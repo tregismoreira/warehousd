@@ -2,7 +2,9 @@
   "name": "warehousd",
   "private": true,
   "packageManager": "pnpm@10.33.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "pnpm -r build",
     "test": "vitest run",
@@ -11,10 +13,11 @@
     "lint": "eslint ."
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0",
-    "eslint": "^9.13.0",
+    "@typescript-eslint/eslint-plugin": "^8.10.0",
     "@typescript-eslint/parser": "^8.10.0",
-    "@typescript-eslint/eslint-plugin": "^8.10.0"
+    "eslint": "^9.13.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
   }
 }

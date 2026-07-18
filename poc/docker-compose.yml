@@ -1,0 +1,17 @@
+# Phase 0 has NO AUTH. Bound to localhost ONLY. Never expose publicly.
+services:
+  db:
+    image: postgres:16
+    environment: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: warehousd }
+    ports: ["127.0.0.1:8723:5432"]
+    healthcheck: { test: ["CMD-SHELL","pg_isready -U postgres"], interval: 1s, retries: 30 }
+  web:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    environment:
+      APP_DATABASE_URL: postgres://postgres:postgres@db:5432/warehousd
+      DEV_DATABASE_URL: postgres://warehousd_dev:pw@db:5432/warehousd
+      LIVE_DATABASE_URL: postgres://warehousd_live:pw@db:5432/warehousd
+      WAREHOUSD_PROJECT_DIR: /app/examples/meridian
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    ports: ["127.0.0.1:8722:8722"]   # localhost ONLY
+    depends_on: { db: { condition: service_healthy } }
