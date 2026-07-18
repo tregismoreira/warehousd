@@ -22,14 +22,21 @@ async function main() {
   const cfg = loadConfig(dir);
   await createAppSchema(db);
   await applyConfig(db, cfg);
+  // truncate before regenerating so re-running bootstrap (e.g. container restart) is idempotent
+  for (const name of Object.keys(cfg.collections))
+    await db.query(`truncate data_synth.${name} cascade`);
   await generateSynthetic(db, cfg, 42);
   await seedLive(db);
-  // Priya's pending salaries request (Marcus's inbox) + her approved dev grants (§9)
-  await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
-    ('priya','documents', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
-    ('priya','people', array['id','full_name','email','department_name'],'dev','approved')`);
-  await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,purpose_label) values
-    ('priya','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
+  // Priya's pending salaries request (Marcus's inbox) + her approved dev grants (§9) —
+  // only seed if not already present, so re-running bootstrap doesn't duplicate grant rows.
+  const existing = await db.query(`select 1 from app.grants where user_id='priya' limit 1`);
+  if (existing.rowCount === 0) {
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
+      ('priya','documents', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
+      ('priya','people', array['id','full_name','email','department_name'],'dev','approved')`);
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,purpose_label) values
+      ('priya','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
+  }
   await db.end();
   console.log("bootstrap complete");
 }
