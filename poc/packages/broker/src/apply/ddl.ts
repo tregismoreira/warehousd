@@ -8,6 +8,7 @@ const PG_TYPE: Record<string, string> = {
 export function tableDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const c = cfg.collections[collection];
+  if (!c) throw new Error(`Unknown collection: ${collection}`);
   const cols: string[] = [];
   for (const [name, f] of Object.entries(c.fields)) {
     if (f.view_join) continue; // join columns are not stored on the base table
@@ -21,12 +22,14 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
 export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const c = cfg.collections[collection];
+  if (!c) throw new Error(`Unknown collection: ${collection}`);
   const selects: string[] = [];
   const joins: string[] = [];
   const seenJoin = new Set<string>();
   for (const [name, f] of Object.entries(c.fields)) {
     if (f.view_join) {
       const [jt, jc] = f.view_join.split("."); // "departments.name"
+      if (!jt || !jc) throw new Error(`Malformed view_join on field ${name}: ${f.view_join}`);
       const alias = `j_${jt}`;
       if (!seenJoin.has(jt)) {
         joins.push(`left join ${schema}.${jt} ${alias} on ${alias}.id = base.${jt.replace(/s$/, "")}_id`);

@@ -14,11 +14,13 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
       await db.query(viewDDL(env, name, cfg));
       await db.query(grantViewDDL(env, name));
     }
+    const c = cfg.collections[name];
+    if (!c) throw new Error(`Unknown collection: ${name}`);
     await db.query(
       `insert into app.collections (name, description, config, updated_at)
        values ($1,$2,$3, now())
        on conflict (name) do update set description=excluded.description,
          config=excluded.config, updated_at=now()`,
-      [name, cfg.collections[name].description, JSON.stringify(cfg.collections[name])]);
+      [name, c.description, JSON.stringify(c)]);
   }
 }

@@ -10,6 +10,7 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
 
   for (const name of order) {
     const c = cfg.collections[name];
+    if (!c) throw new Error(`Unknown collection: ${name}`);
     const n = cfg.synthetic.rows_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
     const ids: string[] = [];
@@ -20,7 +21,7 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
         if (f.pk) { const id = genValue(rng, "uuid", fname) as string; ids.push(id); vals.push(id); }
         else if (f.fk) {
           const [parent] = f.fk.split("."); // "people.id"
-          const parentIds = idsByCollection[parent] ?? [];
+          const parentIds = (parent && idsByCollection[parent]) ?? [];
           vals.push(parentIds[Math.floor(rng() * parentIds.length)] ?? null);
         } else if (f.nullable && rng() < 0.05) vals.push(null);
         else vals.push(genValue(rng, f.type, fname, { min: f.min, max: f.max }));
@@ -34,7 +35,7 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
 
 function topoSort(cfg: WarehousdConfig): string[] {
   const names = Object.keys(cfg.collections);
-  const deps = (n: string) => Object.values(cfg.collections[n].fields)
+  const deps = (n: string) => Object.values(cfg.collections[n]?.fields ?? {})
     .map((f) => f.fk?.split(".")[0]).filter((x): x is string => !!x && names.includes(x));
   const out: string[] = [], seen = new Set<string>();
   const visit = (n: string) => { if (seen.has(n)) return; seen.add(n); deps(n).forEach(visit); out.push(n); };
