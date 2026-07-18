@@ -24,6 +24,15 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@26.1.1)
 
+  examples/meridian:
+    dependencies:
+      '@warehousd/broker':
+        specifier: workspace:*
+        version: link:../../packages/broker
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+
   packages/broker:
     dependencies:
       drizzle-orm:
