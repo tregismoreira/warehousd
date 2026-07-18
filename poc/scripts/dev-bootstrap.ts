@@ -37,6 +37,19 @@ async function main() {
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,purpose_label) values
       ('priya','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
   }
+  // Marcus (manager) and Ana (admin) see everything (README §"grants" — managers get fields: "*").
+  for (const user of ["marcus", "ana"]) {
+    const already = await db.query(`select 1 from app.grants where user_id=$1 limit 1`, [user]);
+    if (already.rowCount === 0) {
+      await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
+        ($1,'documents', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
+        ($1,'departments', array['id','name'],'dev','approved'),
+        ($1,'people', array['id','full_name','email','department_name','department_id'],'dev','approved'),
+        ($1,'salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','approved'),
+        ($1,'metrics', array['id','date','revenue','active_customers','region'],'dev','approved')`,
+        [user]);
+    }
+  }
   await db.end();
   console.log("bootstrap complete");
 }

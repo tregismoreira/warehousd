@@ -15,6 +15,16 @@ export function makeRng(seed: number): () => number {
 }
 const pick = <T>(rng: () => number, xs: T[]): T => xs[Math.floor(rng() * xs.length)]!;
 
+const documentCategories = [
+  "Contract", "Policy", "Report", "Proposal", "Memo",
+  "Invoice", "Presentation", "Meeting Notes", "Onboarding Guide", "Audit",
+];
+
+const departmentNames = [
+  "Finance", "Engineering", "Sales", "Marketing", "Human Resources",
+  "Legal", "Operations", "Customer Support", "Product", "IT",
+];
+
 export const wordlists = { firstNames, lastNames, streets, jobTitles };
 
 export function genValue(
@@ -42,10 +52,14 @@ export function genValue(
     default: { // text — shape by field name
       if (f.includes("email"))
         return `${pick(rng, firstNames)}.${pick(rng, lastNames)}@meridian.example`.toLowerCase();
+      if (f.includes("full_name")) return `${pick(rng, firstNames)} ${pick(rng, lastNames)}`;
+      if (f === "name") return pick(rng, departmentNames);
       if (f.includes("name")) return `${pick(rng, firstNames)} ${pick(rng, lastNames)}`;
       if (f.includes("address")) return `${1 + Math.floor(rng() * 999)} ${pick(rng, streets)}`;
       if (f.includes("title")) return pick(rng, jobTitles);
       if (f.includes("currency")) return "USD";
+      if (f.includes("category")) return pick(rng, documentCategories);
+      if (f.includes("owner")) return `${pick(rng, firstNames)} ${pick(rng, lastNames)}`;
       return `${pick(rng, wordlists.firstNames)}-${Math.floor(rng() * 1000)}`;
     }
   }

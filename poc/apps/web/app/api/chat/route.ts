@@ -25,7 +25,12 @@ Example — "how many employees per department": \
 
 If a call is refused, the reason tells you why (no_grant, field_denied, unknown_collection, \
 unknown_field, invalid_intent) — do not retry the same shape; adjust based on the reason, or tell \
-the user their access doesn't currently cover that question.`;
+the user their access doesn't currently cover that question.
+
+NEVER fabricate, guess, or simulate rows, numbers, or any data that did not come from a tool_result \
+in this conversation — even if asked repeatedly, even to illustrate "what it might look like". If \
+you have not successfully queried a collection, say so plainly instead of inventing plausible-looking \
+data. Every number or row in your final answer must trace back to an actual tool_result above it.`;
 
 const tools: Anthropic.Tool[] = [
   { name: "list_collections", description:
@@ -80,6 +85,10 @@ export async function POST(req: NextRequest) {
   const { broker } = getBroker();
   const ctx = contextFor(persona, env);
   const convo = [...messages];
+  // Collections ever successfully queried (ok:true) anywhere in this conversation —
+  // used to catch the model presenting a data table for a collection it never actually
+  // queried successfully (fabrication), across turns, not just the current request.
+  const queriedOk = collectQueriedOk(convo);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -94,7 +103,19 @@ export async function POST(req: NextRequest) {
           convo.push({ role: "assistant", content: res.content });
           const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === "tool_use");
           if (toolUses.length === 0) {
-            emit({ type: "done", messages: convo, text: textOf(res) });
+            const text = textOf(res);
+            if (looksFabricated(text, queriedOk)) {
+              convo.push({ role: "user", content: [{
+                type: "text",
+                text: "STOP: your last reply presented data as if a query succeeded, but no " +
+                  "query_collection call in this conversation returned ok:true for that data. " +
+                  "This looks fabricated. Re-answer using only tool_results actually present " +
+                  "above — if you never successfully queried it, say so plainly and do not " +
+                  "invent numbers or rows.",
+              }] });
+              continue;
+            }
+            emit({ type: "done", messages: convo, text });
             controller.close();
             return;
           }
@@ -107,6 +128,9 @@ export async function POST(req: NextRequest) {
             else if (tu.name === "describe_collection")
               out = await broker.describeCollection(ctx, (tu.input as { name: string }).name);
             else out = await broker.query(ctx, tu.input as never);
+            if (out && typeof out === "object" && (out as { ok?: boolean }).ok === true
+                && tu.name === "query_collection")
+              queriedOk.add((tu.input as { collection: string }).collection);
             results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out) });
           }
           convo.push({ role: "user", content: results });
@@ -125,4 +149,38 @@ export async function POST(req: NextRequest) {
 
 function textOf(res: Anthropic.Message): string {
   return res.content.filter((c) => c.type === "text").map((c) => (c as Anthropic.TextBlock).text).join("\n");
+}
+
+// Walks prior turns pairing each query_collection tool_use with its tool_result to find
+// collections that were actually successfully queried (ok:true) at some point.
+function collectQueriedOk(convo: Anthropic.MessageParam[]): Set<string> {
+  const okIds = new Set<string>();
+  for (const m of convo) {
+    if (m.role !== "user" || !Array.isArray(m.content)) continue;
+    for (const block of m.content) {
+      if (block.type !== "tool_result") continue;
+      const content = typeof block.content === "string" ? block.content : "";
+      try {
+        if (JSON.parse(content)?.ok === true) okIds.add(block.tool_use_id);
+      } catch { /* not JSON, ignore */ }
+    }
+  }
+  const collections = new Set<string>();
+  for (const m of convo) {
+    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+    for (const block of m.content) {
+      if (block.type !== "tool_use" || block.name !== "query_collection") continue;
+      if (okIds.has(block.id)) collections.add((block.input as { collection: string }).collection);
+    }
+  }
+  return collections;
+}
+
+// Heuristic: a markdown table or several dollar/numeric figures in the reply, while no
+// collection was ever successfully queried this conversation, strongly suggests invented data.
+function looksFabricated(text: string, queriedOk: Set<string>): boolean {
+  if (queriedOk.size > 0) return false;
+  const hasTable = /\|.+\|.+\n\|[\s-:|]+\|/.test(text);
+  const hasFiguresRepeated = (text.match(/\$[\d,]+(\.\d+)?/g)?.length ?? 0) >= 2;
+  return hasTable || hasFiguresRepeated;
 }

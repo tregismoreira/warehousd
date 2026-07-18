@@ -23,6 +23,32 @@ Client cannot:
 - Use forbidden operators (e.g., `DROP TABLE`)
 - See denied rows or columns in the result
 
+### LLM Final-Answer Trust (Fabrication)
+
+The LLM's **tool calls** are re-validated by the broker (see above), but its **final text
+answer to the user is not** — nothing stops the model from ignoring a `no_grant`/`field_denied`
+tool_result and inventing plausible-looking rows or numbers in prose instead of reporting the
+refusal. This was observed in practice: asked for salary data with no grant, the model returned
+a fabricated table of salaries, then only admitted the numbers were invented when challenged on
+a follow-up turn.
+
+Two mitigations, both in `apps/web/app/api/chat/route.ts`:
+
+1. **Prompt-level**: `SYSTEM_PROMPT` explicitly instructs the model to never fabricate,
+   guess, or simulate data not present in a `tool_result`, and to state plainly when it
+   hasn't successfully queried something — even under repeated user pressure. This is a
+   soft mitigation; models can still fail to follow it.
+2. **Code-level guard**: `collectQueriedOk()` scans the full conversation (across turns,
+   not just the current request) for `query_collection` tool_results with `ok:true`,
+   building the set of collections actually queried successfully. When the model's final
+   text contains a markdown table or multiple `$`-figures while that set is empty,
+   `looksFabricated()` flags it and the server injects a corrective message forcing the
+   model to re-answer honestly instead of streaming the fabrication to the user.
+
+This guard is a heuristic (table/number detection), not a full grounding check — it targets
+the specific failure mode observed above cheaply. It does not verify that displayed numbers
+match the actual queried rows field-for-field.
+
 ### Postgres Role Isolation
 Phase 0 implements **deny-by-default** via Postgres role-based access control:
 
