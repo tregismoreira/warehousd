@@ -20,7 +20,7 @@ export async function provision(label: string): Promise<Provisioned> {
   await admin.query(`create database ${dbName}`);
   await admin.end();
 
-  const url = (u: string) => `${BASE}/${dbName}`.replace("//127", `//${u}:pw@127`);
+  const url = (u: string) => `postgres://${u}:pw@127.0.0.1:54329/${dbName}`;
   const db = new Pool({ connectionString: `${BASE}/${dbName}` });
   await db.query(`
     create schema app;
