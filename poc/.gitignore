@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.next/
+.warehousd/
+warehousd.local.yml
+*.local.yml
+.env
+.env.local
+coverage/
