@@ -7,3 +7,4 @@ warehousd.local.yml
 .env
 .env.local
 coverage/
+*.tsbuildinfo

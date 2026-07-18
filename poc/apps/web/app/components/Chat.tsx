@@ -19,14 +19,30 @@ export function Chat({ persona, env, onTurn }:
   return (
     <div className="panel" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <h3>Chat</h3>
-      <div style={{ flex: 1, overflow: "auto" }}>
-        {msgs.map((m, i) => <div key={i}><b>{m.role}:</b> <span>{m.text}</span></div>)}
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+        {msgs.map((m, i) => {
+          const mine = m.role === "user";
+          return (
+            <div key={i} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+              <div className="panel" style={{ maxWidth: "80%", padding: "6px 10px" }}>
+                <b>{m.role}:</b> <span>{m.text}</span>
+              </div>
+            </div>
+          );
+        })}
+        {busy && (
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+            <div className="mono panel" style={{ padding: "6px 10px", color: "var(--muted)" }}>
+              assistant: thinking…
+            </div>
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         <input value={input} onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()} style={{ flex: 1 }}
+          onKeyDown={(e) => e.key === "Enter" && send()} style={{ flex: 1 }} disabled={busy}
           placeholder="e.g. average salary for a senior accountant over 5 years" />
-        <button onClick={send} disabled={busy}>Send</button>
+        <button onClick={send} disabled={busy}>{busy ? "Sending…" : "Send"}</button>
       </div>
     </div>
   );
