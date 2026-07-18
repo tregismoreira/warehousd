@@ -7,16 +7,33 @@ export function Chat({ persona, env, onTurn }:
   const [msgs, setMsgs] = useState<{ role: string; text: string }[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   async function send() {
     if (!input.trim() || busy) return;
     const next = [...msgs, { role: "user", text: input }];
-    setMsgs(next); setInput(""); setBusy(true);
+    setMsgs(next); setInput(""); setBusy(true); setProgress("thinking…");
     const res = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ persona, env,
         messages: next.map((m) => ({ role: m.role, content: m.text })) }) });
-    const data = await res.json();
-    setMsgs([...next, { role: "assistant", text: data.text }]);
-    setBusy(false); onTurn();
+
+    const reader = res.body?.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (reader) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === "progress") setProgress(event.label);
+        else if (event.type === "done") setMsgs([...next, { role: "assistant", text: event.text }]);
+        else if (event.type === "error") setMsgs([...next, { role: "assistant", text: `error: ${event.message}` }]);
+      }
+    }
+    setProgress(null); setBusy(false); onTurn();
   }
   return (
     <div className="panel" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -38,7 +55,7 @@ export function Chat({ persona, env, onTurn }:
         {busy && (
           <div style={{ display: "flex", justifyContent: "flex-start" }}>
             <div className="mono panel" style={{ padding: "6px 10px", color: "var(--muted)" }}>
-              assistant: thinking…
+              assistant: {progress ?? "thinking…"}
             </div>
           </div>
         )}

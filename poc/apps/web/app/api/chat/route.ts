@@ -66,6 +66,14 @@ const tools: Anthropic.Tool[] = [
     }, required: ["collection"] } },
 ];
 
+// Progress label shown in the UI while a tool call is in flight.
+function labelFor(name: string, input: unknown): string {
+  if (name === "list_collections") return "listing collections…";
+  if (name === "describe_collection") return `checking ${(input as { name?: string }).name ?? "schema"}…`;
+  const collection = (input as { collection?: string }).collection ?? "collection";
+  return `querying ${collection}…`;
+}
+
 export async function POST(req: NextRequest) {
   const { persona, env, messages } = await req.json() as
     { persona: PersonaId; env: "dev" | "live"; messages: Anthropic.MessageParam[] };
@@ -73,26 +81,46 @@ export async function POST(req: NextRequest) {
   const ctx = contextFor(persona, env);
   const convo = [...messages];
 
-  for (let i = 0; i < 5; i++) {
-    const res = await client.messages.create({
-      model: "claude-sonnet-4-6", max_tokens: 1024, system: SYSTEM_PROMPT, tools, messages: convo });
-    convo.push({ role: "assistant", content: res.content });
-    const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === "tool_use");
-    if (toolUses.length === 0)
-      return Response.json({ messages: convo, text: textOf(res) });
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (event: Record<string, unknown>) =>
+        controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
 
-    const results: Anthropic.ToolResultBlockParam[] = [];
-    for (const tu of toolUses) {
-      let out: unknown;
-      if (tu.name === "list_collections") out = await broker.listCollections(ctx);
-      else if (tu.name === "describe_collection")
-        out = await broker.describeCollection(ctx, (tu.input as { name: string }).name);
-      else out = await broker.query(ctx, tu.input as never);
-      results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out) });
-    }
-    convo.push({ role: "user", content: results });
-  }
-  return Response.json({ messages: convo, text: "(stopped after 5 tool iterations)" });
+      try {
+        for (let i = 0; i < 5; i++) {
+          const res = await client.messages.create({
+            model: "claude-sonnet-4-6", max_tokens: 1024, system: SYSTEM_PROMPT, tools, messages: convo });
+          convo.push({ role: "assistant", content: res.content });
+          const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === "tool_use");
+          if (toolUses.length === 0) {
+            emit({ type: "done", messages: convo, text: textOf(res) });
+            controller.close();
+            return;
+          }
+
+          const results: Anthropic.ToolResultBlockParam[] = [];
+          for (const tu of toolUses) {
+            emit({ type: "progress", label: labelFor(tu.name, tu.input) });
+            let out: unknown;
+            if (tu.name === "list_collections") out = await broker.listCollections(ctx);
+            else if (tu.name === "describe_collection")
+              out = await broker.describeCollection(ctx, (tu.input as { name: string }).name);
+            else out = await broker.query(ctx, tu.input as never);
+            results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out) });
+          }
+          convo.push({ role: "user", content: results });
+        }
+        emit({ type: "done", messages: convo, text: "(stopped after 5 tool iterations)" });
+        controller.close();
+      } catch (err) {
+        emit({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, { headers: { "content-type": "application/x-ndjson" } });
 }
 
 function textOf(res: Anthropic.Message): string {
