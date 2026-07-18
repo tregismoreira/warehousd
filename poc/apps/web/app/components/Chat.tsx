@@ -1,5 +1,7 @@
 "use client";
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 export function Chat({ persona, env, onTurn }:
   { persona: string; env: string; onTurn: () => void }) {
   const [msgs, setMsgs] = useState<{ role: string; text: string }[]>([]);
@@ -25,7 +27,10 @@ export function Chat({ persona, env, onTurn }:
           return (
             <div key={i} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
               <div className="panel" style={{ maxWidth: "80%", padding: "6px 10px" }}>
-                <b>{m.role}:</b> <span>{m.text}</span>
+                <b>{m.role}:</b>{" "}
+                {mine ? <span>{m.text}</span> : (
+                  <span className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown></span>
+                )}
               </div>
             </div>
           );
