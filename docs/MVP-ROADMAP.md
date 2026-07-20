@@ -8,9 +8,9 @@ Phases and tasks from the Phase 0 POC to a production-ready MVP.
 
 > Before executing a phase, expand it into a task-by-task TDD plan with the `writing-plans` skill (as Phase 0 was) and execute via subagent-driven development. Tasks below are the checklist of deliverables, not step-level instructions.
 
-**MVP definition of done:** all §10 acceptance tests pass (1–10 automated in CI, 11–12 as manual runbooks) and the README ships the stub-vs-real table (§10).
+**MVP definition of done:** all §10 acceptance tests pass (1–10, 12, 14 automated in CI; 11 and 13 as manual runbooks) and the README ships the stub-vs-real table (§10).
 
-**Ordering:** Phases 1→4 are sequential (auth spine). Phases 5 and 6 can run in parallel after 4. Phase 7 needs 4 + 6. Phase 8 closes.
+**Ordering:** Phase 0.5 (document indexing) is broker-level and independent of the auth spine — run it right after Phase 0, or in parallel with Phases 1–4. Phases 1→4 are sequential (auth spine). Phases 5 and 6 can run in parallel after 4. Phase 7 needs 4 + 6. Phase 8 closes.
 
 ---
 
@@ -19,6 +19,18 @@ Phases and tasks from the Phase 0 POC to a production-ready MVP.
 Enforcement core: broker, postures, dual DB roles, synthetic data, audit, persona-switched chat console. See the [Phase 0 plan](./superpowers/plans/2026-07-18-phase-0-poc.md). Throwaway pieces marked `// POC-ONLY` (persona switcher, console identity handling) are replaced in Phases 1–3.
 
 ---
+
+## Phase 0.5 — Document indexing (§5.6) — gate: §10 test 14
+
+Design: [specs/2026-07-18-document-indexing-design.md](./superpowers/specs/2026-07-18-document-indexing-design.md) — read it first; every step below is grounded there against the existing broker code. All production code kept in MVP. Sub-steps in dependency order; 0.5d can run in parallel with 0.5b–c.
+
+- [ ] **0.5a Config foundation:** `type: structured|document` + `source` (dev content) + optional `source_live` on `CollectionSchema`; Zod refinements — document fields ⊆ `{title, content, path, owner, updated_at}`, `source` required for documents, no `__` in collection names (design §8 test 12)
+- [ ] **0.5b Storage & DDL:** per-collection `{name}__docs` + `{name}__chunks` tables (avoids collision with the seeded `documents` collection; `path` unique = upsert key; tsv generated column + GIN index; reserved `embedding vector(1536)`, pgvector enabled); chunk-join `v_{collection}` view; type branches in `tableDDL`/`viewDDL`; `grantViewDDL` unchanged — verify env role reads view but not base tables (design §8 test 7)
+- [ ] **0.5c Indexer:** `packages/broker/src/indexing` — scan the env-appropriate source dir (`source` = dev sample docs, `--env live` requires `source_live`/`--source`; never one dir into both envs), extract `.md`/`.txt` (title from heading/filename, owner from frontmatter, updated_at from mtime), paragraph-aware chunking (~500–1000 chars, overlap), checksum-skip upsert + deletion sync; CLI entry (`warehousd index` or folded into `apply`/`seed`); dedicated write role, read roles gain nothing; distinct per-env demo dirs with distinct canaries (design §8 tests 5–6)
+- [ ] **0.5d Row-level grant scoping:** `row_filter jsonb` column + partial unique index `(user_id, collection, env) where status='approved'`; `loadActiveGrant`/`ActiveGrant` carry it; validated against the collection's YAML field set (not `allowed_fields`); ANDed into `buildSelect`'s `where[]`; empty in-list → constant-false; update the `q()` quote-helper safety comment. **Touches the shared structured-query path — run the full existing suite** (design §8 tests 3, 4, 8, 10)
+- [ ] **0.5e `broker.searchDocuments`:** new factory method reusing `query`'s validation helpers; `q`-guarded `buildSelect` branch (single param slot, tsv match, `ts_rank_cd` ordering, reserved `_rank`/`chunk_index` keys stripped from `fieldsReturned`; no aggregate/groupBy); type matrix — `searchDocuments` on structured → `invalid_intent`, `query` on document collections works unchanged (design §8 tests 1, 2, 9, 11, 12)
+- [ ] **0.5f Chat integration:** `search_documents` as the fourth tool in the POC chat route; Grants panel gets a document picker (`path` multi-select) for document-collection grants; seed a demo document collection so the Meridian arc covers it
+- [ ] Gate: design §8 acceptance list green in CI + all Phase 0 tests still green
 
 ## Phase 1 — Real identity: Better Auth core + roles (§6.2–6.3)
 
@@ -43,7 +55,7 @@ Enforcement core: broker, postures, dual DB roles, synthetic data, audit, person
 ## Phase 3 — MCP endpoint (§7)
 
 - [ ] `/mcp` streamable-HTTP endpoint (MCP TypeScript SDK), OAuth-protected, `BrokerContext` from token
-- [ ] Tools (complete list): `list_collections`, `describe_collection`, `query_collection`, `request_access`
+- [ ] Tools (complete list): `list_collections`, `describe_collection`, `query_collection`, `search_documents` (§5.6.3, from Phase 0.5), `request_access`
 - [ ] Refusals include the `request_access` hint; tool descriptions state deny-by-default + purpose-bound governance plainly
 - [ ] Rewire the chat console's tool loop onto the shared tool implementations (console = local MCP test bench)
 - [ ] Tests: MCP-over-HTTP integration (grant-filtered describe, probe-suite refusals, zero canary leakage, pending grant from `request_access`); dev-token env wall across all tools; §10 test 6 (env parity — identical shapes dev vs live)
@@ -129,8 +141,10 @@ Release gate:
 | 9 audit completeness | Phase 0 |
 | 10 aggregation enforcement | Phase 0 |
 | 11 MCP + SSO e2e (manual) | Phase 4 |
-| 12 cloud deploy e2e (manual) | Phase 7 |
+| 12 LLM fabrication guard | Phase 0 |
+| 13 cloud deploy e2e (manual) | Phase 7 |
+| 14 document indexing & search | Phase 0.5 |
 
 ## Post-MVP
 
-Backlog (§12) lives in [plans/2026-07-18-phases-mvp-and-post-mvp.md](./superpowers/plans/2026-07-18-phases-mvp-and-post-mvp.md#post-mvp-backlog-12--do-not-build-now-design-already-tolerates-these): row-level grant scoping, `broker.mutate` write path, connect-in-place, masking postures, aggregate-only posture, NL search adapter, app platform, IdP group→role mapping, more deploy targets, SAML/SCIM/compliance exports, hosted control plane.
+Backlog (§12) lives in [plans/2026-07-18-phases-mvp-and-post-mvp.md](./superpowers/plans/2026-07-18-phases-mvp-and-post-mvp.md#post-mvp-backlog-12--do-not-build-now-design-already-tolerates-these): ~~row-level grant scoping~~ (shipped in Phase 0.5), semantic/vector search (populate the reserved `embedding` column), document upload UI + PDF/DOCX extraction, `broker.mutate` write path, connect-in-place, masking postures, aggregate-only posture, NL search adapter, app platform, IdP group→role mapping, more deploy targets, SAML/SCIM/compliance exports, hosted control plane.

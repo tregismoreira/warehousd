@@ -36,8 +36,9 @@ These are explicitly **out of scope**. Do not build them, do not scaffold for th
 | Concept | Definition |
 |---|---|
 | **Collection** | A named, schema'd dataset (e.g. `people`, `documents`, `salaries`, `metrics`). Backed by a Postgres table per environment. |
+| **Document collection** | A collection with `type: document` (§5.6): a directory of files indexed into a fixed schema (`title`, `content`, `path`, `owner`, `updated_at`), chunked and full-text searchable via `broker.searchDocuments`. Same postures/grants/audit as any collection. |
 | **Field posture** | Per-field `allow` or `deny`. Deny is the default for any field not explicitly allowed. |
-| **Grant** | (user, collection, purpose, allowed-fields ⊆ collection allow-list, env, expires_at). Grants are requested by users, approved by a manager/admin, and evaluated **at query time** (revocation is immediate — never baked into tokens). |
+| **Grant** | (user, collection, purpose, allowed-fields ⊆ collection allow-list, env, expires_at, optional row_filter). Grants are requested by users, approved by a manager/admin, and evaluated **at query time** (revocation is immediate — never baked into tokens). The optional `row_filter` (§5.6.4) is a grant-author-supplied predicate restricting which rows the grant reaches (e.g. specific documents by `path`). At most one active approved grant per (user, collection, env) — enforced by a partial unique index. |
 | **Environment** | `dev` or `live`. Dev resolves to synthetic data; live resolves to real data. Encoded in the access token, resolved by the broker. |
 | **Purpose** | Free-text + short label stated at grant request time (e.g. "onboarding prep"). Stored on the grant, stamped on every audit event. |
 | **Role** | `admin` (IT: manages collections, postures, SSO config), `manager` (approves grants for their scope), `member` (requests grants, queries). |
@@ -119,6 +120,7 @@ type BrokerResult =
 broker.query(ctx, intent): Promise<BrokerResult>
 broker.describeCollection(ctx, name): Promise<VisibleSchema | Refusal>  // grant-filtered fields only
 broker.listCollections(ctx): Promise<{ name: string; description: string }[]>
+broker.searchDocuments(ctx, intent): Promise<BrokerResult>  // document collections only — §5.6.3
 ```
 
 Validation order inside `broker.query` (fail fast, audit every outcome):
@@ -192,16 +194,54 @@ create table app.grants (
   id uuid pk, user_id text refs user, collection text refs collections,
   purpose_label text, purpose_detail text,
   allowed_fields text[],                  -- ⊆ YAML allow-listed fields
+  row_filter jsonb,                       -- optional grant-author predicate (§5.6.4); null = no row restriction
   env text check (env in ('dev','live')),
   status text check (status in ('pending','approved','denied','revoked')),
   requested_at timestamptz, decided_at timestamptz, decided_by text, expires_at timestamptz
 );
+-- at most one active approved grant per (user, collection, env) — required for row_filter safety (§5.6.4)
+create unique index grants_one_active on app.grants (user_id, collection, env) where status = 'approved';
 create table app.audit_events (
   id uuid pk, at timestamptz, user_id text, env text, collection text,
   intent jsonb, fields_returned text[], grant_id uuid, outcome text, reason text
 );
 -- audit_events: INSERT-only for the app role (no UPDATE/DELETE privileges)
 ```
+
+### 5.6 Document collections & indexing
+
+> Condensed from the full design: [`docs/superpowers/specs/2026-07-18-document-indexing-design.md`](./superpowers/specs/2026-07-18-document-indexing-design.md) — read that before implementing; it grounds every decision below in the existing code.
+
+Documents (files in a directory, uploads later) become searchable by the LLM through the same broker/grant machinery as structured collections. Full-text search now; a `vector(1536)` embedding column is reserved (pgvector enabled) so semantic search is a later additive increment, keeping the offline core intact.
+
+**5.6.1 Collection type.** `warehousd.yml` collections gain `type: structured | document` (default `structured`) and, for documents, a required `source` directory (**dev** content — see 5.6.2) plus an optional `source_live`. Document collections have a **fixed** grantable schema — `title`, `content`, `path`, `owner`, `updated_at` — the YAML `fields` block only sets postures on these (a Zod refinement rejects other names at config load; another forbids `__` in any collection name, reserved for document storage tables).
+
+```yaml
+collections:
+  policies:
+    type: document
+    description: Company policy docs
+    source: ./docs/policies
+    fields:
+      title:   { posture: allow }
+      content: { posture: allow }
+      path:    { posture: deny }   # gates rows via row_filter, never readable
+```
+
+**5.6.2 Storage & the chunk view.** Per env schema and per collection: a `{collection}__docs` table (one row per file; `path` unique = upsert key; `checksum` for idempotent re-index) and a `{collection}__chunks` table (paragraph-aware chunks ~500–1000 chars with overlap; generated `tsv tsvector` column + GIN index; reserved `embedding vector(1536)` column, pgvector enabled). Per-collection naming avoids colliding with the seeded structured collection named `documents` (§9) and mirrors the one-table-per-collection pattern. The queryable surface is — as for every collection — a view `v_{collection}` (one row per chunk, document metadata joined on). The env roles get `SELECT` on the view only, never base tables; this works because views execute with the view **owner's** privileges (the `app` owner role), exactly as structured collections already do. The view also exposes non-grantable structural columns (`tsv` for ranking, `chunk_index` for citation) that are never governed data.
+
+The **indexer** (`packages/broker/src/indexing` + a CLI entry point) scans the env-appropriate source directory, extracts text (`.md`/`.txt` in this increment; `title` from first heading/filename, `owner` from frontmatter, `updated_at` from mtime), chunks, and upserts — skipping unchanged files by checksum and deleting rows for files removed from disk (full sync). It writes base tables via a dedicated write role (or the apply/owner role); the read roles `warehousd_dev`/`warehousd_live` must never gain base-table privileges. **Invariant 5 applies to documents:** the YAML `source` directory is dev content — committed sample/demo files, never real corporate documents. Live content is indexed only by an explicit action (`--env live` with `source_live` or `--source`); the CLI must never silently index one directory into both envs. The demo ships distinct per-env sample directories with distinct canary strings, keeping the env wall demonstrable.
+
+**5.6.3 Search.** `broker.searchDocuments(ctx, { collection, q, fields?, limit?, offset? })` reuses `broker.query`'s validation pipeline (collection exists and is `type: document` → active grant → requested fields ⊆ grant) and the same SQL builder: a `q`-guarded branch adds `tsv @@ websearch_to_tsquery('english', $n)` to the WHERE clause and orders by `ts_rank_cd` (one param slot for `q`, reused in both). No `aggregate`/`groupBy` for document search. Result rows carry reserved `_rank` and `chunk_index` keys (never in `fieldsReturned`); only granted fields are selected — `tsv` and un-granted `path` never appear in any response. Type matrix: `searchDocuments` on a structured collection → `invalid_intent`; `broker.query` on a document collection works unchanged (the chunk view is a normal view — document *listing* for free); `describeCollection`/`listCollections` unchanged for both types.
+
+**5.6.4 Row-level grant scoping (pulled forward from §12).** Grants carry an optional `row_filter` — `{ field, op: "eq" | "in", value }`, reusing the `Filter` shape — so an admin/manager can scope a grant to particular documents (`path in [...]`) or, generically, particular rows of any collection. Rules:
+
+- `row_filter.field` is validated against the collection's **YAML field set**, not the user's `allowed_fields` — that's what lets a denied field like `path` gate rows without ever being readable. It is author-supplied at approval time, never client-supplied; client `QueryIntent.filters` stay restricted to `allowed_fields` as before.
+- The predicate is ANDed server-side into the same parameterized `WHERE` machinery as client filters. An empty `in`-list compiles to constant-false (deny all), never a SQL error.
+- Excluded rows are silently absent (invariant 4), not a distinguishable refusal.
+- Safety requires the single-active-grant index (§5.5): otherwise a second, broader grant would silently override the restriction.
+
+**5.6.5 Acceptance (gates the increment).** Full numbered list in the design doc §8 — headline assertions: ranked grant-filtered results; denied fields absent; row-filtered rows silently absent; row_filter bypass probes leak nothing; idempotent re-index; env-role view-only privilege holds for document tables; empty in-list denies all; second approved grant refused by the index; every search audited.
 
 ## 6. Authentication & SSO
 
@@ -262,6 +302,7 @@ One MCP server endpoint (`/mcp`, streamable HTTP), OAuth-protected. Tools (compl
 | `list_collections` | Names + descriptions of all collections. No schema, no counts. |
 | `describe_collection(name)` | Schema of fields **visible under the caller's grants** in the token env. No grant → refusal with `request_access` hint. |
 | `query_collection(intent)` | Passes `QueryIntent` to the broker. Returns rows or a reason code. |
+| `search_documents(collection, q)` | Full-text search over a `type: document` collection via `broker.searchDocuments` (§5.6.3). Ranked chunks, grant-filtered fields, reserved `_rank`/`chunk_index` keys. |
 | `request_access(collection, purpose, fields?)` | Creates a `pending` grant request; returns request id. Manager approves in the web UI. |
 
 Tool descriptions must state the governance model plainly (deny-by-default, purpose-bound) — the model reading them is the first consumer of the security posture.
@@ -312,6 +353,8 @@ Automated (integration level, run in CI) unless marked manual.
 11. **(Manual) MCP + SSO end-to-end:** configure a test OIDC IdP → connect Claude via the MCP connector → OAuth flow lands on the IdP login → after consent, `list_collections` works and a denied-field probe from the Claude conversation fails cleanly. Documented as a runbook with screenshots.
 12. **LLM final-answer fabrication guard (Phase 0 chat route):** a scripted conversation where the model is asked for data on a collection it has no grant for, then pressed with a follow-up ("yes, show me more detail") after receiving the refusal — assert the second turn's response never presents numbers/rows as if a query succeeded when `queriedOk` is empty for that collection; the corrective re-prompt path is exercised and the final delivered message states the access is denied rather than fabricated data.
 13. **(Manual) Cloud deploy end-to-end:** from the `examples/meridian` project, `warehousd deploy` to Fly.io succeeds only after the production checklist passes (verify it refuses first with demo mode on); the deployed `mcpUrl` connects from Claude over HTTPS; `data_live` on the deployed instance is empty; re-running `deploy` after a YAML posture change applies the diff. Documented as a runbook.
+
+14. **Document indexing & search:** the full acceptance list in the [document-indexing design doc](./superpowers/specs/2026-07-18-document-indexing-design.md) §8 (ranked search, field/row denial, row_filter bypass probes, idempotent re-index, view-only privilege, empty in-list deny-all, single-active-grant constraint, audit) runs in CI alongside tests 1–10.
 
 **Stub-vs-real documentation requirement:** the README must contain a table of every component marked `real` / `simplified` / `stubbed` for the MVP (e.g. "filter operators: real; SAML: stubbed; connect-in-place: absent").
 
@@ -387,9 +430,9 @@ warehousd/
 
 ## 12. Roadmap pointers (context for design, not for building)
 
-**Future adapter compatibility (design constraint, costs nothing now):** other products (e.g. a content/knowledge UI serving pages and paragraphs) will mount as additional adapters over the same broker, exactly like the MCP server. Two things the MVP must not preclude: (a) **row-level grant scoping** — the `grants` table's shape should tolerate a future nullable `row_filter jsonb` column (a broker-validated predicate like `{field:"space", op:"eq", value:"hr"}`) without restructuring; do not add the column or logic now, just don't design queries that assume grants can never carry predicates; (b) **a write path** — `broker.query` stays read-only, but name things so a future `broker.mutate(ctx, mutation)` is additive (e.g. don't call the audit outcome column `query_outcome`). Content-ish field types (`text` covers markdown bodies; a `json` type in the YAML schema is allowed in MVP) mean pages/paragraphs are representable as collections today.
+**Future adapter compatibility (design constraint, costs nothing now):** other products (e.g. a content/knowledge UI serving pages and paragraphs) will mount as additional adapters over the same broker, exactly like the MCP server. Two things the MVP must not preclude: (a) **row-level grant scoping** — ~~a future item~~ **pulled into scope by document indexing (§5.6.4)**: the `row_filter jsonb` column and broker validation now ship with that increment; (b) **a write path** — `broker.query` stays read-only, but name things so a future `broker.mutate(ctx, mutation)` is additive (e.g. don't call the audit outcome column `query_outcome`). Content-ish field types (`text` covers markdown bodies; a `json` type in the YAML schema is allowed in MVP) mean pages/paragraphs are representable as collections today.
 
-Phase 2+: connect-in-place collections (views over external Postgres) · masking postures · **row-level grant scoping** (grants carry a validated row predicate — unlocks CMS-style "these pages, not all pages" for content adapters) · **write path** (`broker.mutate` with its own validation + audit — required for content-hub adapters) · **aggregate-only posture** (compute statistics over fields without row-level access — requires minimum-group-size / inference-leak protection before it is safe) · **NL search in the web UI** (an optional adapter that calls an LLM to produce a `QueryIntent`, then routes it through the same broker — for users not on an MCP client; adds an external API dependency, so it stays out of the offline core) · app platform (OAuth clients per manager-built app → restores app-scoped, purpose-bound access as the flagship differentiator) · IdP group→role mapping · **additional deploy targets** (Railway, generic Docker host, Pulumi/Terraform provider for infra-as-code shops — MVP ships Fly.io only) · hosted control plane.
+Phase 2+: connect-in-place collections (views over external Postgres) · masking postures · **semantic/vector search** (populate the reserved `embedding` column per §5.6, add similarity ranking — needs an embedding model, so it stays out of the offline core) · document **upload UI** + PDF/DOCX extraction (§5.6 indexes local directories, `.md`/`.txt` only) · **write path** (`broker.mutate` with its own validation + audit — required for content-hub adapters) · **aggregate-only posture** (compute statistics over fields without row-level access — requires minimum-group-size / inference-leak protection before it is safe) · **NL search in the web UI** (an optional adapter that calls an LLM to produce a `QueryIntent`, then routes it through the same broker — for users not on an MCP client; adds an external API dependency, so it stays out of the offline core) · app platform (OAuth clients per manager-built app → restores app-scoped, purpose-bound access as the flagship differentiator) · IdP group→role mapping · **additional deploy targets** (Railway, generic Docker host, Pulumi/Terraform provider for infra-as-code shops — MVP ships Fly.io only) · hosted control plane.
 
 ## 13. Phase 0 — POC (build this first)
 
@@ -400,6 +443,8 @@ A pre-MVP proof that validates the entire enforcement core with a chat interface
 - YAML loader + `warehousd apply` (collections, postures, views)
 - Synthetic data generator per §5.4
 - Meridian Robotics seed per §9 (both `data_synth` and `data_live`, canary values planted)
+
+**Post-POC increment (Phase 0.5 in the roadmap):** document indexing per §5.6 — collection `type: document`, indexer, `broker.searchDocuments`, row-level grant scoping — all production code kept in MVP, built against the POC's persona-switched console (the `search_documents` chat tool becomes the MCP tool in the MVP phase).
 
 **Scope — throwaway (mark clearly in code as `// POC-ONLY, replaced by OAuth in MVP`):**
 - **Persona switcher adapter:** instead of token verification, a dropdown in the UI selects the acting user (Ana / Marcus / Priya) and an env toggle selects dev/live. The adapter constructs `BrokerContext` directly from these two controls. This stub is the *only* code replaced when real auth arrives — the broker never knows the difference.
