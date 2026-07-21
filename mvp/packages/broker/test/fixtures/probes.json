@@ -8,5 +8,11 @@
   { "name": "unknown field probing",         "intent": { "collection": "people", "fields": ["id","secret_col"] }, "expect": "refused" },
   { "name": "sql fragment in value",         "intent": { "collection": "people", "fields": ["id"], "filters": [{ "field": "email", "op": "eq", "value": "x'; drop table data_synth.people; --" }] }, "expect": "allowed" },
   { "name": "sql fragment as field name",    "intent": { "collection": "people", "fields": ["id\" , home_address --"] }, "expect": "refused" },
-  { "name": "aggregate over denied field",   "intent": { "collection": "salaries", "aggregate": [{ "fn": "avg", "field": "ssn" }] }, "expect": "refused" }
+  { "name": "aggregate over denied field",   "intent": { "collection": "salaries", "aggregate": [{ "fn": "avg", "field": "ssn" }] }, "expect": "refused" },
+  { "surface": "searchDocuments", "name": "sql-in-q",                "intent": { "collection": "policies", "q": "x'); drop table data_synth.\"policies__docs\"; --" }, "expect": "allowed" },
+  { "surface": "searchDocuments", "name": "path-traversal-in-q",     "intent": { "collection": "policies", "q": "../../restricted secret" }, "expect": "allowed" },
+  { "surface": "searchDocuments", "name": "restricted-content-term", "intent": { "collection": "policies", "q": "DOC-RESTRICTED-CANARY-9e4b" }, "expect": "allowed" },
+  { "surface": "searchDocuments", "name": "oversized-limit",         "intent": { "collection": "policies", "q": "policy", "limit": 999999 }, "expect": "allowed" },
+  { "surface": "searchDocuments", "name": "tsv-as-field",            "intent": { "collection": "policies", "q": "policy", "fields": ["tsv"] }, "expect": "refused" },
+  { "surface": "query",            "name": "row-filter-bypass-via-filters", "intent": { "collection": "policies", "fields": ["title"], "filters": [{ "field": "path", "op": "eq", "value": "restricted/secret.md" }] }, "expect": "refused" }
 ]
