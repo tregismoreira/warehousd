@@ -42,12 +42,16 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     // 4. every referenced field ∈ grant.allowedFields
     for (const f of referenced) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
+    // row_filter is grant-author-supplied; its field is validated against the collection's
+    // full YAML field set (NOT allowedFields) so denied fields like `path` can gate rows.
+    if (grant.rowFilter && !all.includes(grant.rowFilter.field))
+      return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
     // fields to select: explicit, else all granted fields present on the collection
     const selectFields = intent.fields && intent.fields.length
       ? intent.fields
       : grant.allowedFields.filter((f) => all.includes(f));
     // 5. build + execute on the env-scoped pool
-    const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields);
+    const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { rowFilter: grant.rowFilter });
     const rows = (await dataPool(pools, ctx).query(text, values)).rows;
     const fieldsReturned = intent.aggregate && intent.aggregate.length
       ? [...(intent.groupBy ?? []), ...intent.aggregate.map((a) => `${a.fn}_${a.field}`)]

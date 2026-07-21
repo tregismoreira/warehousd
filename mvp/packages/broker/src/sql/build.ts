@@ -1,13 +1,17 @@
-import type { QueryIntent, FilterOp } from "../types";
+import type { QueryIntent, FilterOp, RowFilter } from "../types";
 import { MAX_LIMIT, DEFAULT_LIMIT } from "../types";
 
 const OP_SQL: Record<Exclude<FilterOp, "in">, string> = {
   eq: "=", neq: "<>", gt: ">", lt: "<", gte: ">=", lte: "<=", like: "like",
 };
-const q = (id: string) => `"${id}"`; // caller guarantees id ∈ grantedFields (safe to quote)
+// Identifiers reaching q() are drawn from the collection's YAML-defined field set:
+// granted fields for client intents, plus the grant-author-supplied row_filter.field
+// (validated against the same YAML set in broker.ts) — never from raw client input.
+const q = (id: string) => `"${id}"`;
 
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
+  opts: { rowFilter?: RowFilter | null; q?: string } = {},
 ): { text: string; values: unknown[] } {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const view = `${schema}.v_${intent.collection}`;
@@ -33,6 +37,16 @@ export function buildSelect(
       where.push(`${q(f.field)} in (${arr.map(param).join(", ")})`);
     } else {
       where.push(`${q(f.field)} ${OP_SQL[f.op]} ${param(f.value)}`);
+    }
+  }
+  // AND the grant-carried row filter
+  const rf = opts.rowFilter;
+  if (rf) {
+    if (rf.op === "in") {
+      const arr = Array.isArray(rf.value) ? rf.value : [rf.value];
+      where.push(arr.length ? `${q(rf.field)} in (${arr.map(param).join(", ")})` : `false`);
+    } else {
+      where.push(`${q(rf.field)} = ${param(rf.value)}`);
     }
   }
   if (where.length) text += ` where ${where.join(" and ")}`;

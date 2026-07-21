@@ -67,3 +67,117 @@ it("unknown collection / unknown field", async () => {
     { collection: "people", fields: ["id", "ghost"] });
   if (!r2.ok) expect(r2.reason).toBe("unknown_field");
 });
+
+describe("row_filter on document collections", () => {
+  it("row-filtered rows are silently absent (design test 3)", async () => {
+    const docCfg: WarehousdConfig = {
+      project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+      collections: {
+        policies: {
+          type: "document" as const,
+          description: "d",
+          source: "./x",
+          fields: {
+            title: { posture: "allow" as const },
+            content: { posture: "allow" as const },
+            path: { posture: "deny" as const },
+          },
+        },
+      },
+    };
+    const pDoc = await provision("brokerq-doc");
+    const dbDoc = new Pool({ connectionString: pDoc.urls.admin });
+    await createAppSchema(dbDoc);
+    await applyConfig(dbDoc, docCfg);
+    const poolsDoc = createPools({ app: pDoc.urls.admin, dev: pDoc.urls.dev, live: pDoc.urls.live });
+    const brokerDoc = makeBroker(poolsDoc, docCfg);
+    const ctx = { userId: "u3", env: "dev" as const };
+
+    // Seed documents
+    const docRes = await dbDoc.query(
+      `insert into data_synth."policies__docs" (id,title,path,owner,checksum,updated_at)
+       values (gen_random_uuid(),'PTO Policy','hr/pto.md',null,'c1',now()),
+              (gen_random_uuid(),'Benefits Policy','hr/benefits.md',null,'c2',now())
+       returning id`);
+    const docIds = docRes.rows.map((r: any) => r.id);
+    await dbDoc.query(
+      `insert into data_synth."policies__chunks" (id,document_id,chunk_index,content)
+       values (gen_random_uuid(),$1,0,'PTO content'),
+              (gen_random_uuid(),$2,0,'Benefits content')`,
+      [docIds[0], docIds[1]]);
+
+    // Approve grant with rowFilter limiting to hr/pto.md only
+    const grantRes = await dbDoc.query(
+      `insert into app.grants (user_id, collection, allowed_fields, env, status)
+       values ('u3', 'policies', array['title','content'], 'dev', 'pending') returning id`);
+    const grantId = grantRes.rows[0].id;
+    const { approveGrant } = await import("../src/grants/manage");
+    await approveGrant(dbDoc, grantId, "admin", {
+      rowFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
+    });
+
+    const r = await brokerDoc.query(ctx, { collection: "policies", fields: ["title"] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.rows.every((row: any) => row.title === "PTO Policy")).toBe(true);
+
+    await dbDoc.end();
+    await poolsDoc.end();
+    await pDoc.end();
+  });
+
+  it("empty in-list row_filter returns zero rows, ok:true (design test 8, integration)", async () => {
+    const docCfg: WarehousdConfig = {
+      project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+      collections: {
+        policies: {
+          type: "document" as const,
+          description: "d",
+          source: "./x",
+          fields: {
+            title: { posture: "allow" as const },
+            content: { posture: "allow" as const },
+            path: { posture: "deny" as const },
+          },
+        },
+      },
+    };
+    const pDoc = await provision("brokerq-empty");
+    const dbDoc = new Pool({ connectionString: pDoc.urls.admin });
+    await createAppSchema(dbDoc);
+    await applyConfig(dbDoc, docCfg);
+    const poolsDoc = createPools({ app: pDoc.urls.admin, dev: pDoc.urls.dev, live: pDoc.urls.live });
+    const brokerDoc = makeBroker(poolsDoc, docCfg);
+    const ctx = { userId: "u4", env: "dev" as const };
+
+    // Seed documents
+    const docRes = await dbDoc.query(
+      `insert into data_synth."policies__docs" (id,title,path,owner,checksum,updated_at)
+       values (gen_random_uuid(),'PTO Policy','hr/pto.md',null,'c1',now()),
+              (gen_random_uuid(),'Benefits Policy','hr/benefits.md',null,'c2',now())
+       returning id`);
+    const docIds = docRes.rows.map((r: any) => r.id);
+    await dbDoc.query(
+      `insert into data_synth."policies__chunks" (id,document_id,chunk_index,content)
+       values (gen_random_uuid(),$1,0,'PTO content'),
+              (gen_random_uuid(),$2,0,'Benefits content')`,
+      [docIds[0], docIds[1]]);
+
+    // Approve grant with empty rowFilter
+    const grantRes = await dbDoc.query(
+      `insert into app.grants (user_id, collection, allowed_fields, env, status)
+       values ('u4', 'policies', array['title','content'], 'dev', 'pending') returning id`);
+    const grantId = grantRes.rows[0].id;
+    const { approveGrant } = await import("../src/grants/manage");
+    await approveGrant(dbDoc, grantId, "admin", {
+      rowFilter: { field: "path", op: "in", value: [] },
+    });
+
+    const r = await brokerDoc.query(ctx, { collection: "policies", fields: ["title"] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.rows).toHaveLength(0);
+
+    await dbDoc.end();
+    await poolsDoc.end();
+    await pDoc.end();
+  });
+});
