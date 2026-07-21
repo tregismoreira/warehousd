@@ -65,7 +65,8 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!grant) return refuse(ctx, name, null, "no_grant");
     const fields = Object.entries(c.fields)
       .filter(([n]) => grant.allowedFields.includes(n))
-      .map(([n, f]) => ({ name: n, type: f.type, pk: f.pk }));
+      // type is guaranteed by CollectionSchema refinement for structured collections; document collections have types filled in by transform
+      .map(([n, f]) => ({ name: n, type: f.type!, pk: f.pk }));
     await writeAudit(app, { userId: ctx.userId, env: ctx.env, collection: name, intent: null,
       fieldsReturned: fields.map((f) => f.name), grantId: grant.id, outcome: "allowed", reason: null });
     return { collection: name, description: c.description, fields };

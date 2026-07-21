@@ -13,7 +13,8 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
   for (const [name, f] of Object.entries(c.fields)) {
     if (f.view_join) continue; // join columns are not stored on the base table
     const pk = f.pk ? " primary key" : "";
-    cols.push(`"${name}" ${PG_TYPE[f.type]}${pk}`);
+    // type is guaranteed by CollectionSchema refinement for structured collections
+    cols.push(`"${name}" ${PG_TYPE[f.type!]}${pk}`);
   }
   return `create table if not exists ${schema}.${collection} (${cols.join(", ")});`;
 }

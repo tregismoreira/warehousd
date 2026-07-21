@@ -24,7 +24,8 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
           const parentIds = (parent && idsByCollection[parent]) ?? [];
           vals.push(parentIds[Math.floor(rng() * parentIds.length)] ?? null);
         } else if (f.nullable && rng() < 0.05) vals.push(null);
-        else vals.push(genValue(rng, f.type, fname, { min: f.min, max: f.max }));
+        // type is guaranteed by CollectionSchema refinement for structured collections; document collections have types filled in by transform
+        else vals.push(genValue(rng, f.type!, fname, { min: f.min, max: f.max }));
       }
       const ph = vals.map((_, k) => `$${k + 1}`).join(",");
       await db.query(`insert into data_synth.${name} (${cols.join(",")}) values (${ph})`, vals);

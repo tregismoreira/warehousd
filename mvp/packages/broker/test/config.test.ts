@@ -53,3 +53,41 @@ it("rejects a field with an unknown posture", () => {
   rmSync(join(dir, "warehousd.local.yml"), { force: true });
   expect(() => loadConfig(dir)).toThrow();
 });
+
+import { ConfigSchema } from "../src/config/schema";
+
+const baseSchema = { project: "t", collections: {} as Record<string, unknown> };
+const doc = (over: object = {}) => ({
+  type: "document", description: "d", source: "./docs",
+  fields: { title: { posture: "allow" }, content: { posture: "allow" }, path: { posture: "deny" } },
+  ...over,
+});
+
+describe("document collection config", () => {
+  it("accepts a valid document collection and fills canonical field types", () => {
+    const cfg = ConfigSchema.parse({ ...baseSchema, collections: { policies: doc() } });
+    const c = cfg.collections.policies;
+    expect(c.type).toBe("document");
+    expect(c.fields.title.type).toBe("text");
+  });
+  it("defaults type to structured", () => {
+    const cfg = ConfigSchema.parse({ ...baseSchema, collections: { people: {
+      description: "d", fields: { id: { type: "uuid", posture: "allow", pk: true } } } } });
+    expect(cfg.collections.people.type).toBe("structured");
+  });
+  it("rejects a document collection without source", () => {
+    expect(() => ConfigSchema.parse({ ...baseSchema, collections: { policies: doc({ source: undefined }) } })).toThrow();
+  });
+  it("rejects a document field outside the fixed set", () => {
+    expect(() => ConfigSchema.parse({ ...baseSchema, collections: { policies: doc({
+      fields: { titl: { posture: "allow" } } }) } })).toThrow(/titl/);
+  });
+  it("rejects any collection name containing __", () => {
+    expect(() => ConfigSchema.parse({ ...baseSchema, collections: { "people__docs": {
+      description: "d", fields: { id: { type: "uuid", posture: "allow" } } } } })).toThrow(/__/);
+  });
+  it("rejects a structured field with no type", () => {
+    expect(() => ConfigSchema.parse({ ...baseSchema, collections: { people: {
+      description: "d", fields: { name: { posture: "allow" } } } } })).toThrow();
+  });
+});
