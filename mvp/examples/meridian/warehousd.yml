@@ -1,0 +1,47 @@
+project: cortex
+server: { port: 8722 }
+collections:
+  documents:
+    description: Company documents
+    fields:
+      id:         { type: uuid, posture: allow, pk: true }
+      title:      { type: text, posture: allow }
+      category:   { type: text, posture: allow }
+      summary:    { type: text, posture: allow }
+      owner:      { type: text, posture: allow }
+      updated_at: { type: timestamptz, posture: allow }
+  departments:
+    description: Departments
+    fields:
+      id:   { type: uuid, posture: allow, pk: true }
+      name: { type: text, posture: allow }
+  people:
+    description: Employee directory
+    fields:
+      id:              { type: uuid, posture: allow, pk: true }
+      full_name:       { type: text, posture: allow }
+      email:           { type: text, posture: allow }
+      department_name: { type: text, posture: allow, view_join: departments.name }
+      department_id:   { type: uuid, posture: allow, fk: departments.id }
+      home_address:    { type: text, posture: deny }
+      phone:           { type: text, posture: deny }
+  salaries:
+    description: Compensation records (sensitive)
+    fields:
+      id:             { type: uuid,    posture: allow, pk: true }
+      person_id:      { type: uuid,    posture: allow, fk: people.id }
+      job_title:      { type: text,    posture: allow }
+      base_salary:    { type: numeric, posture: allow, min: 60000, max: 220000 }
+      currency:       { type: text,    posture: allow }
+      effective_date: { type: date,    posture: allow }
+      ssn:            { type: text,    posture: deny }
+  metrics:
+    description: Daily business metrics
+    fields:
+      id:               { type: uuid, posture: allow, pk: true }
+      date:             { type: date, posture: allow }
+      revenue:          { type: numeric, posture: allow, min: 10000, max: 90000 }
+      active_customers: { type: int, posture: allow, min: 100, max: 5000 }
+      region:           { type: text, posture: allow }
+synthetic:
+  rows_per_collection: { documents: 25, departments: 5, people: 40, salaries: 200, metrics: 730 }

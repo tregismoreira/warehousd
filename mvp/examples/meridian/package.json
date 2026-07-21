@@ -1,0 +1,2 @@
+{ "name": "@warehousd/example-meridian", "version": "0.0.0", "private": true, "type": "module",
+  "dependencies": { "@warehousd/broker": "workspace:*", "pg": "^8.13.0" } }
