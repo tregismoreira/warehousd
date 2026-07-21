@@ -22,6 +22,8 @@ export async function GET(req: NextRequest) {
 
   const app = getAppPool();
   const schema = env === "dev" ? "data_synth" : "data_live";
+  // collection is validated above against the loaded config's document-type collections,
+  // so this identifier interpolation is safe (SQL identifiers can't be parameterized).
   const tableName = `${collection}__docs`;
 
   try {

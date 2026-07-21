@@ -19,6 +19,8 @@ export async function indexCollection(
   db: Pool, env: "dev" | "live", collection: string, sourceDir: string,
 ): Promise<{ indexed: number; skipped: number; deleted: number }> {
   const schema = env === "dev" ? "data_synth" : "data_live";
+  // collection is caller-controlled (server-side config/CLI, not raw user input),
+  // so this identifier interpolation is safe (SQL identifiers can't be parameterized).
   const docsT = `${schema}."${collection}__docs"`;
   const chunksT = `${schema}."${collection}__chunks"`;
   const existing = new Map<string, { id: string; checksum: string }>(
