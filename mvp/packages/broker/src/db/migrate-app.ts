@@ -20,6 +20,11 @@ export async function createAppSchema(db: Pool): Promise<void> {
       intent jsonb, fields_returned text[], grant_id uuid,
       outcome text, reason text);
   `);
+  await db.query(`
+    alter table app.grants add column if not exists row_filter jsonb;
+    create unique index if not exists grants_one_active
+      on app.grants (user_id, collection, env) where status='approved';
+  `);
   // audit_events is INSERT-only for data roles (§5.5 / test 9)
   await db.query(`
     grant usage on schema app to warehousd_dev, warehousd_live;

@@ -3,6 +3,8 @@ export interface BrokerContext {
   env: "dev" | "live"; // from token/persona, never from request body
 }
 
+export type RowFilter = { field: string; op: "eq" | "in"; value: unknown };
+
 export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "like" | "in";
 export type Filter = { field: string; op: FilterOp; value: unknown };
 

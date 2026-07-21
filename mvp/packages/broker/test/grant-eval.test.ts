@@ -32,3 +32,15 @@ it("returns the active approved grant and null for revoked/expired", async () =>
   const g2 = await loadActiveGrant(db, "priya", "people", "live");
   expect(g2).toBeNull();
 });
+
+it("loadActiveGrant returns rowFilter when set, null otherwise", async () => {
+  p = await provision("granteval2");
+  db = new Pool({ connectionString: p.urls.admin });
+  await createAppSchema(db);
+
+  await db.query(
+    `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at,row_filter)
+     values ('priya','policies', array['title'],'dev','approved', now() + interval '1 day', '{"field":"path","op":"in","value":["hr/pto.md"]}')`);
+  const g = await loadActiveGrant(db, "priya", "policies", "dev");
+  expect(g?.rowFilter).toEqual({ field: "path", op: "in", value: ["hr/pto.md"] });
+});

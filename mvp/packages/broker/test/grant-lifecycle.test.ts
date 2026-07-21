@@ -7,6 +7,7 @@ import { generateSynthetic } from "../src/synthetic/generate";
 import { createPools, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import { requestGrant, approveGrant, revokeGrant } from "../src/grants/manage";
+import { loadActiveGrant } from "../src/grants/eval";
 import type { WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
@@ -51,4 +52,18 @@ it("request→pending→approve(trim+expiry)→query ok→revoke→immediately n
   const after = await broker.query(ctx, { collection: "people" });
   expect(after.ok).toBe(false);
   if (!after.ok) expect(after.reason).toBe("no_grant");
+});
+
+it("approving a second grant for the same (user, collection, env) fails (design test 10)", async () => {
+  const id1 = await requestGrant(admin, { userId: "u", collection: "people", env: "dev", purposeLabel: "a", allowedFields: ["id"] });
+  await approveGrant(admin, id1, "marcus");
+  const id2 = await requestGrant(admin, { userId: "u", collection: "people", env: "dev", purposeLabel: "b", allowedFields: ["id"] });
+  await expect(approveGrant(admin, id2, "marcus")).rejects.toThrow(/grants_one_active|duplicate key/);
+});
+
+it("approveGrant persists rowFilter", async () => {
+  const id = await requestGrant(admin, { userId: "u2", collection: "people", env: "dev", purposeLabel: "p", allowedFields: ["title","content"] });
+  await approveGrant(admin, id, "marcus", { rowFilter: { field: "path", op: "in", value: ["hr/pto.md"] } });
+  const g = await loadActiveGrant(admin, "u2", "people", "dev");
+  expect(g?.rowFilter?.op).toBe("in");
 });
