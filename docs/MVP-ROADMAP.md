@@ -8,6 +8,22 @@ Phases and tasks from the Phase 0 POC to a production-ready MVP.
 
 > Before executing a phase, expand it into a task-by-task TDD plan with the `writing-plans` skill (as Phase 0 was) and execute via subagent-driven development. Tasks below are the checklist of deliverables, not step-level instructions.
 
+**MVP code lives in `mvp/`** (fresh workspace; POC modules ported and re-reviewed per phase — `poc/` stays frozen as the Phase 0 reference). Per-phase execution plans:
+
+| Phase | Plan |
+|---|---|
+| 0.5 | [plans/2026-07-20-phase-0.5-document-indexing.md](./superpowers/plans/2026-07-20-phase-0.5-document-indexing.md) (full TDD detail) |
+| 1 | [plans/2026-07-20-phase-1-real-identity.md](./superpowers/plans/2026-07-20-phase-1-real-identity.md) (outline) |
+| 2 | [plans/2026-07-20-phase-2-oauth-provider.md](./superpowers/plans/2026-07-20-phase-2-oauth-provider.md) (outline) |
+| 3 | [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-phase-3-mcp-endpoint.md) (outline) |
+| 4 | [plans/2026-07-20-phase-4-sso.md](./superpowers/plans/2026-07-20-phase-4-sso.md) (outline) |
+| 5 | [plans/2026-07-20-phase-5-web-ui.md](./superpowers/plans/2026-07-20-phase-5-web-ui.md) (outline) |
+| 6 | [plans/2026-07-20-phase-6-cli-distribution.md](./superpowers/plans/2026-07-20-phase-6-cli-distribution.md) (outline) |
+| 7 | [plans/2026-07-20-phase-7-deploy-fly.md](./superpowers/plans/2026-07-20-phase-7-deploy-fly.md) (outline) |
+| 8 | [plans/2026-07-20-phase-8-hardening-release.md](./superpowers/plans/2026-07-20-phase-8-hardening-release.md) (outline) |
+
+Outline plans get expanded to full TDD detail (writing-plans) right before their phase starts.
+
 **MVP definition of done:** all §10 acceptance tests pass (1–10, 12, 14 automated in CI; 11 and 13 as manual runbooks) and the README ships the stub-vs-real table (§10).
 
 **Ordering:** Phase 0.5 (document indexing) is broker-level and independent of the auth spine — run it right after Phase 0, or in parallel with Phases 1–4. Phases 1→4 are sequential (auth spine). Phases 5 and 6 can run in parallel after 4. Phase 7 needs 4 + 6. Phase 8 closes.
