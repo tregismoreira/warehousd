@@ -98,9 +98,8 @@ describe("row_filter bypass and hostile-q probes (design §8 test 4)", () => {
     const { mkdtempSync } = await import("node:fs");
     const tmpDir = mkdtempSync("probe-doc-");
     const fs = await import("node:fs");
-    fs.writeFileSync(`${tmpDir}/normal.md`, "# Normal Policy\n\nThis is a work policy.");
-    fs.writeFileSync(`${tmpDir}/restricted/secret.md`, `# Secret Policy\n\n${(await import("./fixtures/canaries")).DOC_RESTRICTED_CANARY}`);
     fs.mkdirSync(`${tmpDir}/restricted`, { recursive: true });
+    fs.writeFileSync(`${tmpDir}/normal.md`, "# Normal Policy\n\nThis is a work policy.");
     fs.writeFileSync(`${tmpDir}/restricted/secret.md`, `# Secret Policy\n\n${(await import("./fixtures/canaries")).DOC_RESTRICTED_CANARY}`);
 
     const { indexCollection } = await import("../src/indexing");
