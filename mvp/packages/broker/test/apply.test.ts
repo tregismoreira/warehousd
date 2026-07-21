@@ -42,3 +42,63 @@ describe("applyConfig", () => {
     await db.end();
   });
 });
+
+const docCfg = {
+  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+  collections: {
+    policies: {
+      type: "document" as const,
+      description: "d",
+      source: "./x",
+      fields: {
+        title: { posture: "allow" as const },
+        content: { posture: "allow" as const },
+        path: { posture: "deny" as const },
+      },
+    },
+  },
+};
+
+describe("document collection apply", () => {
+  it("creates __docs, __chunks, gin index, and the chunk view per env", async () => {
+    p = await provision("apply");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, docCfg);
+
+    for (const schema of ["data_synth", "data_live"]) {
+      const t = await db.query(
+        `select table_name from information_schema.tables where table_schema=$1 and table_name like 'policies__%'`, [schema]);
+      expect(t.rows.map(r => r.table_name).sort()).toEqual(["policies__chunks", "policies__docs"]);
+      const v = await db.query(
+        `select column_name from information_schema.columns where table_schema=$1 and table_name='v_policies'`, [schema]);
+      expect(v.rows.map(r => r.column_name).sort()).toEqual(
+        ["chunk_id","chunk_index","content","document_id","owner","path","title","tsv","updated_at"].sort());
+    }
+    await db.end();
+  });
+  it("is idempotent", async () => {
+    p = await provision("apply");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, docCfg);
+    await applyConfig(db, docCfg);
+    await db.end();
+  });
+  it("chunk tsv is generated and searchable", async () => {
+    p = await provision("apply");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, docCfg);
+
+    await db.query(`insert into data_synth."policies__docs" (id,title,path,owner,checksum,updated_at)
+      values (gen_random_uuid(),'t','a.md',null,'c',now())`);
+    const d = await db.query(`select id from data_synth."policies__docs" limit 1`);
+    await db.query(`insert into data_synth."policies__chunks" (id,document_id,chunk_index,content)
+      values (gen_random_uuid(),$1,0,'remote work policy applies')`, [d.rows[0].id]);
+    const r = await db.query(
+      `select content from data_synth.v_policies where tsv @@ websearch_to_tsquery('english','remote work')`);
+    expect(r.rowCount).toBe(1);
+    await db.end();
+  });
+});

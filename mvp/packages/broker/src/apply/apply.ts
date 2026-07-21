@@ -3,6 +3,7 @@ import type { WarehousdConfig } from "../config/schema";
 import { tableDDL, viewDDL, grantViewDDL } from "./ddl";
 
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
+  await db.query(`create extension if not exists vector`);
   for (const name of Object.keys(cfg.collections)) {
     for (const env of ["dev", "live"] as const) {
       await db.query(tableDDL(env, name, cfg));
