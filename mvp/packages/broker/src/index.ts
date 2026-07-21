@@ -7,3 +7,4 @@ export { applyConfig } from "./apply/apply";
 export { generateSynthetic } from "./synthetic/generate";
 export { createAppSchema } from "./db/migrate-app";
 export * from "./grants/manage";
+export { indexCollection } from "./indexing";
