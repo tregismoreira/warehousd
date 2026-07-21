@@ -28,6 +28,15 @@ export function buildSelect(
     selectClause = cols.join(", ");
   }
 
+  let rankExpr: string | null = null;
+  let searchSlot: string | null = null;
+  if (opts.q !== undefined) {
+    searchSlot = param(opts.q); // ONE slot, reused for WHERE and ORDER BY
+    const tsq = `websearch_to_tsquery('english', ${searchSlot})`;
+    rankExpr = `ts_rank_cd(tsv, ${tsq})`;
+    selectClause += `, ${rankExpr} as "_rank", "chunk_index"`;
+  }
+
   let text = `select ${selectClause} from ${view}`;
 
   const where: string[] = [];
@@ -49,12 +58,21 @@ export function buildSelect(
       where.push(`${q(rf.field)} = ${param(rf.value)}`);
     }
   }
+
+  // Add full-text search WHERE clause if q is present (reuses searchSlot)
+  if (searchSlot !== null) {
+    const tsq = `websearch_to_tsquery('english', ${searchSlot})`;
+    where.push(`tsv @@ ${tsq}`);
+  }
+
   if (where.length) text += ` where ${where.join(" and ")}`;
 
   if (intent.groupBy && intent.groupBy.length)
     text += ` group by ${intent.groupBy.map(q).join(", ")}`;
 
-  if (intent.orderBy) text += ` order by ${q(intent.orderBy.field)} ${intent.orderBy.dir === "desc" ? "desc" : "asc"}`;
+  // ORDER BY: when rankExpr present, relevance overrides intent.orderBy
+  if (rankExpr) text += ` order by ${rankExpr} desc`;
+  else if (intent.orderBy) text += ` order by ${q(intent.orderBy.field)} ${intent.orderBy.dir === "desc" ? "desc" : "asc"}`;
 
   const limit = Math.min(Math.max(1, intent.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
   text += ` limit ${limit}`;

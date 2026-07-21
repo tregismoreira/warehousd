@@ -1,8 +1,8 @@
 import type { Pool } from "pg";
-import type { QueryIntent, RefusalReason } from "../types";
+import type { QueryIntent, DocSearchIntent, RefusalReason } from "../types";
 
 export async function writeAudit(app: Pool, e: {
-  userId: string; env: "dev" | "live"; collection: string; intent: QueryIntent | null;
+  userId: string; env: "dev" | "live"; collection: string; intent: QueryIntent | DocSearchIntent | null;
   fieldsReturned: string[]; grantId: string | null;
   outcome: "allowed" | "refused"; reason: RefusalReason | null;
 }): Promise<string> {

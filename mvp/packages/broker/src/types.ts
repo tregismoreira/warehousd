@@ -21,6 +21,14 @@ export type QueryIntent = {
   groupBy?: string[];
 };
 
+export type DocSearchIntent = {
+  collection: string;
+  q: string;
+  fields?: string[];
+  limit?: number;
+  offset?: number;
+};
+
 export type RefusalReason =
   | "no_grant" | "expired_grant" | "field_denied"
   | "unknown_collection" | "unknown_field" | "invalid_intent";

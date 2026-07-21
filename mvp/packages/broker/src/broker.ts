@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import type {
-  BrokerContext, QueryIntent, BrokerResult, RefusalReason, VisibleSchema, Refusal,
+  BrokerContext, QueryIntent, DocSearchIntent, BrokerResult, RefusalReason, VisibleSchema, Refusal,
 } from "./types";
 import type { WarehousdConfig } from "./config/schema";
 import type { Pools } from "./db/pools";
@@ -12,7 +12,7 @@ import { writeAudit } from "./audit/write";
 export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   const app = pools.app;
 
-  async function refuse(ctx: BrokerContext, collection: string, intent: QueryIntent | null,
+  async function refuse(ctx: BrokerContext, collection: string, intent: QueryIntent | DocSearchIntent | null,
     reason: RefusalReason, grantId: string | null = null): Promise<Refusal> {
     const auditId = await writeAudit(app, {
       userId: ctx.userId, env: ctx.env, collection, intent,
@@ -80,7 +80,33 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     return Object.entries(cfg.collections).map(([name, c]) => ({ name, description: c.description }));
   }
 
-  return { query, describeCollection, listCollections };
+  async function searchDocuments(ctx: BrokerContext, intent: DocSearchIntent): Promise<BrokerResult> {
+    const c = cfg.collections[intent.collection];
+    if (!c) return refuse(ctx, intent.collection, intent, "unknown_collection");
+    if ((c.type ?? "structured") !== "document" || typeof intent.q !== "string" || !intent.q.trim())
+      return refuse(ctx, intent.collection, intent, "invalid_intent");
+    const all = Object.keys(c.fields);
+    for (const f of intent.fields ?? []) if (!all.includes(f))
+      return refuse(ctx, intent.collection, intent, "unknown_field");
+    const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env);
+    if (!grant) return refuse(ctx, intent.collection, intent, "no_grant");
+    for (const f of intent.fields ?? []) if (!grant.allowedFields.includes(f))
+      return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
+    if (grant.rowFilter && !all.includes(grant.rowFilter.field))
+      return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
+    const selectFields = intent.fields && intent.fields.length
+      ? intent.fields : grant.allowedFields.filter((f) => all.includes(f));
+    const { text, values } = buildSelect(ctx.env,
+      { collection: intent.collection, fields: selectFields, limit: intent.limit, offset: intent.offset } as QueryIntent,
+      grant.allowedFields, { q: intent.q, rowFilter: grant.rowFilter });
+    const rows = (await dataPool(pools, ctx).query(text, values)).rows;
+    const auditId = await writeAudit(app, { userId: ctx.userId, env: ctx.env,
+      collection: intent.collection, intent, fieldsReturned: selectFields,
+      grantId: grant.id, outcome: "allowed", reason: null });
+    return { ok: true, rows, fieldsReturned: selectFields, auditId };
+  }
+
+  return { query, describeCollection, listCollections, searchDocuments };
 }
 
 // Every field named anywhere in the intent (fields, filters, orderBy, aggregate, groupBy).
