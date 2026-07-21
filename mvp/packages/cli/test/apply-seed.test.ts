@@ -4,6 +4,8 @@ import { provision, type Provisioned } from "../../broker/test/helpers/db";
 import { runApply, runSeed } from "../src/index";
 import { join } from "node:path";
 
+// NOTE: depends on examples/meridian, excluded from mvp/ until Task 12 recreates it — expected to fail until then.
+
 let p: Provisioned;
 afterAll(async () => { await p?.end(); });
 

@@ -11,6 +11,8 @@ import { seedLive } from "../../../examples/meridian/seed/live";
 import { LIVE_ONLY_CANARY } from "./fixtures/canaries";
 import { join } from "node:path";
 
+// NOTE: depends on examples/meridian, excluded from mvp/ until Task 12 recreates it — expected to fail until then.
+
 const cfg = loadConfig(join(__dirname, "../../../examples/meridian"));
 let p: Provisioned, admin: Pool, pools: Pools;
 beforeAll(async () => {

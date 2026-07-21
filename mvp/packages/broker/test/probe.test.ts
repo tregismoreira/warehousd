@@ -11,6 +11,8 @@ import { loadConfig } from "../src/config/load";
 import { DENIED_CANARY, SSN_CANARY } from "./fixtures/canaries";
 import type { QueryIntent } from "../src/types";
 
+// NOTE: depends on examples/meridian, excluded from mvp/ until Task 12 recreates it — expected to fail until then.
+
 const cfg = loadConfig(join(__dirname, "../../../examples/meridian"));
 const probes = JSON.parse(readFileSync(join(__dirname, "fixtures/probes.json"), "utf8")) as
   { name: string; intent: QueryIntent; expect: "allowed" | "refused" }[];
