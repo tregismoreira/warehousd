@@ -1,0 +1,14 @@
+:root { --bg:#0d1117; --panel:#161b22; --fg:#e6edf3; --muted:#8b949e;
+  --allow:#2ea043; --deny:#d1242f; --mono:"SF Mono",ui-monospace,monospace; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.allow::before { content:"✓ allow "; color:var(--allow); }
+.deny::before  { content:"✗ deny ";  color:var(--deny); }
+.panel { background:var(--panel); border:1px solid #30363d; border-radius:8px; padding:12px; }
+
+.markdown table { border-collapse: collapse; margin: 4px 0; }
+.markdown th, .markdown td { border: 1px solid #30363d; padding: 4px 8px; text-align: left; }
+.markdown blockquote { border-left: 3px solid var(--muted); margin: 4px 0; padding-left: 8px; color: var(--muted); }
+.markdown p { margin: 4px 0; }
+.markdown code { font-family: var(--mono); background: #0d1117; padding: 1px 4px; border-radius: 3px; }

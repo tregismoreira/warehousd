@@ -16,8 +16,12 @@ export async function runSeed(projectDir: string, dbUrl: string, seed = 42): Pro
   const cfg = loadConfig(projectDir);
   const db = new Pool({ connectionString: dbUrl });
   try {
-    for (const name of Object.keys(cfg.collections))
+    for (const name of Object.keys(cfg.collections)) {
+      const c = cfg.collections[name];
+      // Skip document collections — they are populated via indexCollection, not synthetic generation
+      if (c.type === "document") continue;
       await db.query(`truncate data_synth.${name} cascade`);
+    }
     await generateSynthetic(db, cfg, seed);
   } finally { await db.end(); }
 }

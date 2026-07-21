@@ -14,8 +14,10 @@ import type { QueryIntent } from "../src/types";
 // NOTE: depends on examples/meridian, excluded from mvp/ until Task 12 recreates it — expected to fail until then.
 
 const cfg = loadConfig(join(__dirname, "../../../examples/meridian"));
-const probes = JSON.parse(readFileSync(join(__dirname, "fixtures/probes.json"), "utf8")) as
-  { name: string; intent: QueryIntent; expect: "allowed" | "refused" }[];
+const allProbes = JSON.parse(readFileSync(join(__dirname, "fixtures/probes.json"), "utf8")) as
+  { name: string; surface?: string; intent: QueryIntent; expect: "allowed" | "refused" }[];
+// Skip document-specific probes (tested separately via searchDocuments)
+const probes = allProbes.filter(p => !p.surface || p.surface === "query");
 
 let p: Provisioned, admin: Pool, pools: Pools, logs: string[] = [];
 beforeAll(async () => {

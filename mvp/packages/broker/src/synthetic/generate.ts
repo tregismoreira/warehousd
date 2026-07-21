@@ -11,6 +11,8 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
   for (const name of order) {
     const c = cfg.collections[name];
     if (!c) throw new Error(`Unknown collection: ${name}`);
+    // Skip document collections — they are populated via indexCollection, not synthetic generation
+    if (c.type === "document") continue;
     const n = cfg.synthetic.rows_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
     const ids: string[] = [];
