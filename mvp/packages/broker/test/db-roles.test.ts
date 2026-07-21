@@ -7,36 +7,24 @@ import { generateSynthetic } from "../src/synthetic/generate";
 import { createPools, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import { loadConfig } from "../src/config/load";
+import { seedLive } from "../../../examples/meridian/seed/live";
+import { LIVE_ONLY_CANARY } from "./fixtures/canaries";
 import { join } from "node:path";
 
 // NOTE: depends on examples/meridian, excluded from mvp/ until Task 12 recreates it — expected to fail until then.
 
-// Lazy load to avoid import error when examples/meridian is missing
-async function loadMeridianFixtures() {
-  try {
-    const { seedLive: sl } = await import("../../../examples/meridian/seed/live");
-    const { LIVE_ONLY_CANARY: canary } = await import("./fixtures/canaries");
-    return { seedLive: sl, LIVE_ONLY_CANARY: canary, cfg: loadConfig(join(__dirname, "../../../examples/meridian")) };
-  } catch {
-    return { seedLive: null, LIVE_ONLY_CANARY: null, cfg: null };
-  }
-}
-
-let fixtures: Awaited<ReturnType<typeof loadMeridianFixtures>> | null = null;
+const cfg = loadConfig(join(__dirname, "../../../examples/meridian"));
 let p: Provisioned, admin: Pool, pools: Pools;
 beforeAll(async () => {
-  if (!fixtures) fixtures = await loadMeridianFixtures();
-  if (!fixtures.cfg) return;
   p = await provision("dbroles"); admin = new Pool({ connectionString: p.urls.admin });
-  await createAppSchema(admin); await applyConfig(admin, fixtures.cfg);
-  await generateSynthetic(admin, fixtures.cfg, 42);
-  await fixtures.seedLive(admin);
+  await createAppSchema(admin); await applyConfig(admin, cfg);
+  await generateSynthetic(admin, cfg, 42);
+  await seedLive(admin);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
 });
-afterAll(async () => { if (p) { await admin.end(); await pools.end(); await p.end(); } });
+afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
 
 it("test 1: app role has NO direct data privileges; broker path works", async () => {
-  if (!fixtures?.cfg) return;
   // app role is warehousd_dev/live for data — but the "app" pool connects as superuser in tests;
   // assert the DENY on the two data roles crossing their wall instead (the real structural guarantee):
   const dev = new Pool({ connectionString: p.urls.dev });
@@ -45,15 +33,14 @@ it("test 1: app role has NO direct data privileges; broker path works", async ()
 });
 
 it("test 5 (partial): dev token cannot see live-only canary; direct role check", async () => {
-  if (!fixtures?.cfg) return;
-  const broker = makeBroker(pools, fixtures.cfg);
+  const broker = makeBroker(pools, cfg);
   await admin.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
     ('u','people', array['id','full_name','email'],'dev','approved')`);
   const r = await broker.query({ userId: "u", env: "dev" }, { collection: "people", limit: 500 });
   expect(r.ok).toBe(true);
   if (r.ok) {
     const blob = JSON.stringify(r.rows);
-    expect(blob.includes(fixtures.LIVE_ONLY_CANARY)).toBe(false);
+    expect(blob.includes(LIVE_ONLY_CANARY)).toBe(false);
   }
   // direct: warehousd_dev is refused on data_live
   const dev = new Pool({ connectionString: p.urls.dev });
@@ -62,7 +49,6 @@ it("test 5 (partial): dev token cannot see live-only canary; direct role check",
 });
 
 it("test 8: synthetic generator role has no data_live privilege; FK integrity holds", async () => {
-  if (!fixtures?.cfg) return;
   const dev = new Pool({ connectionString: p.urls.dev });
   await expect(dev.query(`select 1 from data_live.people`)).rejects.toThrow();
   await dev.end();
