@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
-import type { WarehousdConfig } from "../src/config/schema";
+import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
   project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
@@ -99,6 +99,60 @@ describe("document collection apply", () => {
     const r = await db.query(
       `select content from data_synth.v_policies where tsv @@ websearch_to_tsquery('english','remote work')`);
     expect(r.rowCount).toBe(1);
+    await db.end();
+  });
+});
+
+describe("apply: taxonomy", () => {
+  const cfgIn = {
+    project: "t", server: { port: 1 },
+    taxonomies: { category: { label: "Category", terms: { hr: { label: "HR" }, finance: { label: "Finance" } } } },
+    collections: {
+      notes:  { description: "d", taxonomy: "category", fields: {
+        id: { type: "uuid", posture: "allow", pk: true } } },
+      briefs: { description: "d", type: "document", source: "./x", taxonomy: "category", fields: {
+        title: { posture: "allow" }, content: { posture: "allow" } } },
+    },
+  };
+
+  it("upserts vocabularies/terms idempotently and renames labels in place", async () => {
+    p = await provision("apply");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    const cfg = ConfigSchema.parse(cfgIn);
+    await applyConfig(db, cfg);
+    await applyConfig(db, cfg);   // idempotent
+    const vocabs = await db.query(`select slug, label from app.vocabularies where slug='category'`);
+    expect(vocabs.rowCount).toBe(1);
+    const renamed = ConfigSchema.parse({ ...cfgIn,
+      taxonomies: { category: { label: "Kategorie", terms: { hr: { label: "Human Resources" }, finance: { label: "Finance" } } } } });
+    await applyConfig(db, renamed);
+    const v = (await db.query(`select label from app.vocabularies where slug='category'`)).rows[0];
+    expect(v.label).toBe("Kategorie");
+    const t = (await db.query(
+      `select label from app.terms where slug='hr'`)).rows[0];
+    expect(t.label).toBe("Human Resources");
+    expect((await db.query(`select count(*)::int as n from app.terms`)).rows[0].n).toBe(2);
+    await db.end();
+  });
+
+  it("adds the term column to bound tables and the doc view, both envs", async () => {
+    p = await provision("apply");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    const cfg = ConfigSchema.parse(cfgIn);
+    await applyConfig(db, cfg);
+    for (const schema of ["data_synth", "data_live"]) {
+      const notesCol = await db.query(
+        `select 1 from information_schema.columns where table_schema=$1 and table_name='notes' and column_name='category'`, [schema]);
+      expect(notesCol.rowCount).toBe(1);
+      const docsCol = await db.query(
+        `select 1 from information_schema.columns where table_schema=$1 and table_name='briefs__docs' and column_name='category'`, [schema]);
+      expect(docsCol.rowCount).toBe(1);
+      const viewCol = await db.query(
+        `select 1 from information_schema.columns where table_schema=$1 and table_name='v_briefs' and column_name='category'`, [schema]);
+      expect(viewCol.rowCount).toBe(1);
+    }
     await db.end();
   });
 });

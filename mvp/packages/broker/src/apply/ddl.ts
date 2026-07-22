@@ -11,14 +11,18 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
   if (!c) throw new Error(`Unknown collection: ${collection}`);
 
   if (c.type === "document") {
+    // c.taxonomy is a config-validated vocabulary slug — identifier interpolation is safe.
+    const termCol = c.taxonomy ? `\n        "${c.taxonomy}" text,` : "";
+    const termAlter = c.taxonomy
+      ? `\n      alter table ${schema}."${collection}__docs" add column if not exists "${c.taxonomy}" text;` : "";
     return `
       create table if not exists ${schema}."${collection}__docs" (
         id uuid primary key,
         title text,
-        path text not null unique,
+        path text not null unique,${termCol}
         owner text,
         checksum text not null,
-        updated_at timestamptz not null);
+        updated_at timestamptz not null);${termAlter}
       create table if not exists ${schema}."${collection}__chunks" (
         id uuid primary key,
         document_id uuid not null references ${schema}."${collection}__docs"(id) on delete cascade,
@@ -38,7 +42,10 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
     // type is guaranteed by CollectionSchema refinement for structured collections
     cols.push(`"${name}" ${PG_TYPE[f.type!]}${pk}`);
   }
-  return `create table if not exists ${schema}.${collection} (${cols.join(", ")});`;
+  let ddl = `create table if not exists ${schema}.${collection} (${cols.join(", ")});`;
+  // Re-apply upgrade path for a newly bound taxonomy on a pre-existing table.
+  if (c.taxonomy) ddl += ` alter table ${schema}.${collection} add column if not exists "${c.taxonomy}" text;`;
+  return ddl;
 }
 
 // One flat view per collection/env. Joins resolve view_join columns.
@@ -48,9 +55,10 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
   if (!c) throw new Error(`Unknown collection: ${collection}`);
 
   if (c.type === "document") {
+    const termSel = c.taxonomy ? `, d."${c.taxonomy}"` : "";
     return `create or replace view ${schema}.v_${collection} as
       select c.id as chunk_id, c.chunk_index, c.content, c.tsv,
-             d.id as document_id, d.title, d.path, d.owner, d.updated_at
+             d.id as document_id, d.title, d.path, d.owner, d.updated_at${termSel}
       from ${schema}."${collection}__chunks" c
       join ${schema}."${collection}__docs" d on d.id = c.document_id;`;
   }

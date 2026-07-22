@@ -4,6 +4,21 @@ import { tableDDL, viewDDL, grantViewDDL } from "./ddl";
 
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
   await db.query(`create extension if not exists vector`);
+
+  // Taxonomies: upsert by slug (labels renameable in place). apply never deletes
+  // vocabularies/terms — data rows store term slugs, so removal is a manual operation.
+  for (const [slug, v] of Object.entries(cfg.taxonomies ?? {})) {
+    const vid = (await db.query(
+      `insert into app.vocabularies (slug, label) values ($1,$2)
+       on conflict (slug) do update set label=excluded.label returning id`,
+      [slug, v.label])).rows[0].id;
+    for (const [t, tv] of Object.entries(v.terms))
+      await db.query(
+        `insert into app.terms (vocabulary_id, slug, label) values ($1,$2,$3)
+         on conflict (vocabulary_id, slug) do update set label=excluded.label`,
+        [vid, t, tv.label]);
+  }
+
   for (const name of Object.keys(cfg.collections)) {
     for (const env of ["dev", "live"] as const) {
       await db.query(tableDDL(env, name, cfg));
