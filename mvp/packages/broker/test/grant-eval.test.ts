@@ -14,22 +14,22 @@ it("returns the active approved grant and null for revoked/expired", async () =>
 
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
-     values ('priya','people', array['id','email'],'dev','approved', now() + interval '1 day')`);
-  const g = await loadActiveGrant(db, "priya", "people", "dev");
+     values ('mia','people', array['id','email'],'dev','approved', now() + interval '1 day')`);
+  const g = await loadActiveGrant(db, "mia", "people", "dev");
   expect(g?.allowedFields).toEqual(["id", "email"]);
 
   // revoked → none
-  await db.query(`update app.grants set status='revoked' where user_id='priya'`);
-  expect(await loadActiveGrant(db, "priya", "people", "dev")).toBeNull();
+  await db.query(`update app.grants set status='revoked' where user_id='mia'`);
+  expect(await loadActiveGrant(db, "mia", "people", "dev")).toBeNull();
 
   // expired approved → none
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
-     values ('priya','people', array['id'],'dev','approved', now() - interval '1 hour')`);
-  expect(await loadActiveGrant(db, "priya", "people", "dev")).toBeNull();
+     values ('mia','people', array['id'],'dev','approved', now() - interval '1 hour')`);
+  expect(await loadActiveGrant(db, "mia", "people", "dev")).toBeNull();
 
   // wrong env → none (dev grant not visible to live)
-  const g2 = await loadActiveGrant(db, "priya", "people", "live");
+  const g2 = await loadActiveGrant(db, "mia", "people", "live");
   expect(g2).toBeNull();
 });
 
@@ -40,7 +40,7 @@ it("loadActiveGrant returns rowFilter when set, null otherwise", async () => {
 
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at,row_filter)
-     values ('priya','policies', array['title'],'dev','approved', now() + interval '1 day', '{"field":"path","op":"in","value":["hr/pto.md"]}')`);
-  const g = await loadActiveGrant(db, "priya", "policies", "dev");
+     values ('mia','policies', array['title'],'dev','approved', now() + interval '1 day', '{"field":"path","op":"in","value":["hr/pto.md"]}')`);
+  const g = await loadActiveGrant(db, "mia", "policies", "dev");
   expect(g?.rowFilter).toEqual({ field: "path", op: "in", value: ["hr/pto.md"] });
 });

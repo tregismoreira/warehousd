@@ -35,16 +35,16 @@ async function main() {
   // Index policies collection from seed docs (dev and live environments)
   const devIndexed = await indexCollection(db, "dev", "policies", `${dir}/seed/docs-dev`);
   const liveIndexed = await indexCollection(db, "live", "policies", `${dir}/seed/docs-live`);
-  // Priya's pending salaries request (Marcus's inbox) + her approved dev grants (§9) —
+  // Mia's pending salaries request (Marcus's inbox) + her approved dev grants (§9) —
   // only seed if not already present, so re-running bootstrap doesn't duplicate grant rows.
-  const existing = await db.query(`select 1 from app.grants where user_id='priya' limit 1`);
+  const existing = await db.query(`select 1 from app.grants where user_id='mia' limit 1`);
   if (existing.rowCount === 0) {
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
-      ('priya','documents', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
-      ('priya','people', array['id','full_name','email','department_name'],'dev','approved'),
-      ('priya','policies', array['title','content','owner','updated_at'],'dev','approved')`);
+      ('mia','documents', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
+      ('mia','people', array['id','full_name','email','department_name'],'dev','approved'),
+      ('mia','policies', array['title','content','owner','updated_at'],'dev','approved')`);
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,purpose_label) values
-      ('priya','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
+      ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
   }
   // Marcus (manager) and Ana (admin) see everything (README §"grants" — managers get fields: "*").
   for (const user of ["marcus", "ana"]) {

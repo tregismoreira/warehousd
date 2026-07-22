@@ -6,7 +6,7 @@ import { Grants } from "./components/Grants";
 import { PERSONAS } from "./lib/persona";
 
 export default function Page() {
-  const [persona, setPersona] = useState("priya");
+  const [persona, setPersona] = useState("mia");
   const [env, setEnv] = useState<"dev" | "live">("dev");
   const [tick, setTick] = useState(0);
   const bump = () => setTick((t) => t + 1);

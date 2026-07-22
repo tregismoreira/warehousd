@@ -325,7 +325,7 @@ Shipping demo = fictional company loaded on first boot (skippable via env var). 
 |---|---|---|
 | `ana@meridian.demo` | admin | IT view: postures, audit, SSO config |
 | `marcus@meridian.demo` | manager | Has one **pending grant request waiting** on first login |
-| `priya@meridian.demo` | member | Has approved dev grants for `documents` + `people`; her pending request for `salaries` is the one in Marcus's inbox |
+| `mia@meridian.demo` | member | Has approved dev grants for `documents` + `people`; her pending request for `salaries` is the one in Marcus's inbox |
 
 **Collections** (graded complexity):
 
@@ -447,7 +447,7 @@ A pre-MVP proof that validates the entire enforcement core with a chat interface
 **Post-POC increment (Phase 0.5 in the roadmap):** document indexing per §5.6 — collection `type: document`, indexer, `broker.searchDocuments`, row-level grant scoping — all production code kept in MVP, built against the POC's persona-switched console (the `search_documents` chat tool becomes the MCP tool in the MVP phase).
 
 **Scope — throwaway (mark clearly in code as `// POC-ONLY, replaced by OAuth in MVP`):**
-- **Persona switcher adapter:** instead of token verification, a dropdown in the UI selects the acting user (Ana / Marcus / Priya) and an env toggle selects dev/live. The adapter constructs `BrokerContext` directly from these two controls. This stub is the *only* code replaced when real auth arrives — the broker never knows the difference.
+- **Persona switcher adapter:** instead of token verification, a dropdown in the UI selects the acting user (Ana / Marcus / Mia) and an env toggle selects dev/live. The adapter constructs `BrokerContext` directly from these two controls. This stub is the *only* code replaced when real auth arrives — the broker never knows the difference.
 - **Chat page** (single screen, three panes):
   1. **Chat:** messages go to a Next.js server route calling the Anthropic API (`claude-sonnet-4-6`) with tool definitions mirroring §7 (`list_collections`, `describe_collection`, `query_collection` — no `request_access`; grants are managed in pane 3). Tool calls are executed against the broker with the current persona's context. Max 5 tool iterations per turn. The LLM remains an untrusted proposer: its tool inputs are `QueryIntent`s that the broker re-validates like any other caller.
 
@@ -455,7 +455,7 @@ A pre-MVP proof that validates the entire enforcement core with a chat interface
      - **Prompt-level:** `SYSTEM_PROMPT` explicitly instructs the model to never fabricate, guess, or simulate data absent from a `tool_result`, and to state plainly when it hasn't successfully queried something, even under repeated user pressure.
      - **Code-level guard:** the route scans the full conversation (across turns) for `query_collection` tool_results with `ok:true` to build the set of collections actually queried successfully. If the model's final text contains a markdown table or multiple `$`-figures while that set is empty, the server injects a corrective message forcing the model to re-answer honestly instead of streaming the fabrication to the user. This is a heuristic, not a full grounding check — it targets the observed failure mode cheaply, without verifying displayed numbers match queried rows field-for-field.
   2. **Evidence panel:** live audit trail (auto-refresh after each turn) showing every broker decision — user, env, intent, outcome, fields returned. This is the "prove it's secure" surface.
-  3. **Grants panel:** the acting persona's grants; when acting as Marcus (manager), pending requests can be approved/denied/revoked inline (writes `app.grants` directly — no workflow UI). Priya's pending `salaries` request from §9 is the demo arc: probe fails → Marcus approves → same question succeeds → revoke → fails again, all visible in the evidence panel.
+  3. **Grants panel:** the acting persona's grants; when acting as Marcus (manager), pending requests can be approved/denied/revoked inline (writes `app.grants` directly — no workflow UI). Mia's pending `salaries` request from §9 is the demo arc: probe fails → Marcus approves → same question succeeds → revoke → fails again, all visible in the evidence panel.
 
 **Not in Phase 0:** Better Auth, SSO, OAuth provider, MCP endpoint, admin UI, client registration. §6 is untouched until MVP.
 

@@ -31,13 +31,13 @@ beforeAll(async () => {
   await admin.query(
     `insert into data_synth.salaries (id,person_id,job_title,base_salary,currency,effective_date,ssn)
      values (gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`, [person, SSN_CANARY]);
-  // grant priya EVERYTHING grantable so the ONLY thing blocking canaries is posture, not missing grant
+  // grant mia EVERYTHING grantable so the ONLY thing blocking canaries is posture, not missing grant
   for (const [c, fields] of [
     ["people", ["id","full_name","email","department_name","department_id"]],
     ["salaries", ["id","person_id","job_title","base_salary","currency","effective_date"]],
   ] as const)
     await admin.query(`insert into app.grants (user_id,collection,allowed_fields,env,status)
-      values ('priya',$1,$2,'dev','approved')`, [c, fields]);
+      values ('mia',$1,$2,'dev','approved')`, [c, fields]);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   logs = [];
   vi.spyOn(console, "log").mockImplementation((...a) => { logs.push(a.join(" ")); });
@@ -48,7 +48,7 @@ afterAll(async () => { vi.restoreAllMocks(); await admin.end(); await pools.end(
 it("no probe leaks any denied canary; outcomes match expectations", async () => {
   const broker = makeBroker(pools, cfg);
   for (const probe of probes) {
-    const r = await broker.query({ userId: "priya", env: "dev" }, probe.intent);
+    const r = await broker.query({ userId: "mia", env: "dev" }, probe.intent);
     const outcome = r.ok ? "allowed" : "refused";
     expect(outcome, `probe "${probe.name}"`).toBe(probe.expect);
     const payload = JSON.stringify(r);

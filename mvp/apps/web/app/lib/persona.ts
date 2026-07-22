@@ -5,7 +5,7 @@ import type { BrokerContext } from "@warehousd/broker";
 export const PERSONAS = [
   { id: "ana",    label: "Ana (admin)" },
   { id: "marcus", label: "Marcus (manager)" },
-  { id: "priya",  label: "Priya (member)" },
+  { id: "mia",  label: "Mia (member)" },
 ] as const;
 export type PersonaId = (typeof PERSONAS)[number]["id"];
 

@@ -36,9 +36,11 @@ Enforcement core: broker, postures, dual DB roles, synthetic data, audit, person
 
 ---
 
-## Phase 0.5 — Document indexing (§5.6) — gate: §10 test 14
+## Phase 0.5 — Document indexing (§5.6) — gate: §10 test 14 — ✅ COMPLETE
 
 Design: [specs/2026-07-18-document-indexing-design.md](./superpowers/specs/2026-07-18-document-indexing-design.md) — read it first; every step below is grounded there against the existing broker code. All production code kept in MVP. Sub-steps in dependency order; 0.5d can run in parallel with 0.5b–c.
+
+Implemented via a 13-task subagent-driven-development plan ([plans/2026-07-20-phase-0.5-document-indexing.md](./superpowers/plans/2026-07-20-phase-0.5-document-indexing.md)), each task independently implemented and reviewed, plus a final whole-branch review. Full `mvp` test suite: **68/68 passing across 20 files, 0 known failures.** See "Try it yourself" below to run the demo.
 
 - [x] **0.5a Config foundation:** `type: structured|document` + `source` (dev content) + optional `source_live` on `CollectionSchema`; Zod refinements — document fields ⊆ `{title, content, path, owner, updated_at}`, `source` required for documents, no `__` in collection names (design §8 test 12)
 - [x] **0.5b Storage & DDL:** per-collection `{name}__docs` + `{name}__chunks` tables (avoids collision with the seeded `documents` collection; `path` unique = upsert key; tsv generated column + GIN index; reserved `embedding vector(1536)`, pgvector enabled); chunk-join `v_{collection}` view; type branches in `tableDDL`/`viewDDL`; `grantViewDDL` unchanged — verify env role reads view but not base tables (design §8 test 7)
@@ -48,11 +50,49 @@ Design: [specs/2026-07-18-document-indexing-design.md](./superpowers/specs/2026-
 - [x] **0.5f Chat integration:** `search_documents` as the fourth tool in the POC chat route; Grants panel gets a document picker (`path` multi-select) for document-collection grants; seed a demo document collection so the Meridian arc covers it
 - [x] Gate: design §8 acceptance list green in CI + all Phase 0 tests still green
 
+### Try it yourself
+
+**Automated: run the full test suite**
+
+```bash
+cd mvp
+pnpm test:up                # start Postgres (pgvector) test container, port 54330
+pnpm test                    # 68 tests across 20 files, all green
+pnpm lint
+pnpm test:down                # stop the container when done
+```
+
+**Manual: run the demo chat console**
+
+1. Start Postgres and bootstrap the demo data (creates roles/schemas, applies `warehousd.yml`, seeds synthetic + demo data, indexes the `policies` document collection into both envs, seeds grants for Ana/Marcus/Mia):
+   ```bash
+   cd mvp
+   docker compose -f docker-compose.test.yml up -d --wait
+   WAREHOUSD_PROJECT_DIR=$(pwd)/examples/meridian \
+   APP_DATABASE_URL=postgres://postgres:postgres@localhost:54330/warehousd_test \
+     pnpm tsx scripts/dev-bootstrap.ts
+   ```
+2. Start the chat console (needs an Anthropic API key for the chat model; the broker/grants/search paths work without it, but the chat UI's tool-calling loop does not):
+   ```bash
+   ANTHROPIC_API_KEY=sk-ant-... \
+   WAREHOUSD_PROJECT_DIR=$(pwd)/examples/meridian \
+   APP_DATABASE_URL=postgres://postgres:postgres@localhost:54330/warehousd_test \
+     pnpm --filter web dev
+   ```
+   Open http://localhost:8722.
+3. In the console, switch persona (top of page) and try:
+   - **Mia (member), env=dev** — ask *"what does the remote work policy say?"* → `search_documents` returns ranked chunks from `remote-work.md` with title/content/owner/updated_at only (Mia's grant excludes `path`).
+   - **Ana or Marcus (admin/manager), env=dev** — same query, broader access (managers/admins are seeded with full grants across all collections, including `policies`).
+   - **A persona/collection combination with no approved grant** (e.g. ask about `salaries` as Mia — her grant on that collection is seeded `pending`, not `approved`) → refusal, with a hint to request access. Check the **Evidence** panel for the audit trail of every call, allowed or refused.
+   - **Grants panel** — as Marcus/Ana, open Grants, approve a pending request for a document collection (`policies`), and try the new path multi-select: pick specific documents to scope a `row_filter`-restricted grant, or leave it empty for full access.
+   - **Env isolation** — switch to `env=live` and repeat a `policies` search; dev-seeded canary text (`DEV-DOC-CANARY-7f3a`, planted in `examples/meridian/seed/docs-dev/`) must never appear, and vice versa for the live canary (`LIVE-DOC-CANARY-2c9d`, in `seed/docs-live/`) when on `env=dev`.
+4. Stop everything: `docker compose -f docker-compose.test.yml down -v` (add `-v` to also drop the demo data volume).
+
 ## Phase 1 — Real identity: Better Auth core + roles (§6.2–6.3)
 
 - [ ] Install Better Auth in `apps/web`; auth tables (`user`, `session`, `account`) in the `app` schema
 - [ ] Local email/password login (bootstrap fallback only) + login screen; demo mode shows §9 persona credentials
-- [ ] `role` on user (`admin`/`manager`/`member`); seed Ana/Marcus/Priya as real users with §9 roles + grants
+- [ ] `role` on user (`admin`/`manager`/`member`); seed Ana/Marcus/Mia as real users with §9 roles + grants
 - [ ] Support `SANDBOXD_DISABLE_LOCAL_LOGIN=true` (fully disables local credentials)
 - [ ] Delete the POC persona switcher; derive `BrokerContext` in UI routes from the verified session (env via authenticated console toggle)
 - [ ] Role checks on grants API (approve/deny/revoke = manager/admin only)

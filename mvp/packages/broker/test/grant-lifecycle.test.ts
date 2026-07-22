@@ -28,12 +28,12 @@ beforeAll(async () => {
 afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
 
 it("request→pending→approve(trim+expiry)→query ok→revoke→immediately no_grant", async () => {
-  const ctx = { userId: "priya", env: "dev" as const };
+  const ctx = { userId: "mia", env: "dev" as const };
   // before approval → no_grant
   const before = await broker.query(ctx, { collection: "people" });
   expect(before.ok).toBe(false);
 
-  const id = await requestGrant(admin, { userId: "priya", collection: "people", env: "dev",
+  const id = await requestGrant(admin, { userId: "mia", collection: "people", env: "dev",
     purposeLabel: "onboarding", allowedFields: ["id", "full_name", "email"] });
   // trim email off on approval, set future expiry
   await approveGrant(admin, id, "marcus",
