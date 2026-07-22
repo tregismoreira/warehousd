@@ -5,6 +5,7 @@ type Grant = {
   id: string; user_id: string; collection: string; env: string; status: string;
   allowed_fields: string[] | null; purpose_label: string | null; expires_at: string | null;
   collectionType?: string;
+  taxonomyField?: string | null;
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -49,6 +50,8 @@ export function Grants({ persona, onChange }: { persona: string; onChange: () =>
   const [data, setData] = useState<{ mine: Grant[]; pending: Grant[] }>({ mine: [], pending: [] });
   const [docPaths, setDocPaths] = useState<Record<string, string[]>>({});
   const [selectedPaths, setSelectedPaths] = useState<Record<string, Set<string>>>({});
+  const [terms, setTerms] = useState<Record<string, { slug: string; label: string }[]>>({});
+  const [selectedTerms, setSelectedTerms] = useState<Record<string, Set<string>>>({});
 
   const load = () => fetch(`/api/grants?user=${persona}`).then((r) => r.json()).then(setData);
   useEffect(() => { load(); }, [persona]);
@@ -66,9 +69,22 @@ export function Grants({ persona, onChange }: { persona: string; onChange: () =>
     }
   }
 
-  async function act(action: string, id: string, allowedFields?: string[], selectedPaths?: string[]) {
+  async function loadTerms(grantId: string, g: Grant) {
+    if (!g.taxonomyField) return;
+    if (terms[g.collection]) return;
+    const res = await fetch(`/api/grants/terms?collection=${g.collection}`);
+    const data = await res.json();
+    if (data.terms) {
+      setTerms(prev => ({ ...prev, [g.collection]: data.terms }));
+      setSelectedTerms(prev => ({ ...prev, [grantId]: new Set() }));
+    }
+  }
+
+  async function act(action: string, id: string, allowedFields?: string[],
+    selectedPaths?: string[], termSlugs?: string[]) {
     await fetch("/api/grants", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, id, by: persona, allowedFields, selectedPaths,
+        selectedTerms: termSlugs,
         expiresAt: new Date(Date.parse("2099-01-01")).toISOString() }) });
     await load(); onChange();
   }
@@ -143,9 +159,38 @@ export function Grants({ persona, onChange }: { persona: string; onChange: () =>
                     Load document paths
                   </button>
                 )}
+                {g.taxonomyField && (terms[g.collection]?.length ?? 0) > 0 && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--muted)" }}>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+                      Categories (optional — leave empty for full access; overrides path selection):
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {terms[g.collection]!.map(t => (
+                        <label key={t.slug} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={(selectedTerms[g.id] ?? new Set()).has(t.slug)}
+                            onChange={(e) => {
+                              const next = new Set(selectedTerms[g.id] ?? new Set<string>());
+                              if (e.target.checked) next.add(t.slug); else next.delete(t.slug);
+                              setSelectedTerms(prev => ({ ...prev, [g.id]: next }));
+                            }}
+                          />
+                          {t.label} <span className="mono" style={{ color: "var(--muted)", fontSize: 10 }}>({t.slug})</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {g.taxonomyField && !(terms[g.collection]?.length) && (
+                  <button onClick={() => loadTerms(g.id, g)} style={{ marginTop: 8, fontSize: 11 }}>
+                    Load categories
+                  </button>
+                )}
                 <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
                   <button
-                    onClick={() => act("approve", g.id, g.allowed_fields ?? [], Array.from(selected))}
+                    onClick={() => act("approve", g.id, g.allowed_fields ?? [],
+                      Array.from(selected), Array.from(selectedTerms[g.id] ?? new Set<string>()))}
                   >
                     approve
                   </button>

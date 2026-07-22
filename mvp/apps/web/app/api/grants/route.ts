@@ -16,17 +16,24 @@ export async function GET(req: NextRequest) {
   const enriched = (rows: typeof mine.rows) => rows.map(g => ({
     ...g,
     collectionType: cfg.collections[g.collection]?.type || "structured",
+    taxonomyField: cfg.collections[g.collection]?.taxonomy ?? null,
   }));
 
   return Response.json({ mine: enriched(mine.rows), pending: enriched(pending.rows) });
 }
 
 export async function POST(req: NextRequest) {
-  const { action, id, by, allowedFields, selectedPaths, expiresAt } = await req.json();
+  const { action, id, by, allowedFields, selectedPaths, selectedTerms, expiresAt } = await req.json();
   const app = getAppPool();
   if (action === "approve") {
     const opts: any = { allowedFields, expiresAt };
-    if (selectedPaths && selectedPaths.length > 0) {
+    const cfg = loadConfig(projectDir);
+    const grant = (await app.query(`select collection from app.grants where id=$1`, [id])).rows[0];
+    const taxonomyField = grant ? cfg.collections[grant.collection]?.taxonomy : undefined;
+    // row_filter field is derived server-side from config — never client-supplied.
+    if (taxonomyField && selectedTerms && selectedTerms.length > 0) {
+      opts.rowFilter = { field: taxonomyField, op: "in", value: selectedTerms };
+    } else if (selectedPaths && selectedPaths.length > 0) {
       opts.rowFilter = { field: "path", op: "in", value: selectedPaths };
     }
     await approveGrant(app, id, by, opts);
