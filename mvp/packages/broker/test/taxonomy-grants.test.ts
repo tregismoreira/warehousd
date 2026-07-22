@@ -48,7 +48,7 @@ beforeAll(async () => {
   broker = makeBroker(pools, cfg);
 });
 
-afterAll(async () => { await pools.end?.(); await admin.end(); await p.end(); });
+afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
 
 async function grant(user: string, collection: string, fields: string[], rowFilter: object | null) {
   await admin.query(`delete from app.grants where user_id=$1 and collection=$2`, [user, collection]);
@@ -71,6 +71,7 @@ describe("term-scoped grants: structured", () => {
   });
 
   it("client filters AND with the term scope — no widening", async () => {
+    await grant("u1", "notes", ["id", "body", "category"], { field: "category", op: "in", value: ["hr"] });
     const r = await broker.query({ userId: "u1", env: "dev" },
       { collection: "notes", filters: [{ field: "category", op: "eq", value: "finance" }] });
     expect(r.ok).toBe(true);
@@ -117,6 +118,7 @@ describe("term-scoped grants: document search", () => {
   });
 
   it("broker.query on the bound document collection filters by term too", async () => {
+    await grant("u4", "briefs", ["title", "content", "category"], { field: "category", op: "in", value: ["hr"] });
     const r = await broker.query({ userId: "u4", env: "dev" }, { collection: "briefs" });
     expect(r.ok).toBe(true);
     if (r.ok) for (const row of r.rows) expect(row.category).toBe("hr");
