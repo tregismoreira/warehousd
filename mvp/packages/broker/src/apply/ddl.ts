@@ -44,6 +44,7 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
   }
   let ddl = `create table if not exists ${schema}.${collection} (${cols.join(", ")});`;
   // Re-apply upgrade path for a newly bound taxonomy on a pre-existing table.
+  // c.taxonomy is a config-validated vocabulary slug — identifier interpolation is safe.
   if (c.taxonomy) ddl += ` alter table ${schema}.${collection} add column if not exists "${c.taxonomy}" text;`;
   return ddl;
 }
@@ -55,6 +56,7 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
   if (!c) throw new Error(`Unknown collection: ${collection}`);
 
   if (c.type === "document") {
+    // c.taxonomy is a config-validated vocabulary slug — identifier interpolation is safe.
     const termSel = c.taxonomy ? `, d."${c.taxonomy}"` : "";
     return `create or replace view ${schema}.v_${collection} as
       select c.id as chunk_id, c.chunk_index, c.content, c.tsv,
