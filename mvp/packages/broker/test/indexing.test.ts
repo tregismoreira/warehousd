@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from "vitest";
 import { Pool } from "pg";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -134,11 +134,6 @@ describe("indexCollection: taxonomy", () => {
   let db: Pool;
   let dir: string;
 
-  afterAll(async () => {
-    await db?.end();
-    await p?.end();
-  });
-
   const tax = { field: "category", slugs: ["hr", "finance"] };
   const taxonomyCfg = {
     ...docCfg,
@@ -153,70 +148,55 @@ describe("indexCollection: taxonomy", () => {
     },
   };
 
-  it("writes the term column from frontmatter", async () => {
-    p = await provision("taxonomy1");
+  beforeAll(async () => {
+    p = await provision("taxonomy");
     db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, taxonomyCfg);
-    dir = mkdtempSync(join(tmpdir(), "wh-tax-"));
+  });
 
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "wh-tax-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await db?.end();
+    await p?.end();
+  });
+
+  it("writes the term column from frontmatter", async () => {
     writeFileSync(join(dir, "a.md"), "---\ncategory: hr\n---\n# A\n\nAlpha body.");
     await indexCollection(db, "dev", "policies", dir, { taxonomy: tax });
     const r = (await db.query(`select category from data_synth."policies__docs" where path='a.md'`)).rows[0];
     expect(r.category).toBe("hr");
-    rmSync(dir, { recursive: true });
   });
 
   it("updates the term when frontmatter changes", async () => {
-    p = await provision("taxonomy2");
-    db = new Pool({ connectionString: p.urls.admin });
-    await createAppSchema(db);
-    await applyConfig(db, taxonomyCfg);
-    dir = mkdtempSync(join(tmpdir(), "wh-tax-"));
-
     writeFileSync(join(dir, "a.md"), "---\ncategory: finance\n---\n# A\n\nAlpha body v2.");
     await indexCollection(db, "dev", "policies", dir, { taxonomy: tax });
     const r = (await db.query(`select category from data_synth."policies__docs" where path='a.md'`)).rows[0];
     expect(r.category).toBe("finance");
-    rmSync(dir, { recursive: true });
   });
 
   it("rejects a file with missing term, naming the file", async () => {
-    p = await provision("taxonomy3");
-    db = new Pool({ connectionString: p.urls.admin });
-    await createAppSchema(db);
-    await applyConfig(db, taxonomyCfg);
-    dir = mkdtempSync(join(tmpdir(), "wh-tax-"));
-
     writeFileSync(join(dir, "b.md"), "# B\n\nNo frontmatter.");
     await expect(indexCollection(db, "dev", "policies", dir, { taxonomy: tax }))
       .rejects.toThrow(/b\.md.*missing required category/);
-    rmSync(dir, { recursive: true });
   });
 
   it("rejects a file with an unknown term, naming file and term", async () => {
-    p = await provision("taxonomy4");
-    db = new Pool({ connectionString: p.urls.admin });
-    await createAppSchema(db);
-    await applyConfig(db, taxonomyCfg);
-    dir = mkdtempSync(join(tmpdir(), "wh-tax-"));
-
     writeFileSync(join(dir, "b.md"), "---\ncategory: bogus\n---\n# B\n\nBody.");
     await expect(indexCollection(db, "dev", "policies", dir, { taxonomy: tax }))
       .rejects.toThrow(/b\.md.*unknown category term "bogus"/);
-    rmSync(dir, { recursive: true });
   });
 
   it("unbound collections index exactly as before", async () => {
-    p = await provision("taxonomy5");
-    db = new Pool({ connectionString: p.urls.admin });
-    await createAppSchema(db);
-    await applyConfig(db, docCfg);
-    dir = mkdtempSync(join(tmpdir(), "wh-tax-"));
-
     writeFileSync(join(dir, "a.md"), "# A\n\nalpha body");
     const r = await indexCollection(db, "dev", "policies", dir);   // no opts
     expect(r.deleted + r.indexed + r.skipped).toBeGreaterThan(0);
-    rmSync(dir, { recursive: true });
   });
 });
