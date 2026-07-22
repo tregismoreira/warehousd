@@ -37,3 +37,17 @@ export const auditEvents = app.table("audit_events", {
   outcome: text("outcome"),                 // 'allowed' | 'refused'
   reason: text("reason"),
 });
+
+export const vocabularies = app.table("vocabularies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull().unique(),
+  label: text("label").notNull(),
+});
+
+export const terms = app.table("terms", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  vocabularyId: uuid("vocabulary_id").notNull(),   // FK + unique(vocabulary_id, slug) enforced in DDL
+  slug: text("slug").notNull(),
+  label: text("label").notNull(),
+  parentId: uuid("parent_id"),                     // reserved for hierarchy, unused in MVP
+});
