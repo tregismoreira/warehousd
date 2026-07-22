@@ -1,3 +1,6 @@
+---
+category: hr
+---
 # Remote Work Policy
 
 ## Overview

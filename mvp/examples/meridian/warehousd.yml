@@ -1,8 +1,25 @@
 project: cortex
 server: { port: 8722 }
+taxonomies:
+  category:
+    label: Category
+    terms:
+      contracts:  { label: Contracts }
+      finance:    { label: Finance }
+      benefits:   { label: Benefits }
+      hr:         { label: HR }
+      engineering: { label: Engineering }
+      security:   { label: Security }
+      compliance: { label: Compliance }
+      sales:      { label: Sales }
+      marketing:  { label: Marketing }
+      operations: { label: Operations }
+      legal:      { label: Legal }
+      onboarding: { label: Onboarding }
 collections:
   documents:
     description: Company documents
+    taxonomy: category
     fields:
       id:         { type: uuid, posture: allow, pk: true }
       title:      { type: text, posture: allow }
@@ -46,6 +63,7 @@ collections:
   policies:
     type: document
     description: Company policy documents (searchable)
+    taxonomy: category
     source: ./seed/docs-dev
     source_live: ./seed/docs-live
     fields:
@@ -53,6 +71,7 @@ collections:
       content:    { posture: allow }
       owner:      { posture: allow }
       updated_at: { posture: allow }
+      category:   { posture: allow }
       path:       { posture: deny }
 synthetic:
   rows_per_collection: { documents: 25, departments: 5, people: 40, salaries: 200, metrics: 730 }

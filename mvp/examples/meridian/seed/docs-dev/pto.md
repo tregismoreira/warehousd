@@ -1,3 +1,6 @@
+---
+category: benefits
+---
 # Paid Time Off (PTO) Policy
 
 ## Annual PTO Allocation

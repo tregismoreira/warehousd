@@ -1,3 +1,6 @@
+---
+category: finance
+---
 # Expense Reimbursement Policy
 
 ## Eligible Expenses

@@ -1,3 +1,6 @@
+---
+category: security
+---
 # Information Security Policy
 
 ## General Security Principles

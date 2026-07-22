@@ -1,3 +1,6 @@
+---
+category: compliance
+---
 # Compliance and Legal Obligations
 
 ## Overview

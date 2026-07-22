@@ -41,8 +41,10 @@ async function main() {
   if (existing.rowCount === 0) {
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
       ('mia','documents', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
-      ('mia','people', array['id','full_name','email','department_name'],'dev','approved'),
-      ('mia','policies', array['title','content','owner','updated_at'],'dev','approved')`);
+      ('mia','people', array['id','full_name','email','department_name'],'dev','approved')`);
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,row_filter) values
+      ('mia','policies', array['title','content','owner','updated_at','category'],'dev','approved',
+       '{"field":"category","op":"in","value":["hr","benefits"]}'::jsonb)`);
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,purpose_label) values
       ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
   }
@@ -56,7 +58,7 @@ async function main() {
         ($1,'people', array['id','full_name','email','department_name','department_id'],'dev','approved'),
         ($1,'salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','approved'),
         ($1,'metrics', array['id','date','revenue','active_customers','region'],'dev','approved'),
-        ($1,'policies', array['title','content','owner','updated_at'],'dev','approved')`,
+        ($1,'policies', array['title','content','owner','updated_at','category'],'dev','approved')`,
         [user]);
     }
   }
