@@ -4,6 +4,7 @@ import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
+import { ConfigSchema } from "../src/config/schema";
 import type { WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
@@ -48,4 +49,33 @@ it("is deterministic for a fixed seed and honors FK integrity", async () => {
   const counts = await db.query(`select count(*)::int c from data_synth.people`);
   expect(counts.rows[0].c).toBe(10);
   await db.end();
+});
+
+describe("synthetic: taxonomy terms", () => {
+  it("bound field gets only valid term slugs, deterministically", async () => {
+    const cfg = ConfigSchema.parse({
+      project: "t", server: { port: 1 },
+      synthetic: { rows_per_collection: { notes: 30 } },
+      taxonomies: { category: { label: "C", terms: {
+        hr: { label: "HR" }, finance: { label: "Fin" }, legal: { label: "Legal" } } } },
+      collections: { notes: { description: "d", taxonomy: "category", fields: {
+        id: { type: "uuid", posture: "allow", pk: true } } } },
+    });
+    const p2 = await provision("synth2");
+    const db = new Pool({ connectionString: p2.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, cfg);
+    await generateSynthetic(db, cfg, 7);
+    const rows = (await db.query(`select category from data_synth.notes`)).rows;
+    expect(rows.length).toBe(30);
+    const valid = new Set(["hr", "finance", "legal"]);
+    for (const r of rows) expect(valid.has(r.category)).toBe(true);
+    // determinism: regenerate with the same seed → identical multiset
+    const first = rows.map((r) => r.category).sort();
+    await db.query(`truncate data_synth.notes`);
+    await generateSynthetic(db, cfg, 7);
+    const again = (await db.query(`select category from data_synth.notes`)).rows.map((r) => r.category).sort();
+    expect(again).toEqual(first);
+    await db.end();
+  });
 });

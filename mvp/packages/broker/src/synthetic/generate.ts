@@ -15,6 +15,7 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
     if (c.type === "document") continue;
     const n = cfg.synthetic.rows_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
+    const termSlugs = c.taxonomy ? Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) : null;
     const ids: string[] = [];
     for (let i = 0; i < n; i++) {
       const cols: string[] = [], vals: unknown[] = [];
@@ -25,7 +26,9 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
           const [parent] = f.fk.split("."); // "people.id"
           const parentIds = (parent && idsByCollection[parent]) ?? [];
           vals.push(parentIds[Math.floor(rng() * parentIds.length)] ?? null);
-        } else if (f.nullable && rng() < 0.05) vals.push(null);
+        } else if (fname === c.taxonomy && termSlugs && termSlugs.length)
+          vals.push(termSlugs[Math.floor(rng() * termSlugs.length)]);
+        else if (f.nullable && rng() < 0.05) vals.push(null);
         // type is guaranteed by CollectionSchema refinement for structured collections; document collections have types filled in by transform
         else vals.push(genValue(rng, f.type!, fname, { min: f.min, max: f.max }));
       }
