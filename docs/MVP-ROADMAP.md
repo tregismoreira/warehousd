@@ -88,6 +88,12 @@ pnpm test:down                # stop the container when done
    - **Env isolation** — switch to `env=live` and repeat a `policies` search; dev-seeded canary text (`DEV-DOC-CANARY-7f3a`, planted in `examples/meridian/seed/docs-dev/`) must never appear, and vice versa for the live canary (`LIVE-DOC-CANARY-2c9d`, in `seed/docs-live/`) when on `env=dev`.
 4. Stop everything: `docker compose -f docker-compose.test.yml down -v` (add `-v` to also drop the demo data volume).
 
+## Phase 0.6 — Taxonomy: vocabularies & terms — ✅ COMPLETE
+
+Design: [specs/2026-07-22-taxonomy-design.md](./superpowers/specs/2026-07-22-taxonomy-design.md) · Plan: [plans/2026-07-22-taxonomy.md](./superpowers/plans/2026-07-22-taxonomy.md)
+
+Term-based access control with zero new enforcement machinery: `taxonomies:` YAML block (vocabulary + term slugs/labels) upserted by `apply` into `app.vocabularies`/`app.terms` (`parent_id` reserved for hierarchy); collections bind a vocabulary (`taxonomy: category`) gaining a term column named after the vocabulary slug; indexer/synthetic/seed validate terms at write time; grant scoping to terms reuses `row_filter` (`{ field: <slug>, op: in }`). Demo: Meridian `category` vocabulary (12 terms) bound to `documents` + `policies`; Mia's policies grant scoped to `hr`+`benefits`; Grants panel term multi-select.
+
 ## Phase 1 — Real identity: Better Auth core + roles (§6.2–6.3)
 
 - [ ] Install Better Auth in `apps/web`; auth tables (`user`, `session`, `account`) in the `app` schema
