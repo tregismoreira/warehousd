@@ -32,7 +32,9 @@ export async function POST(req: NextRequest) {
     const taxonomyField = grant ? cfg.collections[grant.collection]?.taxonomy : undefined;
     // row_filter field is derived server-side from config — never client-supplied.
     if (taxonomyField && selectedTerms && selectedTerms.length > 0) {
-      opts.rowFilter = { field: taxonomyField, op: "in", value: selectedTerms };
+      const validSlugs = Object.keys(cfg.taxonomies[taxonomyField]?.terms ?? {});
+      const filtered = (selectedTerms as string[]).filter(t => validSlugs.includes(t));
+      if (filtered.length > 0) opts.rowFilter = { field: taxonomyField, op: "in", value: filtered };
     } else if (selectedPaths && selectedPaths.length > 0) {
       opts.rowFilter = { field: "path", op: "in", value: selectedPaths };
     }

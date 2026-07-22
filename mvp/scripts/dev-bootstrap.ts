@@ -33,8 +33,11 @@ async function main() {
   await generateSynthetic(db, cfg, 42);
   await seedLive(db);
   // Index policies collection from seed docs (dev and live environments)
-  const devIndexed = await indexCollection(db, "dev", "policies", `${dir}/seed/docs-dev`);
-  const liveIndexed = await indexCollection(db, "live", "policies", `${dir}/seed/docs-live`);
+  const policiesTaxonomy = cfg.collections.policies?.taxonomy
+    ? { field: cfg.collections.policies.taxonomy, slugs: Object.keys(cfg.taxonomies[cfg.collections.policies.taxonomy]?.terms ?? {}) }
+    : undefined;
+  const devIndexed = await indexCollection(db, "dev", "policies", `${dir}/seed/docs-dev`, { taxonomy: policiesTaxonomy });
+  const liveIndexed = await indexCollection(db, "live", "policies", `${dir}/seed/docs-live`, { taxonomy: policiesTaxonomy });
   // Mia's pending salaries request (Marcus's inbox) + her approved dev grants (§9) —
   // only seed if not already present, so re-running bootstrap doesn't duplicate grant rows.
   const existing = await db.query(`select 1 from app.grants where user_id='mia' limit 1`);

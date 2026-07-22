@@ -94,6 +94,60 @@ Design: [specs/2026-07-22-taxonomy-design.md](./superpowers/specs/2026-07-22-tax
 
 Term-based access control with zero new enforcement machinery: `taxonomies:` YAML block (vocabulary + term slugs/labels) upserted by `apply` into `app.vocabularies`/`app.terms` (`parent_id` reserved for hierarchy); collections bind a vocabulary (`taxonomy: category`) gaining a term column named after the vocabulary slug; indexer/synthetic/seed validate terms at write time; grant scoping to terms reuses `row_filter` (`{ field: <slug>, op: in }`). Demo: Meridian `category` vocabulary (12 terms) bound to `documents` + `policies`; Mia's policies grant scoped to `hr`+`benefits`; Grants panel term multi-select.
 
+### Try it yourself
+
+**Automated: taxonomy is covered by the shared test suite**
+
+```bash
+cd mvp
+pnpm test:up          # start Postgres test container (port 54330)
+pnpm test             # 94 tests across 21 files — includes taxonomy-grants.test.ts (7 tests)
+pnpm test:down
+```
+
+The taxonomy-grants suite (`packages/broker/test/taxonomy-grants.test.ts`) proves:
+- `row_filter {field:category, op:in, value:[hr]}` returns only matching rows; non-matching silently absent
+- Client filters AND with the term scope — can never widen it
+- Term column can gate rows without being readable (deny posture on the field)
+- Empty in-list denies all rows (constant-false guard)
+- Document search (`searchDocuments`) is also scoped — "vacation" in both hr and finance docs returns only the hr one for an hr-scoped grant
+- Term-scoped calls appear in the audit log
+
+**Manual: term-scoped grants in the Meridian demo**
+
+Bootstrap the demo (same command as Phase 0.5 — already seeds taxonomy):
+
+```bash
+cd mvp
+docker compose -f docker-compose.test.yml up -d --wait
+WAREHOUSD_PROJECT_DIR=$(pwd)/examples/meridian \
+APP_DATABASE_URL=postgres://postgres:postgres@localhost:54330/warehousd_test \
+  pnpm tsx scripts/dev-bootstrap.ts
+```
+
+Bootstrap seeds three `policies` documents, each with a `category` frontmatter tag:
+- `remote-work.md` → `category: hr`
+- `pto.md` → `category: benefits`
+- `expenses.md` → `category: finance`
+
+It also seeds Mia's grant scoped to `hr` + `benefits` only.
+
+Start the console:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... \
+WAREHOUSD_PROJECT_DIR=$(pwd)/examples/meridian \
+APP_DATABASE_URL=postgres://postgres:postgres@localhost:54330/warehousd_test \
+  pnpm --filter web dev
+```
+
+Open http://localhost:8722 and try these scenarios:
+
+- **Mia, env=dev** — search *"what is the expense reimbursement policy?"* → **no results** (expenses.md has `category:finance`, outside Mia's `hr`+`benefits` scope). Search *"what is the remote work policy?"* → returns content from `remote-work.md` (hr) and *"what is PTO?"* → returns `pto.md` (benefits). The term scope silently excludes finance; Mia never learns the finance document exists.
+- **Ana or Marcus, env=dev** — same searches return all three documents (their grants have no term filter).
+- **Grants panel (term multi-select)** — as Marcus/Ana, open the Grants panel. Approve any pending grant on `policies`: the panel shows a **Category** multi-select listing all 12 terms. Select `hr` + `benefits` to issue a term-scoped approval, or leave the picker empty for full access. The `row_filter` is derived server-side from the config — the client cannot forge the field name.
+- **Stop**: `docker compose -f docker-compose.test.yml down -v`
+
 ## Phase 1 — Real identity: Better Auth core + roles (§6.2–6.3)
 
 - [ ] Install Better Auth in `apps/web`; auth tables (`user`, `session`, `account`) in the `app` schema
