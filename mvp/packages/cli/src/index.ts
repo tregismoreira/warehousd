@@ -40,8 +40,13 @@ export async function runIndex(
   // Invariant 5: the YAML `source` dir is DEV content. Live indexing must be explicit.
   const dir = env === "dev" ? (opts.source ?? c.source!) : (opts.source ?? c.source_live);
   if (!dir) throw new Error(`Indexing env=live requires \`source_live\` in warehousd.yml or --source`);
+  const taxonomy = c.taxonomy
+    ? { field: c.taxonomy, slugs: Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) }
+    : undefined;
   const db = new Pool({ connectionString: dbUrl });
-  try { return await indexCollection(db, env, collection, resolve(projectDir, dir)); } finally { await db.end(); }
+  try {
+    return await indexCollection(db, env, collection, resolve(projectDir, dir), { taxonomy });
+  } finally { await db.end(); }
 }
 
 const program = new Command();

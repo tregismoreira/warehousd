@@ -15,8 +15,11 @@ function walk(root: string, dir = root): string[] {
   return out;
 }
 
+export type IndexTaxonomy = { field: string; slugs: string[] };
+
 export async function indexCollection(
   db: Pool, env: "dev" | "live", collection: string, sourceDir: string,
+  opts: { taxonomy?: IndexTaxonomy } = {},
 ): Promise<{ indexed: number; skipped: number; deleted: number }> {
   const schema = env === "dev" ? "data_synth" : "data_live";
   // collection is caller-controlled (server-side config/CLI, not raw user input),
@@ -28,20 +31,28 @@ export async function indexCollection(
       .map((r: any) => [r.path, { id: r.id, checksum: r.checksum }]));
   let indexed = 0, skipped = 0, deleted = 0;
   const seen = new Set<string>();
+  const tax = opts.taxonomy;
   for (const rel of walk(sourceDir).sort()) {
     seen.add(rel);
     const abs = join(sourceDir, rel);
-    const doc = extractDoc(rel, readFileSync(abs, "utf8"), statSync(abs).mtime);
+    const doc = extractDoc(rel, readFileSync(abs, "utf8"), statSync(abs).mtime, tax?.field);
+    if (tax && (!doc.term || !tax.slugs.includes(doc.term)))
+      throw new Error(`${rel}: ${doc.term
+        ? `unknown ${tax.field} term "${doc.term}"`
+        : `missing required ${tax.field} frontmatter`} (valid: ${tax.slugs.join(", ")})`);
     const prev = existing.get(rel);
     if (prev && prev.checksum === doc.checksum) { skipped++; continue; }
     const id = prev?.id ?? randomUUID();
     if (prev) {
-      await db.query(`update ${docsT} set title=$2, owner=$3, checksum=$4, updated_at=$5 where id=$1`,
-        [id, doc.title, doc.owner, doc.checksum, doc.updatedAt]);
+      await db.query(
+        `update ${docsT} set title=$2, owner=$3, checksum=$4, updated_at=$5${tax ? `, "${tax.field}"=$6` : ""} where id=$1`,
+        [id, doc.title, doc.owner, doc.checksum, doc.updatedAt, ...(tax ? [doc.term] : [])]);
       await db.query(`delete from ${chunksT} where document_id=$1`, [id]);
     } else {
-      await db.query(`insert into ${docsT} (id, title, path, owner, checksum, updated_at)
-        values ($1,$2,$3,$4,$5,$6)`, [id, doc.title, rel, doc.owner, doc.checksum, doc.updatedAt]);
+      await db.query(
+        `insert into ${docsT} (id, title, path, owner, checksum, updated_at${tax ? `, "${tax.field}"` : ""})
+         values ($1,$2,$3,$4,$5,$6${tax ? ",$7" : ""})`,
+        [id, doc.title, rel, doc.owner, doc.checksum, doc.updatedAt, ...(tax ? [doc.term] : [])]);
     }
     const pieces = chunkText(doc.content);
     for (let i = 0; i < pieces.length; i++)
