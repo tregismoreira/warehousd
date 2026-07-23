@@ -1,0 +1,35 @@
+import type { Pool } from "pg";
+
+export type ClientPolicy = { clientId: string; allowedScopes: string[] };
+
+export async function getClientPolicy(app: Pool, clientId: string): Promise<ClientPolicy> {
+  const r = await app.query(`select allowed_scopes from app.client_policies where client_id=$1`, [clientId]);
+  if (r.rowCount === 0) return { clientId, allowedScopes: ["env:dev"] };
+  return { clientId, allowedScopes: r.rows[0].allowed_scopes };
+}
+
+export async function upsertClientPolicy(
+  app: Pool, clientId: string, displayName: string | null, allowedScopes: string[],
+): Promise<void> {
+  await app.query(
+    `insert into app.client_policies (client_id, display_name, allowed_scopes)
+     values ($1,$2,$3)
+     on conflict (client_id) do update set display_name=$2, allowed_scopes=$3`,
+    [clientId, displayName, allowedScopes]);
+}
+
+export async function setAllowedScopes(
+  app: Pool, clientId: string, allowedScopes: string[], by: string,
+): Promise<void> {
+  await app.query(
+    `update app.client_policies set allowed_scopes=$2, promoted_at=now(), promoted_by=$3 where client_id=$1`,
+    [clientId, allowedScopes, by]);
+}
+
+export async function hasApprovedLiveGrant(app: Pool, userId: string): Promise<boolean> {
+  const r = await app.query(
+    `select 1 from app.grants
+     where user_id=$1 and env='live' and status='approved' and expires_at > now() limit 1`,
+    [userId]);
+  return (r.rowCount ?? 0) > 0;
+}
