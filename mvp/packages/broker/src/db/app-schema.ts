@@ -22,7 +22,7 @@ export const grants = app.table("grants", {
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   decidedBy: text("decided_by"),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
-  rowFilter: jsonb("row_filter"),
+  documentFilter: jsonb("document_filter"),
 });
 
 export const auditEvents = app.table("audit_events", {

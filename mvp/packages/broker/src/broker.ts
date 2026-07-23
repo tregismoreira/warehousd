@@ -51,7 +51,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       ? intent.fields
       : grant.allowedFields.filter((f) => all.includes(f));
     // 5. build + execute on the env-scoped pool
-    const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { rowFilter: grant.documentFilter });
+    const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { documentFilter: grant.documentFilter });
     const documents = (await dataPool(pools, ctx).query(text, values)).rows;
     const fieldsReturned = intent.aggregate && intent.aggregate.length
       ? [...(intent.groupBy ?? []), ...intent.aggregate.map((a) => `${a.fn}_${a.field}`)]
@@ -98,7 +98,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       ? intent.fields : grant.allowedFields.filter((f) => all.includes(f));
     const { text, values } = buildSelect(ctx.env,
       { collection: intent.collection, fields: selectFields, limit: intent.limit, offset: intent.offset } as QueryIntent,
-      grant.allowedFields, { q: intent.q, rowFilter: grant.documentFilter });
+      grant.allowedFields, { q: intent.q, documentFilter: grant.documentFilter });
     const documents = (await dataPool(pools, ctx).query(text, values)).rows;
     const auditId = await writeAudit(app, { userId: ctx.userId, env: ctx.env,
       collection: intent.collection, intent, fieldsReturned: selectFields,
