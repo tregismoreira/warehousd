@@ -11,7 +11,7 @@ import { loadActiveGrant } from "../src/grants/eval";
 import type { WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
-  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: { people: 8 } },
+  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: { people: 8 } },
   collections: { people: { description: "d", fields: {
     id: { type: "uuid", posture: "allow", pk: true },
     full_name: { type: "text", posture: "allow" },
@@ -41,7 +41,7 @@ it("request→pending→approve(trim+expiry)→query ok→revoke→immediately n
 
   const ok = await broker.query(ctx, { collection: "people", limit: 2 });
   expect(ok.ok).toBe(true);
-  if (ok.ok) { expect("email" in ok.rows[0]).toBe(false); expect("full_name" in ok.rows[0]).toBe(true); }
+  if (ok.ok) { expect("email" in ok.documents[0]).toBe(false); expect("full_name" in ok.documents[0]).toBe(true); }
 
   // requesting the trimmed field is denied
   const denied = await broker.query(ctx, { collection: "people", fields: ["email"] });
@@ -61,9 +61,9 @@ it("approving a second grant for the same (user, collection, env) fails (design 
   await expect(approveGrant(admin, id2, "marcus")).rejects.toThrow(/grants_one_active|duplicate key/);
 });
 
-it("approveGrant persists rowFilter", async () => {
+it("approveGrant persists documentFilter", async () => {
   const id = await requestGrant(admin, { userId: "u2", collection: "people", env: "dev", purposeLabel: "p", allowedFields: ["title","content"] });
-  await approveGrant(admin, id, "marcus", { rowFilter: { field: "path", op: "in", value: ["hr/pto.md"] } });
+  await approveGrant(admin, id, "marcus", { documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] } });
   const g = await loadActiveGrant(admin, "u2", "people", "dev");
-  expect(g?.rowFilter?.op).toBe("in");
+  expect(g?.documentFilter?.op).toBe("in");
 });

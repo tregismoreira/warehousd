@@ -8,7 +8,7 @@ import { makeBroker } from "../src/broker";
 import type { WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
-  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: {} },
   collections: { people: { description: "dir", fields: {
     id: { type: "uuid", posture: "allow", pk: true },
     email: { type: "text", posture: "allow" },

@@ -8,7 +8,7 @@ import { makeBroker } from "../src/broker";
 import type { WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
-  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: {} },
   collections: { salaries: { description: "comp", fields: {
     id: { type: "uuid", posture: "allow", pk: true },
     job_title: { type: "text", posture: "allow" },
@@ -38,7 +38,7 @@ it("avg over granted base_salary with groupBy + filter returns correct value", a
     groupBy: ["job_title"], filters: [{ field: "job_title", op: "eq", value: "Senior Accountant" }],
   });
   expect(r.ok).toBe(true);
-  if (r.ok) expect(Number(r.rows[0].avg_base_salary)).toBe(110000);
+  if (r.ok) expect(Number(r.documents[0].avg_base_salary)).toBe(110000);
 });
 
 it("aggregate on a non-granted field → field_denied (aggregate/groupBy/filter positions)", async () => {

@@ -8,7 +8,7 @@ import { ConfigSchema } from "../src/config/schema";
 import type { WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
-  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: { people: 10, salaries: 20 } },
+  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: { people: 10, salaries: 20 } },
   collections: {
     people: { description: "dir", fields: {
       id: { type: "uuid", posture: "allow", pk: true },
@@ -55,7 +55,7 @@ describe("synthetic: taxonomy terms", () => {
   it("bound field gets only valid term slugs, deterministically", async () => {
     const cfg = ConfigSchema.parse({
       project: "t", server: { port: 1 },
-      synthetic: { rows_per_collection: { notes: 30 } },
+      synthetic: { documents_per_collection: { notes: 30 } },
       taxonomies: { category: { label: "C", terms: {
         hr: { label: "HR" }, finance: { label: "Fin" }, legal: { label: "Legal" } } } },
       collections: { notes: { description: "d", taxonomy: "category", fields: {
