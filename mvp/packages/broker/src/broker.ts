@@ -83,7 +83,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   async function searchDocuments(ctx: BrokerContext, intent: DocSearchIntent): Promise<BrokerResult> {
     const c = cfg.collections[intent.collection];
     if (!c) return refuse(ctx, intent.collection, intent, "unknown_collection");
-    if ((c.type ?? "structured") !== "document" || typeof intent.q !== "string" || !intent.q.trim())
+    if ((c.type ?? "dataset") !== "file" || typeof intent.q !== "string" || !intent.q.trim())
       return refuse(ctx, intent.collection, intent, "invalid_intent");
     const all = Object.keys(c.fields);
     for (const f of intent.fields ?? []) if (!all.includes(f))
