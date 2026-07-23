@@ -145,7 +145,7 @@ The system state is defined in **`warehousd.yml` at the root of the consuming pr
 
 **File resolution (serverless-framework style):**
 - `warehousd.yml` — committed, the source of truth
-- `warehousd.local.yml` — optional, gitignored, deep-merged over the base (personal overrides: ports, row counts, a real DB connection string)
+- `warehousd.local.yml` — optional, gitignored, deep-merged over the base (personal overrides: ports, document counts, a real DB connection string)
 - `${env:VAR_NAME}` interpolation anywhere in either file (secrets never live in YAML)
 
 ```yaml
@@ -175,7 +175,7 @@ collections:
       base_salary: { type: numeric, posture: deny }
       currency:    { type: text,    posture: allow }
 synthetic:
-  rows_per_collection: { people: 40, salaries: 40, announcements: 25, metrics: 730 }
+  documents_per_collection: { people: 40, salaries: 40, announcements: 25, metrics: 730 }
 ```
 
 Note the two-level deny: a `posture: deny` in YAML means the field can never be granted (admin must change the file); fields with `posture: allow` are still deny-by-default per user until a grant covers them.

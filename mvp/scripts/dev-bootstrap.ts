@@ -26,8 +26,8 @@ async function main() {
   // truncate before regenerating so re-running bootstrap (e.g. container restart) is idempotent
   for (const name of Object.keys(cfg.collections)) {
     const c = cfg.collections[name];
-    // Skip document collections — they are populated via indexCollection, not synthetic generation
-    if (c.type === "document") continue;
+    // Skip file collections — they are populated via indexCollection, not synthetic generation
+    if (c.type === "file") continue;
     await db.query(`truncate data_synth.${name} cascade`);
   }
   await generateSynthetic(db, cfg, 42);
@@ -43,9 +43,9 @@ async function main() {
   const existing = await db.query(`select 1 from app.grants where user_id='mia' limit 1`);
   if (existing.rowCount === 0) {
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
-      ('mia','documents', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
+      ('mia','announcements', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
       ('mia','people', array['id','full_name','email','department_name'],'dev','approved')`);
-    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,row_filter) values
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,document_filter) values
       ('mia','policies', array['title','content','owner','updated_at','category'],'dev','approved',
        '{"field":"category","op":"in","value":["hr","benefits"]}'::jsonb)`);
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,purpose_label) values
@@ -56,7 +56,7 @@ async function main() {
     const already = await db.query(`select 1 from app.grants where user_id=$1 limit 1`, [user]);
     if (already.rowCount === 0) {
       await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
-        ($1,'documents', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
+        ($1,'announcements', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
         ($1,'departments', array['id','name'],'dev','approved'),
         ($1,'people', array['id','full_name','email','department_name','department_id'],'dev','approved'),
         ($1,'salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','approved'),

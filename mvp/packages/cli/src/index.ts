@@ -18,8 +18,8 @@ export async function runSeed(projectDir: string, dbUrl: string, seed = 42): Pro
   try {
     for (const name of Object.keys(cfg.collections)) {
       const c = cfg.collections[name];
-      // Skip document collections — they are populated via indexCollection, not synthetic generation
-      if (c.type === "document") continue;
+      // Skip file collections — they are populated via indexCollection, not synthetic generation
+      if (c.type === "file") continue;
       await db.query(`truncate data_synth.${name} cascade`);
     }
     await generateSynthetic(db, cfg, seed);
@@ -35,7 +35,7 @@ export async function runIndex(
   const cfg = loadConfig(projectDir);
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
-  if (c.type !== "document") throw new Error(`Collection ${collection} is not a document collection`);
+  if (c.type !== "file") throw new Error(`Collection ${collection} is not a file collection`);
   const env = opts.env ?? "dev";
   // Invariant 5: the YAML `source` dir is DEV content. Live indexing must be explicit.
   const dir = env === "dev" ? (opts.source ?? c.source!) : (opts.source ?? c.source_live);

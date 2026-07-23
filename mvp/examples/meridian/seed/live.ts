@@ -4,7 +4,7 @@ import { LIVE_ONLY_CANARY } from "../../../packages/broker/test/fixtures/canarie
 // Minimal, deterministic live seed. Distinct values from synth so env separation is provable.
 export async function seedLive(admin: Pool): Promise<void> {
   await admin.query(`truncate data_live.departments, data_live.people, data_live.salaries,
-    data_live.documents, data_live.metrics cascade`);
+    data_live.announcements, data_live.metrics cascade`);
   const dep = (await admin.query(
     `insert into data_live.departments (id,name) values (gen_random_uuid(),'Finance') returning id`)).rows[0].id;
   const person = (await admin.query(

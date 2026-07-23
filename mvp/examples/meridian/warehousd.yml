@@ -61,7 +61,7 @@ collections:
       active_customers: { type: int, posture: allow, min: 100, max: 5000 }
       region:           { type: text, posture: allow }
   policies:
-    type: document
+    type: file
     description: Company policy documents (searchable)
     taxonomy: category
     source: ./seed/docs-dev
@@ -74,4 +74,4 @@ collections:
       category:   { posture: allow }
       path:       { posture: deny }
 synthetic:
-  rows_per_collection: { announcements: 25, departments: 5, people: 40, salaries: 200, metrics: 730 }
+  documents_per_collection: { announcements: 25, departments: 5, people: 40, salaries: 200, metrics: 730 }

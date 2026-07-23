@@ -11,9 +11,9 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
   for (const name of order) {
     const c = cfg.collections[name];
     if (!c) throw new Error(`Unknown collection: ${name}`);
-    // Skip document collections — they are populated via indexCollection, not synthetic generation
-    if (c.type === "document") continue;
-    const n = cfg.synthetic.rows_per_collection[name] ?? 20;
+    // Skip file collections — they are populated via indexCollection, not synthetic generation
+    if (c.type === "file") continue;
+    const n = cfg.synthetic.documents_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
     const termSlugs = c.taxonomy ? Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) : null;
     const ids: string[] = [];
@@ -29,7 +29,7 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
         } else if (fname === c.taxonomy && termSlugs && termSlugs.length)
           vals.push(termSlugs[Math.floor(rng() * termSlugs.length)]);
         else if (f.nullable && rng() < 0.05) vals.push(null);
-        // type is guaranteed by CollectionSchema refinement for structured collections; document collections have types filled in by transform
+        // type is guaranteed by CollectionSchema refinement for structured collections; file collections have types filled in by transform
         else vals.push(genValue(rng, f.type!, fname, { min: f.min, max: f.max }));
       }
       const ph = vals.map((_, k) => `$${k + 1}`).join(",");
