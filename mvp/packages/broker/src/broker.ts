@@ -42,24 +42,24 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     // 4. every referenced field ∈ grant.allowedFields
     for (const f of referenced) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
-    // row_filter is grant-author-supplied; its field is validated against the collection's
-    // full YAML field set (NOT allowedFields) so denied fields like `path` can gate rows.
-    if (grant.rowFilter && !all.includes(grant.rowFilter.field))
+    // document_filter is grant-author-supplied; its field is validated against the collection's
+    // full YAML field set (NOT allowedFields) so denied fields like `path` can gate documents.
+    if (grant.documentFilter && !all.includes(grant.documentFilter.field))
       return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
     // fields to select: explicit, else all granted fields present on the collection
     const selectFields = intent.fields && intent.fields.length
       ? intent.fields
       : grant.allowedFields.filter((f) => all.includes(f));
     // 5. build + execute on the env-scoped pool
-    const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { rowFilter: grant.rowFilter });
-    const rows = (await dataPool(pools, ctx).query(text, values)).rows;
+    const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { rowFilter: grant.documentFilter });
+    const documents = (await dataPool(pools, ctx).query(text, values)).rows;
     const fieldsReturned = intent.aggregate && intent.aggregate.length
       ? [...(intent.groupBy ?? []), ...intent.aggregate.map((a) => `${a.fn}_${a.field}`)]
       : selectFields;
     const auditId = await writeAudit(app, {
       userId: ctx.userId, env: ctx.env, collection: intent.collection, intent,
       fieldsReturned, grantId: grant.id, outcome: "allowed", reason: null });
-    return { ok: true, rows, fieldsReturned, auditId };
+    return { ok: true, documents, fieldsReturned, auditId };
   }
 
   async function describeCollection(ctx: BrokerContext, name: string): Promise<VisibleSchema | Refusal> {
@@ -69,7 +69,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!grant) return refuse(ctx, name, null, "no_grant");
     const fields = Object.entries(c.fields)
       .filter(([n]) => grant.allowedFields.includes(n))
-      // type is guaranteed by CollectionSchema refinement for structured collections; document collections have types filled in by transform
+      // type is guaranteed by CollectionSchema refinement for structured collections; file collections have types filled in by transform
       .map(([n, f]) => ({ name: n, type: f.type!, pk: f.pk }));
     await writeAudit(app, { userId: ctx.userId, env: ctx.env, collection: name, intent: null,
       fieldsReturned: fields.map((f) => f.name), grantId: grant.id, outcome: "allowed", reason: null });
@@ -92,18 +92,18 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!grant) return refuse(ctx, intent.collection, intent, "no_grant");
     for (const f of intent.fields ?? []) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
-    if (grant.rowFilter && !all.includes(grant.rowFilter.field))
+    if (grant.documentFilter && !all.includes(grant.documentFilter.field))
       return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
     const selectFields = intent.fields && intent.fields.length
       ? intent.fields : grant.allowedFields.filter((f) => all.includes(f));
     const { text, values } = buildSelect(ctx.env,
       { collection: intent.collection, fields: selectFields, limit: intent.limit, offset: intent.offset } as QueryIntent,
-      grant.allowedFields, { q: intent.q, rowFilter: grant.rowFilter });
-    const rows = (await dataPool(pools, ctx).query(text, values)).rows;
+      grant.allowedFields, { q: intent.q, rowFilter: grant.documentFilter });
+    const documents = (await dataPool(pools, ctx).query(text, values)).rows;
     const auditId = await writeAudit(app, { userId: ctx.userId, env: ctx.env,
       collection: intent.collection, intent, fieldsReturned: selectFields,
       grantId: grant.id, outcome: "allowed", reason: null });
-    return { ok: true, rows, fieldsReturned: selectFields, auditId };
+    return { ok: true, documents, fieldsReturned: selectFields, auditId };
   }
 
   return { query, describeCollection, listCollections, searchDocuments };

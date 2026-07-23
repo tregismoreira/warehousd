@@ -3,7 +3,8 @@ export interface BrokerContext {
   env: "dev" | "live"; // from token/persona, never from request body
 }
 
-export type RowFilter = { field: string; op: "eq" | "in"; value: unknown };
+export type DocumentFilter = { field: string; op: "eq" | "in"; value: unknown };
+export type Document = Record<string, unknown>;
 
 export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "like" | "in";
 export type Filter = { field: string; op: FilterOp; value: unknown };
@@ -34,7 +35,7 @@ export type RefusalReason =
   | "unknown_collection" | "unknown_field" | "invalid_intent";
 
 export type BrokerResult =
-  | { ok: true; rows: Record<string, unknown>[]; fieldsReturned: string[]; auditId: string }
+  | { ok: true; documents: Document[]; fieldsReturned: string[]; auditId: string }
   | { ok: false; reason: RefusalReason; auditId: string };
 
 export type VisibleField = { name: string; type: string; pk?: boolean };
