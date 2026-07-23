@@ -1,0 +1,77 @@
+project: cortex
+server: { port: 8722 }
+taxonomies:
+  category:
+    label: Category
+    terms:
+      contracts:  { label: Contracts }
+      finance:    { label: Finance }
+      benefits:   { label: Benefits }
+      hr:         { label: HR }
+      engineering: { label: Engineering }
+      security:   { label: Security }
+      compliance: { label: Compliance }
+      sales:      { label: Sales }
+      marketing:  { label: Marketing }
+      operations: { label: Operations }
+      legal:      { label: Legal }
+      onboarding: { label: Onboarding }
+collections:
+  announcements:
+    description: Company announcements
+    taxonomy: category
+    fields:
+      id:         { type: uuid, posture: allow, pk: true }
+      title:      { type: text, posture: allow }
+      category:   { type: text, posture: allow }
+      summary:    { type: text, posture: allow }
+      owner:      { type: text, posture: allow }
+      updated_at: { type: timestamptz, posture: allow }
+  departments:
+    description: Departments
+    fields:
+      id:   { type: uuid, posture: allow, pk: true }
+      name: { type: text, posture: allow }
+  people:
+    description: Employee directory
+    fields:
+      id:              { type: uuid, posture: allow, pk: true }
+      full_name:       { type: text, posture: allow }
+      email:           { type: text, posture: allow }
+      department_name: { type: text, posture: allow, view_join: departments.name }
+      department_id:   { type: uuid, posture: allow, fk: departments.id }
+      home_address:    { type: text, posture: deny }
+      phone:           { type: text, posture: deny }
+  salaries:
+    description: Compensation records (sensitive)
+    fields:
+      id:             { type: uuid,    posture: allow, pk: true }
+      person_id:      { type: uuid,    posture: allow, fk: people.id }
+      job_title:      { type: text,    posture: allow }
+      base_salary:    { type: numeric, posture: allow, min: 60000, max: 220000 }
+      currency:       { type: text,    posture: allow }
+      effective_date: { type: date,    posture: allow }
+      ssn:            { type: text,    posture: deny }
+  metrics:
+    description: Daily business metrics
+    fields:
+      id:               { type: uuid, posture: allow, pk: true }
+      date:             { type: date, posture: allow }
+      revenue:          { type: numeric, posture: allow, min: 10000, max: 90000 }
+      active_customers: { type: int, posture: allow, min: 100, max: 5000 }
+      region:           { type: text, posture: allow }
+  policies:
+    type: file
+    description: Company policy documents (searchable)
+    taxonomy: category
+    source: ./seed/docs-dev
+    source_live: ./seed/docs-live
+    fields:
+      title:      { posture: allow }
+      content:    { posture: allow }
+      owner:      { posture: allow }
+      updated_at: { posture: allow }
+      category:   { posture: allow }
+      path:       { posture: deny }
+synthetic:
+  documents_per_collection: { announcements: 25, departments: 5, people: 40, salaries: 200, metrics: 730 }
