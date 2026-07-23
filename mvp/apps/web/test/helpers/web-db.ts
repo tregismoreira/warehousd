@@ -48,8 +48,11 @@ export async function setupWebDb(label: string) {
   for (const p of personas) {
     const res = await auth.api.signUpEmail({ body: { email: p.email, password: "demo", name: p.name } });
     const gen = res.user.id;
+    // Disable foreign key constraints to allow user ID updates
+    await db.query(`set session_replication_role = replica`);
     await db.query(`update app."user" set id=$1, role=$2 where id=$3`, [p.id, p.role, gen]);
     await db.query(`update app."account" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
+    await db.query(`set session_replication_role = default`);
   }
 
   return {
