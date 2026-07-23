@@ -70,6 +70,44 @@ export function envScopePlugin(app: Pool) {
           }),
         },
       ],
+      after: [
+        {
+          matcher: (ctx: { path: string }) => ctx.path === "/mcp/token",
+          handler: createAuthMiddleware(async (ctx: any) => {
+            const grantType = ctx.body?.grant_type;
+            if (grantType !== "refresh_token") return;
+            const returned = ctx.context.returned as { access_token?: string; scope?: string } | undefined;
+            if (!returned?.access_token) return;
+
+            const row = await ctx.context.adapter.findOne({
+              model: "oauthAccessToken",
+              where: [{ field: "accessToken", value: returned.access_token }],
+            });
+            if (!row) return;
+
+            const current: string[] = String(row.scopes ?? "").split(" ").filter(Boolean);
+            const currentEnv = current.filter((s) => (ENV_SCOPES as readonly string[]).includes(s));
+            if (currentEnv.length === 0) return;
+
+            const policy = await getClientPolicy(app, row.clientId);
+            let allowed = currentEnv.filter((s) => policy.allowedScopes.includes(s));
+            if (allowed.includes("env:live")) {
+              const eligible = await hasApprovedLiveGrant(app, row.userId);
+              if (!eligible) allowed = allowed.filter((s) => s !== "env:live");
+            }
+
+            const recomputed = [...current.filter((s) => !(ENV_SCOPES as readonly string[]).includes(s)), ...allowed].join(" ");
+            if (recomputed === row.scopes) return;
+
+            await ctx.context.adapter.update({
+              model: "oauthAccessToken",
+              where: [{ field: "accessToken", value: returned.access_token }],
+              update: { scopes: recomputed },
+            });
+            ctx.context.returned = { ...returned, scope: recomputed };
+          }),
+        },
+      ],
     },
   };
 }
