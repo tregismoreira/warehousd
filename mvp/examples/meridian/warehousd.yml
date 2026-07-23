@@ -17,8 +17,8 @@ taxonomies:
       legal:      { label: Legal }
       onboarding: { label: Onboarding }
 collections:
-  documents:
-    description: Company documents
+  announcements:
+    description: Company announcements
     taxonomy: category
     fields:
       id:         { type: uuid, posture: allow, pk: true }
@@ -74,4 +74,4 @@ collections:
       category:   { posture: allow }
       path:       { posture: deny }
 synthetic:
-  rows_per_collection: { documents: 25, departments: 5, people: 40, salaries: 200, metrics: 730 }
+  rows_per_collection: { announcements: 25, departments: 5, people: 40, salaries: 200, metrics: 730 }
