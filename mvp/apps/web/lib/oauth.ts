@@ -46,6 +46,20 @@ export function envScopePlugin(app: Pool) {
               if (!eligible) survivors = survivors.filter((s) => s !== "env:live");
             }
 
+            // Rule 3: exactly-one-env picker. When both env:dev and env:live survive rules 1-2,
+            // redirect to the picker unless wh_env is set to a valid value.
+            if (survivors.includes("env:dev") && survivors.includes("env:live")) {
+              const picked = ctx.query?.wh_env;
+              if (picked === "dev" || picked === "live") {
+                survivors = [`env:${picked}`];
+              } else {
+                const params = new URLSearchParams(
+                  Object.entries(ctx.query ?? {}).map(([k, v]) => [k, String(v)]),
+                );
+                throw ctx.redirect(`/oauth/env-picker?${params.toString()}`);
+              }
+            }
+
             // Mutate the existing ctx.query object's property in place — `ctx.query = {...}`
             // (reassigning to a new object) silently stops propagating to the endpoint handler
             // once this hook does another await after the reassignment site's first tick;
