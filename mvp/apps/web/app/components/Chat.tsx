@@ -2,8 +2,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-export function Chat({ persona, env, onTurn }:
-  { persona: string; env: string; onTurn: () => void }) {
+export function Chat({ onTurn }: { onTurn: () => void }) {
   const [msgs, setMsgs] = useState<{ role: string; text: string }[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -13,7 +12,7 @@ export function Chat({ persona, env, onTurn }:
     const next = [...msgs, { role: "user", text: input }];
     setMsgs(next); setInput(""); setBusy(true); setProgress("thinking…");
     const res = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ persona, env,
+      body: JSON.stringify({
         messages: next.map((m) => ({ role: m.role, content: m.text })) }) });
 
     const reader = res.body?.getReader();
