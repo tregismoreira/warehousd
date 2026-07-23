@@ -1,11 +1,38 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
+import { execSync } from "child_process";
 import { loadConfig, applyConfig, generateSynthetic, createAppSchema, indexCollection } from "@warehousd/broker";
 import { seedLive } from "../examples/meridian/seed/live";
 import { runIndex } from "../packages/cli/src/index";
+import { auth } from "../apps/web/lib/auth";
 
 const url = process.env.APP_DATABASE_URL!;
 const dir = process.env.WAREHOUSD_PROJECT_DIR!;
+
+// Seed the three demo personas as real Better Auth local-credential users.
+// Fixed ids keep them aligned with the pre-seeded app.grants rows (user_id = 'ana'|'marcus'|'mia').
+async function seedPersonaUsers(db: Pool) {
+  const personas = [
+    { id: "ana",    email: "ana@meridian.demo",    name: "Ana",    role: "admin" },
+    { id: "marcus", email: "marcus@meridian.demo", name: "Marcus", role: "manager" },
+    { id: "mia",    email: "mia@meridian.demo",    name: "Mia",    role: "member" },
+  ];
+  for (const p of personas) {
+    const exists = await db.query(`select 1 from app."user" where id=$1`, [p.id]);
+    if (exists.rowCount && exists.rowCount > 0) continue;
+    // Use Better Auth's sign-up so the password is hashed with its own scheme,
+    // then fix the id + role directly (sign-up assigns a random id and default role).
+    const res = await auth.api.signUpEmail({
+      body: { email: p.email, password: "demo123456", name: p.name },
+    });
+    const generatedId = res.user.id;
+    // Delete sessions and accounts, then update user id and role.
+    // This avoids foreign key constraint violations.
+    await db.query(`delete from app."session" where "userId"=$1`, [generatedId]);
+    await db.query(`delete from app."account" where "userId"=$1`, [generatedId]);
+    await db.query(`update app."user" set id=$1, role=$2 where id=$3`, [p.id, p.role, generatedId]);
+  }
+}
 
 async function main() {
   const db = new Pool({ connectionString: url });
@@ -22,6 +49,9 @@ async function main() {
     grant usage on schema app to warehousd_dev, warehousd_live;`);
   const cfg = loadConfig(dir);
   await createAppSchema(db);
+  // Ensure Better Auth tables exist (user/session/account/verification) before seeding users.
+  execSync("npx @better-auth/cli migrate --config apps/web/lib/auth.ts -y", { cwd: process.cwd(), stdio: "inherit" });
+  await seedPersonaUsers(db);
   await applyConfig(db, cfg);
   // truncate before regenerating so re-running bootstrap (e.g. container restart) is idempotent
   for (const name of Object.keys(cfg.collections)) {
