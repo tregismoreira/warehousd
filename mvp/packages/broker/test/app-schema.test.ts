@@ -14,7 +14,7 @@ describe("app schema", () => {
     const r = await db.query(
       `select table_name from information_schema.tables where table_schema='app' order by table_name`);
     await db.end();
-    expect(r.rows.map((x) => x.table_name)).toEqual(["audit_events", "collections", "grants", "terms", "vocabularies"]);
+    expect(r.rows.map((x) => x.table_name)).toEqual(["audit_events", "client_policies", "collections", "grants", "terms", "vocabularies"]);
   });
 });
 
@@ -22,10 +22,6 @@ describe("taxonomy tables", () => {
   it("vocabularies: slug unique; terms: (vocabulary_id, slug) unique, parent_id reserved-null", async () => {
     p = await provision("appschema");
     const db = new Pool({ connectionString: p.urls.admin });
-    // Create stub oauthApplication table for client_policies FK (real table created by Better Auth's mcp plugin)
-    await db.query(`
-      create table if not exists app."oauthApplication" ("clientId" text primary key);
-    `);
     await createAppSchema(db);
     const vid = (await db.query(
       `insert into app.vocabularies (slug, label) values ('category','Category') returning id`)).rows[0].id;
@@ -42,10 +38,6 @@ describe("taxonomy tables", () => {
   it("cascade-deletes terms with their vocabulary", async () => {
     p = await provision("appschema");
     const db = new Pool({ connectionString: p.urls.admin });
-    // Create stub oauthApplication table for client_policies FK (real table created by Better Auth's mcp plugin)
-    await db.query(`
-      create table if not exists app."oauthApplication" ("clientId" text primary key);
-    `);
     await createAppSchema(db);
     const vid = (await db.query(
       `insert into app.vocabularies (slug, label) values ('tmp','Tmp') returning id`)).rows[0].id;
@@ -61,14 +53,7 @@ describe("client_policies table", () => {
   it("creates app.client_policies with the default allow-list", async () => {
     p = await provision("appschema");
     const db = new Pool({ connectionString: p.urls.admin });
-    // Create stub oauthApplication table for the FK (real table created by Better Auth's mcp plugin)
-    await db.query(`
-      create table if not exists app."oauthApplication" ("clientId" text primary key);
-    `);
     await createAppSchema(db);
-    await db.query(`
-      insert into app."oauthApplication" ("clientId") values ('c1') on conflict do nothing;
-    `);
     const r = await db.query(`
       insert into app.client_policies (client_id, display_name) values ('c1', 'Test Client')
       returning allowed_scopes`);
@@ -79,10 +64,6 @@ describe("client_policies table", () => {
   it("client_policies is idempotent under repeated createAppSchema calls", async () => {
     p = await provision("appschema");
     const db = new Pool({ connectionString: p.urls.admin });
-    // Create stub oauthApplication table for client_policies FK (real table created by Better Auth's mcp plugin)
-    await db.query(`
-      create table if not exists app."oauthApplication" ("clientId" text primary key);
-    `);
     await expect(createAppSchema(db)).resolves.not.toThrow();
     await expect(createAppSchema(db)).resolves.not.toThrow();
     await db.end();
