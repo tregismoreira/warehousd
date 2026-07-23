@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAppPool } from "../../lib/broker";
 import { approveGrant, denyGrant, revokeGrant, loadConfig } from "@warehousd/broker";
-import { join } from "node:path";
 import { getSessionUser } from "../../../lib/session";
 
 const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
