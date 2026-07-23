@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 
-export type ExtractedDoc = {
+export type ExtractedFile = {
   path: string; title: string; owner: string | null; term: string | null;
   updatedAt: Date; content: string; checksum: string;
 };
 
-export function extractDoc(relPath: string, raw: string, mtime: Date, termField?: string): ExtractedDoc {
+export function extractFile(relPath: string, raw: string, mtime: Date, termField?: string): ExtractedFile {
   let content = raw;
   let owner: string | null = null;
   let term: string | null = null;
