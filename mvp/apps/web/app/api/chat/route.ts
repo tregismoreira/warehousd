@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
 import { getBroker } from "../../lib/broker";
-import { contextFor, type PersonaId } from "../../lib/persona";
+import { deriveContext } from "../../../lib/session";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -91,10 +91,11 @@ function labelFor(name: string, input: unknown): string {
 }
 
 export async function POST(req: NextRequest) {
-  const { persona, env, messages } = await req.json() as
-    { persona: PersonaId; env: "dev" | "live"; messages: Anthropic.MessageParam[] };
+  const ctx = await deriveContext(req);
+  if (!ctx) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  // env/userId are NEVER read from the body — deriveContext is the only source (SPECS §6.1).
+  const { messages } = await req.json() as { messages: Anthropic.MessageParam[] };
   const { broker } = getBroker();
-  const ctx = contextFor(persona, env);
   const convo = [...messages];
   // Collections ever successfully queried (ok:true) anywhere in this conversation —
   // used to catch the model presenting a data table for a collection it never actually

@@ -1,12 +1,14 @@
 import { NextRequest } from "next/server";
 import { getAppPool } from "../../lib/broker";
 import { approveGrant, denyGrant, revokeGrant, loadConfig } from "@warehousd/broker";
-import { join } from "node:path";
+import { getSessionUser } from "../../../lib/session";
 
 const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
 export async function GET(req: NextRequest) {
-  const user = req.nextUrl.searchParams.get("user") ?? "";
+  const sessionUser = await getSessionUser(req);
+  if (!sessionUser) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  const user = sessionUser.id;
   const app = getAppPool();
   const cfg = loadConfig(projectDir);
   const mine = await app.query(`select * from app.grants where user_id=$1 order by requested_at desc`, [user]);
@@ -23,20 +25,26 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { action, id, by, allowedFields, selectedPaths, selectedTerms, expiresAt } = await req.json();
+  const sessionUser = await getSessionUser(req);
+  if (!sessionUser) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  const { action, id, allowedFields, selectedPaths, expiresAt } = await req.json();
   const app = getAppPool();
+
+  if (action === "request") {
+    // any authenticated user may request; requester is the session user, never a body value
+    // (request insertion handled elsewhere in the grants flow — kept as-is if present)
+  } else {
+    // approve/deny/revoke are privileged
+    if (sessionUser.role !== "manager" && sessionUser.role !== "admin") {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
+  }
+
+  const by = sessionUser.id; // decided_by comes from the session, never the request body
   if (action === "approve") {
     const opts: any = { allowedFields, expiresAt };
-    const cfg = loadConfig(projectDir);
-    const grant = (await app.query(`select collection from app.grants where id=$1`, [id])).rows[0];
-    const taxonomyField = grant ? cfg.collections[grant.collection]?.taxonomy : undefined;
-    // document_filter field is derived server-side from config — never client-supplied.
-    if (taxonomyField && selectedTerms && selectedTerms.length > 0) {
-      const validSlugs = Object.keys(cfg.taxonomies[taxonomyField]?.terms ?? {});
-      const filtered = (selectedTerms as string[]).filter(t => validSlugs.includes(t));
-      if (filtered.length > 0) opts.documentFilter = { field: taxonomyField, op: "in", value: filtered };
-    } else if (selectedPaths && selectedPaths.length > 0) {
-      opts.documentFilter = { field: "path", op: "in", value: selectedPaths };
+    if (selectedPaths && selectedPaths.length > 0) {
+      opts.rowFilter = { field: "path", op: "in", value: selectedPaths };
     }
     await approveGrant(app, id, by, opts);
   } else if (action === "deny") await denyGrant(app, id, by);

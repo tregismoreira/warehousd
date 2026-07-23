@@ -46,15 +46,15 @@ function GrantRow({ g, action }: { g: Grant; action?: React.ReactNode }) {
   );
 }
 
-export function Grants({ persona, onChange }: { persona: string; onChange: () => void }) {
+export function Grants({ canApprove, onChange }: { canApprove: boolean; onChange: () => void }) {
   const [data, setData] = useState<{ mine: Grant[]; pending: Grant[] }>({ mine: [], pending: [] });
   const [docPaths, setDocPaths] = useState<Record<string, string[]>>({});
   const [selectedPaths, setSelectedPaths] = useState<Record<string, Set<string>>>({});
   const [terms, setTerms] = useState<Record<string, { slug: string; label: string }[]>>({});
   const [selectedTerms, setSelectedTerms] = useState<Record<string, Set<string>>>({});
 
-  const load = () => fetch(`/api/grants?user=${persona}`).then((r) => r.json()).then(setData);
-  useEffect(() => { load(); }, [persona]);
+  const load = () => fetch("/api/grants").then((r) => r.json()).then(setData);
+  useEffect(() => { load(); }, []);
 
   async function loadDocPaths(grantId: string, g: Grant) {
     if (g.collectionType !== "file") return;
@@ -83,25 +83,24 @@ export function Grants({ persona, onChange }: { persona: string; onChange: () =>
   async function act(action: string, id: string, allowedFields?: string[],
     selectedPaths?: string[], termSlugs?: string[]) {
     await fetch("/api/grants", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action, id, by: persona, allowedFields, selectedPaths,
+      body: JSON.stringify({ action, id, allowedFields, selectedPaths,
         selectedTerms: termSlugs,
         expiresAt: new Date(Date.parse("2099-01-01")).toISOString() }) });
     await load(); onChange();
   }
 
-  const canApprove = persona === "marcus" || persona === "ana";
-  const others = canApprove ? data.pending.filter((g) => g.user_id !== persona) : [];
+  const others = canApprove ? data.pending : [];
 
   return (
     <div className="panel" style={{ height: "100%", overflow: "auto" }}>
-      <h3>Grants — {persona}</h3>
+      <h3>Grants</h3>
       <p style={{ color: "var(--muted)", fontSize: 12, marginTop: -6, marginBottom: 12 }}>
-        A grant is what lets {persona} query a collection — deny-by-default, so no grant means no access.
+        A grant is what lets you query a collection — deny-by-default, so no grant means no access.
         Each grant lists exactly which fields are visible and can be revoked at any time.
       </p>
 
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>
-        {persona}&rsquo;s access
+        Your access
       </div>
       {data.mine.length === 0 && (
         <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 12 }}>No grants yet.</div>
