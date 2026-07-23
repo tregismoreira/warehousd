@@ -16,15 +16,15 @@ export async function GET(req: NextRequest) {
 
   const cfg = loadConfig(projectDir);
   const collCfg = cfg.collections[collection];
-  if (!collCfg || collCfg.type !== "document") {
-    return Response.json({ error: "Collection not found or not a document collection" }, { status: 400 });
+  if (!collCfg || collCfg.type !== "file") {
+    return Response.json({ error: "Collection not found or not a file collection" }, { status: 400 });
   }
 
   const app = getAppPool();
   const schema = env === "dev" ? "data_synth" : "data_live";
-  // collection is validated above against the loaded config's document-type collections,
+  // collection is validated above against the loaded config's file-type collections,
   // so this identifier interpolation is safe (SQL identifiers can't be parameterized).
-  const tableName = `${collection}__docs`;
+  const tableName = `${collection}__files`;
 
   try {
     const result = await app.query(
@@ -32,6 +32,6 @@ export async function GET(req: NextRequest) {
     );
     return Response.json({ paths: result.rows.map(r => r.path) });
   } catch (err) {
-    return Response.json({ error: "Failed to query document paths" }, { status: 500 });
+    return Response.json({ error: "Failed to query file paths" }, { status: 500 });
   }
 }
