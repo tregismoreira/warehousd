@@ -46,8 +46,13 @@ export function envScopePlugin(app: Pool) {
               if (!eligible) survivors = survivors.filter((s) => s !== "env:live");
             }
 
+            // Mutate the existing ctx.query object's property in place — `ctx.query = {...}`
+            // (reassigning to a new object) silently stops propagating to the endpoint handler
+            // once this hook does another await after the reassignment site's first tick;
+            // Better Auth's dispatch holds a reference to the original query object, and only
+            // in-place mutation of that object is guaranteed visible downstream.
             const others = requested.filter((s) => !(ENV_SCOPES as readonly string[]).includes(s));
-            ctx.query = { ...ctx.query, scope: [...others, ...survivors].join(" ") };
+            ctx.query.scope = [...others, ...survivors].join(" ");
           }),
         },
       ],
