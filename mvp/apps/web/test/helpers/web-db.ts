@@ -31,10 +31,14 @@ export async function setupWebDb(label: string) {
   await createAppSchema(db);
 
   const { auth } = await import("../../lib/auth");
-  // Run Better Auth migration (use the approach confirmed in Task 9 Step 2).
-  const { getMigrations } = await import("better-auth/db");
-  const { runMigrations } = await getMigrations((auth as any).options);
-  await runMigrations();
+  // Run Better Auth migration via CLI.
+  const { execSync } = await import("node:child_process");
+  const mvpDir = new URL("../../../../", import.meta.url).pathname;
+  execSync(`npx @better-auth/cli migrate --config apps/web/lib/auth.ts -y`, {
+    cwd: mvpDir,
+    stdio: "pipe",
+    env: { ...process.env, APP_DATABASE_URL: appUrl },
+  });
 
   const personas = [
     { id: "ana", email: "ana@meridian.demo", name: "Ana", role: "admin" },
