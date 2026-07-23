@@ -14,7 +14,7 @@ Phases and tasks from the Phase 0 POC to a production-ready MVP.
 |---|---|
 | 0.5 | [plans/2026-07-20-phase-0.5-document-indexing.md](./superpowers/plans/2026-07-20-phase-0.5-document-indexing.md) (full TDD detail) |
 | 1 | [plans/2026-07-20-phase-1-real-identity.md](./superpowers/plans/2026-07-20-phase-1-real-identity.md) (outline) |
-| 2 | [plans/2026-07-20-phase-2-oauth-provider.md](./superpowers/plans/2026-07-20-phase-2-oauth-provider.md) (outline) |
+| 2 | [plans/2026-07-20-phase-2-oauth-provider.md](./superpowers/plans/2026-07-20-phase-2-oauth-provider.md) (full TDD detail) |
 | 3 | [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-phase-3-mcp-endpoint.md) (outline) |
 | 4 | [plans/2026-07-20-phase-4-sso.md](./superpowers/plans/2026-07-20-phase-4-sso.md) (outline) |
 | 5 | [plans/2026-07-20-phase-5-web-ui.md](./superpowers/plans/2026-07-20-phase-5-web-ui.md) (outline) |
@@ -42,12 +42,12 @@ Design: [specs/2026-07-18-document-indexing-design.md](./superpowers/specs/2026-
 
 Implemented via a 13-task subagent-driven-development plan ([plans/2026-07-20-phase-0.5-document-indexing.md](./superpowers/plans/2026-07-20-phase-0.5-document-indexing.md)), each task independently implemented and reviewed, plus a final whole-branch review. Full `mvp` test suite: **68/68 passing across 20 files, 0 known failures.** See "Try it yourself" below to run the demo.
 
-- [x] **0.5a Config foundation:** `type: structured|document` + `source` (dev content) + optional `source_live` on `CollectionSchema`; Zod refinements — document fields ⊆ `{title, content, path, owner, updated_at}`, `source` required for documents, no `__` in collection names (design §8 test 12)
-- [x] **0.5b Storage & DDL:** per-collection `{name}__docs` + `{name}__chunks` tables (avoids collision with the seeded `documents` collection; `path` unique = upsert key; tsv generated column + GIN index; reserved `embedding vector(1536)`, pgvector enabled); chunk-join `v_{collection}` view; type branches in `tableDDL`/`viewDDL`; `grantViewDDL` unchanged — verify env role reads view but not base tables (design §8 test 7)
-- [x] **0.5c Indexer:** `packages/broker/src/indexing` — scan the env-appropriate source dir (`source` = dev sample docs, `--env live` requires `source_live`/`--source`; never one dir into both envs), extract `.md`/`.txt` (title from heading/filename, owner from frontmatter, updated_at from mtime), paragraph-aware chunking (~500–1000 chars, overlap), checksum-skip upsert + deletion sync; CLI entry (`warehousd index` or folded into `apply`/`seed`); dedicated write role, read roles gain nothing; distinct per-env demo dirs with distinct canaries (design §8 tests 5–6)
+- [x] **0.5a Config foundation:** `type: dataset|file` + `source` (dev content) + optional `source_live` on `CollectionSchema`; Zod refinements — file fields ⊆ `{title, content, path, owner, updated_at}`, `source` required for file collections, no `__` in collection names (design §8 test 12)
+- [x] **0.5b Storage & DDL:** per-collection `{name}__files` + `{name}__documents` tables (avoids collision with the seeded `documents` collection; `path` unique = upsert key; tsv generated column + GIN index; reserved `embedding vector(1536)`, pgvector enabled); file+document join `v_{collection}` view; type branches in `tableDDL`/`viewDDL`; `grantViewDDL` unchanged — verify env role reads view but not base tables (design §8 test 7)
+- [x] **0.5c Indexer:** `packages/broker/src/indexing` — scan the env-appropriate source dir (`source` = dev sample files, `--env live` requires `source_live`/`--source`; never one dir into both envs), extract `.md`/`.txt` (title from heading/filename, owner from frontmatter, updated_at from mtime), paragraph-aware chunking (~500–1000 chars, overlap), checksum-skip upsert + deletion sync; CLI entry (`warehousd index` or folded into `apply`/`seed`); dedicated write role, read roles gain nothing; distinct per-env demo dirs with distinct canaries (design §8 tests 5–6)
 - [x] **0.5d Row-level grant scoping:** `row_filter jsonb` column + partial unique index `(user_id, collection, env) where status='approved'`; `loadActiveGrant`/`ActiveGrant` carry it; validated against the collection's YAML field set (not `allowed_fields`); ANDed into `buildSelect`'s `where[]`; empty in-list → constant-false; update the `q()` quote-helper safety comment. **Touches the shared structured-query path — run the full existing suite** (design §8 tests 3, 4, 8, 10)
-- [x] **0.5e `broker.searchDocuments`:** new factory method reusing `query`'s validation helpers; `q`-guarded `buildSelect` branch (single param slot, tsv match, `ts_rank_cd` ordering, reserved `_rank`/`chunk_index` keys stripped from `fieldsReturned`; no aggregate/groupBy); type matrix — `searchDocuments` on structured → `invalid_intent`, `query` on document collections works unchanged (design §8 tests 1, 2, 9, 11, 12)
-- [x] **0.5f Chat integration:** `search_documents` as the fourth tool in the POC chat route; Grants panel gets a document picker (`path` multi-select) for document-collection grants; seed a demo document collection so the Meridian arc covers it
+- [x] **0.5e `broker.searchDocuments`:** new factory method reusing `query`'s validation helpers; `q`-guarded `buildSelect` branch (single param slot, tsv match, `ts_rank_cd` ordering, reserved `_rank`/`document_seq` keys stripped from `fieldsReturned`; no aggregate/groupBy); type matrix — `searchDocuments` on dataset collections → `invalid_intent`, `query` on file collections works unchanged (design §8 tests 1, 2, 9, 11, 12)
+- [x] **0.5f Chat integration:** `search_documents` as the fourth tool in the POC chat route; Grants panel gets a file picker (`path` multi-select) for file-collection grants; seed a demo file collection so the Meridian arc covers it
 - [x] Gate: design §8 acceptance list green in CI + all Phase 0 tests still green
 
 ### Try it yourself
@@ -64,7 +64,7 @@ pnpm test:down                # stop the container when done
 
 **Manual: run the demo chat console**
 
-1. Start Postgres and bootstrap the demo data (creates roles/schemas, applies `warehousd.yml`, seeds synthetic + demo data, indexes the `policies` document collection into both envs, seeds grants for Ana/Marcus/Mia):
+1. Start Postgres and bootstrap the demo data (creates roles/schemas, applies `warehousd.yml`, seeds synthetic + demo data, indexes the `policies` file collection into both envs, seeds grants for Ana/Marcus/Mia):
    ```bash
    cd mvp
    docker compose -f docker-compose.test.yml up -d --wait
@@ -81,10 +81,10 @@ pnpm test:down                # stop the container when done
    ```
    Open http://localhost:8722.
 3. In the console, switch persona (top of page) and try:
-   - **Mia (member), env=dev** — ask *"what does the remote work policy say?"* → `search_documents` returns ranked chunks from `remote-work.md` with title/content/owner/updated_at only (Mia's grant excludes `path`).
+   - **Mia (member), env=dev** — ask *"what does the remote work policy say?"* → `search_documents` returns ranked documents from `remote-work.md` with title/content/owner/updated_at only (Mia's grant excludes `path`).
    - **Ana or Marcus (admin/manager), env=dev** — same query, broader access (managers/admins are seeded with full grants across all collections, including `policies`).
    - **A persona/collection combination with no approved grant** (e.g. ask about `salaries` as Mia — her grant on that collection is seeded `pending`, not `approved`) → refusal, with a hint to request access. Check the **Evidence** panel for the audit trail of every call, allowed or refused.
-   - **Grants panel** — as Marcus/Ana, open Grants, approve a pending request for a document collection (`policies`), and try the new path multi-select: pick specific documents to scope a `row_filter`-restricted grant, or leave it empty for full access.
+   - **Grants panel** — as Marcus/Ana, open Grants, approve a pending request for a file collection (`policies`), and try the new path multi-select: pick specific files to scope a `row_filter`-restricted grant, or leave it empty for full access.
    - **Env isolation** — switch to `env=live` and repeat a `policies` search; dev-seeded canary text (`DEV-DOC-CANARY-7f3a`, planted in `examples/meridian/seed/docs-dev/`) must never appear, and vice versa for the live canary (`LIVE-DOC-CANARY-2c9d`, in `seed/docs-live/`) when on `env=dev`.
 4. Stop everything: `docker compose -f docker-compose.test.yml down -v` (add `-v` to also drop the demo data volume).
 
@@ -110,7 +110,7 @@ The taxonomy-grants suite (`packages/broker/test/taxonomy-grants.test.ts`) prove
 - Client filters AND with the term scope — can never widen it
 - Term column can gate rows without being readable (deny posture on the field)
 - Empty in-list denies all rows (constant-false guard)
-- Document search (`searchDocuments`) is also scoped — "vacation" in both hr and finance docs returns only the hr one for an hr-scoped grant
+- Document search (`searchDocuments`) is also scoped — "vacation" in both hr and finance documents returns only the hr one for an hr-scoped grant
 - Term-scoped calls appear in the audit log
 
 **Manual: term-scoped grants in the Meridian demo**
@@ -125,7 +125,7 @@ APP_DATABASE_URL=postgres://postgres:postgres@localhost:54330/warehousd_test \
   pnpm tsx scripts/dev-bootstrap.ts
 ```
 
-Bootstrap seeds three `policies` documents, each with a `category` frontmatter tag:
+Bootstrap seeds three `policies` files, each with a `category` frontmatter tag:
 - `remote-work.md` → `category: hr`
 - `pto.md` → `category: benefits`
 - `expenses.md` → `category: finance`
@@ -143,8 +143,8 @@ APP_DATABASE_URL=postgres://postgres:postgres@localhost:54330/warehousd_test \
 
 Open http://localhost:8722 and try these scenarios:
 
-- **Mia, env=dev** — search *"what is the expense reimbursement policy?"* → **no results** (expenses.md has `category:finance`, outside Mia's `hr`+`benefits` scope). Search *"what is the remote work policy?"* → returns content from `remote-work.md` (hr) and *"what is PTO?"* → returns `pto.md` (benefits). The term scope silently excludes finance; Mia never learns the finance document exists.
-- **Ana or Marcus, env=dev** — same searches return all three documents (their grants have no term filter).
+- **Mia, env=dev** — search *"what is the expense reimbursement policy?"* → **no results** (expenses.md has `category:finance`, outside Mia's `hr`+`benefits` scope). Search *"what is the remote work policy?"* → returns content from `remote-work.md` (hr) and *"what is PTO?"* → returns `pto.md` (benefits). The term scope silently excludes finance; Mia never learns the finance file exists.
+- **Ana or Marcus, env=dev** — same searches return content from all three files (their grants have no term filter).
 - **Grants panel (term multi-select)** — as Marcus/Ana, open the Grants panel. Approve any pending grant on `policies`: the panel shows a **Category** multi-select listing all 12 terms. Select `hr` + `benefits` to issue a term-scoped approval, or leave the picker empty for full access. The `row_filter` is derived server-side from the config — the client cannot forge the field name.
 - **Stop**: `docker compose -f docker-compose.test.yml down -v`
 
@@ -263,4 +263,4 @@ Release gate:
 
 ## Post-MVP
 
-Backlog (§12) lives in [plans/2026-07-18-phases-mvp-and-post-mvp.md](./superpowers/plans/2026-07-18-phases-mvp-and-post-mvp.md#post-mvp-backlog-12--do-not-build-now-design-already-tolerates-these): ~~row-level grant scoping~~ (shipped in Phase 0.5), semantic/vector search (populate the reserved `embedding` column), document upload UI + PDF/DOCX extraction, `broker.mutate` write path, connect-in-place, masking postures, aggregate-only posture, NL search adapter, app platform, IdP group→role mapping, more deploy targets, SAML/SCIM/compliance exports, hosted control plane.
+Backlog (§12) lives in [plans/2026-07-18-phases-mvp-and-post-mvp.md](./superpowers/plans/2026-07-18-phases-mvp-and-post-mvp.md#post-mvp-backlog-12--do-not-build-now-design-already-tolerates-these): ~~row-level grant scoping~~ (shipped in Phase 0.5), semantic/vector search (populate the reserved `embedding` column), file upload UI + PDF/DOCX extraction, `broker.mutate` write path, connect-in-place, masking postures, aggregate-only posture, NL search adapter, app platform, IdP group→role mapping, more deploy targets, SAML/SCIM/compliance exports, hosted control plane.
