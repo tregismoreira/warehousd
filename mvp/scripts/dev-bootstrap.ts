@@ -23,7 +23,7 @@ async function seedPersonaUsers(db: Pool) {
     // Use Better Auth's sign-up so the password is hashed with its own scheme,
     // then fix the id + role directly (sign-up assigns a random id and default role).
     const res = await auth.api.signUpEmail({
-      body: { email: p.email, password: "demo123456", name: p.name },
+      body: { email: p.email, password: "demo", name: p.name },
     });
     const generatedId = res.user.id;
     // Delete sessions and accounts, then update user id and role.

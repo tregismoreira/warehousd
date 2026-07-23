@@ -18,6 +18,7 @@ export const auth = betterAuth({
     // Local credentials are the bootstrap/demo fallback (SPECS §6.2). Kill switch disables them entirely.
     enabled: !LOCAL_LOGIN_DISABLED,
     requireEmailVerification: false,
+    minPasswordLength: 4,
   },
   user: {
     additionalFields: {
