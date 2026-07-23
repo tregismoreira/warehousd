@@ -39,6 +39,24 @@ export async function createAppSchema(db: Pool): Promise<void> {
       parent_id uuid references app.terms(id),
       unique (vocabulary_id, slug));
   `);
+  // client_policies: per-OAuth-client env:live allow-list (§6.1). FK target table name was
+  // confirmed empirically against the installed better-auth version (Task 1 Step 1) — if a
+  // future better-auth bump renames the oauth client table, this FK will fail on create and
+  // must be updated to match.
+  // Stub for oauthApplication table (created by Better Auth's mcp plugin in production).
+  // This allows client_policies FK to be created before the real migration runs.
+  await db.query(`
+    create table if not exists app."oauthApplication" ("clientId" text primary key);
+  `);
+  await db.query(`
+    create table if not exists app.client_policies (
+      client_id text primary key,
+      display_name text,
+      allowed_scopes text[] not null default '{env:dev}',
+      promoted_at timestamptz,
+      promoted_by text,
+      foreign key (client_id) references app."oauthApplication"("clientId") on delete cascade);
+  `);
   // audit_events is INSERT-only for data roles (§5.5 / test 9)
   await db.query(`
     grant usage on schema app to warehousd_dev, warehousd_live;

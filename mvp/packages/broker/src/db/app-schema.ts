@@ -1,4 +1,5 @@
 import { pgSchema, text, uuid, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const app = pgSchema("app");
 
@@ -50,4 +51,12 @@ export const terms = app.table("terms", {
   slug: text("slug").notNull(),
   label: text("label").notNull(),
   parentId: uuid("parent_id"),                     // reserved for hierarchy, unused in MVP
+});
+
+export const clientPolicies = app.table("client_policies", {
+  clientId: text("client_id").primaryKey(),
+  displayName: text("display_name"),
+  allowedScopes: text("allowed_scopes").array().notNull().default(sql`'{env:dev}'`),
+  promotedAt: timestamp("promoted_at", { withTimezone: true }),
+  promotedBy: text("promoted_by"),
 });
