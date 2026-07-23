@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
+import { mcpPlugin } from "./oauth";
 
 export const LOCAL_LOGIN_DISABLED = process.env.SANDBOXD_DISABLE_LOCAL_LOGIN === "true";
 
@@ -25,6 +26,7 @@ export const auth = betterAuth({
       role: { type: "string", defaultValue: "member", input: false },
     },
   },
+  plugins: [mcpPlugin],
 });
 
 export type SessionUser = {
