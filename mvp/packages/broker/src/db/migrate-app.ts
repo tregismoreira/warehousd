@@ -21,7 +21,7 @@ export async function createAppSchema(db: Pool): Promise<void> {
       outcome text, reason text);
   `);
   await db.query(`
-    alter table app.grants add column if not exists row_filter jsonb;
+    alter table app.grants add column if not exists document_filter jsonb;
     create unique index if not exists grants_one_active
       on app.grants (user_id, collection, env) where status='approved';
   `);

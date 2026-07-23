@@ -29,14 +29,14 @@ describe("runIndex env/source resolution", () => {
     writeFileSync(join(docsDevDir, "policy.md"), "# Dev Policy\n\nThis is dev content");
     writeFileSync(join(docsLiveDir, "policy.md"), "# Live Policy\n\nThis is live content");
 
-    // Create warehousd.yml with document collection and structured collection
+    // Create warehousd.yml with file collection and dataset collection
     const config = `
 project: test-cli
 server:
   port: 8722
 collections:
   policies:
-    type: document
+    type: file
     description: Policy documents
     source: ./docs-dev
     source_live: ./docs-live
@@ -49,7 +49,7 @@ collections:
         posture: deny
   people:
     description: People records
-    type: structured
+    type: dataset
     fields:
       id:
         type: uuid
@@ -67,10 +67,10 @@ collections:
     const cfg = {
       project: "test-cli",
       server: { port: 8722 },
-      synthetic: { rows_per_collection: {} },
+      synthetic: { documents_per_collection: {} },
       collections: {
         policies: {
-          type: "document" as const,
+          type: "file" as const,
           description: "Policy documents",
           source: "./docs-dev",
           source_live: "./docs-live",
@@ -104,7 +104,7 @@ server:
   port: 8722
 collections:
   policies:
-    type: document
+    type: file
     description: Policy documents
     source: ./docs-dev
     fields:
@@ -116,7 +116,7 @@ collections:
         posture: deny
   people:
     description: People records
-    type: structured
+    type: dataset
     fields:
       id:
         type: uuid
@@ -139,8 +139,8 @@ collections:
     const r = await runIndex(projectDir, dbUrl, "policies", {});
     expect(r.indexed).toBe(1);
     const db = new Pool({ connectionString: dbUrl });
-    const synth = await db.query(`select count(*)::int as n from data_synth."policies__docs"`);
-    const live = await db.query(`select count(*)::int as n from data_live."policies__docs"`);
+    const synth = await db.query(`select count(*)::int as n from data_synth."policies__files"`);
+    const live = await db.query(`select count(*)::int as n from data_live."policies__files"`);
     expect(synth.rows[0].n).toBe(1);
     expect(live.rows[0].n).toBe(0);
     await db.end();
@@ -149,8 +149,8 @@ collections:
   it("env=live uses source_live", async () => {
     await runIndex(projectDir, dbUrl, "policies", { env: "live" });
     const db = new Pool({ connectionString: dbUrl });
-    const live = await db.query(`select content from data_live."policies__docs" join data_live."policies__chunks" on data_live."policies__chunks".document_id = data_live."policies__docs".id limit 1`);
-    const synth = await db.query(`select content from data_synth."policies__docs" join data_synth."policies__chunks" on data_synth."policies__chunks".document_id = data_synth."policies__docs".id limit 1`);
+    const live = await db.query(`select content from data_live."policies__files" join data_live."policies__documents" on data_live."policies__documents".file_id = data_live."policies__files".id limit 1`);
+    const synth = await db.query(`select content from data_synth."policies__files" join data_synth."policies__documents" on data_synth."policies__documents".file_id = data_synth."policies__files".id limit 1`);
     expect(live.rowCount).toBe(1);
     expect(synth.rowCount).toBe(1);
     // The content should be different because dev uses docs-dev and live uses docs-live
@@ -165,10 +165,10 @@ collections:
     const cfg2 = {
       project: "test-cli",
       server: { port: 8722 },
-      synthetic: { rows_per_collection: {} },
+      synthetic: { documents_per_collection: {} },
       collections: {
         policies: {
-          type: "document" as const,
+          type: "file" as const,
           description: "Policy documents",
           source: "./docs-dev",
           fields: {
@@ -193,8 +193,8 @@ collections:
       .rejects.toThrow(/source_live|--source/);
   });
 
-  it("rejects a structured collection", async () => {
+  it("rejects a dataset collection", async () => {
     await expect(runIndex(projectDir, dbUrl, "people", {}))
-      .rejects.toThrow(/document/);
+      .rejects.toThrow(/file/);
   });
 });

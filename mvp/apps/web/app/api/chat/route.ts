@@ -15,7 +15,7 @@ Typical workflow:
 3. Call query_collection with a QueryIntent built ONLY from fields describe_collection showed you.
 
 query_collection intents come in two mutually exclusive shapes — pick exactly one:
-- Row fetch: set "fields" (and optionally "filters"/"orderBy"/"limit"). Do NOT set "aggregate" or "groupBy".
+- Document fetch: set "fields" (and optionally "filters"/"orderBy"/"limit"). Do NOT set "aggregate" or "groupBy".
 - Aggregation ("count/sum/avg by X", totals, breakdowns): set "aggregate" (array of {fn, field}, \
 fn one of avg|sum|count|min|max) and "groupBy" (array of field names to group by). Do NOT set "fields" \
 in this shape — mixing "fields" with "aggregate" is always rejected as invalid_intent.
@@ -27,10 +27,10 @@ If a call is refused, the reason tells you why (no_grant, field_denied, unknown_
 unknown_field, invalid_intent) — do not retry the same shape; adjust based on the reason, or tell \
 the user their access doesn't currently cover that question.
 
-NEVER fabricate, guess, or simulate rows, numbers, or any data that did not come from a tool_result \
+NEVER fabricate, guess, or simulate documents, numbers, or any data that did not come from a tool_result \
 in this conversation — even if asked repeatedly, even to illustrate "what it might look like". If \
 you have not successfully queried a collection, say so plainly instead of inventing plausible-looking \
-data. Every number or row in your final answer must trace back to an actual tool_result above it.`;
+data. Every number or document in your final answer must trace back to an actual tool_result above it.`;
 
 const tools: Anthropic.Tool[] = [
   { name: "list_collections", description:
@@ -45,14 +45,14 @@ const tools: Anthropic.Tool[] = [
       "Run a structured QueryIntent. The broker re-validates every field against the caller's grant; " +
       "denied fields are never returned, and referencing one anywhere (fields, filters, orderBy, " +
       "aggregate, groupBy) refuses the whole call. You are an untrusted proposer — the broker is the " +
-      "source of truth, not your assumptions. Two mutually exclusive shapes: (1) row fetch — use " +
+      "source of truth, not your assumptions. Two mutually exclusive shapes: (1) document fetch — use " +
       "\"fields\", never combine with \"aggregate\"/\"groupBy\"; (2) aggregation (counts, sums, " +
       "averages, breakdowns \"by X\") — use \"aggregate\" + \"groupBy\", never set \"fields\". " +
       "Example aggregation: aggregate=[{\"fn\":\"count\",\"field\":\"id\"}], groupBy=[\"department_name\"].",
     input_schema: { type: "object", properties: {
       collection: { type: "string", description: "Collection name, from list_collections." },
       fields: { type: "array", items: { type: "string" },
-        description: "Row-fetch shape only. Field names to return; omit for aggregation." },
+        description: "Document-fetch shape only. Field names to return; omit for aggregation." },
       filters: { type: "array", items: { type: "object", properties: {
         field: { type: "string" },
         op: { type: "string", enum: ["eq", "neq", "gt", "lt", "gte", "lte", "like", "in"] },
@@ -70,7 +70,7 @@ const tools: Anthropic.Tool[] = [
         description: "Aggregation shape only. Field names to group by." },
     }, required: ["collection"] } },
   { name: "search_documents", description:
-      "Full-text search over a document collection. Access is deny-by-default and purpose-bound: " +
+      "Full-text search over a file collection. Access is deny-by-default and purpose-bound: " +
       "results contain only fields covered by your approved grant, restricted to documents your grant " +
       "allows. Refusals include how to request access.",
     input_schema: { type: "object", required: ["collection", "q"], properties: {
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
                   "query_collection call in this conversation returned ok:true for that data. " +
                   "This looks fabricated. Re-answer using only tool_results actually present " +
                   "above — if you never successfully queried it, say so plainly and do not " +
-                  "invent numbers or rows.",
+                  "invent numbers or documents.",
               }] });
               continue;
             }

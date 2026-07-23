@@ -19,7 +19,7 @@ collections:
       email: { type: text, posture: allow }
       home_address: { type: text, posture: deny }
 synthetic:
-  rows_per_collection: { people: 40 }
+  documents_per_collection: { people: 40 }
 `;
 
 it("parses base config", () => {
@@ -58,27 +58,27 @@ import { ConfigSchema } from "../src/config/schema";
 
 const baseSchema = { project: "t", collections: {} as Record<string, unknown> };
 const doc = (over: object = {}) => ({
-  type: "document", description: "d", source: "./docs",
+  type: "file", description: "d", source: "./docs",
   fields: { title: { posture: "allow" }, content: { posture: "allow" }, path: { posture: "deny" } },
   ...over,
 });
 
-describe("document collection config", () => {
-  it("accepts a valid document collection and fills canonical field types", () => {
+describe("file collection config", () => {
+  it("accepts a valid file collection and fills canonical field types", () => {
     const cfg = ConfigSchema.parse({ ...baseSchema, collections: { policies: doc() } });
     const c = cfg.collections.policies;
-    expect(c.type).toBe("document");
+    expect(c.type).toBe("file");
     expect(c.fields.title.type).toBe("text");
   });
-  it("defaults type to structured", () => {
+  it("defaults type to dataset", () => {
     const cfg = ConfigSchema.parse({ ...baseSchema, collections: { people: {
       description: "d", fields: { id: { type: "uuid", posture: "allow", pk: true } } } } });
-    expect(cfg.collections.people.type).toBe("structured");
+    expect(cfg.collections.people.type).toBe("dataset");
   });
-  it("rejects a document collection without source", () => {
+  it("rejects a file collection without source", () => {
     expect(() => ConfigSchema.parse({ ...baseSchema, collections: { policies: doc({ source: undefined }) } })).toThrow();
   });
-  it("rejects a document field outside the fixed set", () => {
+  it("rejects a field outside the fixed set", () => {
     expect(() => ConfigSchema.parse({ ...baseSchema, collections: { policies: doc({
       fields: { titl: { posture: "allow" } } }) } })).toThrow(/titl/);
   });
@@ -107,16 +107,16 @@ describe("taxonomies", () => {
     expect(cfg.taxonomies.category!.terms.hr!.label).toBe("HR");
   });
 
-  it("accepts the vocabulary slug as an extra document field and fills type text", () => {
+  it("accepts the vocabulary slug as an extra file field and fills type text", () => {
     const cfg = ConfigSchema.parse({ ...base, collections: {
-      briefs: { description: "d", type: "document", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
         title: { posture: "allow" }, content: { posture: "allow" }, category: { posture: "deny" } } } } });
     expect(cfg.collections.briefs!.fields.category).toEqual({ posture: "deny", type: "text" });
   });
 
-  it("auto-adds the term field on a bound document collection when omitted", () => {
+  it("auto-adds the term field on a bound file collection when omitted", () => {
     const cfg = ConfigSchema.parse({ ...base, collections: {
-      briefs: { description: "d", type: "document", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
         title: { posture: "allow" }, content: { posture: "allow" } } } } });
     expect(cfg.collections.briefs!.fields.category).toEqual({ posture: "allow", type: "text" });
   });
@@ -152,9 +152,9 @@ describe("taxonomies", () => {
       .toThrow(/pk\/fk\/view_join/);
   });
 
-  it("still rejects unknown extra document fields on bound collections", () => {
+  it("still rejects unknown extra file fields on bound collections", () => {
     expect(() => ConfigSchema.parse({ ...base, collections: {
-      briefs: { description: "d", type: "document", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
         title: { posture: "allow" }, sneaky: { posture: "allow" } } } } })).toThrow(/not in fixed set/);
   });
 });

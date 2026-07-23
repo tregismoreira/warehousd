@@ -41,16 +41,16 @@ it("expands `in` operator to a parameter list", () => {
   expect(values).toEqual(["a", "b", "c"]);
 });
 
-it("ANDs rowFilter into where with parameterized values", () => {
+it("ANDs documentFilter into where with parameterized values", () => {
   const { text, values } = buildSelect("dev", { collection: "policies", fields: ["title"] },
-    ["title", "content"], { rowFilter: { field: "path", op: "in", value: ["hr/pto.md", "hr/benefits.md"] } });
+    ["title", "content"], { documentFilter: { field: "path", op: "in", value: ["hr/pto.md", "hr/benefits.md"] } });
   expect(text).toContain(`"path" in ($1, $2)`);
   expect(values).toEqual(["hr/pto.md", "hr/benefits.md"]);
 });
 
 it("empty in-list compiles to constant false, not a SQL error (design test 8)", () => {
   const { text } = buildSelect("dev", { collection: "policies", fields: ["title"] },
-    ["title"], { rowFilter: { field: "path", op: "in", value: [] } });
+    ["title"], { documentFilter: { field: "path", op: "in", value: [] } });
   expect(text).toContain("false");
   expect(text).not.toContain("in ()");
 });

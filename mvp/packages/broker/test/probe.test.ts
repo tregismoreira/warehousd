@@ -64,7 +64,7 @@ it("no probe leaks any denied canary; outcomes match expectations", async () => 
   expect(still.rows[0].c).toBeGreaterThan(0);
 });
 
-describe("row_filter bypass and hostile-q probes (design §8 test 4)", () => {
+describe("document_filter bypass and hostile-q probes (design §8 test 4)", () => {
   let p2: Provisioned;
   let db2: Pool;
   let pools2: Pools;
@@ -79,10 +79,10 @@ describe("row_filter bypass and hostile-q probes (design §8 test 4)", () => {
     const docCfg = {
       project: "t",
       server: { port: 1 },
-      synthetic: { rows_per_collection: {} },
+      synthetic: { documents_per_collection: {} },
       collections: {
         policies: {
-          type: "document" as const,
+          type: "file" as const,
           description: "Company policies",
           source: "./x",
           fields: {
@@ -108,7 +108,7 @@ describe("row_filter bypass and hostile-q probes (design §8 test 4)", () => {
     await indexCollection(db2, "dev", "policies", tmpDir);
     fs.rmSync(tmpDir, { recursive: true });
 
-    // Approve grant with row_filter excluding the restricted doc
+    // Approve grant with document_filter excluding the restricted document
     const { approveGrant } = await import("../src/grants/manage");
     const grantRes = await db2.query(
       `insert into app.grants (user_id, collection, allowed_fields, env, status)
@@ -117,7 +117,7 @@ describe("row_filter bypass and hostile-q probes (design §8 test 4)", () => {
     );
     const grantId = grantRes.rows[0].id;
     await approveGrant(db2, grantId, "admin", {
-      rowFilter: { field: "path", op: "in", value: ["normal.md"] },
+      documentFilter: { field: "path", op: "in", value: ["normal.md"] },
     });
 
     pools2 = createPools({ app: p2.urls.admin, dev: p2.urls.dev, live: p2.urls.live });
@@ -126,15 +126,15 @@ describe("row_filter bypass and hostile-q probes (design §8 test 4)", () => {
     vi.spyOn(console, "error").mockImplementation((...a) => { logs2.push(a.join(" ")); });
   });
 
-  it("hostile q and row_filter bypass probes do not leak canary; outcomes match", async () => {
+  it("hostile q and document_filter bypass probes do not leak canary; outcomes match", async () => {
     const { DOC_RESTRICTED_CANARY } = await import("./fixtures/canaries");
     const broker = makeBroker(pools2, {
       project: "t",
       server: { port: 1 },
-      synthetic: { rows_per_collection: {} },
+      synthetic: { documents_per_collection: {} },
       collections: {
         policies: {
-          type: "document" as const,
+          type: "file" as const,
           description: "Company policies",
           source: "./x",
           fields: {
@@ -148,7 +148,7 @@ describe("row_filter bypass and hostile-q probes (design §8 test 4)", () => {
 
     const allProbes = JSON.parse(readFileSync(join(__dirname, "fixtures/probes.json"), "utf8")) as
       { name: string; surface?: string; intent: any; expect: "allowed" | "refused" }[];
-    const newProbes = allProbes.filter((p) => p.surface === "searchDocuments" || p.name === "row-filter-bypass-via-filters");
+    const newProbes = allProbes.filter((p) => p.surface === "searchDocuments" || p.name === "document-filter-bypass-via-filters");
 
     for (const probe of newProbes) {
       const surface = probe.surface || "query";

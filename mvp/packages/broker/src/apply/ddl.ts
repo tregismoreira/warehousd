@@ -10,29 +10,29 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
 
-  if (c.type === "document") {
+  if (c.type === "file") {
     // c.taxonomy is a config-validated vocabulary slug — identifier interpolation is safe.
     const termCol = c.taxonomy ? `\n        "${c.taxonomy}" text,` : "";
     const termAlter = c.taxonomy
-      ? `\n      alter table ${schema}."${collection}__docs" add column if not exists "${c.taxonomy}" text;` : "";
+      ? `\n      alter table ${schema}."${collection}__files" add column if not exists "${c.taxonomy}" text;` : "";
     return `
-      create table if not exists ${schema}."${collection}__docs" (
+      create table if not exists ${schema}."${collection}__files" (
         id uuid primary key,
         title text,
         path text not null unique,${termCol}
         owner text,
         checksum text not null,
         updated_at timestamptz not null);${termAlter}
-      create table if not exists ${schema}."${collection}__chunks" (
+      create table if not exists ${schema}."${collection}__documents" (
         id uuid primary key,
-        document_id uuid not null references ${schema}."${collection}__docs"(id) on delete cascade,
-        chunk_index int not null,
+        file_id uuid not null references ${schema}."${collection}__files"(id) on delete cascade,
+        document_seq int not null,
         content text not null,
         tsv tsvector generated always as (to_tsvector('english', content)) stored,
         embedding vector(1536),
-        unique (document_id, chunk_index));
-      create index if not exists "${collection}__chunks_tsv_idx"
-        on ${schema}."${collection}__chunks" using gin (tsv);`;
+        unique (file_id, document_seq));
+      create index if not exists "${collection}__documents_tsv_idx"
+        on ${schema}."${collection}__documents" using gin (tsv);`;
   }
 
   const cols: string[] = [];
@@ -55,14 +55,14 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
 
-  if (c.type === "document") {
+  if (c.type === "file") {
     // c.taxonomy is a config-validated vocabulary slug — identifier interpolation is safe.
     const termSel = c.taxonomy ? `, d."${c.taxonomy}"` : "";
     return `create or replace view ${schema}.v_${collection} as
-      select c.id as chunk_id, c.chunk_index, c.content, c.tsv,
-             d.id as document_id, d.title, d.path, d.owner, d.updated_at${termSel}
-      from ${schema}."${collection}__chunks" c
-      join ${schema}."${collection}__docs" d on d.id = c.document_id;`;
+      select c.id as document_id, c.document_seq, c.content, c.tsv,
+             d.id as file_id, d.title, d.path, d.owner, d.updated_at${termSel}
+      from ${schema}."${collection}__documents" c
+      join ${schema}."${collection}__files" d on d.id = c.file_id;`;
   }
 
   const selects: string[] = [];

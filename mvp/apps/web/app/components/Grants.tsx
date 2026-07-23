@@ -57,7 +57,7 @@ export function Grants({ persona, onChange }: { persona: string; onChange: () =>
   useEffect(() => { load(); }, [persona]);
 
   async function loadDocPaths(grantId: string, g: Grant) {
-    if (g.collectionType !== "document") return;
+    if (g.collectionType !== "file") return;
     const key = `${g.collection}:${g.env}`;
     if (docPaths[key]) return;
 
@@ -119,7 +119,7 @@ export function Grants({ persona, onChange }: { persona: string; onChange: () =>
             Pending requests awaiting your approval
           </div>
           {others.map((g) => {
-            const isDocument = g.collectionType === "document";
+            const isFile = g.collectionType === "file";
             const pathKey = `${g.collection}:${g.env}`;
             const paths = docPaths[pathKey] || [];
             const selected = selectedPaths[g.id] || new Set();
@@ -127,10 +127,10 @@ export function Grants({ persona, onChange }: { persona: string; onChange: () =>
             return (
               <div key={g.id} className="panel" style={{ padding: "8px 10px", marginBottom: 6 }}>
                 <GrantRow g={{ ...g, collection: `${g.user_id} → ${g.collection}` }} />
-                {isDocument && paths.length > 0 && (
+                {isFile && paths.length > 0 && (
                   <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--muted)" }}>
                     <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
-                      Document paths (optional — leave empty for full access):
+                      File paths (optional — leave empty for full access):
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {paths.map(path => (
@@ -151,12 +151,12 @@ export function Grants({ persona, onChange }: { persona: string; onChange: () =>
                     </div>
                   </div>
                 )}
-                {isDocument && !paths.length && (
+                {isFile && !paths.length && (
                   <button
                     onClick={() => loadDocPaths(g.id, g)}
                     style={{ marginTop: 8, fontSize: 11 }}
                   >
-                    Load document paths
+                    Load file paths
                   </button>
                 )}
                 {g.taxonomyField && (terms[g.collection]?.length ?? 0) > 0 && (

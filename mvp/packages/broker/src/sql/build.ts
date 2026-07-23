@@ -1,17 +1,17 @@
-import type { QueryIntent, FilterOp, RowFilter } from "../types";
+import type { QueryIntent, FilterOp, DocumentFilter } from "../types";
 import { MAX_LIMIT, DEFAULT_LIMIT } from "../types";
 
 const OP_SQL: Record<Exclude<FilterOp, "in">, string> = {
   eq: "=", neq: "<>", gt: ">", lt: "<", gte: ">=", lte: "<=", like: "like",
 };
 // Identifiers reaching q() are drawn from the collection's YAML-defined field set:
-// granted fields for client intents, plus the grant-author-supplied row_filter.field
+// granted fields for client intents, plus the grant-author-supplied document_filter.field
 // (validated against the same YAML set in broker.ts) — never from raw client input.
 const q = (id: string) => `"${id}"`;
 
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
-  opts: { rowFilter?: RowFilter | null; q?: string } = {},
+  opts: { documentFilter?: DocumentFilter | null; q?: string } = {},
 ): { text: string; values: unknown[] } {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const view = `${schema}.v_${intent.collection}`;
@@ -34,7 +34,7 @@ export function buildSelect(
     searchSlot = param(opts.q); // ONE slot, reused for WHERE and ORDER BY
     const tsq = `websearch_to_tsquery('english', ${searchSlot})`;
     rankExpr = `ts_rank_cd(tsv, ${tsq})`;
-    selectClause += `, ${rankExpr} as "_rank", "chunk_index"`;
+    selectClause += `, ${rankExpr} as "_rank", "document_seq"`;
   }
 
   let text = `select ${selectClause} from ${view}`;
@@ -48,8 +48,8 @@ export function buildSelect(
       where.push(`${q(f.field)} ${OP_SQL[f.op]} ${param(f.value)}`);
     }
   }
-  // AND the grant-carried row filter
-  const rf = opts.rowFilter;
+  // AND the grant-carried document filter
+  const rf = opts.documentFilter;
   if (rf) {
     if (rf.op === "in") {
       const arr = Array.isArray(rf.value) ? rf.value : [rf.value];

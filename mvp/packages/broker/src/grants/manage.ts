@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import type { RowFilter } from "../types";
+import type { DocumentFilter } from "../types";
 
 export async function requestGrant(app: Pool, i: {
   userId: string; collection: string; env: "dev" | "live";
@@ -13,13 +13,13 @@ export async function requestGrant(app: Pool, i: {
 }
 
 export async function approveGrant(app: Pool, id: string, by: string,
-  opts: { allowedFields?: string[]; expiresAt?: string; rowFilter?: RowFilter } = {}): Promise<void> {
+  opts: { allowedFields?: string[]; expiresAt?: string; documentFilter?: DocumentFilter } = {}): Promise<void> {
   await app.query(
     `update app.grants set status='approved', decided_by=$2, decided_at=now(),
-       allowed_fields=coalesce($3, allowed_fields), expires_at=$4, row_filter=$5
+       allowed_fields=coalesce($3, allowed_fields), expires_at=$4, document_filter=$5
      where id=$1 and status='pending'`,
     [id, by, opts.allowedFields ?? null, opts.expiresAt ?? null,
-     opts.rowFilter ? JSON.stringify(opts.rowFilter) : null]);
+     opts.documentFilter ? JSON.stringify(opts.documentFilter) : null]);
 }
 
 export async function denyGrant(app: Pool, id: string, by: string): Promise<void> {

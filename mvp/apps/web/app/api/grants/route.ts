@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   // Enrich grants with collection type info
   const enriched = (rows: typeof mine.rows) => rows.map(g => ({
     ...g,
-    collectionType: cfg.collections[g.collection]?.type || "structured",
+    collectionType: cfg.collections[g.collection]?.type || "dataset",
     taxonomyField: cfg.collections[g.collection]?.taxonomy ?? null,
   }));
 
@@ -30,13 +30,13 @@ export async function POST(req: NextRequest) {
     const cfg = loadConfig(projectDir);
     const grant = (await app.query(`select collection from app.grants where id=$1`, [id])).rows[0];
     const taxonomyField = grant ? cfg.collections[grant.collection]?.taxonomy : undefined;
-    // row_filter field is derived server-side from config — never client-supplied.
+    // document_filter field is derived server-side from config — never client-supplied.
     if (taxonomyField && selectedTerms && selectedTerms.length > 0) {
       const validSlugs = Object.keys(cfg.taxonomies[taxonomyField]?.terms ?? {});
       const filtered = (selectedTerms as string[]).filter(t => validSlugs.includes(t));
-      if (filtered.length > 0) opts.rowFilter = { field: taxonomyField, op: "in", value: filtered };
+      if (filtered.length > 0) opts.documentFilter = { field: taxonomyField, op: "in", value: filtered };
     } else if (selectedPaths && selectedPaths.length > 0) {
-      opts.rowFilter = { field: "path", op: "in", value: selectedPaths };
+      opts.documentFilter = { field: "path", op: "in", value: selectedPaths };
     }
     await approveGrant(app, id, by, opts);
   } else if (action === "deny") await denyGrant(app, id, by);

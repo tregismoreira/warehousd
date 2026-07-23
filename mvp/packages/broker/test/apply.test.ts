@@ -6,7 +6,7 @@ import { applyConfig } from "../src/apply/apply";
 import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
-  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: {} },
   collections: {
     people: { description: "dir", fields: {
       id: { type: "uuid", posture: "allow", pk: true },
@@ -44,10 +44,10 @@ describe("applyConfig", () => {
 });
 
 const docCfg = {
-  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: {} },
   collections: {
     policies: {
-      type: "document" as const,
+      type: "file" as const,
       description: "d",
       source: "./x",
       fields: {
@@ -59,8 +59,8 @@ const docCfg = {
   },
 };
 
-describe("document collection apply", () => {
-  it("creates __docs, __chunks, gin index, and the chunk view per env", async () => {
+describe("file collection apply", () => {
+  it("creates __files, __documents, gin index, and the documents view per env", async () => {
     p = await provision("apply");
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
@@ -69,11 +69,11 @@ describe("document collection apply", () => {
     for (const schema of ["data_synth", "data_live"]) {
       const t = await db.query(
         `select table_name from information_schema.tables where table_schema=$1 and table_name like 'policies__%'`, [schema]);
-      expect(t.rows.map(r => r.table_name).sort()).toEqual(["policies__chunks", "policies__docs"]);
+      expect(t.rows.map(r => r.table_name).sort()).toEqual(["policies__documents", "policies__files"]);
       const v = await db.query(
         `select column_name from information_schema.columns where table_schema=$1 and table_name='v_policies'`, [schema]);
       expect(v.rows.map(r => r.column_name).sort()).toEqual(
-        ["chunk_id","chunk_index","content","document_id","owner","path","title","tsv","updated_at"].sort());
+        ["content","document_id","document_seq","file_id","owner","path","title","tsv","updated_at"].sort());
     }
     await db.end();
   });
@@ -85,16 +85,16 @@ describe("document collection apply", () => {
     await applyConfig(db, docCfg);
     await db.end();
   });
-  it("chunk tsv is generated and searchable", async () => {
+  it("document tsv is generated and searchable", async () => {
     p = await provision("apply");
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, docCfg);
 
-    await db.query(`insert into data_synth."policies__docs" (id,title,path,owner,checksum,updated_at)
+    await db.query(`insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at)
       values (gen_random_uuid(),'t','a.md',null,'c',now())`);
-    const d = await db.query(`select id from data_synth."policies__docs" limit 1`);
-    await db.query(`insert into data_synth."policies__chunks" (id,document_id,chunk_index,content)
+    const d = await db.query(`select id from data_synth."policies__files" limit 1`);
+    await db.query(`insert into data_synth."policies__documents" (id,file_id,document_seq,content)
       values (gen_random_uuid(),$1,0,'remote work policy applies')`, [d.rows[0].id]);
     const r = await db.query(
       `select content from data_synth.v_policies where tsv @@ websearch_to_tsquery('english','remote work')`);
@@ -110,7 +110,7 @@ describe("apply: taxonomy", () => {
     collections: {
       notes:  { description: "d", taxonomy: "category", fields: {
         id: { type: "uuid", posture: "allow", pk: true } } },
-      briefs: { description: "d", type: "document", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
         title: { posture: "allow" }, content: { posture: "allow" } } },
     },
   };
@@ -136,7 +136,7 @@ describe("apply: taxonomy", () => {
     await db.end();
   });
 
-  it("adds the term column to bound tables and the doc view, both envs", async () => {
+  it("adds the term column to bound tables and the file view, both envs", async () => {
     p = await provision("apply");
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
@@ -147,7 +147,7 @@ describe("apply: taxonomy", () => {
         `select 1 from information_schema.columns where table_schema=$1 and table_name='notes' and column_name='category'`, [schema]);
       expect(notesCol.rowCount).toBe(1);
       const docsCol = await db.query(
-        `select 1 from information_schema.columns where table_schema=$1 and table_name='briefs__docs' and column_name='category'`, [schema]);
+        `select 1 from information_schema.columns where table_schema=$1 and table_name='briefs__files' and column_name='category'`, [schema]);
       expect(docsCol.rowCount).toBe(1);
       const viewCol = await db.query(
         `select 1 from information_schema.columns where table_schema=$1 and table_name='v_briefs' and column_name='category'`, [schema]);
