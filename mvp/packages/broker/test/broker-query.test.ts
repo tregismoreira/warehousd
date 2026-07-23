@@ -9,7 +9,7 @@ import { makeBroker } from "../src/broker";
 import type { WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
-  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: { people: 12 } },
+  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: { people: 12 } },
   collections: { people: { description: "dir", fields: {
     id: { type: "uuid", posture: "allow", pk: true },
     full_name: { type: "text", posture: "allow" },
@@ -53,7 +53,7 @@ it("grant excluding email → default fields omit the email key entirely (absent
   expect(r.ok).toBe(true);
   if (r.ok) {
     expect(r.fieldsReturned.sort()).toEqual(["full_name", "id"]);
-    for (const row of r.rows) {
+    for (const row of r.documents) {
       expect("email" in row).toBe(false);
       expect("home_address" in row).toBe(false);
     }
@@ -68,13 +68,13 @@ it("unknown collection / unknown field", async () => {
   if (!r2.ok) expect(r2.reason).toBe("unknown_field");
 });
 
-describe("row_filter on document collections", () => {
-  it("row-filtered rows are silently absent (design test 3)", async () => {
+describe("document_filter on file collections", () => {
+  it("document-filtered documents are silently absent (design test 3)", async () => {
     const docCfg: WarehousdConfig = {
-      project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+      project: "t", server: { port: 1 }, synthetic: { documents_per_collection: {} },
       collections: {
         policies: {
-          type: "document" as const,
+          type: "file" as const,
           description: "d",
           source: "./x",
           fields: {
@@ -95,42 +95,42 @@ describe("row_filter on document collections", () => {
 
     // Seed documents
     const docRes = await dbDoc.query(
-      `insert into data_synth."policies__docs" (id,title,path,owner,checksum,updated_at)
+      `insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at)
        values (gen_random_uuid(),'PTO Policy','hr/pto.md',null,'c1',now()),
               (gen_random_uuid(),'Benefits Policy','hr/benefits.md',null,'c2',now())
        returning id`);
     const docIds = docRes.rows.map((r: any) => r.id);
     await dbDoc.query(
-      `insert into data_synth."policies__chunks" (id,document_id,chunk_index,content)
+      `insert into data_synth."policies__documents" (id,file_id,document_seq,content)
        values (gen_random_uuid(),$1,0,'PTO content'),
               (gen_random_uuid(),$2,0,'Benefits content')`,
       [docIds[0], docIds[1]]);
 
-    // Approve grant with rowFilter limiting to hr/pto.md only
+    // Approve grant with document_filter limiting to hr/pto.md only
     const grantRes = await dbDoc.query(
       `insert into app.grants (user_id, collection, allowed_fields, env, status)
        values ('u3', 'policies', array['title','content'], 'dev', 'pending') returning id`);
     const grantId = grantRes.rows[0].id;
     const { approveGrant } = await import("../src/grants/manage");
     await approveGrant(dbDoc, grantId, "admin", {
-      rowFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
+      documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
     });
 
     const r = await brokerDoc.query(ctx, { collection: "policies", fields: ["title"] });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.rows.every((row: any) => row.title === "PTO Policy")).toBe(true);
+    if (r.ok) expect(r.documents.every((row: any) => row.title === "PTO Policy")).toBe(true);
 
     await dbDoc.end();
     await poolsDoc.end();
     await pDoc.end();
   });
 
-  it("empty in-list row_filter returns zero rows, ok:true (design test 8, integration)", async () => {
+  it("empty in-list document_filter returns zero documents, ok:true (design test 8, integration)", async () => {
     const docCfg: WarehousdConfig = {
-      project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+      project: "t", server: { port: 1 }, synthetic: { documents_per_collection: {} },
       collections: {
         policies: {
-          type: "document" as const,
+          type: "file" as const,
           description: "d",
           source: "./x",
           fields: {
@@ -151,30 +151,30 @@ describe("row_filter on document collections", () => {
 
     // Seed documents
     const docRes = await dbDoc.query(
-      `insert into data_synth."policies__docs" (id,title,path,owner,checksum,updated_at)
+      `insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at)
        values (gen_random_uuid(),'PTO Policy','hr/pto.md',null,'c1',now()),
               (gen_random_uuid(),'Benefits Policy','hr/benefits.md',null,'c2',now())
        returning id`);
     const docIds = docRes.rows.map((r: any) => r.id);
     await dbDoc.query(
-      `insert into data_synth."policies__chunks" (id,document_id,chunk_index,content)
+      `insert into data_synth."policies__documents" (id,file_id,document_seq,content)
        values (gen_random_uuid(),$1,0,'PTO content'),
               (gen_random_uuid(),$2,0,'Benefits content')`,
       [docIds[0], docIds[1]]);
 
-    // Approve grant with empty rowFilter
+    // Approve grant with empty documentFilter
     const grantRes = await dbDoc.query(
       `insert into app.grants (user_id, collection, allowed_fields, env, status)
        values ('u4', 'policies', array['title','content'], 'dev', 'pending') returning id`);
     const grantId = grantRes.rows[0].id;
     const { approveGrant } = await import("../src/grants/manage");
     await approveGrant(dbDoc, grantId, "admin", {
-      rowFilter: { field: "path", op: "in", value: [] },
+      documentFilter: { field: "path", op: "in", value: [] },
     });
 
     const r = await brokerDoc.query(ctx, { collection: "policies", fields: ["title"] });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.rows).toHaveLength(0);
+    if (r.ok) expect(r.documents).toHaveLength(0);
 
     await dbDoc.end();
     await poolsDoc.end();

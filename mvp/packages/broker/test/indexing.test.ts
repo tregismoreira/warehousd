@@ -3,34 +3,34 @@ import { Pool } from "pg";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { extractDoc } from "../src/indexing/extract";
+import { extractFile } from "../src/indexing/extract";
 import { chunkText } from "../src/indexing/chunk";
 import { indexCollection } from "../src/indexing";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 
-describe("extractDoc", () => {
+describe("extractFile", () => {
   const mtime = new Date("2026-07-01T00:00:00Z");
   it("title from first # heading, owner from frontmatter, checksum stable", () => {
     const raw = "---\nowner: ana@meridian.demo\n---\n# PTO Policy\n\nBody text.";
-    const d = extractDoc("hr/pto.md", raw, mtime);
+    const d = extractFile("hr/pto.md", raw, mtime);
     expect(d.title).toBe("PTO Policy");
     expect(d.owner).toBe("ana@meridian.demo");
     expect(d.content).not.toContain("owner:");        // frontmatter stripped
-    expect(d.checksum).toBe(extractDoc("hr/pto.md", raw, mtime).checksum);
+    expect(d.checksum).toBe(extractFile("hr/pto.md", raw, mtime).checksum);
   });
   it("falls back to filename title and null owner", () => {
-    const d = extractDoc("notes/q3-plan.txt", "no heading here", mtime);
+    const d = extractFile("notes/q3-plan.txt", "no heading here", mtime);
     expect(d.title).toBe("q3-plan");
     expect(d.owner).toBeNull();
   });
   it("parses the taxonomy term from frontmatter when termField given", () => {
     const raw = "---\nowner: ana@meridian.demo\ncategory: hr\n---\n# T\n\nBody.";
-    const d = extractDoc("a.md", raw, mtime, "category");
+    const d = extractFile("a.md", raw, mtime, "category");
     expect(d.term).toBe("hr");
-    expect(extractDoc("a.md", raw, mtime).term).toBeNull();       // no termField → null
-    expect(extractDoc("a.md", "# T\n\nBody.", mtime, "category").term).toBeNull(); // no frontmatter → null
+    expect(extractFile("a.md", raw, mtime).term).toBeNull();       // no termField → null
+    expect(extractFile("a.md", "# T\n\nBody.", mtime, "category").term).toBeNull(); // no frontmatter → null
   });
 });
 
@@ -58,10 +58,10 @@ describe("chunkText", () => {
 });
 
 const docCfg = {
-  project: "t", server: { port: 1 }, synthetic: { rows_per_collection: {} },
+  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: {} },
   collections: {
     policies: {
-      type: "document" as const,
+      type: "file" as const,
       description: "d",
       source: "./x",
       fields: {
@@ -103,14 +103,14 @@ describe("indexCollection (DB-backed)", () => {
     writeFileSync(join(dir, "a.md"), "# A\n\nalpha body CHANGED");
     const r3 = await indexCollection(db, "dev", "policies", dir);
     expect(r3.indexed).toBe(1);
-    const chunks = await db.query(`select content from data_synth."policies__chunks" c
-      join data_synth."policies__docs" d on d.id=c.document_id where d.path='a.md'`);
+    const chunks = await db.query(`select content from data_synth."policies__documents" c
+      join data_synth."policies__files" d on d.id=c.file_id where d.path='a.md'`);
     expect(chunks.rows.every((r: any) => r.content.includes("CHANGED"))).toBe(true);
 
     rmSync(join(dir, "sub/b.txt"));
     const r4 = await indexCollection(db, "dev", "policies", dir);
     expect(r4.deleted).toBe(1);
-    const docs = await db.query(`select path from data_synth."policies__docs"`);
+    const docs = await db.query(`select path from data_synth."policies__files"`);
     expect(docs.rows.map((r: any) => r.path)).toEqual(["a.md"]);
 
     rmSync(dir, { recursive: true });
@@ -122,7 +122,7 @@ describe("indexCollection (DB-backed)", () => {
     await createAppSchema(db);
     await applyConfig(db, docCfg);
 
-    const live = await db.query(`select count(*)::int as n from data_live."policies__docs"`);
+    const live = await db.query(`select count(*)::int as n from data_live."policies__files"`);
     expect(live.rows[0].n).toBe(0);
 
     rmSync(join(tmpdir(), "wh-idx-*"), { force: true });
@@ -171,14 +171,14 @@ describe("indexCollection: taxonomy", () => {
   it("writes the term column from frontmatter", async () => {
     writeFileSync(join(dir, "a.md"), "---\ncategory: hr\n---\n# A\n\nAlpha body.");
     await indexCollection(db, "dev", "policies", dir, { taxonomy: tax });
-    const r = (await db.query(`select category from data_synth."policies__docs" where path='a.md'`)).rows[0];
+    const r = (await db.query(`select category from data_synth."policies__files" where path='a.md'`)).rows[0];
     expect(r.category).toBe("hr");
   });
 
   it("updates the term when frontmatter changes", async () => {
     writeFileSync(join(dir, "a.md"), "---\ncategory: finance\n---\n# A\n\nAlpha body v2.");
     await indexCollection(db, "dev", "policies", dir, { taxonomy: tax });
-    const r = (await db.query(`select category from data_synth."policies__docs" where path='a.md'`)).rows[0];
+    const r = (await db.query(`select category from data_synth."policies__files" where path='a.md'`)).rows[0];
     expect(r.category).toBe("finance");
   });
 

@@ -13,10 +13,10 @@ import type { WarehousdConfig } from "../src/config/schema";
 const docCfg: WarehousdConfig = {
   project: "t",
   server: { port: 1 },
-  synthetic: { rows_per_collection: {} },
+  synthetic: { documents_per_collection: {} },
   collections: {
     policies: {
-      type: "document",
+      type: "file",
       description: "Company policies",
       source: "./x",
       fields: {
@@ -101,27 +101,27 @@ afterAll(async () => {
   await p.end();
 });
 
-it("returns ranked chunks with _rank + chunk_index, granted fields only (design tests 1, 9)", async () => {
+it("returns ranked documents with _rank + document_seq, granted fields only (design tests 1, 9)", async () => {
   const r = await broker.searchDocuments(ctx, { collection: "policies", q: "remote work" });
   expect(r.ok).toBe(true);
   if (!r.ok) return;
-  expect(r.rows.length).toBeGreaterThan(0);
-  for (const row of r.rows) {
+  expect(r.documents.length).toBeGreaterThan(0);
+  for (const row of r.documents) {
     expect(typeof row._rank).toBe("number");
-    expect(typeof row.chunk_index).toBe("number");
+    expect(typeof row.document_seq).toBe("number");
     expect(row).not.toHaveProperty("tsv");
     expect(row).not.toHaveProperty("path"); // path is posture: deny and ungranted
   }
-  const ranks = r.rows.map((x) => x._rank as number);
+  const ranks = r.documents.map((x) => x._rank as number);
   expect([...ranks].sort((a, b) => b - a)).toEqual(ranks); // descending
   expect(r.fieldsReturned).not.toContain("_rank");
-  expect(r.fieldsReturned).not.toContain("chunk_index");
+  expect(r.fieldsReturned).not.toContain("document_seq");
 });
 
 it("grant excluding content → content key absent (design test 2)", async () => {
   const r = await brokerAsTitleOnly.searchDocuments(makeCtx("u2"), { collection: "policies", q: "remote" });
   if (r.ok) {
-    for (const row of r.rows) {
+    for (const row of r.documents) {
       expect(row).not.toHaveProperty("content");
     }
   }
@@ -141,7 +141,7 @@ it("searchDocuments on a structured collection → invalid_intent (design test 1
   expect(r).toMatchObject({ ok: false, reason: "invalid_intent" });
 });
 
-it("query on a document collection works unchanged — listing (design test 12)", async () => {
+it("query on a file collection works unchanged — listing (design test 12)", async () => {
   const r = await broker.query(ctx, { collection: "policies", fields: ["title"] });
   expect(r.ok).toBe(true);
 });
@@ -160,7 +160,7 @@ it("every search writes an audit event (design test 11)", async () => {
   expect(await countAudit(db)).toBe(before + 2);
 });
 
-it("row_filter applies to search too (design test 3 over the search path)", async () => {
+it("document_filter applies to search too (design test 3 over the search path)", async () => {
   // Seed 2 docs with shared search term in different locations
   const fs = await import("node:fs");
   const tmpDir = mkdtempSync("search-rf-");
@@ -175,7 +175,7 @@ it("row_filter applies to search too (design test 3 over the search path)", asyn
   await indexCollection(db, "dev", "policies", tmpDir);
   rmSync(tmpDir, { recursive: true });
 
-  // Approve grant with rowFilter limiting to hr/pto.md only for user u3
+  // Approve grant with document_filter limiting to hr/pto.md only for user u3
   const grantRes = await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5) returning id`,
@@ -184,16 +184,16 @@ it("row_filter applies to search too (design test 3 over the search path)", asyn
   const grantId = grantRes.rows[0].id;
   const { approveGrant } = await import("../src/grants/manage");
   await approveGrant(db, grantId, "admin", {
-    rowFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
+    documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
   });
 
   // Search with the filtered grant
   const r = await broker.searchDocuments(makeCtx("u3"), { collection: "policies", q: "remote work" });
   expect(r.ok).toBe(true);
   if (r.ok) {
-    // All returned chunks should only be from hr/pto.md (check via path if available, but it won't be in fieldsReturned)
-    // Since path is denied, we can't check directly in the row, but the count should match only that doc's chunks
-    expect(r.rows.length).toBeGreaterThan(0);
+    // All returned documents should only be from hr/pto.md (check via path if available, but it won't be in fieldsReturned)
+    // Since path is denied, we can't check directly in the row, but the count should match only that doc's documents
+    expect(r.documents.length).toBeGreaterThan(0);
     // Verify the search actually matched something
   }
 });
