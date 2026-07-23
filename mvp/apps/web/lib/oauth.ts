@@ -1,7 +1,7 @@
 import { mcp } from "better-auth/plugins";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { Pool } from "pg";
-import { getClientPolicy } from "@warehousd/broker";
+import { getClientPolicy, hasApprovedLiveGrant } from "@warehousd/broker";
 
 const ENV_SCOPES = ["env:dev", "env:live"] as const;
 
@@ -37,7 +37,14 @@ export function envScopePlugin(app: Pool) {
             if (requestedEnv.length === 0) return;
 
             const policy = await getClientPolicy(app, clientId);
-            const survivors = requestedEnv.filter((s) => policy.allowedScopes.includes(s));
+            let survivors = requestedEnv.filter((s) => policy.allowedScopes.includes(s));
+
+            if (survivors.includes("env:live")) {
+              const session = await getSessionFromCtx(ctx);
+              const userId = session?.user?.id;
+              const eligible = userId ? await hasApprovedLiveGrant(app, userId) : false;
+              if (!eligible) survivors = survivors.filter((s) => s !== "env:live");
+            }
 
             const others = requested.filter((s) => !(ENV_SCOPES as readonly string[]).includes(s));
             ctx.query = { ...ctx.query, scope: [...others, ...survivors].join(" ") };
