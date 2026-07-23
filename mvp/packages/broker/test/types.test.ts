@@ -11,7 +11,7 @@ describe("types", () => {
       groupBy: ["job_title"],
       limit: 100,
     };
-    const ok: BrokerResult = { ok: true, rows: [], fieldsReturned: [], auditId: "a" };
+    const ok: BrokerResult = { ok: true, documents: [], fieldsReturned: [], auditId: "a" };
     expect(ctx.env).toBe("dev");
     expect(intent.collection).toBe("salaries");
     expect(ok.ok).toBe(true);
