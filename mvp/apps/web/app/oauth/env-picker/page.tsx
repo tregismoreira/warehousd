@@ -9,13 +9,14 @@ export default function EnvPickerPage({
   const params = new URLSearchParams(
     Object.entries(searchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] ?? "" : v ?? ""]),
   );
-  const authorizeAction = `/api/auth/mcp/authorize?${params.toString()}`;
-
   return (
     <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "system-ui" }}>
       <h1>Choose an environment</h1>
       <p>This app is requesting access. Pick which data environment to connect it to.</p>
-      <form action={authorizeAction} method="GET">
+      {/* GET form submission replaces the action URL's query entirely with the serialized
+          form fields (HTML living standard) — the hidden inputs below carry every original
+          param, so the action needs no query string of its own. */}
+      <form action="/api/auth/mcp/authorize" method="GET">
         {Array.from(params.entries()).map(([k, v]) => (
           <input key={k} type="hidden" name={k} value={v} />
         ))}
