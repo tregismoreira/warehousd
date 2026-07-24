@@ -64,12 +64,11 @@ describe("/mcp endpoint", () => {
 
   it("list_collections returns names+descriptions only", async () => {
     const token = await mintAccessToken("env:dev");
-    const { status, body } = await rpc(token, "tools/list");
+    const { status, body } = await rpc(token, "tools/call", { name: "list_collections", arguments: {} });
     expect(status).toBe(200);
-    const names = body.result.tools.map((t: { name: string }) => t.name).sort();
-    expect(names).toEqual([
-      "describe_collection", "list_collections", "query_collection", "request_access", "search_documents",
-    ]);
+    const out = JSON.parse(body.result.content[0].text);
+    expect(Array.isArray(out)).toBe(true);
+    for (const c of out) expect(Object.keys(c).sort()).toEqual(["description", "name"]);
   });
 
   it("describe_collection is grant-filtered", async () => {
