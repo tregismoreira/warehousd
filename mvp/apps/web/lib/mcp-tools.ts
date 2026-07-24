@@ -1,4 +1,6 @@
 import type { BrokerContext, QueryIntent, DocSearchIntent } from "@warehousd/broker";
+// requestGrant/getAppPool are unused until the request_access tool lands (Task 3) — kept
+// imported now so that task is a pure addition to this file, not an import-list edit too.
 import { requestGrant } from "@warehousd/broker";
 import { getBroker, getAppPool } from "../app/lib/broker";
 
