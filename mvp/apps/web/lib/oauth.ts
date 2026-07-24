@@ -46,6 +46,16 @@ export function envScopePlugin(app: Pool) {
               if (!eligible) survivors = survivors.filter((s) => s !== "env:live");
             }
 
+            // env:dev is the floor once a client engages with env scopes at all (requestedEnv
+            // was non-empty): a client that ends up ineligible for env:live — or never
+            // explicitly asked for env:dev — still receives env:dev if its policy allows it.
+            // "A client whose policy lacks env:live can request anything it wants — it will
+            // only ever receive env:dev" (SPECS §6.1 rule 1), not nothing. Gated on NOT already
+            // having env:live so it never fires on the dual-survivor path rule 3 handles below.
+            if (!survivors.includes("env:live") && !survivors.includes("env:dev") && policy.allowedScopes.includes("env:dev")) {
+              survivors = ["env:dev"];
+            }
+
             // Rule 3: exactly-one-env picker. When both env:dev and env:live survive rules 1-2,
             // redirect to the picker unless wh_env is set to a valid value.
             if (survivors.includes("env:dev") && survivors.includes("env:live")) {
@@ -89,12 +99,20 @@ export function envScopePlugin(app: Pool) {
             const currentEnv = current.filter((s) => (ENV_SCOPES as readonly string[]).includes(s));
             if (currentEnv.length === 0) return;
 
+            // Re-derive from the CURRENT policy/grant state rather than narrowing from
+            // currentEnv — a narrow-only recompute can never widen env:dev back up to
+            // env:live after a promotion, since env:live was never in currentEnv to begin
+            // with (it was already stripped at issuance). currentEnv.length===0 above is the
+            // only gate: it preserves "never touch a token that never engaged with env scopes
+            // at all," matching the before-hook's requestedEnv.length===0 gate.
             const policy = await getClientPolicy(app, row.clientId);
-            let allowed = currentEnv.filter((s) => policy.allowedScopes.includes(s));
-            if (allowed.includes("env:live")) {
+            let liveEligible = policy.allowedScopes.includes("env:live");
+            if (liveEligible) {
               const eligible = await hasApprovedLiveGrant(app, row.userId);
-              if (!eligible) allowed = allowed.filter((s) => s !== "env:live");
+              if (!eligible) liveEligible = false;
             }
+            const devEligible = policy.allowedScopes.includes("env:dev");
+            const allowed = liveEligible ? ["env:live"] : devEligible ? ["env:dev"] : [];
 
             const recomputed = [...current.filter((s) => !(ENV_SCOPES as readonly string[]).includes(s)), ...allowed].join(" ");
             if (recomputed === row.scopes) return;
