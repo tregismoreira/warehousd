@@ -81,7 +81,16 @@ it("test 5 (scope clauses): full env-as-scope acceptance gate", async () => {
       return tokenRes.json();
     }
 
-    const t1 = await authorizeAndGetToken("env:live openid");
+    // Request BOTH env:dev and env:live: rule 1's intersection only keeps scopes that are
+    // both requested and allowed — it never adds back an unrequested scope. Requesting
+    // env:live alone (as the plan's own literal brief text did) would correctly result in
+    // NEITHER scope surviving, not a fallback to env:dev; that's the already-verified
+    // behavior of Task 4's rule 1 test, which only asserts not.toContain("env:live") for
+    // exactly this reason. Request both here so the intended "downgrade to allowed subset"
+    // scenario is actually exercised.
+    // offline_access is required to receive a refresh_token at all (see Task 7) — without
+    // it, t1.refresh_token is undefined and the refresh calls below silently error.
+    const t1 = await authorizeAndGetToken("env:dev env:live openid offline_access");
     expect(t1.scope).not.toContain("env:live");
     expect(t1.scope).toContain("env:dev");
 
@@ -118,7 +127,7 @@ it("test 5 (scope clauses): full env-as-scope acceptance gate", async () => {
     expect(cols).not.toEqual(expect.arrayContaining(["allowedFields", "purposeLabel", "documentFilter"]));
 
     // Revoked grant → env:live gone within one forced refresh.
-    const liveToken = await authorizeAndGetToken("env:live openid");
+    const liveToken = await authorizeAndGetToken("env:live openid offline_access");
     const g2 = await app.query(`select id from app.grants where user_id='mia' and env='live' and status='approved' order by requested_at desc limit 1`);
     await revokeGrant(app, g2.rows[0].id, "marcus");
     const afterRevoke = await web.auth.api.mcpOAuthToken({
