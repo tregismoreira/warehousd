@@ -43,6 +43,38 @@ describe("mcp-tools: describe_collection", () => {
   });
 });
 
+describe("mcp-tools: query_collection", () => {
+  it("is registered and rejects unknown collections with a hint", async () => {
+    const tool = toolByName("query_collection")!;
+    expect(tool.inputSchema.required).toEqual(["collection"]);
+    const out = await tool.handler(ctx, { collection: "does_not_exist" }) as { ok: boolean; reason: string; hint?: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("unknown_collection");
+    expect(out.hint).toContain("request_access");
+  });
+});
+
+describe("mcp-tools: search_documents", () => {
+  it("is registered with collection and q required", () => {
+    const tool = toolByName("search_documents")!;
+    expect(tool.inputSchema.required).toEqual(["collection", "q"]);
+  });
+
+  it("rejects unknown collections with a hint", async () => {
+    const tool = toolByName("search_documents")!;
+    const out = await tool.handler(ctx, { collection: "does_not_exist", q: "x" }) as { ok: boolean; hint?: string };
+    expect(out.ok).toBe(false);
+    expect(out.hint).toContain("request_access");
+  });
+});
+
+describe("DATA_TOOL_NAMES", () => {
+  it("matches the query/search tool names", async () => {
+    const { DATA_TOOL_NAMES } = await import("../lib/mcp-tools");
+    expect(DATA_TOOL_NAMES).toEqual(["query_collection", "search_documents"]);
+  });
+});
+
 describe("TOOLS", () => {
   it("names are unique", () => {
     const names = TOOLS.map((t) => t.name);

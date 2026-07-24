@@ -52,6 +52,82 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx, input) =>
       withHint(await getBroker().broker.describeCollection(ctx, input.name as string)),
   },
+  {
+    name: "query_collection",
+    description:
+      "Run a structured QueryIntent. The broker re-validates every field against the caller's " +
+      "grant; denied fields are never returned, and referencing one anywhere (fields, filters, " +
+      "orderBy, aggregate, groupBy) refuses the whole call — you are an untrusted proposer, the " +
+      "broker is the source of truth. Two mutually exclusive shapes: (1) document fetch — use " +
+      "\"fields\", never combine with \"aggregate\"/\"groupBy\"; (2) aggregation (counts, sums, " +
+      "averages, breakdowns \"by X\") — use \"aggregate\" + \"groupBy\", never set \"fields\". " +
+      "Example aggregation: aggregate=[{\"fn\":\"count\",\"field\":\"id\"}], " +
+      "groupBy=[\"department_name\"]. Refusals are deny-by-default and purpose-bound; a refusal " +
+      "includes a request_access hint.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        collection: { type: "string", description: "Collection name, from list_collections." },
+        fields: {
+          type: "array", items: { type: "string" },
+          description: "Document-fetch shape only. Field names to return; omit for aggregation.",
+        },
+        filters: {
+          type: "array", items: {
+            type: "object",
+            properties: {
+              field: { type: "string" },
+              op: { type: "string", enum: ["eq", "neq", "gt", "lt", "gte", "lte", "like", "in"] },
+              value: {},
+            },
+            required: ["field", "op", "value"],
+          },
+        },
+        orderBy: {
+          type: "object",
+          properties: { field: { type: "string" }, dir: { type: "string", enum: ["asc", "desc"] } },
+        },
+        limit: { type: "number", description: "Default 100, max 500." },
+        aggregate: {
+          type: "array", items: {
+            type: "object",
+            properties: {
+              fn: { type: "string", enum: ["avg", "sum", "count", "min", "max"] },
+              field: { type: "string" },
+            },
+            required: ["fn", "field"],
+          },
+          description: "Aggregation shape only. e.g. count/sum/avg per group.",
+        },
+        groupBy: {
+          type: "array", items: { type: "string" },
+          description: "Aggregation shape only. Field names to group by.",
+        },
+      },
+      required: ["collection"],
+    },
+    handler: async (ctx, input) =>
+      withHint(await getBroker().broker.query(ctx, input as unknown as QueryIntent)),
+  },
+  {
+    name: "search_documents",
+    description:
+      "Full-text search over a file collection. Access is deny-by-default and purpose-bound: " +
+      "results contain only fields covered by your approved grant, restricted to documents your " +
+      "grant allows. Refusals include a request_access hint.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        collection: { type: "string" },
+        q: { type: "string" },
+        fields: { type: "array", items: { type: "string" } },
+        limit: { type: "number" },
+      },
+      required: ["collection", "q"],
+    },
+    handler: async (ctx, input) =>
+      withHint(await getBroker().broker.searchDocuments(ctx, input as unknown as DocSearchIntent)),
+  },
 ];
 
 export function toolByName(name: string): ToolDef | undefined {
