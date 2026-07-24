@@ -17,19 +17,13 @@ async function handle(req: Request): Promise<Response> {
     tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (req: any) => {
-    const toolName = req.params?.name ?? req.name;
-    const toolArgs = req.params?.arguments ?? req.arguments ?? {};
-    const tool = toolByName(toolName);
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const tool = toolByName(req.params.name);
     if (!tool) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, reason: "unknown_tool" }) }], isError: true };
     }
-    try {
-      const out = await tool.handler(ctx, toolArgs);
-      return { content: [{ type: "text" as const, text: JSON.stringify(out) }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: JSON.stringify({ ok: false, reason: "tool_error", message: String(error) }) }], isError: true };
-    }
+    const out = await tool.handler(ctx, req.params.arguments ?? {});
+    return { content: [{ type: "text", text: JSON.stringify(out) }] };
   });
 
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
