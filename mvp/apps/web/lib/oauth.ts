@@ -1,7 +1,7 @@
 import { mcp } from "better-auth/plugins";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { Pool } from "pg";
-import { getClientPolicy, hasApprovedLiveGrant } from "@warehousd/broker";
+import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy } from "@warehousd/broker";
 
 const ENV_SCOPES = ["env:dev", "env:live"] as const;
 
@@ -105,6 +105,16 @@ export function envScopePlugin(app: Pool) {
               update: { scopes: recomputed },
             });
             ctx.context.returned = { ...returned, scope: recomputed };
+          }),
+        },
+        {
+          matcher: (ctx: { path: string }) => ctx.path === "/mcp/register",
+          handler: createAuthMiddleware(async (ctx: any) => {
+            const returned = ctx.context.returned;
+            if (!(returned instanceof Response)) return;
+            const body = await returned.clone().json();
+            if (!body?.client_id) return;
+            await upsertClientPolicy(app, body.client_id, body.client_name ?? null, ["env:dev", "env:live"]);
           }),
         },
       ],
