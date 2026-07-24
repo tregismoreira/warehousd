@@ -97,21 +97,20 @@ describe("/mcp endpoint", () => {
     expect(out.hint).toContain("request_access");
   });
 
-  it("search_documents is grant-filtered with _rank/document_seq", async () => {
-    const app = getAppPool();
-    // `policies` is the one `type: file` collection in examples/meridian/warehousd.yml, with
-    // fields title/content/owner/updated_at/category (allow) and path (deny).
-    const g = await requestGrant(app, { userId: "mia", collection: "policies", env: "dev", purposeLabel: "t", allowedFields: ["title", "content"] });
-    await approveGrant(app, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+  it("search_documents refuses an ungranted collection with a hint (grant-filtering entry point)", async () => {
     const token = await mintAccessToken("env:dev");
+    // `policies` is the one `type: file` collection in examples/meridian/warehousd.yml. No grant
+    // exists in this test, so this exercises the deny-by-default path — same boundary the unit
+    // tests in mcp-tools.test.ts already cover; a real successful search against live synthetic/
+    // indexed content is out of scope here since apps/web's test harness doesn't provision
+    // DEV_DATABASE_URL/LIVE_DATABASE_URL or seeded data (see packages/broker's own
+    // search-documents.test.ts for full data-correctness coverage of _rank/document_seq).
     const { body } = await rpc(token, "tools/call", {
       name: "search_documents", arguments: { collection: "policies", q: "policy" },
     });
     const out = JSON.parse(body.result.content[0].text);
-    if (out.ok) {
-      expect(out.fieldsReturned).not.toContain("_rank");
-      expect(out.fieldsReturned).not.toContain("document_seq");
-    }
+    expect(out.ok).toBe(false);
+    expect(out.hint).toContain("request_access");
   });
 
   it("request_access produces a pending grant visible to Marcus", async () => {
