@@ -75,6 +75,32 @@ describe("DATA_TOOL_NAMES", () => {
   });
 });
 
+describe("mcp-tools: request_access", () => {
+  it("is registered with collection and purpose required, fields optional", () => {
+    const tool = toolByName("request_access")!;
+    expect(tool.inputSchema.required).toEqual(["collection", "purpose"]);
+  });
+
+  it("creates a pending grant row via requestGrant and returns its id", async () => {
+    const tool = toolByName("request_access")!;
+    const out = await tool.handler(ctx, {
+      collection: "people", purpose: "quarterly headcount review", fields: ["id", "department_name"],
+    }) as { ok: boolean; requestId: string };
+    expect(out.ok).toBe(true);
+    expect(out.requestId).toBeTruthy();
+
+    const { getAppPool } = await import("../app/lib/broker");
+    const row = await getAppPool().query(
+      `select status, user_id, collection, env, allowed_fields from app.grants where id = $1`,
+      [out.requestId],
+    );
+    expect(row.rows[0]).toMatchObject({
+      status: "pending", user_id: "mia", collection: "people", env: "dev",
+      allowed_fields: ["id", "department_name"],
+    });
+  });
+});
+
 describe("TOOLS", () => {
   it("names are unique", () => {
     const names = TOOLS.map((t) => t.name);

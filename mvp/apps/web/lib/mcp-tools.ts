@@ -128,6 +128,35 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx, input) =>
       withHint(await getBroker().broker.searchDocuments(ctx, input as unknown as DocSearchIntent)),
   },
+  {
+    name: "request_access",
+    description:
+      "Request access to a collection you currently can't see, or can't fully see. Creates a " +
+      "pending request a manager or admin can approve; returns the request id. Use this whenever " +
+      "another tool refuses with no_grant or field_denied.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        collection: { type: "string" },
+        purpose: { type: "string", description: "Why you need this access — shown to the approver." },
+        fields: {
+          type: "array", items: { type: "string" },
+          description: "Fields you need. Omit to let the approver decide scope from the purpose.",
+        },
+      },
+      required: ["collection", "purpose"],
+    },
+    handler: async (ctx, input) => {
+      const requestId = await requestGrant(getAppPool(), {
+        userId: ctx.userId,
+        collection: input.collection as string,
+        env: ctx.env,
+        purposeLabel: input.purpose as string,
+        allowedFields: (input.fields as string[] | undefined) ?? [],
+      });
+      return { ok: true, requestId };
+    },
+  },
 ];
 
 export function toolByName(name: string): ToolDef | undefined {
