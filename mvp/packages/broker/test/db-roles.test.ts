@@ -10,6 +10,9 @@ import { loadConfig } from "../src/config/load";
 import { seedLive } from "../../../examples/meridian/seed/live";
 import { LIVE_ONLY_CANARY } from "./fixtures/canaries";
 import { join } from "node:path";
+import { setupWebDb, signIn } from "../../../apps/web/test/helpers/web-db";
+import { authorizeAndGetCode, pkcePair } from "../../../apps/web/test/helpers/oauth";
+import { upsertClientPolicy, requestGrant, approveGrant, revokeGrant, setAllowedScopes } from "../src";
 
 // NOTE: depends on examples/meridian, excluded from mvp/ until Task 12 recreates it — expected to fail until then.
 
@@ -47,6 +50,95 @@ it("test 5 (partial): dev token cannot see live-only canary; direct role check",
   await expect(dev.query(`select * from data_live.v_people`)).rejects.toThrow();
   await dev.end();
 });
+
+it("test 5 (scope clauses): full env-as-scope acceptance gate", async () => {
+  const web = await setupWebDb("acceptance5");
+  try {
+    const miaCookie = await signIn(web.auth, "mia@meridian.demo", "demo");
+    const { getAppPool } = await import("../../../apps/web/app/lib/broker");
+    const app = getAppPool();
+
+    // Dev-only client requesting env:live → issued token contains only env:dev.
+    const reg = await web.auth.api.registerMcpClient({
+      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "Acceptance Client" },
+      asResponse: true,
+    } as any);
+    const { client_id, client_secret } = await reg.json(); // snake_case — RFC 7591
+    await upsertClientPolicy(app, client_id, "Acceptance Client", ["env:dev"]); // dev-only
+
+    async function authorizeAndGetToken(scope: string) {
+      const { verifier, challenge } = pkcePair();
+      const { code } = await authorizeAndGetCode(web.auth, {
+        clientId: client_id, scope, cookie: miaCookie, challenge,
+      });
+      const tokenRes = await web.auth.api.mcpOAuthToken({
+        body: {
+          grant_type: "authorization_code", code, redirect_uri: "http://localhost:9999/callback",
+          client_id, client_secret, code_verifier: verifier,
+        },
+        asResponse: true,
+      } as any);
+      return tokenRes.json();
+    }
+
+    // Request BOTH env:dev and env:live: rule 1's intersection only keeps scopes that are
+    // both requested and allowed — it never adds back an unrequested scope. Requesting
+    // env:live alone (as the plan's own literal brief text did) would correctly result in
+    // NEITHER scope surviving, not a fallback to env:dev; that's the already-verified
+    // behavior of Task 4's rule 1 test, which only asserts not.toContain("env:live") for
+    // exactly this reason. Request both here so the intended "downgrade to allowed subset"
+    // scenario is actually exercised.
+    // offline_access is required to receive a refresh_token at all (see Task 7) — without
+    // it, t1.refresh_token is undefined and the refresh calls below silently error.
+    const t1 = await authorizeAndGetToken("env:dev env:live openid offline_access");
+    expect(t1.scope).not.toContain("env:live");
+    expect(t1.scope).toContain("env:dev");
+
+    // After promotion, next refresh yields env:live.
+    await setAllowedScopes(app, client_id, ["env:dev", "env:live"], "ana");
+    const grantId = await requestGrant(app, { userId: "mia", collection: "people", env: "live", purposeLabel: "t", allowedFields: ["id"] });
+    await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    const refreshed = await web.auth.api.mcpOAuthToken({
+      body: { grant_type: "refresh_token", refresh_token: t1.refresh_token, client_id, client_secret },
+      asResponse: true,
+    } as any).then((r: Response) => r.json());
+    expect(refreshed.scope).toContain("env:live");
+
+    // After demotion, next refresh drops it.
+    await setAllowedScopes(app, client_id, ["env:dev"], "ana");
+    const demoted = await web.auth.api.mcpOAuthToken({
+      body: { grant_type: "refresh_token", refresh_token: refreshed.refresh_token, client_id, client_secret },
+      asResponse: true,
+    } as any).then((r: Response) => r.json());
+    expect(demoted.scope).not.toContain("env:live");
+
+    // Token with no env scope → adapter defaults to dev.
+    await setAllowedScopes(app, client_id, ["env:dev", "env:live"], "ana");
+    const noEnv = await authorizeAndGetToken("openid");
+    const { deriveTokenContext } = await import("../../../apps/web/lib/broker-context");
+    const ctx = await deriveTokenContext(new Request("http://localhost:8722/mcp", {
+      headers: { authorization: `Bearer ${noEnv.access_token}` },
+    }));
+    expect(ctx?.env).toBe("dev");
+
+    // Token payload contains only sub/client/env — no grant data (spot-check the row).
+    const row = await app.query(`select * from app."oauthAccessToken" where "accessToken"=$1`, [noEnv.access_token]);
+    const cols = Object.keys(row.rows[0]);
+    expect(cols).not.toEqual(expect.arrayContaining(["allowedFields", "purposeLabel", "documentFilter"]));
+
+    // Revoked grant → env:live gone within one forced refresh.
+    const liveToken = await authorizeAndGetToken("env:live openid offline_access");
+    const g2 = await app.query(`select id from app.grants where user_id='mia' and env='live' and status='approved' order by requested_at desc limit 1`);
+    await revokeGrant(app, g2.rows[0].id, "marcus");
+    const afterRevoke = await web.auth.api.mcpOAuthToken({
+      body: { grant_type: "refresh_token", refresh_token: liveToken.refresh_token, client_id, client_secret },
+      asResponse: true,
+    } as any).then((r: Response) => r.json());
+    expect(afterRevoke.scope).not.toContain("env:live");
+  } finally {
+    await web.end();
+  }
+}, 60_000);
 
 it("test 8: synthetic generator role has no data_live privilege; FK integrity holds", async () => {
   const dev = new Pool({ connectionString: p.urls.dev });

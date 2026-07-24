@@ -14,7 +14,7 @@ describe("app schema", () => {
     const r = await db.query(
       `select table_name from information_schema.tables where table_schema='app' order by table_name`);
     await db.end();
-    expect(r.rows.map((x) => x.table_name)).toEqual(["audit_events", "collections", "grants", "terms", "vocabularies"]);
+    expect(r.rows.map((x) => x.table_name)).toEqual(["audit_events", "client_policies", "collections", "grants", "terms", "vocabularies"]);
   });
 });
 
@@ -45,6 +45,27 @@ describe("taxonomy tables", () => {
     await db.query(`delete from app.vocabularies where id=$1`, [vid]);
     const left = await db.query(`select 1 from app.terms where vocabulary_id=$1`, [vid]);
     expect(left.rowCount).toBe(0);
+    await db.end();
+  });
+});
+
+describe("client_policies table", () => {
+  it("creates app.client_policies with the default allow-list", async () => {
+    p = await provision("appschema");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    const r = await db.query(`
+      insert into app.client_policies (client_id, display_name) values ('c1', 'Test Client')
+      returning allowed_scopes`);
+    expect(r.rows[0].allowed_scopes).toEqual(["env:dev"]);
+    await db.end();
+  });
+
+  it("client_policies is idempotent under repeated createAppSchema calls", async () => {
+    p = await provision("appschema");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await expect(createAppSchema(db)).resolves.not.toThrow();
+    await expect(createAppSchema(db)).resolves.not.toThrow();
     await db.end();
   });
 });

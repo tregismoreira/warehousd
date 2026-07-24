@@ -11,7 +11,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
     "@warehousd/broker": "workspace:*",
-    "better-auth": "^1.2.0",
+    "better-auth": "^1.6.24",
     "next": "^15.0.0",
     "pg": "^8.13.0",
     "react": "^19.0.0",

@@ -39,6 +39,18 @@ export async function createAppSchema(db: Pool): Promise<void> {
       parent_id uuid references app.terms(id),
       unique (vocabulary_id, slug));
   `);
+  // client_policies: per-OAuth-client env:live allow-list (§6.1). No FK to Better Auth's
+  // oauth client table: createAppSchema runs BEFORE the `@better-auth/cli migrate` step in
+  // both scripts/dev-bootstrap.ts and the web test helper, so that table doesn't exist yet
+  // when this runs — same reason app.grants.user_id has no FK to Better Auth's user table.
+  await db.query(`
+    create table if not exists app.client_policies (
+      client_id text primary key,
+      display_name text,
+      allowed_scopes text[] not null default '{env:dev}',
+      promoted_at timestamptz,
+      promoted_by text);
+  `);
   // audit_events is INSERT-only for data roles (§5.5 / test 9)
   await db.query(`
     grant usage on schema app to warehousd_dev, warehousd_live;

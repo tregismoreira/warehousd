@@ -15,8 +15,10 @@ export function readEnvCookie(req: Request): "dev" | "live" {
   return m?.[1] === "live" ? "live" : "dev";
 }
 
-// The ONLY place BrokerContext is constructed in the web console. userId comes from the
-// verified session; env from the env cookie. Any env-like body param is ignored.
+// The sole BrokerContext constructor for cookie/session (web console) paths. userId comes
+// from the verified session; env from the env cookie. Any env-like body param is ignored.
+// Token-authenticated (MCP/OAuth) paths use lib/broker-context.ts's deriveTokenContext
+// instead — two constructors, one per auth path, never a third.
 export async function deriveContext(req: Request): Promise<BrokerContext | null> {
   const user = await getSessionUser(req);
   if (!user) return null;

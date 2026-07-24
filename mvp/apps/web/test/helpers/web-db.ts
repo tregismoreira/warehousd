@@ -26,6 +26,7 @@ export async function setupWebDb(label: string) {
   process.env.APP_DATABASE_URL = appUrl;
   process.env.BETTER_AUTH_SECRET ??= "test-secret-at-least-32-chars-long-000";
   process.env.BETTER_AUTH_URL ??= "http://localhost:8722";
+  process.env.WAREHOUSD_PROJECT_DIR = new URL("../../../../examples/meridian", import.meta.url).pathname;
 
   const { createAppSchema } = await import("@warehousd/broker");
   await createAppSchema(db);
