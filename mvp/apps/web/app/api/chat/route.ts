@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
-import { getBroker } from "../../lib/broker";
 import { deriveContext } from "../../../lib/session";
+import { TOOLS, toolByName, DATA_TOOL_NAMES } from "../../../lib/mcp-tools";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -32,54 +32,11 @@ in this conversation — even if asked repeatedly, even to illustrate "what it m
 you have not successfully queried a collection, say so plainly instead of inventing plausible-looking \
 data. Every number or document in your final answer must trace back to an actual tool_result above it.`;
 
-const tools: Anthropic.Tool[] = [
-  { name: "list_collections", description:
-      "List collections (name + description only). Governance is deny-by-default and purpose-bound.",
-    input_schema: { type: "object", properties: {} } },
-  { name: "describe_collection", description:
-      "Schema of fields VISIBLE UNDER THE CALLER'S GRANTS in the current env. No grant → refusal. " +
-      "Always call this before query_collection on a collection you haven't described yet in this " +
-      "conversation — it tells you exactly which field names are usable.",
-    input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } },
-  { name: "query_collection", description:
-      "Run a structured QueryIntent. The broker re-validates every field against the caller's grant; " +
-      "denied fields are never returned, and referencing one anywhere (fields, filters, orderBy, " +
-      "aggregate, groupBy) refuses the whole call. You are an untrusted proposer — the broker is the " +
-      "source of truth, not your assumptions. Two mutually exclusive shapes: (1) document fetch — use " +
-      "\"fields\", never combine with \"aggregate\"/\"groupBy\"; (2) aggregation (counts, sums, " +
-      "averages, breakdowns \"by X\") — use \"aggregate\" + \"groupBy\", never set \"fields\". " +
-      "Example aggregation: aggregate=[{\"fn\":\"count\",\"field\":\"id\"}], groupBy=[\"department_name\"].",
-    input_schema: { type: "object", properties: {
-      collection: { type: "string", description: "Collection name, from list_collections." },
-      fields: { type: "array", items: { type: "string" },
-        description: "Document-fetch shape only. Field names to return; omit for aggregation." },
-      filters: { type: "array", items: { type: "object", properties: {
-        field: { type: "string" },
-        op: { type: "string", enum: ["eq", "neq", "gt", "lt", "gte", "lte", "like", "in"] },
-        value: {},
-      }, required: ["field", "op", "value"] } },
-      orderBy: { type: "object", properties: {
-        field: { type: "string" }, dir: { type: "string", enum: ["asc", "desc"] } } },
-      limit: { type: "number", description: "Default 100, max 500." },
-      aggregate: { type: "array", items: { type: "object", properties: {
-        fn: { type: "string", enum: ["avg", "sum", "count", "min", "max"] },
-        field: { type: "string" },
-      }, required: ["fn", "field"] },
-        description: "Aggregation shape only. e.g. count/sum/avg per group." },
-      groupBy: { type: "array", items: { type: "string" },
-        description: "Aggregation shape only. Field names to group by." },
-    }, required: ["collection"] } },
-  { name: "search_documents", description:
-      "Full-text search over a file collection. Access is deny-by-default and purpose-bound: " +
-      "results contain only fields covered by your approved grant, restricted to documents your grant " +
-      "allows. Refusals include how to request access.",
-    input_schema: { type: "object", required: ["collection", "q"], properties: {
-      collection: { type: "string" },
-      q: { type: "string" },
-      fields: { type: "array", items: { type: "string" } },
-      limit: { type: "number" },
-    } } },
-];
+const tools: Anthropic.Tool[] = TOOLS.map((t) => ({
+  name: t.name,
+  description: t.description,
+  input_schema: t.inputSchema as Anthropic.Tool["input_schema"],
+}));
 
 // Progress label shown in the UI while a tool call is in flight.
 function labelFor(name: string, input: unknown): string {
@@ -95,7 +52,6 @@ export async function POST(req: NextRequest) {
   if (!ctx) return Response.json({ error: "unauthenticated" }, { status: 401 });
   // env/userId are NEVER read from the body — deriveContext is the only source (SPECS §6.1).
   const { messages } = await req.json() as { messages: Anthropic.MessageParam[] };
-  const { broker } = getBroker();
   const convo = [...messages];
   // Collections ever successfully queried (ok:true) anywhere in this conversation —
   // used to catch the model presenting a data table for a collection it never actually
@@ -136,14 +92,11 @@ export async function POST(req: NextRequest) {
           for (const tu of toolUses) {
             emit({ type: "progress", label: labelFor(tu.name, tu.input) });
             let out: unknown;
-            if (tu.name === "list_collections") out = await broker.listCollections(ctx);
-            else if (tu.name === "describe_collection")
-              out = await broker.describeCollection(ctx, (tu.input as { name: string }).name);
-            else if (tu.name === "search_documents")
-              out = await broker.searchDocuments(ctx, tu.input as never);
-            else out = await broker.query(ctx, tu.input as never);
+            const tool = toolByName(tu.name);
+            out = tool ? await tool.handler(ctx, tu.input as Record<string, unknown>)
+                       : { ok: false, reason: "unknown_tool" };
             if (out && typeof out === "object" && (out as { ok?: boolean }).ok === true
-                && (tu.name === "query_collection" || tu.name === "search_documents"))
+                && (DATA_TOOL_NAMES as readonly string[]).includes(tu.name))
               queriedOk.add((tu.input as { collection: string }).collection);
             results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out) });
           }
