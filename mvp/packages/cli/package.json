@@ -1,4 +1,16 @@
 {
-  "name": "warehousd", "version": "0.0.0", "type": "module", "bin": { "warehousd": "./src/index.ts" },
-  "dependencies": { "@warehousd/broker": "workspace:*", "commander": "^12.1.0", "pg": "^8.13.0" }
+  "name": "warehousd",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "warehousd": "./src/index.ts"
+  },
+  "dependencies": {
+    "@warehousd/broker": "workspace:*",
+    "commander": "^12.1.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1"
+  }
 }
