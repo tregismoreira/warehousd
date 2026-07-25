@@ -64,10 +64,14 @@ function LoginInner() {
     else window.location.href = returnTo;
   }
 
-  async function signInWithSSO(providerId: string) {
+  async function signInWithSSO(providerId: string, providerType: string) {
     try {
       setErr(null);
-      const { error } = await authClient.signIn.sso({ providerId, callbackURL: returnTo });
+      const { error } = await authClient.signIn.sso({
+        providerId,
+        callbackURL: returnTo,
+        ...(providerType === "saml" && { providerType: "saml" }),
+      });
       if (error) setErr(error.message ?? "SSO sign-in failed");
     } catch (e) {
       setErr("SSO sign-in failed");
@@ -96,7 +100,7 @@ function LoginInner() {
           {providers.map((p) => (
             <button
               key={p.providerId}
-              onClick={() => signInWithSSO(p.providerId)}
+              onClick={() => signInWithSSO(p.providerId, p.type)}
               style={{
                 padding: 12,
                 fontSize: 14,

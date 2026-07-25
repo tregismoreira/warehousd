@@ -138,6 +138,24 @@
       "realmRoles": [
         "offline_access"
       ]
+    },
+    {
+      "username": "sso-saml-user@meridian.demo",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "sso-saml-user@meridian.demo",
+      "firstName": "SAML",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "offline_access"
+      ]
     }
   ],
   "clients": [
