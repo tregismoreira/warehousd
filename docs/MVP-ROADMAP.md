@@ -213,6 +213,20 @@ confirming what's on screen:
 Until these are done, Phase 4 is code-complete but not signed off. §10 test 11
 is the one acceptance test this phase owns that CI cannot prove.
 
+### Known coverage gap — carry into Phase 5
+
+`mvp/apps/web/app/login/page.tsx` has **no automated test coverage**. Nothing
+exercises the SSO-first rendering, the collapsed local-login disclosure, the
+"No login method is configured" state, the `returnTo` OAuth-continuation
+redirect, or the SAML `providerType` branch — only the `/api/sso/status`
+endpoint it consumes is tested. Until the hand-check above is done, that file's
+only verification is a human looking at it.
+
+Phase 5 rebuilds this page as part of the web UI and should add component or
+browser coverage for those states then, rather than bolting a test onto a page
+that is about to be replaced. Flagging it here so it isn't silently inherited
+as "already tested".
+
 ## Phase 5 — Admin / Manager / Member web UI (§8) — parallel with Phase 6
 
 Apply the `frontend-design` skill; keep the Phase 0 "security console" aesthetic.

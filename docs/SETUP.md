@@ -63,7 +63,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Demo mode — shows demo credential buttons on the login screen
 WAREHOUSD_DEMO=true
 
-# Kill-switch — uncomment to disable local login (shows SSO notice instead)
+# Kill-switch — uncomment to disable local login. The login page then offers only the
+# SSO button, or "No login method is configured" if no SSO provider is registered.
 # WAREHOUSD_DISABLE_LOCAL_LOGIN=true
 ```
 
