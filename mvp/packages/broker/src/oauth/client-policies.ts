@@ -1,4 +1,7 @@
 import type { Pool } from "pg";
+import { randomBytes } from "node:crypto";
+
+export const DEV_CLIENT_NAME = "warehousd dev client";
 
 export type ClientPolicy = { clientId: string; allowedScopes: string[] };
 
@@ -32,4 +35,31 @@ export async function hasApprovedLiveGrant(app: Pool, userId: string): Promise<b
      where user_id=$1 and env='live' and status='approved' and expires_at > now() limit 1`,
     [userId]);
   return (r.rowCount ?? 0) > 0;
+}
+
+export async function getDevClient(app: Pool): Promise<{ clientId: string; clientSecret: string } | null> {
+  const r = await app.query(
+    `select "clientId", "clientSecret" from app."oauthApplication" where name=$1 limit 1`,
+    [DEV_CLIENT_NAME]);
+  if (r.rowCount === 0) return null;
+  return { clientId: r.rows[0].clientId, clientSecret: r.rows[0].clientSecret };
+}
+
+export async function ensureDevClient(app: Pool, ownerUserId: string | null): Promise<{ clientId: string; clientSecret: string }> {
+  const existing = await getDevClient(app);
+  if (existing) {
+    // Re-assert the policy in case the row was created before client_policies existed.
+    await upsertClientPolicy(app, existing.clientId, DEV_CLIENT_NAME, ["env:dev"]);
+    return existing;
+  }
+  const id = randomBytes(16).toString("hex");
+  const clientId = randomBytes(16).toString("hex");
+  const clientSecret = randomBytes(32).toString("hex");
+  await app.query(
+    `insert into app."oauthApplication"
+       ("id","clientId","clientSecret",name,type,"redirectUrls","userId","createdAt","updatedAt")
+     values ($1,$2,$3,$4,'web','[]',$5,now(),now())`,
+    [id, clientId, clientSecret, DEV_CLIENT_NAME, ownerUserId]);
+  await upsertClientPolicy(app, clientId, DEV_CLIENT_NAME, ["env:dev"]);
+  return { clientId, clientSecret };
 }

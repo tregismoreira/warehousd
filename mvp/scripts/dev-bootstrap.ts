@@ -1,7 +1,7 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
 import { execSync } from "child_process";
-import { loadConfig, applyConfig, generateSynthetic, createAppSchema, indexCollection } from "@warehousd/broker";
+import { loadConfig, applyConfig, generateSynthetic, createAppSchema, indexCollection, ensureSchemasAndRoles } from "@warehousd/broker";
 import { seedLive } from "../examples/meridian/seed/live";
 import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
@@ -36,17 +36,7 @@ async function seedPersonaUsers(db: Pool) {
 
 async function main() {
   const db = new Pool({ connectionString: url });
-  await db.query(`
-    create schema if not exists app;
-    create schema if not exists data_synth;
-    create schema if not exists data_live;
-    do $$ begin
-      if not exists (select from pg_roles where rolname='warehousd_dev') then create role warehousd_dev login password 'pw'; end if;
-      if not exists (select from pg_roles where rolname='warehousd_live') then create role warehousd_live login password 'pw'; end if;
-    end $$;
-    grant usage on schema data_synth to warehousd_dev;
-    grant usage on schema data_live to warehousd_live;
-    grant usage on schema app to warehousd_dev, warehousd_live;`);
+  await ensureSchemasAndRoles(db, "pw");
   const cfg = loadConfig(dir);
   await createAppSchema(db);
   // Ensure Better Auth tables exist (user/session/account/verification) before seeding users.

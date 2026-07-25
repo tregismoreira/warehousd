@@ -12,15 +12,8 @@ export async function setupWebDb(label: string) {
 
   const appUrl = `${BASE}/${dbName}`;
   const db = new Pool({ connectionString: appUrl });
-  await db.query(`
-    create schema app; create schema data_synth; create schema data_live;
-    do $$ begin
-      if not exists (select from pg_roles where rolname='warehousd_dev') then create role warehousd_dev login password 'pw'; end if;
-      if not exists (select from pg_roles where rolname='warehousd_live') then create role warehousd_live login password 'pw'; end if;
-    end $$;
-    grant usage on schema data_synth to warehousd_dev;
-    grant usage on schema data_live to warehousd_live;
-    grant usage on schema app to warehousd_dev, warehousd_live;`);
+  const { ensureSchemasAndRoles } = await import("@warehousd/broker");
+  await ensureSchemasAndRoles(db, "pw");
 
   // Point auth at this DB BEFORE importing lib/auth (it reads APP_DATABASE_URL at module load).
   process.env.APP_DATABASE_URL = appUrl;
