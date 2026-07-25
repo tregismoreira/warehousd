@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getAppPool } from "../../lib/broker";
 import { approveGrant, denyGrant, revokeGrant, loadConfig, requestGrant, grantableFields } from "@warehousd/broker";
-import { requireSession, requireRole } from "../../../lib/authz";
+import { requireSession, requireRole, atLeast } from "../../../lib/authz";
 import { readEnvCookie } from "../../../lib/session";
 
 const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
@@ -16,8 +16,7 @@ export async function GET(req: NextRequest) {
     `select * from app.grants where user_id=$1 order by requested_at desc`, [user.id]);
   // The pending queue is approver-only data: it names who asked for what, and why. A member
   // calling this endpoint directly used to receive the whole organisation's queue.
-  const isManager = user.role === "manager" || user.role === "admin";
-  const pending = isManager
+  const pending = atLeast(user.role, "manager")
     ? await app.query(`select * from app.grants where status='pending' order by requested_at desc`)
     : { rows: [] as typeof mine.rows };
 

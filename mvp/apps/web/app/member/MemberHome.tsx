@@ -1,16 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/common/PageHeader";
-import { MyGrants } from "./MyGrants";
+import { MyGrants, type MeGrant } from "./MyGrants";
 import { RequestAccessSheet } from "./RequestAccessSheet";
-
-type MeGrant = {
-  id: string; collection: string; env: "dev" | "live";
-  status: string; effectiveStatus: string;
-  allowed_fields: string[] | null; purpose_label: string | null;
-  requested_at: string; expires_at: string | null;
-  document_filter: { field: string; op: string; value: unknown } | null;
-};
 
 export function MemberHome() {
   const [grants, setGrants] = useState<MeGrant[]>([]);

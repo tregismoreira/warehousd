@@ -6,7 +6,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { StatusBadge, type GrantStatus } from "@/components/common/StatusBadge";
 import { Mono } from "@/components/common/Mono";
 
-type MeGrant = {
+export type MeGrant = {
   id: string; collection: string; env: "dev" | "live";
   status: string; effectiveStatus: GrantStatus;
   allowed_fields: string[] | null; purpose_label: string | null;
