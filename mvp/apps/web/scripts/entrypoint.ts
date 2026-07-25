@@ -130,9 +130,9 @@ export async function bootstrap(): Promise<void> {
 
     // 4. Better Auth's own tables (user/session/account/verification/oauthApplication).
     //    Skip if WAREHOUSD_SKIP_BA_MIGRATE is set (for testing, since cwd:/app doesn't exist on host).
-    //    Use npx instead of pnpm exec to avoid version conflicts in the CLI package.
+    //    Use pnpm exec to resolve better-auth CLI from node_modules for offline operation.
     if (process.env.WAREHOUSD_SKIP_BA_MIGRATE !== "true") {
-      execFileSync("npx", ["@better-auth/cli", "migrate", "--config", "apps/web/lib/auth.ts", "-y"], {
+      execFileSync("pnpm", ["exec", "better-auth", "migrate", "--config", "apps/web/lib/auth.ts", "-y"], {
         cwd: "/app",
         stdio: "inherit",
         env: process.env,
