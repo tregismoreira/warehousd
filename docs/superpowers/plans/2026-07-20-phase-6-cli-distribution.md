@@ -9,7 +9,7 @@
 ## Tasks
 
 - [ ] `warehousd init`: scaffold starter `warehousd.yml` (Meridian collections commented as examples) + `.gitignore` entries (`warehousd.local.yml`, `.warehousd/`)
-- [ ] `warehousd start`: read config → pull/start server image + Postgres (or `database.url`) under the project namespace → run `apply` + synthetic seed (+ document index for `type: document` collections) → print outputs block → write `.warehousd/outputs.json`; idempotent — re-run picks up YAML changes
+- [ ] `warehousd start`: read config → pull/start server image + Postgres (or `database.url`) under the project namespace → run `apply` + synthetic seed (+ document index for `type: file` collections) → print outputs block → write `.warehousd/outputs.json`; idempotent — re-run picks up YAML changes
 - [ ] `warehousd stop` (keep volumes) / `stop --destroy` (remove volumes); `warehousd status` (health + outputs block)
 - [ ] Outputs contract exactly per §11 (`mcpUrl`, `apiUrl`, `adminUrl`, `databaseUrl`, `env`, `devClient{clientId,clientSecret}`); `devClient` auto-created with `allowed_scopes = {env:dev}` via Phase 2 machinery
 - [ ] Docker integration via `dockerode` or shell-out (pick one at expansion); clear error when Docker isn't running
