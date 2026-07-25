@@ -488,5 +488,17 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
 
       expect(grantedScope).toContain("env:dev");
     });
+
+    it("SAML: SP metadata endpoint responds with XML containing the SP entity ID", async () => {
+      const metadataRes = await db.auth.handler(
+        new Request(
+          "http://localhost:8722/api/auth/sso/saml2/sp/metadata?providerId=keycloak-saml",
+        ),
+      );
+
+      expect(metadataRes.status).toBe(200);
+      const metadataXml = await metadataRes.text();
+      expect(metadataXml).toContain("warehousd-sp");
+    });
   },
 );
