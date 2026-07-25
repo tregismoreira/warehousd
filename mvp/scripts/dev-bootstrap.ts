@@ -1,7 +1,7 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
 import { execSync } from "child_process";
-import { loadConfig, applyConfig, generateSynthetic, createAppSchema, indexCollection } from "@warehousd/broker";
+import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection } from "@warehousd/broker";
 import { seedLive } from "../examples/meridian/seed/live";
 import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
@@ -54,13 +54,7 @@ async function main() {
   await seedPersonaUsers(db);
   await applyConfig(db, cfg);
   // truncate before regenerating so re-running bootstrap (e.g. container restart) is idempotent
-  for (const name of Object.keys(cfg.collections)) {
-    const c = cfg.collections[name];
-    // Skip file collections — they are populated via indexCollection, not synthetic generation
-    if (c.type === "file") continue;
-    await db.query(`truncate data_synth.${name} cascade`);
-  }
-  await generateSynthetic(db, cfg, 42);
+  await regenerateSynthetic(db, cfg, 42);
   await seedLive(db);
   // Index policies collection from seed docs (dev and live environments)
   const policiesTaxonomy = cfg.collections.policies?.taxonomy
