@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { setupWebDb } from "./helpers/web-db";
+import { setupWebDb, signIn } from "./helpers/web-db";
 import { pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy, approveGrant, requestGrant } from "@warehousd/broker";
+import { upsertClientPolicy } from "@warehousd/broker";
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -24,16 +24,8 @@ async function exchangeCodeForScope(clientId: string, clientSecret: string, code
   return body.scope as string;
 }
 
-// Extracts all Set-Cookie headers from a response and formats them as a Cookie header.
-function extractCookies(res: Response): string {
-  const setCookieHeaders = res.headers.getSetCookie?.() ?? [];
-  return setCookieHeaders
-    .map((c: string) => c.split(";")[0].trim())
-    .join("; ");
-}
-
-describe("env-scope behavior via authorize-resume (no cookie → sign-in → callback)", () => {
-  it("case 1: dev-only client requesting env:live via resume gets only env:dev (regression/hardening check)", async () => {
+describe("env-scope redirect-to-login before cookie-resume can arm", () => {
+  it("case 1: dev-only client requesting env:live gets dev-only scope after redirect-login flow", async () => {
     // Register a client with default policy {env:dev, env:live}.
     const reg = await db.auth.api.registerMcpClient({
       body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "Dev Only Resume Client" },
@@ -54,104 +46,111 @@ describe("env-scope behavior via authorize-resume (no cookie → sign-in → cal
     authorizeUrl.searchParams.set("code_challenge", challenge);
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
-    // GET /mcp/authorize with NO cookie → 302 to /login with oidc_login_prompt.
+    // Step 1: GET /mcp/authorize with NO cookie → 302 to /login with original query string intact.
     const authorizeRes = await db.auth.handler(
       new Request(authorizeUrl, { method: "GET" })
     );
     expect(authorizeRes.status).toBe(302);
     const authorizeLocation = authorizeRes.headers.get("location");
     expect(authorizeLocation).toContain("/login");
+    // Verify original query params are preserved.
+    expect(authorizeLocation).toContain("client_id=" + client_id);
+    expect(authorizeLocation).toContain("scope=env%3Alive");
 
-    // Extract the oidc_login_prompt cookie (and others if present).
-    const authorizeCookies = extractCookies(authorizeRes);
-    expect(authorizeCookies).toContain("oidc_login_prompt");
+    // Step 2: POST /sign-in/email normally (no special cookie forwarding).
+    const sessionCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    expect(sessionCookie).toBeTruthy();
 
-    // POST /sign-in/email with oidc_login_prompt cookie → 302 to callback?code=...
-    const signInRes = await db.auth.handler(
-      new Request("http://localhost:8722/api/auth/sign-in/email", {
-        method: "POST",
+    // Step 3: GET /mcp/authorize AGAIN, same original query params, WITH the session cookie.
+    const authorizeRes2 = await db.auth.handler(
+      new Request(authorizeUrl, {
+        method: "GET",
         headers: {
-          "content-type": "application/json",
-          cookie: authorizeCookies,
+          cookie: sessionCookie,
         },
-        body: JSON.stringify({ email: "mia@meridian.demo", password: "demo" }),
       })
     );
-    expect(signInRes.status).toBe(302);
-    const signInLocation = signInRes.headers.get("location");
-    expect(signInLocation).toContain("http://localhost:9999/callback");
+    // This second response should be the final authorize call, resulting in a 302 callback redirect.
+    expect(authorizeRes2.status).toBe(302);
+    const callbackLocation = authorizeRes2.headers.get("location");
+    expect(callbackLocation).toContain("http://localhost:9999/callback");
 
-    // Extract the code from the callback redirect.
-    const callbackUrl = new URL(signInLocation ?? "", "http://localhost");
+    // Step 4: Extract the code and exchange for token to verify the granted scope.
+    const callbackUrl = new URL(callbackLocation ?? "", "http://localhost");
     const code = callbackUrl.searchParams.get("code");
     expect(code).toBeTruthy();
 
-    // Exchange the code for a token and inspect the scope.
     const scope = await exchangeCodeForScope(client_id, client_secret, code!, verifier);
-    // Rule 1 enforcement: dev-only client should never get env:live, even via resume.
-    // This passes today (envScopePlugin's before-hook runs on the authorize request before the session exists,
-    // conservatively stripping env:live and freezing that safe scope into oidc_login_prompt).
+    // Case 1 assertion: dev-only client should NOT have env:live in final scope.
     expect(scope).not.toContain("env:live");
+    expect(scope).toContain("env:dev");
   });
 
-  it("case 2: eligible live-grant user via resume path should redirect to env-picker but silently downgrades to env:dev (BUG)", async () => {
-    // Register a client with both env:dev and env:live allowed.
+  it("case 2: live-allowed client with eligible user gets env-picker redirect on second request", async () => {
+    // Register a client with default policy {env:dev, env:live}.
     const reg = await db.auth.api.registerMcpClient({
-      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "Both Envs Resume Client" },
+      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "Live Allowed Resume Client" },
       asResponse: true,
     } as any);
     const { client_id, client_secret } = await reg.json();
-    const app = getAppPool();
-    await upsertClientPolicy(app, client_id, "Both Envs Resume Client", ["env:dev", "env:live"]);
+    // Keep the default policy (both env:dev and env:live allowed).
 
-    // Give mia an approved, unexpired live grant (same pattern as oauth-scope.integration.test.ts).
-    const grantId = await requestGrant(app, {
-      userId: "mia", collection: "people", env: "live",
-      purposeLabel: "resume-test", allowedFields: ["id"],
-    });
-    await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    // Grant mia an approved live grant so she becomes eligible.
+    const app = getAppPool();
+    await app.query(
+      `insert into app.grants (user_id, collection, allowed_fields, env, status, expires_at) values
+       ($1, 'people', array['id'], 'live', 'approved', now() + interval '1 day')`,
+      ["mia"]
+    );
 
     const { verifier, challenge } = pkcePair();
     const authorizeUrl = new URL("http://localhost:8722/api/auth/mcp/authorize");
     authorizeUrl.searchParams.set("client_id", client_id);
     authorizeUrl.searchParams.set("response_type", "code");
     authorizeUrl.searchParams.set("redirect_uri", "http://localhost:9999/callback");
+    // Request BOTH env:dev and env:live to trigger the env-picker rule.
     authorizeUrl.searchParams.set("scope", "env:dev env:live openid");
     authorizeUrl.searchParams.set("code_challenge", challenge);
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
-    // GET /mcp/authorize with NO cookie → 302 to /login with oidc_login_prompt.
+    // Step 1: GET /mcp/authorize with NO cookie → 302 to /login with original query string intact.
     const authorizeRes = await db.auth.handler(
       new Request(authorizeUrl, { method: "GET" })
     );
     expect(authorizeRes.status).toBe(302);
     const authorizeLocation = authorizeRes.headers.get("location");
     expect(authorizeLocation).toContain("/login");
+    // Verify original query params are preserved.
+    expect(authorizeLocation).toContain("client_id=" + client_id);
+    expect(authorizeLocation).toContain("env%3Adev");
+    expect(authorizeLocation).toContain("env%3Alive");
 
-    // Extract the oidc_login_prompt cookie.
-    const authorizeCookies = extractCookies(authorizeRes);
-    expect(authorizeCookies).toContain("oidc_login_prompt");
+    // Step 2: POST /sign-in/email normally (no special cookie forwarding).
+    const sessionCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    expect(sessionCookie).toBeTruthy();
 
-    // POST /sign-in/email with oidc_login_prompt cookie.
-    // Per SPECS §6.1 rule 3, when both env:dev and env:live survive eligibility checks
-    // (eligible user + live-allowed client), the user should be redirected to /oauth/env-picker
-    // to choose which env to use. However, the resume path currently skips this redirect and
-    // silently returns a 302 to callback?code=... with env:dev-only scope instead.
-    const signInRes = await db.auth.handler(
-      new Request("http://localhost:8722/api/auth/sign-in/email", {
-        method: "POST",
+    // Step 3: GET /mcp/authorize AGAIN, same original query params, WITH the session cookie.
+    const authorizeRes2 = await db.auth.handler(
+      new Request(authorizeUrl, {
+        method: "GET",
         headers: {
-          "content-type": "application/json",
-          cookie: authorizeCookies,
+          cookie: sessionCookie,
         },
-        body: JSON.stringify({ email: "mia@meridian.demo", password: "demo" }),
       })
     );
-
-    // This assertion FAILS: signInRes is a 302 to callback?code=..., not a 3xx to /oauth/env-picker.
-    // The bug: the resume path silently downgrades an eligible user to env:dev instead of showing the picker.
-    expect(signInRes.status).toBeGreaterThanOrEqual(300);
-    expect(signInRes.status).toBeLessThan(400);
-    expect(signInRes.headers.get("location")).toContain("/oauth/env-picker");
+    // Case 2: This second request should redirect to /oauth/env-picker because:
+    // - Client policy allows both env:dev and env:live
+    // - User is eligible for env:live (has approved, unexpired grant)
+    // - Requested scope has both env:dev and env:live
+    // - Rule 1: both are in policy and requested, survivors = [env:dev, env:live]
+    // - Rule 2: user is eligible, so env:live is not filtered out
+    // - Both survive, so env-picker is triggered
+    expect(authorizeRes2.status).toBe(302);
+    const pickerLocation = authorizeRes2.headers.get("location");
+    expect(pickerLocation).toContain("/oauth/env-picker");
+    // Verify original query params are preserved in the picker redirect.
+    expect(pickerLocation).toContain("client_id=" + client_id);
+    expect(pickerLocation).toContain("env%3Adev");
+    expect(pickerLocation).toContain("env%3Alive");
   });
 });
