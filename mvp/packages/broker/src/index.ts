@@ -13,3 +13,6 @@ export { indexCollection } from "./indexing";
 export type { IndexTaxonomy } from "./indexing/sync";
 export type { DocSearchIntent } from "./types";
 export { listDocumentPaths } from "./documents/paths";
+export { importCollection } from "./import/run";
+export { validateImportRows, type ImportError } from "./import/validate";
+export { parseImportPayload, parseCsv } from "./import/csv";
