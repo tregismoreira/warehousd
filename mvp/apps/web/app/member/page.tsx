@@ -1,5 +1,14 @@
 import { PageHeader } from "@/components/common/PageHeader";
+import { MyGrants } from "./MyGrants";
 
-export default function MemberGrants() {
-  return <PageHeader title="My grants" description="What you can query, and what you've asked for." />;
+export default function MemberPage() {
+  return (
+    <>
+      <PageHeader
+        title="My grants"
+        description="Access is deny-by-default: a collection is invisible until a grant covers it, and every grant is evaluated at query time."
+      />
+      <MyGrants />
+    </>
+  );
 }
