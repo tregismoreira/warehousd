@@ -26,6 +26,7 @@ interface Collection {
     pk: boolean;
     fk: string | null;
     view_join: string | null;
+    nullable: boolean;
   }>;
 }
 
@@ -197,10 +198,10 @@ export function ImportForm() {
             <div className="mt-3 space-y-2 rounded-md bg-muted p-3">
               <p className="text-xs font-semibold text-muted-foreground">Expected columns:</p>
               <div className="space-y-1">
-                {currentCollection.fields.map((field) => {
+                {currentCollection.fields.filter((field) => !field.view_join).map((field) => {
                   const label =
                     field.name +
-                    (field.pk ? " (required)" : field.type === "NULL" ? " (nullable)" : "") +
+                    (field.pk || !field.nullable ? " (required)" : " (nullable)") +
                     (field.posture === "deny" ? " — stored, never readable through the broker" : "");
                   return (
                     <div key={field.name} className="text-xs">
