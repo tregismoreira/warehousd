@@ -7,6 +7,23 @@ This runbook covers OIDC (generic — Okta, Entra ID, Google Workspace, Keycloak
 etc.) and SAML. Both are driven through the same admin API; the login page
 picks the right client-side flow automatically based on the provider's `type`.
 
+> ## ⚠️ Screenshots pending — outstanding human work
+>
+> Every flow described here is covered by automated tests (including a real
+> Keycloak OIDC **and** SAML round trip — `mvp/apps/web/test/sso-keycloak.integration.test.ts`,
+> run via `pnpm test:e2e`), so the *steps* are verified. What's missing is the
+> visual walkthrough:
+>
+> - [ ] Capture the 3 screenshots marked `*(Screenshot: …)*` below, save them
+>       under `docs/img/`, and replace each placeholder with a markdown image link.
+> - [ ] While you're there, sanity-check the admin UX by hand: register a
+>       provider as `ana` (admin), confirm the same call returns `403` as `mia`
+>       (member), and confirm `/login` visibly flips to SSO-first afterwards.
+> - [ ] Delete this banner once all boxes are ticked.
+>
+> The companion runbook `docs/connect-claude.md` has a larger outstanding item —
+> it has never been executed end-to-end at all.
+
 ---
 
 ## Prerequisite: `WAREHOUSD_TRUSTED_ORIGINS`

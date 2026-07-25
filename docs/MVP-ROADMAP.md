@@ -186,7 +186,32 @@ Plan: [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-
 - [x] SSO configured → login defaults to SSO; local login off when disabled
 - [x] MCP OAuth authorize step delegates to the IdP ("log in with your company account")
 - [x] Tests: JIT role = member; local-login rejection; IdP CRUD admin-only
-- [x] §10 test 11 (manual): runbooks `docs/connect-claude.md` + `docs/configure-sso.md` — written; screenshots and the live Claude-connector pass still need to be captured by a human running the runbook once
+- [ ] §10 test 11 (manual): runbooks `docs/connect-claude.md` + `docs/configure-sso.md` — **written but NOT yet executed.** See "Outstanding human work" below.
+
+### Outstanding human work (blocks Phase 4 sign-off)
+
+Everything above is code-complete and covered by automated tests, including a
+real Keycloak OIDC **and** SAML round trip (`pnpm test:e2e`). What remains
+cannot be automated — it needs a browser, the Claude connector UI, and a human
+confirming what's on screen:
+
+- [ ] **Execute §10 test 11 end-to-end** per `docs/connect-claude.md`: add the
+      connector in Claude → confirm the OAuth step lands on the **IdP's** login
+      page (not warehousd's form) → `list_collections` works → a `deny`-posture
+      field probe fails cleanly with the request-access hint and leaks nothing
+      into the response, error message, or logs.
+- [ ] **Capture 7 screenshots** (4 in `connect-claude.md`, 3 in
+      `configure-sso.md`), save under `docs/img/`, replace the
+      `*(Screenshot: …)*` placeholders with image links, and delete the status
+      banner at the top of each runbook.
+- [ ] **Hand-check the admin UX** per `docs/configure-sso.md`: register a
+      provider as `ana` (admin), confirm `403` as `mia` (member), confirm
+      `/login` flips to SSO-first, then restart with
+      `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` and confirm only the SSO button
+      remains and `sign-in/email` is refused.
+
+Until these are done, Phase 4 is code-complete but not signed off. §10 test 11
+is the one acceptance test this phase owns that CI cannot prove.
 
 ## Phase 5 — Admin / Manager / Member web UI (§8) — parallel with Phase 6
 
