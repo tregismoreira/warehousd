@@ -52,6 +52,10 @@ LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:5432/warehousd
 BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long
 BETTER_AUTH_URL=http://localhost:8722
 
+# SSO — comma-separated origins trusted as OIDC/SAML issuers (e.g., on-prem IdP or local test IdP)
+# Leave empty or unset to disable SSO registration
+WAREHOUSD_TRUSTED_ORIGINS=
+
 # Anthropic (for chat)
 ANTHROPIC_API_KEY=sk-ant-...
 
