@@ -255,7 +255,7 @@ The **indexer** (`packages/broker/src/indexing` + a CLI entry point) scans the e
 Requirements:
 
 1. **SSO-ready from day one.** Enterprise will not adopt a new login. The auth layer must support **generic OIDC SSO** in the MVP (works with Okta, Entra ID/Azure AD, Google Workspace) via Better Auth's SSO plugin. SAML: include only if the same plugin provides it without extra work; otherwise defer. Admin configures the IdP in the admin UI (issuer URL, client id/secret) — no code change, no redeploy.
-2. **Local credentials exist only as a fallback** for the seeded demo and initial admin bootstrap. When an SSO provider is configured, login defaults to SSO; a `SANDBOXD_DISABLE_LOCAL_LOGIN=true` env var turns local login off entirely.
+2. **Local credentials exist only as a fallback** for the seeded demo and initial admin bootstrap. When an SSO provider is configured, login defaults to SSO; a `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` env var turns local login off entirely.
 3. **JIT provisioning.** First SSO login creates the user with role `member`. Admin promotes roles in the UI. (IdP group→role mapping is a documented future item, not MVP.)
 4. **warehousd is an OAuth 2.1 provider** (Better Auth OIDC-provider/MCP plugin) so MCP clients — Claude first — connect via the standard MCP OAuth flow. Critically, when the user authorizes an MCP client, the login step **delegates to the configured SSO IdP**. Net effect: connecting Claude to warehousd is "log in with your company account," never a new password.
 5. **Environment selection is standard OAuth scopes — nothing invented.** Two scopes exist: `env:dev` and `env:live`. Env is **never** a request parameter to the broker or MCP tools; it exists only as a scope in the signed access token, decided server-side at issuance. See §6.1 for the exact flow.
@@ -407,7 +407,7 @@ deploy:
 ```
 
 Behavior of `warehousd deploy`:
-1. **Pre-flight production checklist — deploy refuses to proceed unless all pass:** an SSO provider is configured *or* `--allow-local-login` is explicitly passed; `SANDBOXD_DISABLE_DEMO=true` (no demo personas, no seeded `data_live`); all `${env:...}` references resolve.
+1. **Pre-flight production checklist — deploy refuses to proceed unless all pass:** an SSO provider is configured *or* `--allow-local-login` is explicitly passed; `WAREHOUSD_DISABLE_DEMO=true` (no demo personas, no seeded `data_live`); all `${env:...}` references resolve.
 2. Creates/updates the Fly app running the published server image, provisions Postgres per config, sets secrets from resolved `${env:...}` values via `fly secrets set` (never written to disk), and attaches the database.
 3. Runs `apply` and synthetic seed against the deployed instance (`data_synth` only — **deploy never writes `data_live`**; real data arrives via the admin import path).
 4. Writes the same **outputs contract** to `.warehousd/outputs.deploy.json` with public HTTPS URLs (Fly provides TLS): `mcpUrl` is now the address to paste into Claude's connector settings.

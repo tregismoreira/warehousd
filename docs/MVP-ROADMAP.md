@@ -153,7 +153,7 @@ Open http://localhost:8722 and try these scenarios:
 - [ ] Install Better Auth in `apps/web`; auth tables (`user`, `session`, `account`) in the `app` schema
 - [ ] Local email/password login (bootstrap fallback only) + login screen; demo mode shows §9 persona credentials
 - [ ] `role` on user (`admin`/`manager`/`member`); seed Ana/Marcus/Mia as real users with §9 roles + grants
-- [ ] Support `SANDBOXD_DISABLE_LOCAL_LOGIN=true` (fully disables local credentials)
+- [ ] Support `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` (fully disables local credentials)
 - [ ] Delete the POC persona switcher; derive `BrokerContext` in UI routes from the verified session (env via authenticated console toggle)
 - [ ] Role checks on grants API (approve/deny/revoke = manager/admin only)
 - [ ] Tests: 401 on unauthenticated routes; 403 on member-approve; request-body userId/env provably ignored; all Phase 0 tests still green
@@ -178,15 +178,54 @@ Plan: [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-
 - [x] Rewire the chat console's tool loop onto the shared tool implementations (console = local MCP test bench)
 - [x] Tests: MCP-over-HTTP integration (grant-filtered describe, probe-suite refusals over both `query_collection` and `search_documents`, zero canary leakage, pending grant from `request_access`); dev-token env wall across all tools (incl. forged env args); §10 test 6 (env parity — identical shapes dev vs live)
 
-## Phase 4 — SSO: OIDC, JIT, IdP-delegated MCP login (§6.1–6.4)
+## Phase 4 — SSO: OIDC, JIT, IdP-delegated MCP login (§6 items 1–4, §6.1)
 
-- [ ] Better Auth SSO plugin: generic OIDC (Okta / Entra ID / Google Workspace); SAML only if free in the same plugin, else marked `stubbed`
-- [ ] IdP config (issuer, client id/secret) stored in DB, admin-editable — no code change, no redeploy (API here; form in Phase 5)
-- [ ] JIT provisioning: first SSO login creates a `member`
-- [ ] SSO configured → login defaults to SSO; local login off when disabled
-- [ ] MCP OAuth authorize step delegates to the IdP ("log in with your company account")
-- [ ] Tests: JIT role = member; local-login rejection; IdP CRUD admin-only
-- [ ] §10 test 11 (manual): runbooks `docs/connect-claude.md` + `docs/configure-sso.md` with screenshots — IdP → Claude connector → tools work → denied-field probe fails cleanly
+- [x] Better Auth SSO plugin: generic OIDC (Okta / Entra ID / Google Workspace); SAML shipped in the same plugin and tested end-to-end against Keycloak — both `real`, not `stubbed`
+- [x] IdP config (issuer, client id/secret) stored in DB, admin-editable — no code change, no redeploy (API here; form in Phase 5)
+- [x] JIT provisioning: first SSO login creates a `member`
+- [x] SSO configured → login defaults to SSO; local login off when disabled
+- [x] MCP OAuth authorize step delegates to the IdP ("log in with your company account")
+- [x] Tests: JIT role = member; local-login rejection; IdP CRUD admin-only
+- [ ] §10 test 11 (manual): runbooks `docs/connect-claude.md` + `docs/configure-sso.md` — **written but NOT yet executed.** See "Outstanding human work" below.
+
+### Outstanding human work (blocks Phase 4 sign-off)
+
+Everything above is code-complete and covered by automated tests, including a
+real Keycloak OIDC **and** SAML round trip (`pnpm test:e2e`). What remains
+cannot be automated — it needs a browser, the Claude connector UI, and a human
+confirming what's on screen:
+
+- [ ] **Execute §10 test 11 end-to-end** per `docs/connect-claude.md`: add the
+      connector in Claude → confirm the OAuth step lands on the **IdP's** login
+      page (not warehousd's form) → `list_collections` works → a `deny`-posture
+      field probe fails cleanly with the request-access hint and leaks nothing
+      into the response, error message, or logs.
+- [ ] **Capture 7 screenshots** (4 in `connect-claude.md`, 3 in
+      `configure-sso.md`), save under `docs/img/`, replace the
+      `*(Screenshot: …)*` placeholders with image links, and delete the status
+      banner at the top of each runbook.
+- [ ] **Hand-check the admin UX** per `docs/configure-sso.md`: register a
+      provider as `ana` (admin), confirm `403` as `mia` (member), confirm
+      `/login` flips to SSO-first, then restart with
+      `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` and confirm only the SSO button
+      remains and `sign-in/email` is refused.
+
+Until these are done, Phase 4 is code-complete but not signed off. §10 test 11
+is the one acceptance test this phase owns that CI cannot prove.
+
+### Known coverage gap — carry into Phase 5
+
+`mvp/apps/web/app/login/page.tsx` has **no automated test coverage**. Nothing
+exercises the SSO-first rendering, the collapsed local-login disclosure, the
+"No login method is configured" state, the `returnTo` OAuth-continuation
+redirect, or the SAML `providerType` branch — only the `/api/sso/status`
+endpoint it consumes is tested. Until the hand-check above is done, that file's
+only verification is a human looking at it.
+
+Phase 5 rebuilds this page as part of the web UI and should add component or
+browser coverage for those states then, rather than bolting a test onto a page
+that is about to be replaced. Flagging it here so it isn't silently inherited
+as "already tested".
 
 ## Phase 5 — Admin / Manager / Member web UI (§8) — parallel with Phase 6
 
@@ -214,7 +253,7 @@ Apply the `frontend-design` skill; keep the Phase 0 "security console" aesthetic
 ## Phase 7 — `warehousd deploy` (Fly.io) (§11 Deploy)
 
 - [ ] `deploy` via `flyctl` shell-out (detect installed+authenticated; error with install instructions)
-- [ ] Pre-flight checklist — refuse unless: SSO configured or `--allow-local-login`; `SANDBOXD_DISABLE_DEMO=true`; all `${env:...}` resolve
+- [ ] Pre-flight checklist — refuse unless: SSO configured or `--allow-local-login`; `WAREHOUSD_DISABLE_DEMO=true`; all `${env:...}` resolve
 - [ ] Create/update Fly app from published image; Fly Postgres or `database.url`; secrets via `fly secrets set` (never on disk)
 - [ ] Post-deploy apply + synthetic seed (`data_synth` only — deploy never writes `data_live`)
 - [ ] `.warehousd/outputs.deploy.json` with HTTPS URLs; idempotent re-deploy with config diff (`--yes`); `--destroy` with typed app-name confirmation
@@ -237,7 +276,7 @@ Release gate:
 
 - [ ] Full §10 sweep in CI (tests 1–10, incl. upgrades from partial in Phases 2–3); probes extended over the MCP surface (forged env in tool args, scope-stuffing, refresh replay after demotion)
 - [ ] `docs/threat-model.md` (§4 invariants, enforcement mechanisms, out-of-scope)
-- [ ] README: contributor + consumer quickstarts, bold security posture, **stub-vs-real table** (`real`/`simplified`/`stubbed` per component)
+- [ ] README: contributor + consumer quickstarts, bold security posture, **stub-vs-real table** (`real`/`simplified`/`stubbed` per component) — Phase 4 shipped both SSO protocols with a full Keycloak-tested e2e pass (`docs/superpowers/plans/2026-07-20-phase-4-sso.md` Task 8/9): mark SSO OIDC `real` and SAML `real`, not `stubbed` (that was the pre-research assumption in this file's Phase 4 section, superseded once Task 9 landed)
 - [ ] MIT `LICENSE`; `docs/roadmap.md` documenting the open-core line
 - [ ] Runbooks 11 + 12 executed end-to-end at least once
 - [ ] Tag `v0.1.0`; publish image + npm

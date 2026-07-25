@@ -1,8 +1,9 @@
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
 import { mcpPlugin, envScopePlugin } from "./oauth";
+import { ssoPlugin, ssoAdminPlugin, trustedOrigins } from "./sso";
 
-export const LOCAL_LOGIN_DISABLED = process.env.SANDBOXD_DISABLE_LOCAL_LOGIN === "true";
+export const LOCAL_LOGIN_DISABLED = process.env.WAREHOUSD_DISABLE_LOCAL_LOGIN === "true";
 
 const appPool = new Pool({
   connectionString: process.env.APP_DATABASE_URL,
@@ -28,7 +29,8 @@ export const auth = betterAuth({
       role: { type: "string", defaultValue: "member", input: false },
     },
   },
-  plugins: [mcpPlugin, envScopePlugin(appPool)],
+  trustedOrigins: trustedOrigins(),
+  plugins: [mcpPlugin, envScopePlugin(appPool), ssoPlugin(appPool), ssoAdminPlugin()],
 });
 
 export type SessionUser = {

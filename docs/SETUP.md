@@ -52,14 +52,20 @@ LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:5432/warehousd
 BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long
 BETTER_AUTH_URL=http://localhost:8722
 
+# SSO — comma-separated origins trusted as OIDC/SAML issuers (e.g., on-prem IdP or local test IdP)
+# Leave empty or unset to disable SSO registration
+# Required for any loopback/private-network IdP (self-hosted Keycloak, on-prem) — see docs/configure-sso.md
+WAREHOUSD_TRUSTED_ORIGINS=
+
 # Anthropic (for chat)
 ANTHROPIC_API_KEY=sk-ant-...
 
 # Demo mode — shows demo credential buttons on the login screen
 WAREHOUSD_DEMO=true
 
-# Kill-switch — uncomment to disable local login (shows SSO notice instead)
-# SANDBOXD_DISABLE_LOCAL_LOGIN=true
+# Kill-switch — uncomment to disable local login. The login page then offers only the
+# SSO button, or "No login method is configured" if no SSO provider is registered.
+# WAREHOUSD_DISABLE_LOCAL_LOGIN=true
 ```
 
 > `NEXT_PUBLIC_*` variants are derived automatically from the non-public ones via `next.config.mjs` — you don't need to set them.

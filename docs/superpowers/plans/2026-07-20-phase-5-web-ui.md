@@ -11,8 +11,8 @@
 - [ ] Navigation/layout shell with role-aware routing; chat console kept as a dev-mode page
 - [ ] **Admin:** collections & postures view (YAML state from `app.collections` + apply status), SSO config form (Phase 4 API), user role management, "Regenerate dev data" button, audit browser with filters (user/collection/outcome)
 - [ ] **Admin → Clients (§6.1):** list; "New client" (returns id+secret, `{env:dev}` always); per-client allowed scopes, promotion audit trail (`promoted_at/by`), last token issued; promote-to-live / demote-to-dev actions (manager or admin)
-- [ ] **Real-data import path** (spec §11: "real data arrives via the admin import path"): admin-only CSV/JSON upload per structured collection into `data_live`, validated against the YAML schema, written via a dedicated write role — audited, covered by leak probes (the only write path into live data)
-- [ ] **Manager:** grant request inbox → approve (trim fields, set expiry, document `path` picker for document collections — Phase 0.5 machinery) / deny; active grants list with revoke
+- [ ] **Real-data import path** (spec §11: "real data arrives via the admin import path"): admin-only CSV/JSON upload per `dataset` collection into `data_live`, validated against the YAML schema, written via a dedicated write role — audited, covered by leak probes (the only write path into live data)
+- [ ] **Manager:** grant request inbox → approve (trim fields, set expiry, document `path` picker for `file` collections — Phase 0.5 machinery) / deny; active grants list with revoke
 - [ ] **Member:** my grants + statuses; how-to-connect page (MCP endpoint URL + copy-paste Claude connector setup)
 
 **Key files:** `mvp/apps/web/app/(admin)/**`, `(manager)/**`, `(member)/**`, shared components; API routes for clients, roles, SSO config, regen-synth, import.

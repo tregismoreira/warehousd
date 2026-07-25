@@ -3,7 +3,8 @@ import { Pool } from "pg";
 const ADMIN = "postgres://postgres:postgres@127.0.0.1:54330/postgres";
 const BASE = "postgres://postgres:postgres@127.0.0.1:54330";
 
-export async function setupWebDb(label: string) {
+export async function setupWebDb(label: string, opts: { seedPersonas?: boolean } = {}) {
+  const { seedPersonas = true } = opts;
   const dbName = `wh_web_${label}_${process.pid}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
   const admin = new Pool({ connectionString: ADMIN });
   await admin.query(`drop database if exists ${dbName} with (force)`);
@@ -26,6 +27,7 @@ export async function setupWebDb(label: string) {
   process.env.APP_DATABASE_URL = appUrl;
   process.env.BETTER_AUTH_SECRET ??= "test-secret-at-least-32-chars-long-000";
   process.env.BETTER_AUTH_URL ??= "http://localhost:8722";
+  process.env.WAREHOUSD_TRUSTED_ORIGINS ??= "http://127.0.0.1:8791,http://127.0.0.1:8780";
   process.env.WAREHOUSD_PROJECT_DIR = new URL("../../../../examples/meridian", import.meta.url).pathname;
 
   const { createAppSchema } = await import("@warehousd/broker");
@@ -41,20 +43,22 @@ export async function setupWebDb(label: string) {
     env: { ...process.env, APP_DATABASE_URL: appUrl },
   });
 
-  const personas = [
-    { id: "ana", email: "ana@meridian.demo", name: "Ana", role: "admin" },
-    { id: "marcus", email: "marcus@meridian.demo", name: "Marcus", role: "manager" },
-    { id: "mia", email: "mia@meridian.demo", name: "Mia", role: "member" },
-  ];
-  for (const p of personas) {
-    const res = await auth.api.signUpEmail({ body: { email: p.email, password: "demo", name: p.name } });
-    const gen = res.user.id;
-    // Disable foreign key constraints to allow user ID updates
-    await db.query(`set session_replication_role = replica`);
-    await db.query(`update app."user" set id=$1, role=$2 where id=$3`, [p.id, p.role, gen]);
-    await db.query(`update app."account" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
-    await db.query(`update app."session" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
-    await db.query(`set session_replication_role = default`);
+  if (seedPersonas) {
+    const personas = [
+      { id: "ana", email: "ana@meridian.demo", name: "Ana", role: "admin" },
+      { id: "marcus", email: "marcus@meridian.demo", name: "Marcus", role: "manager" },
+      { id: "mia", email: "mia@meridian.demo", name: "Mia", role: "member" },
+    ];
+    for (const p of personas) {
+      const res = await auth.api.signUpEmail({ body: { email: p.email, password: "demo", name: p.name } });
+      const gen = res.user.id;
+      // Disable foreign key constraints to allow user ID updates
+      await db.query(`set session_replication_role = replica`);
+      await db.query(`update app."user" set id=$1, role=$2 where id=$3`, [p.id, p.role, gen]);
+      await db.query(`update app."account" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
+      await db.query(`update app."session" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
+      await db.query(`set session_replication_role = default`);
+    }
   }
 
   return {
