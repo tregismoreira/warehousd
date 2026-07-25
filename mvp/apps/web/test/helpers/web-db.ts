@@ -58,6 +58,7 @@ export async function setupWebDb(label: string) {
   }
 
   return {
+    dbName,
     appUrl,
     auth,
     async end() {
@@ -67,6 +68,35 @@ export async function setupWebDb(label: string) {
       await a.end();
     },
   };
+}
+
+// Full-data variant of setupWebDb: applies the meridian YAML, generates synthetic data,
+// seeds live data, and indexes the policies collection for both envs — same recipe as
+// scripts/dev-bootstrap.ts, scoped to a disposable test database. Also points
+// DEV_DATABASE_URL/LIVE_DATABASE_URL at the warehousd_dev/warehousd_live roles setupWebDb
+// already creates on this database, so apps/web's getBroker() can serve real dev/live queries.
+export async function setupWebDbWithData(label: string) {
+  const base = await setupWebDb(label);
+  const { loadConfig, applyConfig, generateSynthetic, indexCollection } = await import("@warehousd/broker");
+  const meridianDir = new URL("../../../../examples/meridian", import.meta.url).pathname;
+  const { seedLive } = await import("../../../../examples/meridian/seed/live");
+  const cfg = loadConfig(meridianDir);
+
+  const db = new Pool({ connectionString: base.appUrl });
+  await applyConfig(db, cfg);
+  await generateSynthetic(db, cfg, 42);
+  await seedLive(db);
+  const policiesTaxonomy = cfg.collections.policies?.taxonomy
+    ? { field: cfg.collections.policies.taxonomy, slugs: Object.keys(cfg.taxonomies[cfg.collections.policies.taxonomy]?.terms ?? {}) }
+    : undefined;
+  await indexCollection(db, "dev", "policies", `${meridianDir}/seed/docs-dev`, { taxonomy: policiesTaxonomy });
+  await indexCollection(db, "live", "policies", `${meridianDir}/seed/docs-live`, { taxonomy: policiesTaxonomy });
+  await db.end();
+
+  process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${base.dbName}`;
+  process.env.LIVE_DATABASE_URL = `postgres://warehousd_live:pw@127.0.0.1:54330/${base.dbName}`;
+
+  return base;
 }
 
 // Sign in and return the Set-Cookie value as a Cookie header for subsequent requests.
