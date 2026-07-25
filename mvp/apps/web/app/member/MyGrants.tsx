@@ -1,5 +1,4 @@
 "use client";
-import { useEffect, useState } from "react";
 import { KeyRound } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/common/DataTable";
@@ -42,17 +41,7 @@ const columns: ColumnDef<MeGrant, unknown>[] = [
     ) },
 ];
 
-export function MyGrants() {
-  const [grants, setGrants] = useState<MeGrant[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/me/grants")
-      .then((r) => r.json())
-      .then((d) => setGrants(d.grants ?? []))
-      .finally(() => setLoading(false));
-  }, []);
-
+export function MyGrants({ grants, loading }: { grants: MeGrant[]; loading: boolean }) {
   return (
     <DataTable
       columns={columns} data={grants} loading={loading}
