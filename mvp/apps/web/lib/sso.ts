@@ -1,5 +1,5 @@
 import { sso } from "@better-auth/sso";
-import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { createAuthMiddleware, getSessionFromCtx, APIError } from "better-auth/api";
 import type { Pool } from "pg";
 
 // Origins allowed as OIDC issuers/discovery hosts. Better Auth's discovery rejects
@@ -38,9 +38,7 @@ export function ssoAdminPlugin() {
           handler: createAuthMiddleware(async (ctx: any) => {
             const session = await getSessionFromCtx(ctx);
             if (session?.user?.role !== "admin") {
-              const error = new Error("admin role required") as any;
-              error.status = 403;
-              throw error;
+              throw new APIError("FORBIDDEN", { message: "admin role required" });
             }
           }),
         },

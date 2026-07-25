@@ -75,7 +75,7 @@ function req(url: string, opts: { method?: string; cookie?: string; body?: unkno
 }
 
 describe("SSO Admin Routes", () => {
-  describe("POST /api/sso/providers (registerSSOProvider) — auth gate", () => {
+  describe("POST /api/sso/providers (app-level, registerSSOProvider) — auth gate", () => {
     it("member (mia) cannot register → 403", async () => {
       const { POST } = await import("../app/api/sso/providers/route");
       const res = await POST(req("/api/sso/providers", {
@@ -107,7 +107,7 @@ describe("SSO Admin Routes", () => {
     });
   });
 
-  describe("GET /api/sso/providers", () => {
+  describe("GET /api/sso/providers (app-level)", () => {
     it("manager (marcus) cannot list → 403", async () => {
       const { GET } = await import("../app/api/sso/providers/route");
       const res = await GET(req("/api/sso/providers", {
@@ -213,6 +213,60 @@ describe("SSO Admin Routes", () => {
       expect(listBody2.providers.some((p: any) => p.providerId === providerId)).toBe(false);
 
       await appPool.end();
+    });
+  });
+
+  describe("Raw Better Auth endpoints (5a: ssoAdminPlugin hook)", () => {
+    describe("POST /api/auth/sso/register (raw, via db.auth.handler)", () => {
+      it("member (mia) cannot register → 403", async () => {
+        const res = await db.auth.handler(req("/api/auth/sso/register", {
+          method: "POST",
+          cookie: miaCookie,
+          body: {
+            issuer: fakeIdpUrl,
+            type: "oidc",
+          },
+        }));
+        expect(res.status).toBe(403);
+      });
+
+      it("manager (marcus) cannot register → 403", async () => {
+        const res = await db.auth.handler(req("/api/auth/sso/register", {
+          method: "POST",
+          cookie: marcusCookie,
+          body: {
+            issuer: fakeIdpUrl,
+            type: "oidc",
+          },
+        }));
+        expect(res.status).toBe(403);
+      });
+
+      it("admin (ana) can register → succeeds", async () => {
+        const res = await db.auth.handler(req("/api/auth/sso/register", {
+          method: "POST",
+          cookie: anaCookie,
+          body: {
+            issuer: fakeIdpUrl,
+            type: "oidc",
+          },
+        }));
+        expect([200, 201, 400]).toContain(res.status);
+        const body = await res.json();
+        if (res.status === 200 || res.status === 201) {
+          expect(body.id || body.providerId).toBeDefined();
+        }
+      });
+    });
+
+    describe("GET /api/auth/sso/providers (raw, via db.auth.handler)", () => {
+      it("manager (marcus) cannot list → 403", async () => {
+        const res = await db.auth.handler(req("/api/auth/sso/providers", {
+          method: "GET",
+          cookie: marcusCookie,
+        }));
+        expect(res.status).toBe(403);
+      });
     });
   });
 });
