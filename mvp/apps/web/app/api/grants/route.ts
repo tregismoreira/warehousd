@@ -21,13 +21,22 @@ export async function GET(req: NextRequest) {
     ? await app.query(`select * from app.grants where status='pending' order by requested_at desc`)
     : { rows: [] as typeof mine.rows };
 
+  const active = atLeast(user.role, "manager")
+    ? await app.query(
+        `select * from app.grants where status='approved' order by decided_at desc nulls last`)
+    : { rows: [] as typeof mine.rows };
+
   const enriched = (rows: typeof mine.rows) => rows.map((g) => ({
     ...g,
     collectionType: cfg.collections[g.collection]?.type || "dataset",
     taxonomyField: cfg.collections[g.collection]?.taxonomy ?? null,
   }));
 
-  return Response.json({ mine: enriched(mine.rows), pending: enriched(pending.rows) });
+  return Response.json({
+    mine: enriched(mine.rows),
+    pending: enriched(pending.rows),
+    active: enriched(active.rows),
+  });
 }
 
 export async function POST(req: NextRequest) {
