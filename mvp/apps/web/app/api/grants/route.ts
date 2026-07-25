@@ -3,6 +3,7 @@ import { getAppPool } from "../../lib/broker";
 import { approveGrant, denyGrant, revokeGrant, loadConfig, requestGrant, grantableFields } from "@warehousd/broker";
 import { requireSession, requireRole, atLeast } from "../../../lib/authz";
 import { readEnvCookie } from "../../../lib/session";
+import { buildApproval } from "../../../lib/approve";
 
 const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
@@ -72,10 +73,22 @@ export async function POST(req: NextRequest) {
   const by = user.id; // decided_by comes from the session, never the request body
 
   if (action === "approve") {
-    const opts: any = { allowedFields: body.allowedFields, expiresAt: body.expiresAt };
-    if (body.selectedPaths && body.selectedPaths.length > 0)
-      opts.rowFilter = { field: "path", op: "in", value: body.selectedPaths };
-    await approveGrant(app, body.id, by, opts);
+    const cur = await app.query(
+      `select collection, allowed_fields, status from app.grants where id=$1`, [body.id]);
+    const row = cur.rows[0];
+    if (!row) return Response.json({ error: "unknown_grant" }, { status: 404 });
+    if (row.status !== "pending") return Response.json({ error: "not_pending" }, { status: 409 });
+
+    const built = buildApproval(cfg, row.allowed_fields ?? [], {
+      collection: row.collection,
+      allowedFields: body.allowedFields,
+      expiresAt: body.expiresAt,
+      selectedPaths: body.selectedPaths,
+      selectedTerms: body.selectedTerms,
+    });
+    if (!built.ok) return Response.json({ error: built.error }, { status: 400 });
+
+    await approveGrant(app, body.id, by, built.opts);
     return Response.json({ ok: true });
   }
   if (action === "deny") { await denyGrant(app, body.id, by); return Response.json({ ok: true }); }
