@@ -138,7 +138,7 @@ export function buildRunArgs(spec: ContainerSpec): string[] {
   if (spec.volumes) {
     for (const [container, host] of Object.entries(spec.volumes)) {
       args.push("-v");
-      args.push(`${container}:${host}`);
+      args.push(`${host}:${container}`);
     }
   }
 

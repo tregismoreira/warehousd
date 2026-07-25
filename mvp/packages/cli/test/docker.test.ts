@@ -43,9 +43,9 @@ describe("buildRunArgs", () => {
     expect(args).toContain("-p");
     expect(args).toContain("5432:5432");
 
-    // Verify volumes as container:host
+    // Verify volumes as host:container
     expect(args).toContain("-v");
-    expect(args).toContain("/var/lib/postgresql/data:wh_myapp_pgdata");
+    expect(args).toContain("wh_myapp_pgdata:/var/lib/postgresql/data");
 
     // Verify -d for detached
     expect(args).toContain("-d");
