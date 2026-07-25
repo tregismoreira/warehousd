@@ -74,19 +74,32 @@ async function waitForKeycloak(maxAttempts = 60) {
 
 // Helper: Parse HTML form from login page and extract action URL and input fields
 function parseLoginForm(html: string): { action: string; fields: Record<string, string> } {
-  const formMatch = html.match(
-    /<form[^>]*action="([^"]*)"[^>]*method="post"[^>]*>([\s\S]*?)<\/form>/i,
-  );
-  if (!formMatch) {
+  // Extract the form tag (order-independent by matching <form...> first)
+  const formTagMatch = html.match(/<form[^>]*>([\s\S]*?)<\/form>/i);
+  if (!formTagMatch) {
     throw new Error("Could not find login form in HTML");
   }
-  const action = formMatch[1];
-  const formBody = formMatch[2];
 
+  const formTag = formTagMatch[0];
+  const formBody = formTagMatch[1];
+
+  // Extract action attribute independently of other attributes
+  const actionMatch = formTag.match(/action="([^"]*)"/i);
+  if (!actionMatch || !actionMatch[1]) {
+    throw new Error("Login form action URL is missing or empty");
+  }
+  const action = actionMatch[1];
+
+  // Extract input fields independently of attribute order
   const fields: Record<string, string> = {};
-  const inputMatches = formBody.matchAll(/<input[^>]*name="([^"]*)"[^>]*value="([^"]*)"[^>]*>/g);
-  for (const match of inputMatches) {
-    fields[match[1]] = match[2];
+  const inputMatches = formBody.matchAll(/<input[^>]*>/g);
+  for (const inputMatch of inputMatches) {
+    const inputTag = inputMatch[0];
+    const nameMatch = inputTag.match(/name="([^"]*)"/i);
+    const valueMatch = inputTag.match(/value="([^"]*)"/i);
+    if (nameMatch && valueMatch) {
+      fields[nameMatch[1]] = valueMatch[1];
+    }
   }
 
   return { action, fields };
@@ -118,7 +131,6 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
 
       // Step 2: Fetch the authorization URL (real HTTP to Keycloak)
       const authRes = await fetch(authorizationUrl, { redirect: "manual" });
-      const authText = await authRes.text();
 
       // If we got HTML (200), this is the login page; if we got redirect (300+), follow it
       let loginPageUrl: string;
@@ -170,10 +182,9 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
         }),
       );
 
-      // Extract session cookie from callback response
-      const callbackSetCookie = callbackRes.headers.get("set-cookie") ?? "";
-      const sessionCookie = callbackSetCookie
-        .split(/,(?=[^;]+?=)/)
+      // Extract session cookie from callback response using proper Set-Cookie parsing
+      const sessionCookie = callbackRes.headers
+        .getSetCookie()
         .map((c: string) => c.split(";")[0].trim())
         .join("; ");
 
