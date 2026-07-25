@@ -54,6 +54,7 @@ BETTER_AUTH_URL=http://localhost:8722
 
 # SSO — comma-separated origins trusted as OIDC/SAML issuers (e.g., on-prem IdP or local test IdP)
 # Leave empty or unset to disable SSO registration
+# Required for any loopback/private-network IdP (self-hosted Keycloak, on-prem) — see docs/configure-sso.md
 WAREHOUSD_TRUSTED_ORIGINS=
 
 # Anthropic (for chat)

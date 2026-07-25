@@ -178,15 +178,15 @@ Plan: [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-
 - [x] Rewire the chat console's tool loop onto the shared tool implementations (console = local MCP test bench)
 - [x] Tests: MCP-over-HTTP integration (grant-filtered describe, probe-suite refusals over both `query_collection` and `search_documents`, zero canary leakage, pending grant from `request_access`); dev-token env wall across all tools (incl. forged env args); §10 test 6 (env parity — identical shapes dev vs live)
 
-## Phase 4 — SSO: OIDC, JIT, IdP-delegated MCP login (§6.1–6.4)
+## Phase 4 — SSO: OIDC, JIT, IdP-delegated MCP login (§6 items 1–4, §6.1)
 
-- [ ] Better Auth SSO plugin: generic OIDC (Okta / Entra ID / Google Workspace); SAML only if free in the same plugin, else marked `stubbed`
-- [ ] IdP config (issuer, client id/secret) stored in DB, admin-editable — no code change, no redeploy (API here; form in Phase 5)
-- [ ] JIT provisioning: first SSO login creates a `member`
-- [ ] SSO configured → login defaults to SSO; local login off when disabled
-- [ ] MCP OAuth authorize step delegates to the IdP ("log in with your company account")
-- [ ] Tests: JIT role = member; local-login rejection; IdP CRUD admin-only
-- [ ] §10 test 11 (manual): runbooks `docs/connect-claude.md` + `docs/configure-sso.md` with screenshots — IdP → Claude connector → tools work → denied-field probe fails cleanly
+- [x] Better Auth SSO plugin: generic OIDC (Okta / Entra ID / Google Workspace); SAML shipped in the same plugin and tested end-to-end against Keycloak — both `real`, not `stubbed`
+- [x] IdP config (issuer, client id/secret) stored in DB, admin-editable — no code change, no redeploy (API here; form in Phase 5)
+- [x] JIT provisioning: first SSO login creates a `member`
+- [x] SSO configured → login defaults to SSO; local login off when disabled
+- [x] MCP OAuth authorize step delegates to the IdP ("log in with your company account")
+- [x] Tests: JIT role = member; local-login rejection; IdP CRUD admin-only
+- [x] §10 test 11 (manual): runbooks `docs/connect-claude.md` + `docs/configure-sso.md` — written; screenshots and the live Claude-connector pass still need to be captured by a human running the runbook once
 
 ## Phase 5 — Admin / Manager / Member web UI (§8) — parallel with Phase 6
 
@@ -237,7 +237,7 @@ Release gate:
 
 - [ ] Full §10 sweep in CI (tests 1–10, incl. upgrades from partial in Phases 2–3); probes extended over the MCP surface (forged env in tool args, scope-stuffing, refresh replay after demotion)
 - [ ] `docs/threat-model.md` (§4 invariants, enforcement mechanisms, out-of-scope)
-- [ ] README: contributor + consumer quickstarts, bold security posture, **stub-vs-real table** (`real`/`simplified`/`stubbed` per component)
+- [ ] README: contributor + consumer quickstarts, bold security posture, **stub-vs-real table** (`real`/`simplified`/`stubbed` per component) — Phase 4 shipped both SSO protocols with a full Keycloak-tested e2e pass (`docs/superpowers/plans/2026-07-20-phase-4-sso.md` Task 8/9): mark SSO OIDC `real` and SAML `real`, not `stubbed` (that was the pre-research assumption in this file's Phase 4 section, superseded once Task 9 landed)
 - [ ] MIT `LICENSE`; `docs/roadmap.md` documenting the open-core line
 - [ ] Runbooks 11 + 12 executed end-to-end at least once
 - [ ] Tag `v0.1.0`; publish image + npm
