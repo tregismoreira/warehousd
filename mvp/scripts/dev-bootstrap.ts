@@ -43,9 +43,11 @@ async function main() {
     do $$ begin
       if not exists (select from pg_roles where rolname='warehousd_dev') then create role warehousd_dev login password 'pw'; end if;
       if not exists (select from pg_roles where rolname='warehousd_live') then create role warehousd_live login password 'pw'; end if;
+      if not exists (select from pg_roles where rolname='warehousd_import') then create role warehousd_import login password 'pw'; end if;
     end $$;
     grant usage on schema data_synth to warehousd_dev;
     grant usage on schema data_live to warehousd_live;
+    grant usage on schema data_live to warehousd_import;
     grant usage on schema app to warehousd_dev, warehousd_live;`);
   const cfg = loadConfig(dir);
   await createAppSchema(db);

@@ -18,9 +18,11 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean }
     do $$ begin
       if not exists (select from pg_roles where rolname='warehousd_dev') then create role warehousd_dev login password 'pw'; end if;
       if not exists (select from pg_roles where rolname='warehousd_live') then create role warehousd_live login password 'pw'; end if;
+      if not exists (select from pg_roles where rolname='warehousd_import') then create role warehousd_import login password 'pw'; end if;
     end $$;
     grant usage on schema data_synth to warehousd_dev;
     grant usage on schema data_live to warehousd_live;
+    grant usage on schema data_live to warehousd_import;
     grant usage on schema app to warehousd_dev, warehousd_live;`);
 
   // Point auth at this DB BEFORE importing lib/auth (it reads APP_DATABASE_URL at module load).
@@ -99,6 +101,7 @@ export async function setupWebDbWithData(label: string) {
 
   process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${base.dbName}`;
   process.env.LIVE_DATABASE_URL = `postgres://warehousd_live:pw@127.0.0.1:54330/${base.dbName}`;
+  process.env.IMPORT_DATABASE_URL = `postgres://warehousd_import:pw@127.0.0.1:54330/${base.dbName}`;
 
   return base;
 }

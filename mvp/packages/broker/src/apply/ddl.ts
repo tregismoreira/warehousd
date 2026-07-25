@@ -91,3 +91,14 @@ export function grantViewDDL(env: "dev" | "live", collection: string): string {
   const role = env === "dev" ? "warehousd_dev" : "warehousd_live";
   return `grant select on ${schema}.v_${collection} to ${role};`;
 }
+
+// The import role writes live BASE tables (not views — a view insert would need rules) and
+// gets nothing else: no SELECT, no UPDATE, no DELETE, and nothing at all in data_synth.
+// Synthetic data is generated, never imported, so there is no dev counterpart by design.
+export function grantImportDDL(collection: string, cfg: WarehousdConfig): string {
+  const c = cfg.collections[collection];
+  if (!c) throw new Error(`Unknown collection: ${collection}`);
+  // File collections are populated by the indexer under the owner role, not by import.
+  if (c.type === "file") return "";
+  return `grant insert on data_live.${collection} to warehousd_import;`;
+}

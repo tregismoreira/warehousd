@@ -10,6 +10,7 @@ export function getBroker() {
     app:  process.env.APP_DATABASE_URL!,
     dev:  process.env.DEV_DATABASE_URL!,
     live: process.env.LIVE_DATABASE_URL!,
+    imp:  process.env.IMPORT_DATABASE_URL,
   });
   cached = { broker: makeBroker(pools, cfg), pools };
   return cached;
