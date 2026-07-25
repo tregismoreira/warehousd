@@ -8,4 +8,6 @@ Tasks surfaced while executing `docs/superpowers/plans/2026-07-25-phase-5-web-ui
 
 ## Phase 5 items expected to need human sign-off
 
-(To be filled in as Task 23 Playwright / Task 24 design review / Task 25 acceptance gate surface anything needing human judgment — e.g. visual design approval, production secrets for the import path, or manual browser confirmation beyond what Playwright can assert.)
+- [ ] **Task 5 Step 7 (manual console smoke test)** — requires a real `ANTHROPIC_API_KEY` and a human at a browser: start the test stack, run `dev-bootstrap.ts`, run the web app with `WAREHOUSD_DEMO=true`, sign in as `mia@meridian.demo` / `demo`, land on `/member`, open **Chat console**, ask "what does the remote work policy say?" and confirm a streamed answer from `search_documents`; then confirm `/` redirects correctly for all three personas. Skipped by the implementer agent — no API key available in this environment.
+
+(To be filled in further as Task 23 Playwright / Task 24 design review / Task 25 acceptance gate surface anything needing human judgment — e.g. visual design approval, production secrets for the import path, or manual browser confirmation beyond what Playwright can assert.)
