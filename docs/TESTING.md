@@ -111,7 +111,7 @@ While signed in as any user:
    pnpm --filter @warehousd/web dev
    ```
 3. Visit **http://localhost:8722** (unauthenticated).
-4. **Expected:** login page shows "Local login is disabled" notice and **no** email/password form and **no** demo buttons.
+4. **Expected:** login page shows "No login method is configured" (no SSO providers registered in this dev setup).
 
 ---
 
