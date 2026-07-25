@@ -11,3 +11,4 @@ export * from "./oauth/client-policies";
 export { indexCollection } from "./indexing";
 export type { IndexTaxonomy } from "./indexing/sync";
 export type { DocSearchIntent } from "./types";
+export { listDocumentPaths } from "./documents/paths";
