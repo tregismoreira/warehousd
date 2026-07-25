@@ -168,13 +168,15 @@ Open http://localhost:8722 and try these scenarios:
 - [ ] Promotion/demotion primitives (data layer + API; UI in Phase 5)
 - [ ] Tests — completes §10 test 5: scope-escalation refused; promotion/demotion take effect on next refresh; no-live-grant user never gets `env:live`; token payload contains only sub/client/env
 
-## Phase 3 — MCP endpoint (§7)
+## Phase 3 — MCP endpoint (§7) — ✅ COMPLETE
 
-- [ ] `/mcp` streamable-HTTP endpoint (MCP TypeScript SDK), OAuth-protected, `BrokerContext` from token
-- [ ] Tools (complete list): `list_collections`, `describe_collection`, `query_collection`, `search_documents` (§5.6.3, from Phase 0.5), `request_access`
-- [ ] Refusals include the `request_access` hint; tool descriptions state deny-by-default + purpose-bound governance plainly
-- [ ] Rewire the chat console's tool loop onto the shared tool implementations (console = local MCP test bench)
-- [ ] Tests: MCP-over-HTTP integration (grant-filtered describe, probe-suite refusals, zero canary leakage, pending grant from `request_access`); dev-token env wall across all tools; §10 test 6 (env parity — identical shapes dev vs live)
+Plan: [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-phase-3-mcp-endpoint.md)
+
+- [x] `/mcp` streamable-HTTP endpoint (MCP TypeScript SDK), OAuth-protected, `BrokerContext` from token
+- [x] Tools (complete list): `list_collections`, `describe_collection`, `query_collection`, `search_documents` (§5.6.3, from Phase 0.5), `request_access`
+- [x] Refusals include the `request_access` hint; tool descriptions state deny-by-default + purpose-bound governance plainly
+- [x] Rewire the chat console's tool loop onto the shared tool implementations (console = local MCP test bench)
+- [x] Tests: MCP-over-HTTP integration (grant-filtered describe, probe-suite refusals over both `query_collection` and `search_documents`, zero canary leakage, pending grant from `request_access`); dev-token env wall across all tools (incl. forged env args); §10 test 6 (env parity — identical shapes dev vs live)
 
 ## Phase 4 — SSO: OIDC, JIT, IdP-delegated MCP login (§6.1–6.4)
 
