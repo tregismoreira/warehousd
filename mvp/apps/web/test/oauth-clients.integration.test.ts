@@ -4,10 +4,11 @@ import { getClientPolicy } from "@warehousd/broker";
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
-let miaCookie: string, marcusCookie: string;
+let anaCookie: string, miaCookie: string, marcusCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDb("oauthclients");
+  anaCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
   miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
   marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
 }, 60_000);
@@ -23,10 +24,10 @@ function req(url: string, opts: { method?: string; cookie?: string; body?: unkno
 }
 
 describe("manual client creation", () => {
-  it("member can create a client; it always starts with {env:dev} — no override", async () => {
+  it("admin can create a client; it always starts with {env:dev} — no override", async () => {
     const { POST } = await import("../app/api/oauth-clients/route");
     const res = await POST(req("/api/oauth-clients", {
-      method: "POST", cookie: miaCookie,
+      method: "POST", cookie: anaCookie,
       body: { name: "My Reporting App", allowedScopes: ["env:dev", "env:live"] }, // attempted override
     }) as any);
     expect(res.status).toBe(200);
@@ -36,13 +37,22 @@ describe("manual client creation", () => {
     const policy = await getClientPolicy(getAppPool(), body.clientId);
     expect(policy.allowedScopes).toEqual(["env:dev"]);
   });
+
+  it("member gets 403 when trying to create a client", async () => {
+    const { POST } = await import("../app/api/oauth-clients/route");
+    const res = await POST(req("/api/oauth-clients", {
+      method: "POST", cookie: miaCookie,
+      body: { name: "Nope" },
+    }) as any);
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("promotion/demotion", () => {
   it("member cannot promote → 403", async () => {
     const { POST: createClient } = await import("../app/api/oauth-clients/route");
     const created = await (await createClient(req("/api/oauth-clients", {
-      method: "POST", cookie: miaCookie, body: { name: "App" },
+      method: "POST", cookie: anaCookie, body: { name: "App" },
     }) as any)).json();
 
     const { POST } = await import("../app/api/oauth-clients/[clientId]/promote/route");
@@ -55,7 +65,7 @@ describe("promotion/demotion", () => {
   it("manager can promote, stamping promoted_by; and demote", async () => {
     const { POST: createClient } = await import("../app/api/oauth-clients/route");
     const created = await (await createClient(req("/api/oauth-clients", {
-      method: "POST", cookie: miaCookie, body: { name: "App" },
+      method: "POST", cookie: anaCookie, body: { name: "App" },
     }) as any)).json();
 
     const { POST } = await import("../app/api/oauth-clients/[clientId]/promote/route");
