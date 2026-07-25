@@ -153,13 +153,13 @@ async function getSamlCertificate(): Promise<string> {
   }
   const xml = await res.text();
 
-  // Extract X.509 certificate from <ds:X509Certificate> tag
-  const certMatch = xml.match(/<ds:X509Certificate>([^<]+)<\/ds:X509Certificate>/);
+  // Extract X.509 certificate from <ds:X509Certificate> tag, handling multi-line content
+  const certMatch = xml.match(/<ds:X509Certificate>([\s\S]+?)<\/ds:X509Certificate>/);
   if (!certMatch || !certMatch[1]) {
     throw new Error("Could not extract X.509 certificate from SAML descriptor");
   }
 
-  return certMatch[1];
+  return certMatch[1].trim();
 }
 
 // Helper: Parse SAML form response and extract SAMLResponse and RelayState
@@ -181,7 +181,7 @@ function parseSamlForm(html: string): { samlResponse: string; relayState: string
 }
 
 describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
-  "SSO: Real Keycloak OIDC provider",
+  "SSO: Real Keycloak OIDC and SAML providers",
   () => {
     it("signs in via Keycloak's login form, creates user with role='member', and completes OAuth flow", async () => {
       // Step 1: POST /sign-in/sso to get authorization URL and state cookie
