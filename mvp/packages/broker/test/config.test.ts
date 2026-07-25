@@ -158,3 +158,34 @@ describe("taxonomies", () => {
         title: { posture: "allow" }, sneaky: { posture: "allow" } } } } })).toThrow(/not in fixed set/);
   });
 });
+
+it("accepts database.port, server.image and demo", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
+  writeFileSync(join(dir, "warehousd.yml"), `
+project: p
+demo: true
+database: { managed: true, port: 8723 }
+server: { port: 8722, image: "ghcr.io/warehousd/warehousd:dev" }
+collections:
+  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
+`);
+  const cfg = loadConfig(dir);
+  expect(cfg.database?.port).toBe(8723);
+  expect(cfg.server.image).toBe("ghcr.io/warehousd/warehousd:dev");
+  expect(cfg.demo).toBe(true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+it("defaults demo to false and leaves image/port undefined", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
+  writeFileSync(join(dir, "warehousd.yml"), `
+project: p
+collections:
+  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
+`);
+  const cfg = loadConfig(dir);
+  expect(cfg.demo).toBe(false);
+  expect(cfg.server.image).toBeUndefined();
+  expect(cfg.database?.port).toBeUndefined();
+  rmSync(dir, { recursive: true, force: true });
+});

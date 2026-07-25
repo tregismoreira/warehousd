@@ -68,8 +68,20 @@ export const CollectionSchema = z.object({
 
 export const ConfigSchema = z.object({
   project: z.string(),
-  database: z.object({ managed: z.boolean().optional(), url: z.string().optional() }).optional(),
-  server: z.object({ port: z.number() }).default({ port: 8722 }),
+  // Seed the §9 demo personas on first boot. Off by default: a consuming project must opt in.
+  demo: z.boolean().default(false),
+  database: z.object({
+    managed: z.boolean().optional(),
+    url: z.string().optional(),
+    // Host port for the CLI-managed Postgres. Default (server.port + 1) is applied in the CLI,
+    // not here, because it depends on a sibling field.
+    port: z.number().optional(),
+  }).optional(),
+  server: z.object({
+    port: z.number(),
+    // Override the published server image (CI/E2E point this at a locally built tag).
+    image: z.string().optional(),
+  }).default({ port: 8722 }),
   taxonomies: z.record(VocabularySchema).default({}).superRefine((tx, ctx) => {
     for (const [slug, v] of Object.entries(tx)) {
       if (!/^[a-z][a-z0-9_]*$/.test(slug) || slug.includes("__") || TAXONOMY_RESERVED_SLUGS.has(slug))
