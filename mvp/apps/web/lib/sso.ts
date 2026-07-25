@@ -1,4 +1,5 @@
 import { sso } from "@better-auth/sso";
+import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx, APIError } from "better-auth/api";
 import type { Pool } from "pg";
 
@@ -34,7 +35,7 @@ export function ssoAdminPlugin() {
     hooks: {
       before: [
         {
-          matcher: (ctx: { path: string }) => SSO_ADMIN_PATHS.has(ctx.path),
+          matcher: (ctx: { path?: string }) => SSO_ADMIN_PATHS.has(ctx.path ?? ""),
           handler: createAuthMiddleware(async (ctx: any) => {
             const session = await getSessionFromCtx(ctx);
             if (session?.user?.role !== "admin") {
@@ -44,5 +45,7 @@ export function ssoAdminPlugin() {
         },
       ],
     },
-  };
+    // See the matching note in lib/oauth.ts's envScopePlugin — `satisfies` keeps Better Auth's
+    // InferAPI intact across the plugins tuple in lib/auth.ts.
+  } satisfies BetterAuthPlugin;
 }

@@ -1,4 +1,5 @@
 import { mcp } from "better-auth/plugins";
+import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { Pool } from "pg";
 import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy } from "@warehousd/broker";
@@ -12,6 +13,10 @@ const ENV_SCOPES = ["env:dev", "env:live"] as const;
 export const mcpPlugin = mcp({
   loginPage: "/login",
   oidcConfig: {
+    // Required by OIDCOptions as well as at the mcp() top level. Both are backstops only:
+    // envScopePlugin's before-hook intercepts unauthenticated /mcp/authorize first (Task 3),
+    // so Better Auth's own login redirect never fires for this endpoint.
+    loginPage: "/login",
     scopes: ["env:dev", "env:live"],
     accessTokenExpiresIn: 900, // 15 min, per §6.1 rule 4
     allowDynamicClientRegistration: true,
@@ -29,7 +34,7 @@ export function envScopePlugin(app: Pool) {
     hooks: {
       before: [
         {
-          matcher: (ctx: { path: string }) => ctx.path === "/mcp/authorize",
+          matcher: (ctx: { path?: string }) => ctx.path === "/mcp/authorize",
           handler: createAuthMiddleware(async (ctx: any) => {
             // Intercept the unauthenticated case before Better Auth's authorize handler can arm its
             // `oidc_login_prompt` cookie-resume (better-auth/plugins/mcp/authorize.mjs sets the cookie;
@@ -93,7 +98,7 @@ export function envScopePlugin(app: Pool) {
       ],
       after: [
         {
-          matcher: (ctx: { path: string }) => ctx.path === "/mcp/token",
+          matcher: (ctx: { path?: string }) => ctx.path === "/mcp/token",
           handler: createAuthMiddleware(async (ctx: any) => {
             const grantType = ctx.body?.grant_type;
             if (grantType !== "refresh_token") return;
@@ -137,7 +142,7 @@ export function envScopePlugin(app: Pool) {
           }),
         },
         {
-          matcher: (ctx: { path: string }) => ctx.path === "/mcp/register",
+          matcher: (ctx: { path?: string }) => ctx.path === "/mcp/register",
           handler: createAuthMiddleware(async (ctx: any) => {
             const returned = ctx.context.returned;
             if (!(returned instanceof Response)) return;
@@ -148,5 +153,9 @@ export function envScopePlugin(app: Pool) {
         },
       ],
     },
-  };
+    // `satisfies` (not a plain literal) so this stays assignable to the plugins tuple in
+    // lib/auth.ts. An unannotated literal degrades Better Auth's InferAPI across the whole
+    // tuple, silently dropping later plugins' endpoints from `auth.api` — that is what hid
+    // `registerSSOProvider` and broke `next build`.
+  } satisfies BetterAuthPlugin;
 }
