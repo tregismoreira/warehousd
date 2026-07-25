@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
 import { mcpPlugin, envScopePlugin } from "./oauth";
-import { ssoPlugin, trustedOrigins } from "./sso";
+import { ssoPlugin, ssoAdminPlugin, trustedOrigins } from "./sso";
 
 export const LOCAL_LOGIN_DISABLED = process.env.WAREHOUSD_DISABLE_LOCAL_LOGIN === "true";
 
@@ -30,7 +30,7 @@ export const auth = betterAuth({
     },
   },
   trustedOrigins: trustedOrigins(),
-  plugins: [mcpPlugin, envScopePlugin(appPool), ssoPlugin(appPool)],
+  plugins: [mcpPlugin, envScopePlugin(appPool), ssoPlugin(appPool), ssoAdminPlugin()],
 });
 
 export type SessionUser = {
