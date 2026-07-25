@@ -153,7 +153,7 @@ Open http://localhost:8722 and try these scenarios:
 - [ ] Install Better Auth in `apps/web`; auth tables (`user`, `session`, `account`) in the `app` schema
 - [ ] Local email/password login (bootstrap fallback only) + login screen; demo mode shows §9 persona credentials
 - [ ] `role` on user (`admin`/`manager`/`member`); seed Ana/Marcus/Mia as real users with §9 roles + grants
-- [ ] Support `SANDBOXD_DISABLE_LOCAL_LOGIN=true` (fully disables local credentials)
+- [ ] Support `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` (fully disables local credentials)
 - [ ] Delete the POC persona switcher; derive `BrokerContext` in UI routes from the verified session (env via authenticated console toggle)
 - [ ] Role checks on grants API (approve/deny/revoke = manager/admin only)
 - [ ] Tests: 401 on unauthenticated routes; 403 on member-approve; request-body userId/env provably ignored; all Phase 0 tests still green
@@ -214,7 +214,7 @@ Apply the `frontend-design` skill; keep the Phase 0 "security console" aesthetic
 ## Phase 7 — `warehousd deploy` (Fly.io) (§11 Deploy)
 
 - [ ] `deploy` via `flyctl` shell-out (detect installed+authenticated; error with install instructions)
-- [ ] Pre-flight checklist — refuse unless: SSO configured or `--allow-local-login`; `SANDBOXD_DISABLE_DEMO=true`; all `${env:...}` resolve
+- [ ] Pre-flight checklist — refuse unless: SSO configured or `--allow-local-login`; `WAREHOUSD_DISABLE_DEMO=true`; all `${env:...}` resolve
 - [ ] Create/update Fly app from published image; Fly Postgres or `database.url`; secrets via `fly secrets set` (never on disk)
 - [ ] Post-deploy apply + synthetic seed (`data_synth` only — deploy never writes `data_live`)
 - [ ] `.warehousd/outputs.deploy.json` with HTTPS URLs; idempotent re-deploy with config diff (`--yes`); `--destroy` with typed app-name confirmation

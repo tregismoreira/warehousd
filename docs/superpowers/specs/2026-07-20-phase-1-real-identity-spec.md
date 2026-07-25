@@ -41,7 +41,7 @@ The acceptance gate proves this: a `userId`/`env` planted in a request is provab
 
 ## 5. Surface changes
 
-- **Auth backend.** Better Auth owns `user`/`session`/`account`/`verification` tables in the existing `app` Postgres schema, created idempotently alongside the hand-written `createAppSchema` tables. They own disjoint table names, so create-if-not-exists on both sides never clobbers. `SANDBOXD_DISABLE_LOCAL_LOGIN=true` fully disables email/password login.
+- **Auth backend.** Better Auth owns `user`/`session`/`account`/`verification` tables in the existing `app` Postgres schema, created idempotently alongside the hand-written `createAppSchema` tables. They own disjoint table names, so create-if-not-exists on both sides never clobbers. `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` fully disables email/password login.
 - **Login screen.** Email/password form. In demo mode (`WAREHOUSD_DEMO=true`) it lists the §9 persona credentials; when local login is disabled it shows an SSO-only notice instead of a form.
 - **Console page.** Persona dropdown deleted. Unauthenticated visits redirect to `/login`. The env toggle POSTs to `/api/env` (server-side cookie), never a client-held param. Header shows the logged-in user, role, and sign-out.
 - **Grants API.** `request` is allowed for any authenticated user; `approve`/`deny`/`revoke` require `manager`/`admin` (else 403). The acting user (`decided_by`) is the session user, not a body value.

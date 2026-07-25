@@ -59,7 +59,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 WAREHOUSD_DEMO=true
 
 # Kill-switch — uncomment to disable local login (shows SSO notice instead)
-# SANDBOXD_DISABLE_LOCAL_LOGIN=true
+# WAREHOUSD_DISABLE_LOCAL_LOGIN=true
 ```
 
 > `NEXT_PUBLIC_*` variants are derived automatically from the non-public ones via `next.config.mjs` — you don't need to set them.

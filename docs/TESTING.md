@@ -104,9 +104,9 @@ While signed in as any user:
 ## 10. Local login kill-switch
 
 1. Stop the dev server.
-2. Restart with `SANDBOXD_DISABLE_LOCAL_LOGIN=true`:
+2. Restart with `WAREHOUSD_DISABLE_LOCAL_LOGIN=true`:
    ```bash
-   SANDBOXD_DISABLE_LOCAL_LOGIN=true \
+   WAREHOUSD_DISABLE_LOCAL_LOGIN=true \
    WAREHOUSD_PROJECT_DIR=examples/meridian \
    pnpm --filter @warehousd/web dev
    ```
