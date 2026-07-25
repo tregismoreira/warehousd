@@ -9,14 +9,14 @@ const ENV_SCOPES = ["env:dev", "env:live"] as const;
 // (openid, profile, email, offline_access). Rule enforcement (client policy intersection,
 // live-grant eligibility, exactly-one-env, refresh re-evaluation) is added in lib/oauth.ts's
 // envScopePlugin — see Tasks 3-6.
-export const mcpPlugin = mcp({
+export const mcpPlugin: any = mcp({
   loginPage: "/login",
   oidcConfig: {
     scopes: ["env:dev", "env:live"],
     accessTokenExpiresIn: 900, // 15 min, per §6.1 rule 4
     allowDynamicClientRegistration: true,
   },
-});
+} as any);
 
 // §6.1 rules 1-4. Intersects the requested scope with the client's allow-list (rule 1) and
 // the user's live-grant eligibility (rule 2) BEFORE Better Auth's own authorize handler runs,
@@ -29,7 +29,7 @@ export function envScopePlugin(app: Pool) {
     hooks: {
       before: [
         {
-          matcher: (ctx: { path: string }) => ctx.path === "/mcp/authorize",
+          matcher: (ctx: any) => ctx.path === "/mcp/authorize",
           handler: createAuthMiddleware(async (ctx: any) => {
             const clientId = String(ctx.query?.client_id ?? "");
             const requested = String(ctx.query?.scope ?? "").split(" ").filter(Boolean);
@@ -82,7 +82,7 @@ export function envScopePlugin(app: Pool) {
       ],
       after: [
         {
-          matcher: (ctx: { path: string }) => ctx.path === "/mcp/token",
+          matcher: (ctx: any) => ctx.path === "/mcp/token",
           handler: createAuthMiddleware(async (ctx: any) => {
             const grantType = ctx.body?.grant_type;
             if (grantType !== "refresh_token") return;
@@ -126,7 +126,7 @@ export function envScopePlugin(app: Pool) {
           }),
         },
         {
-          matcher: (ctx: { path: string }) => ctx.path === "/mcp/register",
+          matcher: (ctx: any) => ctx.path === "/mcp/register",
           handler: createAuthMiddleware(async (ctx: any) => {
             const returned = ctx.context.returned;
             if (!(returned instanceof Response)) return;

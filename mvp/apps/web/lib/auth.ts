@@ -29,7 +29,7 @@ export const auth = betterAuth({
     },
   },
   plugins: [mcpPlugin, envScopePlugin(appPool)],
-});
+} as any);
 
 export type SessionUser = {
   id: string;
