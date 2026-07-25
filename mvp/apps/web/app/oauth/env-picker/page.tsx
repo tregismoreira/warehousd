@@ -1,13 +1,14 @@
 // Rule 3 (§6.1): shown only when BOTH env:dev and env:live survived rules 1-2 for this
 // client+user. This radio is a hint — /mcp/authorize's before-hook re-derives eligibility
 // on resubmit and ignores any wh_env value outside {dev, live}. Default selection is dev.
-export default function EnvPickerPage({
+export default async function EnvPickerPage({
   searchParams,
 }: {
-  searchParams: Record<string, string | string[] | undefined>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const resolvedSearchParams = await searchParams;
   const params = new URLSearchParams(
-    Object.entries(searchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] ?? "" : v ?? ""]),
+    Object.entries(resolvedSearchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] ?? "" : v ?? ""]),
   );
   return (
     <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "system-ui" }}>
