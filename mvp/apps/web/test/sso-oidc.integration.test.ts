@@ -107,7 +107,7 @@ describe("SSO: MCP authorize delegates to the IdP", () => {
       },
       asResponse: true,
     } as any);
-    const { client_id } = await reg.json();
+    const { client_id, client_secret } = await reg.json();
 
     // Step 1: GET /api/auth/mcp/authorize without cookie should redirect to /login
     const { verifier, challenge } = pkcePair();
@@ -129,18 +129,49 @@ describe("SSO: MCP authorize delegates to the IdP", () => {
     expect(redirectLocation).toContain("/login");
     expect(redirectLocation).toContain(`client_id=${client_id}`);
 
-    // Step 2: Sign in with an existing user and test the OAuth flow
-    const miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    // Step 2: Sign in via SSO to establish a session
+    fakeIdp.setNextUser({
+      sub: "scenario3ssouser@meridian.demo",
+      email: "scenario3ssouser@meridian.demo",
+      email_verified: true,
+      name: "Scenario 3 SSO User",
+    });
 
-    const res = await db.auth.handler(
-      new Request(authorizeUrl, { headers: { cookie: miaCookie } }),
+    const { cookie: sessionCookie } = await ssoSignIn(
+      db.auth,
+      "test-oidc",
+      "/",
     );
 
-    const location = res.headers.get("location") ?? "";
-    // Should either redirect to callback with code or to env picker
-    expect(["/oauth/env-picker", "http://localhost:9999/callback"].some(
-      (path) => location.includes(path),
-    )).toBe(true);
+    // Step 3: Now call mcp/authorize with the SSO session
+    const mcpRes = await db.auth.handler(
+      new Request(authorizeUrl, { headers: { cookie: sessionCookie } }),
+    );
+
+    const location = mcpRes.headers.get("location") ?? "";
+    // Should redirect to the callback with a code (no env picker for single env)
+    expect(location).toContain("http://localhost:9999/callback");
+    expect(location).toContain("code=");
+
+    // Extract and verify the code
+    const code = new URL(location, "http://localhost").searchParams.get("code");
+    expect(code).toBeTruthy();
+
+    // Exchange the code for a token and verify the scope
+    const tokenRes = await db.auth.api.mcpOAuthToken({
+      body: {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "http://localhost:9999/callback",
+        client_id,
+        client_secret,
+        code_verifier: verifier,
+      },
+      asResponse: true,
+    } as any);
+    const body = await tokenRes.json();
+    const grantedScope = body.scope as string;
+    expect(grantedScope).toContain("env:dev");
   });
 });
 
@@ -156,8 +187,14 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
     const { client_id, client_secret } = await reg.json();
     await upsertClientPolicy(appPool, client_id, "SSO Dev Only Client", ["env:dev"]);
 
-    // Use mia's existing session for this test
-    const miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    // Sign in via SSO to establish session (use fresh SSO-only user)
+    fakeIdp.setNextUser({
+      sub: "rule1ssouser@meridian.demo",
+      email: "rule1ssouser@meridian.demo",
+      email_verified: true,
+      name: "Rule 1 SSO User",
+    });
+    const { cookie: sessionCookie } = await ssoSignIn(db.auth, "test-oidc", "/");
 
     const { verifier, challenge } = pkcePair();
     const authorizeUrl = new URL("http://localhost:8722/api/auth/mcp/authorize");
@@ -169,7 +206,7 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
     const res = await db.auth.handler(
-      new Request(authorizeUrl, { headers: { cookie: miaCookie } }),
+      new Request(authorizeUrl, { headers: { cookie: sessionCookie } }),
     );
 
     const location = res.headers.get("location") ?? "";
@@ -207,9 +244,15 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
       "env:dev",
       "env:live",
     ]);
-    // mia has no live grant
 
-    const miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    // Sign in via SSO to establish session (use fresh SSO-only user with no live grant)
+    fakeIdp.setNextUser({
+      sub: "rule2ssouser@meridian.demo",
+      email: "rule2ssouser@meridian.demo",
+      email_verified: true,
+      name: "Rule 2 SSO User",
+    });
+    const { cookie: sessionCookie } = await ssoSignIn(db.auth, "test-oidc", "/");
 
     const { verifier, challenge } = pkcePair();
     const authorizeUrl = new URL("http://localhost:8722/api/auth/mcp/authorize");
@@ -221,7 +264,7 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
     const res = await db.auth.handler(
-      new Request(authorizeUrl, { headers: { cookie: miaCookie } }),
+      new Request(authorizeUrl, { headers: { cookie: sessionCookie } }),
     );
 
     const location = res.headers.get("location") ?? "";
@@ -259,9 +302,25 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
       "env:live",
     ]);
 
-    // Give mia a live grant
+    // Sign in via SSO to establish session and get the user ID
+    fakeIdp.setNextUser({
+      sub: "rule3ssouser@meridian.demo",
+      email: "rule3ssouser@meridian.demo",
+      email_verified: true,
+      name: "Rule 3 SSO User",
+    });
+    const { cookie: sessionCookie } = await ssoSignIn(db.auth, "test-oidc", "/");
+
+    // Get the new SSO user's ID from the database
+    const userResult = await appPool.query(
+      `select id from app."user" where email = $1`,
+      ["rule3ssouser@meridian.demo"],
+    );
+    const userId = userResult.rows[0].id;
+
+    // Give this SSO user a live grant
     const grantId = await requestGrant(appPool, {
-      userId: "mia",
+      userId,
       collection: "policies",
       env: "live",
       purposeLabel: "test",
@@ -270,8 +329,6 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
     await approveGrant(appPool, grantId, "ana", {
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
     });
-
-    const miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
 
     const { challenge } = pkcePair();
     const authorizeUrl = new URL("http://localhost:8722/api/auth/mcp/authorize");
@@ -283,7 +340,7 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
     const res = await db.auth.handler(
-      new Request(authorizeUrl, { headers: { cookie: miaCookie } }),
+      new Request(authorizeUrl, { headers: { cookie: sessionCookie } }),
     );
 
     const location = res.headers.get("location") ?? "";
