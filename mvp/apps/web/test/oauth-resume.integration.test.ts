@@ -153,4 +153,63 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
     expect(pickerLocation).toContain("env%3Adev");
     expect(pickerLocation).toContain("env%3Alive");
   });
+
+  it("case 3: live-allowed client with no approved live grant gets dev-only scope after redirect-login flow", async () => {
+    // Register a client with default policy {env:dev, env:live}.
+    const reg = await db.auth.api.registerMcpClient({
+      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "No Grant Resume Client" },
+      asResponse: true,
+    } as any);
+    const { client_id, client_secret } = await reg.json();
+    // Keep the default policy (both env:dev and env:live allowed).
+    // marcus has no approved live grant, unlike mia in case 2.
+
+    const { verifier, challenge } = pkcePair();
+    const authorizeUrl = new URL("http://localhost:8722/api/auth/mcp/authorize");
+    authorizeUrl.searchParams.set("client_id", client_id);
+    authorizeUrl.searchParams.set("response_type", "code");
+    authorizeUrl.searchParams.set("redirect_uri", "http://localhost:9999/callback");
+    // Request BOTH env:dev and env:live; rule 2 should filter env:live since marcus is ineligible.
+    authorizeUrl.searchParams.set("scope", "env:dev env:live openid");
+    authorizeUrl.searchParams.set("code_challenge", challenge);
+    authorizeUrl.searchParams.set("code_challenge_method", "S256");
+
+    // Step 1: GET /mcp/authorize with NO cookie → 302 to /login with original query string intact.
+    const authorizeRes = await db.auth.handler(
+      new Request(authorizeUrl, { method: "GET" })
+    );
+    expect(authorizeRes.status).toBe(302);
+    const authorizeLocation = authorizeRes.headers.get("location");
+    expect(authorizeLocation).toContain("/login");
+    expect(authorizeLocation).toContain("client_id=" + client_id);
+
+    // Step 2: POST /sign-in/email normally (no special cookie forwarding).
+    const sessionCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
+    expect(sessionCookie).toBeTruthy();
+
+    // Step 3: GET /mcp/authorize AGAIN, same original query params, WITH the session cookie.
+    const authorizeRes2 = await db.auth.handler(
+      new Request(authorizeUrl, {
+        method: "GET",
+        headers: {
+          cookie: sessionCookie,
+        },
+      })
+    );
+    // Rule 1: both env:dev and env:live are in policy and requested, survivors = [env:dev, env:live].
+    // Rule 2: marcus has no approved live grant, so env:live is filtered out, survivors = [env:dev].
+    // Only one survivor, so no env-picker; this resolves directly to the callback redirect.
+    expect(authorizeRes2.status).toBe(302);
+    const callbackLocation = authorizeRes2.headers.get("location");
+    expect(callbackLocation).toContain("http://localhost:9999/callback");
+
+    // Step 4: Extract the code and exchange for token to verify the granted scope.
+    const callbackUrl = new URL(callbackLocation ?? "", "http://localhost");
+    const code = callbackUrl.searchParams.get("code");
+    expect(code).toBeTruthy();
+
+    const scope = await exchangeCodeForScope(client_id, client_secret, code!, verifier);
+    expect(scope).toContain("env:dev");
+    expect(scope).not.toContain("env:live");
+  });
 });
