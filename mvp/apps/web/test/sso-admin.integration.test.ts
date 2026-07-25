@@ -247,15 +247,19 @@ describe("SSO Admin Routes", () => {
           method: "POST",
           cookie: anaCookie,
           body: {
+            providerId: "admin-register-test-provider",
             issuer: fakeIdpUrl,
-            type: "oidc",
+            domain: "test.example.com",
+            oidcConfig: {
+              clientId: "test-client-id",
+              clientSecret: "test-client-secret",
+              discoveryEndpoint: `${fakeIdpUrl}/.well-known/openid-configuration`,
+            },
           },
         }));
-        expect([200, 201, 400]).toContain(res.status);
+        expect([200, 201]).toContain(res.status);
         const body = await res.json();
-        if (res.status === 200 || res.status === 201) {
-          expect(body.id || body.providerId).toBeDefined();
-        }
+        expect(body.id || body.providerId).toBeDefined();
       });
     });
 
