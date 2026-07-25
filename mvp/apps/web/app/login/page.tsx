@@ -1,9 +1,8 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { authClient } from "../../lib/auth-client";
 
-const LOCAL_LOGIN_DISABLED = process.env.NEXT_PUBLIC_LOCAL_LOGIN_DISABLED === "true";
 const DEMO = process.env.NEXT_PUBLIC_WAREHOUSD_DEMO === "true";
 
 const DEMO_CREDS = [
@@ -18,7 +17,7 @@ interface SSOProvider {
   type: string;
 }
 
-export default function Login() {
+function LoginInner() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -160,5 +159,13 @@ export default function Login() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function Login() {
+  return (
+    <Suspense fallback={<main style={{ padding: 24 }}><p>Loading...</p></main>}>
+      <LoginInner />
+    </Suspense>
   );
 }

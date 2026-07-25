@@ -79,7 +79,7 @@ describe("Local login disabled", () => {
       name: "New SSO Account",
     });
 
-    const { cookie } = await ssoSignIn(db.auth, "test-oidc", "/");
+    await ssoSignIn(db.auth, "test-oidc", "/");
 
     // Query the database for the new user
     const result = await appPool.query(
