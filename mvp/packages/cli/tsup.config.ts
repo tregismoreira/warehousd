@@ -1,4 +1,5 @@
 import { defineConfig } from "tsup";
+import pkg from "./package.json" with { type: "json" };
 
 export default defineConfig({
   entry: ["src/index.ts"],
@@ -13,6 +14,6 @@ export default defineConfig({
   external: ["pg"],
   banner: { js: "#!/usr/bin/env node" },
   define: {
-    WAREHOUSD_CLI_VERSION: JSON.stringify("0.1.0"),
+    WAREHOUSD_CLI_VERSION: JSON.stringify(pkg.version),
   },
 });

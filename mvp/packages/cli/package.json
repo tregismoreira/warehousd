@@ -7,7 +7,7 @@
   "bin": {
     "warehousd": "./dist/index.cjs"
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md"],
   "engines": {
     "node": ">=22"
   },
