@@ -4,11 +4,18 @@ import { parse } from "yaml";
 import { ConfigSchema, type WarehousdConfig } from "./schema";
 
 function interpolate(raw: string): string {
-  return raw.replace(/\$\{env:([A-Z0-9_]+)\}/g, (_, name) => {
-    const v = process.env[name];
-    if (v === undefined) throw new Error(`Unresolved \${env:${name}} in warehousd.yml`);
-    return v;
+  const lines = raw.split('\n');
+  const interpolated = lines.map(line => {
+    // Skip lines that are YAML comments (trimmed line starts with #)
+    if (line.trim().startsWith('#')) return line;
+
+    return line.replace(/\$\{env:([A-Z0-9_]+)\}/g, (_, name) => {
+      const v = process.env[name];
+      if (v === undefined) throw new Error(`Unresolved \${env:${name}} in warehousd.yml`);
+      return v;
+    });
   });
+  return interpolated.join('\n');
 }
 
 function deepMerge<T>(base: T, over: Partial<T>): T {

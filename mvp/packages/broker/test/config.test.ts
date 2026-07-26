@@ -47,6 +47,15 @@ it("interpolates ${env:VAR}", () => {
   expect(cfg.server.port).toBe(7000);
 });
 
+it("skips interpolation inside YAML comment lines", () => {
+  writeFileSync(join(dir, "warehousd.yml"),
+    base + "\n# This line contains ${env:UNDEFINED_VAR} in a comment");
+  rmSync(join(dir, "warehousd.local.yml"), { force: true });
+  // Should not throw even though UNDEFINED_VAR is not set
+  const cfg = loadConfig(dir);
+  expect(cfg.project).toBe("cortex");
+});
+
 it("rejects a field with an unknown posture", () => {
   writeFileSync(join(dir, "warehousd.yml"),
     base.replace("posture: deny", "posture: sometimes"));
