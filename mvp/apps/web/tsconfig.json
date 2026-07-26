@@ -6,6 +6,11 @@
     "lib": ["dom", "dom.iterable", "esnext"],
     "plugins": [{ "name": "next" }],
     "noEmit": true,
+    // tsconfig.base.json turns declaration emit on for packages/broker, which ships types.
+    // This app emits nothing, and Better Auth's inferred `auth`/plugin types are deliberately
+    // huge and reference non-portable paths — requiring them to be nameable (TS2742/TS4023/TS7056)
+    // serves no purpose here.
+    "declaration": false,
     "allowJs": true,
     "incremental": true,
     "isolatedModules": true,
