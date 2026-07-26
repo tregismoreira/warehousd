@@ -103,6 +103,10 @@ export function removeVolume(name: string): void {
   run(["volume", "rm", "-f", name]);
 }
 
+export function removeNetwork(name: string): void {
+  run(["network", "rm", name]);
+}
+
 export function buildRunArgs(spec: ContainerSpec): string[] {
   const args: string[] = [
     "run",
