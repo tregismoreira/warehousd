@@ -8,3 +8,5 @@ warehousd.local.yml
 .env.local
 coverage/
 *.tsbuildinfo
+apps/web/test-results/
+apps/web/playwright-report/

@@ -13,6 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
   Popover, PopoverContent, PopoverTrigger,
@@ -182,9 +183,9 @@ export function AuditBrowser() {
     <div className="space-y-4">
       <div className="flex flex-wrap gap-4">
         <div className="flex-1 min-w-40">
-          <label className="block text-xs font-medium mb-1">Outcome</label>
+          <Label htmlFor="filter-outcome" className="block text-xs font-medium mb-1">Outcome</Label>
           <Select value={outcome} onValueChange={(v) => updateParam("outcome", v)}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger id="filter-outcome" className="w-full">
               <SelectValue placeholder="Any" />
             </SelectTrigger>
             <SelectContent>
@@ -196,9 +197,9 @@ export function AuditBrowser() {
         </div>
 
         <div className="flex-1 min-w-40">
-          <label className="block text-xs font-medium mb-1">Env</label>
+          <Label htmlFor="filter-env" className="block text-xs font-medium mb-1">Env</Label>
           <Select value={env} onValueChange={(v) => updateParam("env", v)}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger id="filter-env" className="w-full">
               <SelectValue placeholder="Any" />
             </SelectTrigger>
             <SelectContent>
@@ -210,8 +211,9 @@ export function AuditBrowser() {
         </div>
 
         <div className="flex-1 min-w-40">
-          <label className="block text-xs font-medium mb-1">User</label>
+          <Label htmlFor="filter-user" className="block text-xs font-medium mb-1">User</Label>
           <Input
+            id="filter-user"
             placeholder="User ID"
             value={user}
             onChange={(e) => updateParam("user", e.target.value)}
@@ -220,9 +222,9 @@ export function AuditBrowser() {
         </div>
 
         <div className="flex-1 min-w-40">
-          <label className="block text-xs font-medium mb-1">Collection</label>
+          <Label htmlFor="filter-collection" className="block text-xs font-medium mb-1">Collection</Label>
           <Select value={collection} onValueChange={(v) => updateParam("collection", v)}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger id="filter-collection" className="w-full">
               <SelectValue placeholder="Any" />
             </SelectTrigger>
             <SelectContent>
