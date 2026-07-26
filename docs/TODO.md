@@ -12,6 +12,11 @@ Tasks surfaced while executing `docs/superpowers/plans/2026-07-25-phase-5-web-ui
 
 ## Phase 5 wrap-up
 
-- [ ] **Push `phase-5-web-ui` and open the PR to `main`** (plan Task 25, Step 7). All 26 tasks are implemented, verified, and committed locally (57 commits ahead of `main`); the full acceptance gate is green (Vitest 348/348, ESLint clean, `tsc --noEmit` clean, `next build` succeeds, Playwright 8/8). Pushing and opening a PR is visible to others and was left for explicit human confirmation rather than done automatically.
+- [ ] **Push `phase-5-web-ui` and open the PR to `main`** (plan Task 25, Step 7). All 26 tasks are implemented, verified, and committed locally; the full acceptance gate is green (Vitest 350/350, ESLint clean, `tsc --noEmit` clean, `next build` succeeds, Playwright 8/8). Pushing and opening a PR is visible to others and was left for explicit human confirmation rather than done automatically.
 
 Task 23 (Playwright) and Task 24 (design review) did not surface anything requiring human-only judgment beyond the above — both were completed end-to-end by the agent, including real-browser screenshots of all eleven surfaces via the Playwright MCP tools, and several real bugs found and fixed along the way (see the `polish(web): design review pass` commit).
+
+## Deferred hardening (reviewed, not blocking Phase 5)
+
+- [ ] **Mark the `wh_env` cookie `Secure`** — `app/api/env/route.ts` sets it `HttpOnly; SameSite=Lax` but not `Secure`, because the dev/demo setup is plain HTTP on localhost. Not a privilege path (flipping it to `live` without a live grant still refuses with `no_grant`), but it should be conditional on HTTPS before any real deployment.
+- [ ] **`deepMerge` in `config/load.ts` assigns `__proto__` as a computed key** — reachable only through `warehousd.local.yml`, an operator-controlled file, so this is a trusted-input path today. Worth closing if config ever becomes untrusted.
