@@ -1,3 +1,8 @@
+"use client";
+// Load-bearing: NAV items carry a lucide `icon` component, and a component reference cannot
+// be serialized across a server→client boundary. Without this the shell renders on the server
+// and every authenticated surface dies on `<SidebarNav items={items} />`. Children still
+// arrive pre-rendered from the server layouts, so nothing else moves to the client.
 import { NAV, CONSOLE_ITEM } from "@/lib/nav";
 import type { Role } from "@/lib/authz";
 import { SidebarNav } from "./SidebarNav";
