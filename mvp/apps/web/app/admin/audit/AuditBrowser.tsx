@@ -147,7 +147,7 @@ export function AuditBrowser() {
       cell: ({ row }) => {
         const fields = row.original.fields_returned;
         if (!fields || fields.length === 0) return <span className="text-muted-foreground">—</span>;
-        return <Mono className="text-muted-foreground">[{fields.join(", ")}]</Mono>;
+        return <Mono className="text-muted-foreground">{`[${fields.join(", ")}]`}</Mono>;
       },
       size: 200,
     },

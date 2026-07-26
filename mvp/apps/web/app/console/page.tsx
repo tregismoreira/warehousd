@@ -8,7 +8,7 @@ export default function ConsolePage() {
         title="Chat console"
         description="A local MCP test bench. Every tool call runs through the broker and is audited like any other client."
       />
-      <div className="min-h-0 flex-1"><Chat onTurn={() => {}} /></div>
+      <div className="min-h-0 flex-1"><Chat /></div>
     </div>
   );
 }

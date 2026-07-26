@@ -1,12 +1,13 @@
 "use client";
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/common/DataTable";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Mono } from "@/components/common/Mono";
+import { EmptyState } from "@/components/common/EmptyState";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -188,5 +189,18 @@ export function ClientsTable({ clients, loading, onRefresh }: { clients: Client[
     },
   ];
 
-  return <DataTable columns={columns} data={clients} loading={loading} />;
+  return (
+    <DataTable
+      columns={columns}
+      data={clients}
+      loading={loading}
+      empty={
+        <EmptyState
+          icon={KeyRound}
+          title="No OAuth clients yet"
+          description="Clients created here start scoped to env:dev. Promote to live once the connected app has proven itself."
+        />
+      }
+    />
+  );
 }

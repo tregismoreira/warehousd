@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, ListChecks } from "lucide-react";
 import { toast } from "sonner";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/common/DataTable";
 import { Button } from "@/components/ui/button";
 import { Mono } from "@/components/common/Mono";
+import { EmptyState } from "@/components/common/EmptyState";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -113,5 +114,18 @@ export function ActiveGrants() {
       ) },
   ];
 
-  return <DataTable columns={columns} data={grants} loading={loading} />;
+  return (
+    <DataTable
+      columns={columns}
+      data={grants}
+      loading={loading}
+      empty={
+        <EmptyState
+          icon={ListChecks}
+          title="No active grants"
+          description="Approved grants across the deployment will show up here, with revoke taking effect on the next query."
+        />
+      }
+    />
+  );
 }

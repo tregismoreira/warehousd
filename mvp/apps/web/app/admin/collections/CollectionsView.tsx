@@ -59,7 +59,7 @@ export function CollectionsView() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetch() {
+    async function load() {
       try {
         const res = await fetch("/api/admin/collections");
         if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
@@ -71,7 +71,7 @@ export function CollectionsView() {
         setLoading(false);
       }
     }
-    fetch();
+    load();
   }, []);
 
   if (loading) return <div className="text-muted-foreground">Loading...</div>;

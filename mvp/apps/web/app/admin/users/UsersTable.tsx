@@ -56,12 +56,19 @@ function RoleSelect({ user, isSelf }: { user: User; isSelf: boolean }) {
 
   if (isSelf) {
     return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-          <TooltipContent>You cannot change your own role.</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <Select value={user.role} disabled>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+            <TooltipContent>You cannot change your own role.</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <SelectContent>
+          <SelectItem value="admin">Admin</SelectItem>
+          <SelectItem value="manager">Manager</SelectItem>
+          <SelectItem value="member">Member</SelectItem>
+        </SelectContent>
+      </Select>
     );
   }
 

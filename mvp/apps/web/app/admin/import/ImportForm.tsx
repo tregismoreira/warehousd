@@ -118,43 +118,43 @@ export function ImportForm() {
     return (
       <div className="space-y-4">
         {result.ok ? (
-          <Card className="border-green-200 bg-green-50">
+          <Card className="border-allow/20 bg-allow/5">
             <CardHeader>
-              <CardTitle className="text-green-900">Import successful</CardTitle>
+              <CardTitle className="text-allow">Import successful</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <p className="text-green-800">
+              <p>
                 <strong>{result.imported}</strong> row{result.imported !== 1 ? "s" : ""} imported into{" "}
-                <code className="rounded bg-green-100 px-2 py-1 font-mono text-xs">
+                <code className="rounded bg-allow/10 px-2 py-1 font-mono text-xs">
                   data_live.{selectedCollection}
                 </code>
               </p>
               {result.columns && result.columns.length > 0 && (
-                <p className="text-green-800">
+                <p>
                   Columns: <code className="font-mono text-xs">{result.columns.join(", ")}</code>
                 </p>
               )}
             </CardContent>
           </Card>
         ) : (
-          <Card className="border-red-200 bg-red-50">
+          <Card className="border-deny/20 bg-deny/5">
             <CardHeader>
-              <CardTitle className="text-red-900">Import failed</CardTitle>
-              <CardDescription className="text-red-800">{result.reason}</CardDescription>
+              <CardTitle className="text-deny">Import failed</CardTitle>
+              <CardDescription className="text-deny/80">{result.reason}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {result.reason === "validation_failed" && result.errors && result.errors.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-red-900">Nothing was imported.</p>
-                  <div className="overflow-auto rounded border border-red-200 bg-white">
+                  <p className="text-sm font-semibold text-deny">Nothing was imported.</p>
+                  <div className="overflow-auto rounded border border-deny/20 bg-card">
                     <div className="space-y-1 p-3 font-mono text-xs">
                       {result.errors.slice(0, 50).map((err, i) => (
-                        <div key={i} className="text-red-700">
+                        <div key={i} className="text-deny">
                           Row {err.row} · {err.column} · {ERROR_LABELS[err.reason] || err.reason}
                         </div>
                       ))}
                       {result.errors.length > 50 && (
-                        <div className="pt-2 text-red-600">
+                        <div className="pt-2 text-deny/80">
                           ... and {result.errors.length - 50} more problems (showing the first 50)
                         </div>
                       )}

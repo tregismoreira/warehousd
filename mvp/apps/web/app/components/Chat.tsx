@@ -2,7 +2,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-export function Chat({ onTurn }: { onTurn: () => void }) {
+export function Chat() {
   const [msgs, setMsgs] = useState<{ role: string; text: string }[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,7 +32,7 @@ export function Chat({ onTurn }: { onTurn: () => void }) {
         else if (event.type === "error") setMsgs([...next, { role: "assistant", text: `error: ${event.message}` }]);
       }
     }
-    setProgress(null); setBusy(false); onTurn();
+    setProgress(null); setBusy(false);
   }
   return (
     <div className="flex h-full flex-col rounded-lg border bg-card p-3">
