@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { Command } from "commander";
 import { Pool } from "pg";
 import { resolve } from "node:path";
@@ -157,4 +156,7 @@ program.command("regen-synth")
   });
 
 // Only parse argv when run as a binary, not when imported by tests.
-if (import.meta.url === `file://${process.argv[1]}`) program.parseAsync();
+const isMainModule =
+  (typeof require !== 'undefined' && require.main === module) ||
+  (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}`);
+if (isMainModule) program.parseAsync();
