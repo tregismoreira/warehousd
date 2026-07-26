@@ -263,3 +263,68 @@ pnpm lint
 ```
 
 **Expected:** all three clean.
+
+## 15. Role-scoped surfaces
+
+Sign in as each persona and confirm the landing route, the nav contents, and
+that a lower-privileged role is refused a higher surface.
+
+- Sign in as Mia (member) — land on `/member`, nav shows only *My grants*,
+  *Request access*, *How to connect*.
+- Type `/admin` into the address bar as Mia — redirected to `/403`.
+- Sign in as Marcus (manager) — land on `/manager`; typing `/admin/users`
+  redirects to `/403`.
+- Sign in as Ana (admin) — every surface (`/admin/collections`, `/admin/users`,
+  `/admin/clients`, `/admin/sso`, `/admin/audit`, `/admin/import`) loads
+  without redirecting to `/403`.
+
+## 16. Grant lifecycle through the UI
+
+Walk §10 test 7 by hand, through the actual interface, ending in the audit
+browser filtered to the collection:
+
+1. As Mia, *Request access* to `departments` with a purpose.
+2. As Marcus, review the request in the grant inbox, uncheck one field,
+   approve with no expiry.
+3. As Mia, confirm *My grants* shows Approved, scoped to the remaining field
+   only.
+4. As Marcus, revoke it from *Active grants*.
+5. As Mia, confirm the grant now reads Revoked.
+6. As Ana, filter the audit browser to `departments` and confirm the trail is
+   there.
+
+## 17. Document-scoped approval (the Task 9 regression)
+
+Approve Mia's `policies` request scoped to the `hr` taxonomy term, then in
+`/console` (dev-mode only) ask:
+
+- *"what is the expense reimbursement policy?"* — expect no results (outside
+  the `hr` scope).
+- *"what is the remote work policy?"* — expect content (inside `hr`).
+
+**Before Phase 5 this scoping was silently dropped** — the route wrote
+`opts.rowFilter`, `approveGrant` read `opts.documentFilter`, so a manager
+scoping a grant to specific files or terms was silently granting the whole
+collection. This is the check that it stays fixed.
+
+## 18. Client promotion
+
+- Create an OAuth client as Ana — confirm it starts `{env:dev}` only.
+- Promote it to live as Marcus — confirm the trail shows `marcus` and a
+  timestamp.
+- Demote it — confirm scopes narrow back to dev.
+
+## 19. Live import
+
+- Import a two-row CSV into `departments` as Ana — confirm the import summary
+  and that an `app.audit_events` row was written.
+- Re-import the same file — confirm `constraint_violation` and that nothing
+  new was written (append-only, no silent overwrite).
+- Import a file with a bad UUID — confirm the error panel names the row and
+  column but never echoes the offending value.
+
+## 20. Regenerate dev data
+
+Note a synthetic row in `data_synth`, regenerate with a new seed from
+`/admin`, and confirm it changed — and that a row you imported into
+`data_live` earlier did not.

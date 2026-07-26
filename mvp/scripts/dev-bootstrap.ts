@@ -1,7 +1,7 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
 import { execSync } from "child_process";
-import { loadConfig, applyConfig, generateSynthetic, createAppSchema, indexCollection } from "@warehousd/broker";
+import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection } from "@warehousd/broker";
 import { seedLive } from "../examples/meridian/seed/live";
 import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
@@ -43,9 +43,11 @@ async function main() {
     do $$ begin
       if not exists (select from pg_roles where rolname='warehousd_dev') then create role warehousd_dev login password 'pw'; end if;
       if not exists (select from pg_roles where rolname='warehousd_live') then create role warehousd_live login password 'pw'; end if;
+      if not exists (select from pg_roles where rolname='warehousd_import') then create role warehousd_import login password 'pw'; end if;
     end $$;
     grant usage on schema data_synth to warehousd_dev;
     grant usage on schema data_live to warehousd_live;
+    grant usage on schema data_live to warehousd_import;
     grant usage on schema app to warehousd_dev, warehousd_live;`);
   const cfg = loadConfig(dir);
   await createAppSchema(db);
@@ -54,13 +56,7 @@ async function main() {
   await seedPersonaUsers(db);
   await applyConfig(db, cfg);
   // truncate before regenerating so re-running bootstrap (e.g. container restart) is idempotent
-  for (const name of Object.keys(cfg.collections)) {
-    const c = cfg.collections[name];
-    // Skip file collections — they are populated via indexCollection, not synthetic generation
-    if (c.type === "file") continue;
-    await db.query(`truncate data_synth.${name} cascade`);
-  }
-  await generateSynthetic(db, cfg, 42);
+  await regenerateSynthetic(db, cfg, 42);
   await seedLive(db);
   // Index policies collection from seed docs (dev and live environments)
   const policiesTaxonomy = cfg.collections.policies?.taxonomy

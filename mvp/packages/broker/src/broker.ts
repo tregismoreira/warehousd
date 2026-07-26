@@ -8,6 +8,7 @@ import { dataPool } from "./db/pools";
 import { loadActiveGrant } from "./grants/eval";
 import { buildSelect } from "./sql/build";
 import { writeAudit } from "./audit/write";
+import { findCollection } from "./config/load";
 
 export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   const app = pools.app;
@@ -21,7 +22,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   }
 
   function fieldsOf(collection: string): string[] | null {
-    const c = cfg.collections[collection];
+    const c = findCollection(cfg, collection);
     return c ? Object.keys(c.fields) : null;
   }
 
@@ -63,7 +64,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   }
 
   async function describeCollection(ctx: BrokerContext, name: string): Promise<VisibleSchema | Refusal> {
-    const c = cfg.collections[name];
+    const c = findCollection(cfg, name);
     if (!c) return refuse(ctx, name, null, "unknown_collection");
     const grant = await loadActiveGrant(app, ctx.userId, name, ctx.env);
     if (!grant) return refuse(ctx, name, null, "no_grant");
@@ -81,7 +82,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   }
 
   async function searchDocuments(ctx: BrokerContext, intent: DocSearchIntent): Promise<BrokerResult> {
-    const c = cfg.collections[intent.collection];
+    const c = findCollection(cfg, intent.collection);
     if (!c) return refuse(ctx, intent.collection, intent, "unknown_collection");
     if ((c.type ?? "dataset") !== "file" || typeof intent.q !== "string" || !intent.q.trim())
       return refuse(ctx, intent.collection, intent, "invalid_intent");

@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { Pool } from "pg";
 import { resolve } from "node:path";
 import {
-  loadConfig, applyConfig, generateSynthetic, createAppSchema, indexCollection,
+  loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection,
 } from "@warehousd/broker";
 
 export async function runApply(projectDir: string, dbUrl: string): Promise<void> {
@@ -15,15 +15,7 @@ export async function runApply(projectDir: string, dbUrl: string): Promise<void>
 export async function runSeed(projectDir: string, dbUrl: string, seed = 42): Promise<void> {
   const cfg = loadConfig(projectDir);
   const db = new Pool({ connectionString: dbUrl });
-  try {
-    for (const name of Object.keys(cfg.collections)) {
-      const c = cfg.collections[name];
-      // Skip file collections — they are populated via indexCollection, not synthetic generation
-      if (c.type === "file") continue;
-      await db.query(`truncate data_synth.${name} cascade`);
-    }
-    await generateSynthetic(db, cfg, seed);
-  } finally { await db.end(); }
+  try { await regenerateSynthetic(db, cfg, seed); } finally { await db.end(); }
 }
 
 export async function runIndex(

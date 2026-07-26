@@ -2,6 +2,10 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { authClient } from "../../lib/auth-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const DEMO = process.env.NEXT_PUBLIC_WAREHOUSD_DEMO === "true";
 
@@ -17,12 +21,17 @@ interface SSOProvider {
   type: string;
 }
 
+function Centered({ children }: { children: React.ReactNode }) {
+  return <main className="flex min-h-screen items-center justify-center p-6">{children}</main>;
+}
+
 function LoginInner() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [providers, setProviders] = useState<SSOProvider[]>([]);
   const [localLoginEnabled, setLocalLoginEnabled] = useState(false);
 
@@ -36,7 +45,6 @@ function LoginInner() {
     return "/";
   })();
 
-  // Fetch SSO status on mount
   useEffect(() => {
     async function fetchSSOStatus() {
       try {
@@ -59,8 +67,9 @@ function LoginInner() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    setSubmitting(true);
     const { error } = await authClient.signIn.email({ email, password, callbackURL: returnTo });
-    if (error) setErr(error.message ?? "login failed");
+    if (error) { setErr(error.message ?? "login failed"); setSubmitting(false); }
     else window.location.href = returnTo;
   }
 
@@ -73,102 +82,132 @@ function LoginInner() {
         ...(providerType === "saml" && { providerType: "saml" }),
       });
       if (error) setErr(error.message ?? "SSO sign-in failed");
-    } catch (e) {
+    } catch {
       setErr("SSO sign-in failed");
     }
   }
 
-  // No login method configured
   if (loading) {
-    return <main style={{ padding: 24 }}>
-      <p>Loading...</p>
-    </main>;
+    return (
+      <Centered>
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </Centered>
+    );
   }
 
   if (!providers.length && !localLoginEnabled) {
-    return <main style={{ padding: 24 }}>
-      <h2>No login method is configured</h2>
-    </main>;
+    return (
+      <Centered>
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle>No login method is configured</CardTitle>
+          </CardHeader>
+        </Card>
+      </Centered>
+    );
   }
+
+  const localLoginForm = (
+    <form onSubmit={submit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="email">Email</Label>
+        <Input
+          id="email" placeholder="email" type="email" autoComplete="username"
+          value={email} onChange={(e) => setEmail(e.target.value)}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password" placeholder="password" type="password" autoComplete="current-password"
+          value={password} onChange={(e) => setPassword(e.target.value)}
+        />
+      </div>
+      <Button type="submit" className="w-full" disabled={submitting}>
+        Sign in
+      </Button>
+      {err && <p className="text-sm text-deny" role="alert">{err}</p>}
+    </form>
+  );
+
+  const demoCreds = DEMO && (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p><strong className="text-foreground">Demo credentials</strong> (password <code className="font-mono">demo</code>):</p>
+      <ul className="space-y-1">
+        {DEMO_CREDS.map((c) => (
+          <li key={c.email}>
+            <button
+              type="button"
+              className="font-mono underline-offset-2 hover:underline"
+              onClick={() => { setEmail(c.email); setPassword("demo"); }}
+            >
+              {c.email}
+            </button>{" "}— {c.role}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 
   // SSO is default (≥1 provider configured)
   if (providers.length) {
     return (
-      <main style={{ padding: 24, maxWidth: 360 }}>
-        <h2>warehousd security console</h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {providers.map((p) => (
-            <button
-              key={p.providerId}
-              onClick={() => signInWithSSO(p.providerId, p.type)}
-              style={{
-                padding: 12,
-                fontSize: 14,
-                border: "1px solid #ccc",
-                borderRadius: 4,
-                cursor: "pointer",
-              }}
-            >
-              Sign in with your company account
-            </button>
-          ))}
+      <Centered>
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle>warehousd security console</CardTitle>
+            <CardDescription>Sign in to continue</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {providers.map((p) => (
+              <Button
+                key={p.providerId}
+                variant="outline"
+                className="w-full"
+                onClick={() => signInWithSSO(p.providerId, p.type)}
+              >
+                Sign in with your company account
+              </Button>
+            ))}
 
-          {localLoginEnabled && (
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ cursor: "pointer", fontSize: 13, color: "#666" }}>
-                Use a local account
-              </summary>
-              <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-                <input placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                <input placeholder="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-                <button type="submit">Sign in</button>
-                {err && <p style={{ color: "crimson" }}>{err}</p>}
-              </form>
-              {DEMO && (
-                <div style={{ marginTop: 12, fontSize: 12 }}>
-                  <b>Demo credentials</b> (password <code>demo</code>):
-                  <ul>{DEMO_CREDS.map((c) => (
-                    <li key={c.email}><button style={{ font: "inherit", cursor: "pointer" }}
-                      onClick={() => { setEmail(c.email); setPassword("demo"); }}>
-                      {c.email}</button> — {c.role}</li>
-                  ))}</ul>
+            {localLoginEnabled && (
+              <details>
+                <summary className="cursor-pointer text-sm text-muted-foreground">
+                  Use a local account
+                </summary>
+                <div className="mt-4 space-y-4">
+                  {localLoginForm}
+                  {demoCreds}
                 </div>
-              )}
-            </details>
-          )}
-        </div>
-        {err && <p style={{ color: "crimson", marginTop: 12 }}>{err}</p>}
-      </main>
+              </details>
+            )}
+            {err && !localLoginEnabled && <p className="text-sm text-deny" role="alert">{err}</p>}
+          </CardContent>
+        </Card>
+      </Centered>
     );
   }
 
   // Local login only (no SSO providers)
   return (
-    <main style={{ padding: 24, maxWidth: 360 }}>
-      <h2>warehousd security console</h2>
-      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <input placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <input placeholder="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <button type="submit">Sign in</button>
-        {err && <p style={{ color: "crimson" }}>{err}</p>}
-      </form>
-      {DEMO && (
-        <div style={{ marginTop: 16, fontSize: 13 }}>
-          <b>Demo credentials</b> (password <code>demo</code>):
-          <ul>{DEMO_CREDS.map((c) => (
-            <li key={c.email}><button style={{ font: "inherit" }}
-              onClick={() => { setEmail(c.email); setPassword("demo"); }}>
-              {c.email}</button> — {c.role}</li>
-          ))}</ul>
-        </div>
-      )}
-    </main>
+    <Centered>
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle>warehousd security console</CardTitle>
+          <CardDescription>Sign in to continue</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {localLoginForm}
+          {demoCreds}
+        </CardContent>
+      </Card>
+    </Centered>
   );
 }
 
 export default function Login() {
   return (
-    <Suspense fallback={<main style={{ padding: 24 }}><p>Loading...</p></main>}>
+    <Suspense fallback={<Centered><p className="text-sm text-muted-foreground">Loading...</p></Centered>}>
       <LoginInner />
     </Suspense>
   );

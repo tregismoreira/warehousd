@@ -18,5 +18,9 @@ export const config = {
     "/api/env/:path*",
     "/api/sso/providers",
     "/api/sso/providers/:path*",
+    "/api/admin/:path*",
+    "/api/me/:path*",
+    "/api/oauth-clients/:path*",
+    "/api/connect-info",
   ],
 };

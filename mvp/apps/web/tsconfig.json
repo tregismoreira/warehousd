@@ -2,16 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "preserve",
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "declaration": false,
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "plugins": [{ "name": "next" }],
     "noEmit": true,
     // tsconfig.base.json turns declaration emit on for packages/broker, which ships types.
     // This app emits nothing, and Better Auth's inferred `auth`/plugin types are deliberately
@@ -20,14 +13,10 @@
     "declaration": false,
     "allowJs": true,
     "incremental": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["./*"] }
   },
-  "include": [
-    "app",
-    "next-env.d.ts",
-    ".next/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["app", "components", "lib", "middleware.ts", "next-env.d.ts", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
 }

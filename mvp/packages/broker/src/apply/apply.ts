@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
-import { tableDDL, viewDDL, grantViewDDL } from "./ddl";
+import { tableDDL, viewDDL, grantViewDDL, grantImportDDL } from "./ddl";
 
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
   await db.query(`create extension if not exists vector`);
@@ -25,11 +25,18 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
     }
   }
   // views after all tables (joins reference sibling tables)
+  // A stack provisioned before the import role existed still applies cleanly.
+  const hasImportRole = (await db.query(
+    `select 1 from pg_roles where rolname='warehousd_import'`)).rowCount === 1;
+
   for (const name of Object.keys(cfg.collections)) {
     for (const env of ["dev", "live"] as const) {
       await db.query(viewDDL(env, name, cfg));
       await db.query(grantViewDDL(env, name));
     }
+    const importGrant = grantImportDDL(name, cfg);
+    if (hasImportRole && importGrant) await db.query(importGrant);
+
     const c = cfg.collections[name];
     if (!c) throw new Error(`Unknown collection: ${name}`);
     await db.query(
