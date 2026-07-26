@@ -6,6 +6,9 @@ import {
   loadConfig, applyConfig, generateSynthetic, createAppSchema, indexCollection,
 } from "@warehousd/broker";
 import { runInit } from "./init";
+import { runStart } from "./start";
+import { formatOutputs } from "./outputs";
+import { ensureState } from "./state";
 
 export async function runApply(projectDir: string, dbUrl: string): Promise<void> {
   const cfg = loadConfig(projectDir);
@@ -60,6 +63,18 @@ program.command("init")
     for (const f of r.created) console.log(`created ${f}`);
     for (const f of r.skipped) console.log(`skipped ${f} (already exists)`);
     console.log("\nNext: warehousd start");
+  });
+program.command("start")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("-s, --seed <n>", "synthetic seed", "42")
+  .option("--verbose", "log every docker command")
+  .action(async (o) => {
+    const outputs = await runStart(o.dir, { seed: Number(o.seed), verbose: o.verbose });
+    const st = ensureState(o.dir);
+    console.log(formatOutputs(outputs, {
+      adminEmail: "admin@warehousd.local",
+      adminPassword: st.adminPassword,
+    }));
   });
 program.command("apply")
   .option("-d, --dir <dir>", "project dir", process.cwd())
