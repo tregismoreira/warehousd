@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import {
   loadConfig, applyConfig, generateSynthetic, createAppSchema, indexCollection,
 } from "@warehousd/broker";
+import { runInit } from "./init";
 
 export async function runApply(projectDir: string, dbUrl: string): Promise<void> {
   const cfg = loadConfig(projectDir);
@@ -51,6 +52,15 @@ export async function runIndex(
 
 const program = new Command();
 program.name("warehousd").description("warehousd Phase 0 CLI");
+program.command("init")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--force", "overwrite an existing warehousd.yml")
+  .action(async (o) => {
+    const r = await runInit(o.dir, { force: o.force });
+    for (const f of r.created) console.log(`created ${f}`);
+    for (const f of r.skipped) console.log(`skipped ${f} (already exists)`);
+    console.log("\nNext: warehousd start");
+  });
 program.command("apply")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .requiredOption("--db <url>", "database url ($DATABASE_URL)", process.env.DATABASE_URL)
