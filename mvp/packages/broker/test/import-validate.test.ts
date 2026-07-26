@@ -97,6 +97,18 @@ describe("validateImportRows", () => {
     expect(r.errors[0].reason).toBe("unknown_collection");
   });
 
+  // `cfg.collections["constructor"]` is truthy on any object literal, so a name inherited
+  // from Object.prototype used to slip past the unknown-collection check and blow up on
+  // `c.fields` — a 500 where the contract says 400.
+  it("rejects a collection name inherited from Object.prototype", () => {
+    for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+      const r = validateImportRows(cfg, name, [{ a: 1 }]);
+      expect(r.ok, name).toBe(false);
+      if (r.ok) throw new Error("unreachable");
+      expect(r.errors[0]!.reason, name).toBe("unknown_collection");
+    }
+  });
+
   it("rejects a malformed uuid", () => {
     const r = validateImportRows(cfg, "departments", [{ id: "not-a-uuid", name: "X" }]);
     expect(r.ok).toBe(false);

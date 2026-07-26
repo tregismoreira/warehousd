@@ -33,9 +33,21 @@ export function loadConfig(dir: string): WarehousdConfig {
   return ConfigSchema.parse(cfg);
 }
 
+// Collection names arrive from request bodies and MCP tool calls, and `cfg.collections[name]`
+// is a property read, not a membership test: every object literal already answers to
+// `constructor`, `toString`, `__proto__` and friends. Those names returned a truthy
+// non-collection that sailed past each caller's `if (!c)` refusal and threw on `.fields`.
+// The throw was the smaller half — refusals are what write the audit row, so a probe using
+// one of those names left no trace in the trail. Own properties only.
+export function findCollection(
+  cfg: WarehousdConfig, name: string,
+): WarehousdConfig["collections"][string] | null {
+  return Object.hasOwn(cfg.collections, name) ? cfg.collections[name]! : null;
+}
+
 // The two-tier deny (§5.3): fields marked posture:deny can never be granted.
 export function grantableFields(cfg: WarehousdConfig, collection: string): string[] {
-  const c = cfg.collections[collection];
+  const c = findCollection(cfg, collection);
   if (!c) return [];
   return Object.entries(c.fields).filter(([, f]) => f.posture === "allow").map(([n]) => n);
 }

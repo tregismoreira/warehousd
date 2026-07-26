@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { loadConfig } from "@warehousd/broker";
+import { loadConfig, findCollection } from "@warehousd/broker";
 import { requireRole } from "../../../../lib/authz";
 
 const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
 
   const collection = req.nextUrl.searchParams.get("collection") ?? "";
   const cfg = loadConfig(projectDir);
-  const c = cfg.collections[collection];
+  const c = findCollection(cfg, collection);
   if (!c?.taxonomy) return Response.json({ field: null, terms: [] });
   const vocab = cfg.taxonomies[c.taxonomy];
   return Response.json({

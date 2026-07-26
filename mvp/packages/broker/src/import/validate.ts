@@ -1,4 +1,5 @@
 import type { WarehousdConfig, FieldConfig } from "../config/schema";
+import { findCollection } from "../config/load";
 
 export type ImportError = { row: number; column: string | null; reason: string };
 
@@ -61,7 +62,7 @@ export function validateImportRows(
   rows: Record<string, unknown>[],
   opts: { maxRows?: number } = {},
 ): ImportValidation {
-  const c = cfg.collections[collection];
+  const c = findCollection(cfg, collection);
   if (!c) return { ok: false, errors: [{ row: -1, column: null, reason: "unknown_collection" }] };
   // Files are ingested by the indexer, which owns chunking, checksums and deletion sync.
   if (c.type === "file")

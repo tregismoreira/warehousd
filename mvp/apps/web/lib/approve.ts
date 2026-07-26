@@ -1,4 +1,4 @@
-import { grantableFields, type WarehousdConfig } from "@warehousd/broker";
+import { findCollection, grantableFields, type WarehousdConfig } from "@warehousd/broker";
 
 export type ApproveOpts = {
   allowedFields?: string[];
@@ -28,7 +28,7 @@ export function buildApproval(
   requestedFields: string[],
   input: ApprovalInput,
 ): { ok: true; opts: ApproveOpts } | { ok: false; error: string } {
-  const c = cfg.collections[input.collection];
+  const c = findCollection(cfg, input.collection);
   if (!c) return { ok: false, error: "unknown_collection" };
 
   const grantable = grantableFields(cfg, input.collection);
