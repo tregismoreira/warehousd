@@ -48,6 +48,11 @@ APP_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/warehousd
 DEV_DATABASE_URL=postgres://warehousd_dev:pw@127.0.0.1:5432/warehousd
 LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:5432/warehousd
 
+# The admin import path's write role — INSERT-only on data_live, nothing else. Optional:
+# if unset, POST /api/admin/import refuses with `import_not_configured` and there is no
+# write path into data_live at all.
+IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:5432/warehousd
+
 # Better Auth
 BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long
 BETTER_AUTH_URL=http://localhost:8722
@@ -77,6 +82,9 @@ Run once against a fresh database. Seeds schemas, roles, synthetic data, demo do
 ```bash
 cd mvp
 APP_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/warehousd \
+DEV_DATABASE_URL=postgres://warehousd_dev:pw@127.0.0.1:5432/warehousd \
+LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:5432/warehousd \
+IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:5432/warehousd \
 BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long \
 BETTER_AUTH_URL=http://localhost:8722 \
 WAREHOUSD_PROJECT_DIR=examples/meridian \
@@ -91,6 +99,7 @@ The script is idempotent — safe to re-run on container restart.
 cd mvp
 WAREHOUSD_DEMO=true \
 WAREHOUSD_PROJECT_DIR=examples/meridian \
+IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:5432/warehousd \
 pnpm --filter @warehousd/web dev
 ```
 

@@ -17,7 +17,7 @@ Phases and tasks from the Phase 0 POC to a production-ready MVP.
 | 2 | [plans/2026-07-20-phase-2-oauth-provider.md](./superpowers/plans/2026-07-20-phase-2-oauth-provider.md) (full TDD detail) |
 | 3 | [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-phase-3-mcp-endpoint.md) (outline) |
 | 4 | [plans/2026-07-20-phase-4-sso.md](./superpowers/plans/2026-07-20-phase-4-sso.md) (outline) |
-| 5 | [plans/2026-07-20-phase-5-web-ui.md](./superpowers/plans/2026-07-20-phase-5-web-ui.md) (outline) |
+| 5 | [plans/2026-07-25-phase-5-web-ui.md](./superpowers/plans/2026-07-25-phase-5-web-ui.md) (full TDD detail) |
 | 6 | [plans/2026-07-20-phase-6-cli-distribution.md](./superpowers/plans/2026-07-20-phase-6-cli-distribution.md) (outline) |
 | 7 | [plans/2026-07-20-phase-7-deploy-fly.md](./superpowers/plans/2026-07-20-phase-7-deploy-fly.md) (outline) |
 | 8 | [plans/2026-07-20-phase-8-hardening-release.md](./superpowers/plans/2026-07-20-phase-8-hardening-release.md) (outline) |
@@ -227,17 +227,60 @@ browser coverage for those states then, rather than bolting a test onto a page
 that is about to be replaced. Flagging it here so it isn't silently inherited
 as "already tested".
 
-## Phase 5 — Admin / Manager / Member web UI (§8) — parallel with Phase 6
+## Phase 5 — Admin / Manager / Member web UI (§8) — parallel with Phase 6 — ✅ COMPLETE
 
 Apply the `frontend-design` skill; keep the Phase 0 "security console" aesthetic.
 
-- [ ] Admin: collections & postures view (YAML state + apply status), SSO config form, user role management, regenerate-dev-data button, audit browser (filter by user/collection/outcome)
-- [ ] Admin → Clients (§6.1): list, "New client" (id+secret, `{env:dev}` always), per-client scopes + promotion audit trail + last token, promote/demote actions
-- [ ] **Real-data import path** (spec-implied by §11 "real data arrives via the admin import path"): admin-only CSV/JSON upload per collection into `data_live`, validated against the YAML schema, via a dedicated write role — audited, and covered by leak probes (only write path into live data)
-- [ ] Manager: grant inbox → approve (trim fields, set expiry) / deny; active grants with revoke
-- [ ] Member: my grants + statuses; how-to-connect page (MCP URL + Claude connector setup)
-- [ ] Navigation/layout; chat console kept as a dev-mode page
-- [ ] Tests: per-surface role 403s; §10 test 7 driven through the UI/API; promotion tests through the real surface; import-path validation + audit; design review pass
+Implemented via a 26-task subagent-driven-development plan
+([plans/2026-07-25-phase-5-web-ui.md](./superpowers/plans/2026-07-25-phase-5-web-ui.md)),
+each task independently implemented and verified. Along the way it fixed five
+real defects that predated this phase: the pending-grant queue and the audit
+feed both disclosed org-wide data to any authenticated user, the member
+request-access UI action was a dead branch, and approvals silently dropped
+their document/term scoping (`opts.rowFilter` was written but `approveGrant`
+reads `opts.documentFilter`) — see "Try it yourself" below to exercise the fix
+directly. See "Try it yourself" below to run the demo.
+
+- [x] Admin: collections & postures view (YAML state + apply status), SSO config form, user role management, regenerate-dev-data button, audit browser (filter by user/collection/outcome)
+- [x] Admin → Clients (§6.1): list, "New client" (id+secret, `{env:dev}` always), per-client scopes + promotion audit trail + last token, promote/demote actions
+- [x] **Real-data import path** (spec-implied by §11 "real data arrives via the admin import path"): admin-only CSV/JSON upload per collection into `data_live`, validated against the YAML schema, via a dedicated write role (`warehousd_import` — `INSERT` only, nothing else) — audited, atomic, append-only, and covered by leak probes (only write path into live data)
+- [x] Manager: grant inbox → approve (trim fields, set expiry) / deny; active grants with revoke
+- [x] Member: my grants + statuses; how-to-connect page (MCP URL + Claude connector setup)
+- [x] Navigation/layout; chat console kept as a dev-mode page
+- [x] Tests: per-surface role 403s; §10 test 7 driven through the UI/API and in a real browser (Playwright); promotion tests through the real surface; import-path validation + audit; design review pass
+
+### Try it yourself
+
+**Automated: run the full test suite**
+
+```bash
+cd mvp
+pnpm test:up
+WAREHOUSD_PROJECT_DIR=$(pwd)/examples/meridian pnpm test
+pnpm lint
+cd apps/web && npx tsc --noEmit && npx next build && cd ../..
+pnpm e2e            # Playwright: role guards + the grant lifecycle in a browser
+pnpm test:down
+```
+
+**Manual: walk the three surfaces and the import path**
+
+1. Bootstrap and start the demo (see [SETUP.md](./SETUP.md) for the full env
+   var list, including the optional `IMPORT_DATABASE_URL`).
+2. Sign in as each persona (`ana`/`marcus`/`mia@meridian.demo`, password
+   `demo`) and confirm the landing route and nav match the role; try typing a
+   higher surface's URL directly and confirm the `/403` redirect.
+3. Walk the grant lifecycle end to end: request as Mia → approve trimmed (no
+   expiry) as Marcus → confirm the scoped grant as Mia → revoke as Marcus →
+   confirm revoked as Mia → filter the audit browser to the collection as Ana.
+4. Confirm the Task 9 regression stays fixed: approve Mia's `policies`
+   request scoped to the `hr` taxonomy term, then in `/console` (dev-mode
+   only) ask about a policy inside `hr` (content) vs. outside it (nothing).
+5. As Ana, import a two-row CSV into `departments` — confirm the row count
+   and the audit event, then re-import the same file and confirm
+   `constraint_violation` with nothing overwritten.
+6. As Ana, regenerate synthetic data with a new seed and confirm a
+   `data_synth` row changed while an imported `data_live` row did not.
 
 ## Phase 6 — CLI lifecycle + distribution (§11) — parallel with Phase 5
 
@@ -293,7 +336,7 @@ Release gate:
 | 4 adversarial leak probe | Phase 0 (extended over MCP in 3, 8) |
 | 5 dev/live wall + scope escalation | Phase 0 partial → Phase 2 |
 | 6 env parity | Phase 3 |
-| 7 grant lifecycle | Phase 0 (through real UI in 5) |
+| 7 grant lifecycle | Phase 0; Phase 5 drives it end-to-end through the real UI/API layer and in a browser |
 | 8 synthetic isolation | Phase 0 |
 | 9 audit completeness | Phase 0 |
 | 10 aggregation enforcement | Phase 0 |
