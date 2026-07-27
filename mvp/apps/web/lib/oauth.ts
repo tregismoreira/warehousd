@@ -28,6 +28,12 @@ export const mcpPlugin = mcp({
 // by rewriting ctx.query.scope in place — so escalation is impossible by construction, not by
 // after-the-fact validation. Rules 3 (env picker) and 4 (refresh re-evaluation) are added in
 // Tasks 6 and 7 respectively, in the same hook bodies below.
+//
+// The three hook handler contexts below use `ctx: any` because Better Auth's MiddlewareContext
+// type is not designed for external narrowing — it includes many internal fields beyond what
+// the handlers access, and attempting to provide narrower interfaces breaks the handler
+// signature compatibility with createAuthMiddleware. This is intentional API design per
+// Better Auth's comments around the satisfies BetterAuthPlugin line (line ~160).
 export function envScopePlugin(app: Pool) {
   return {
     id: "env-scope",

@@ -51,17 +51,17 @@ export async function approveGrant(app: Pool, id: string, by: string,
      where id=$1 and status='pending'`,
     [id, by, opts.allowedFields ?? null, opts.expiresAt ?? null,
      opts.documentFilter ? JSON.stringify(opts.documentFilter) : null]);
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function denyGrant(app: Pool, id: string, by: string): Promise<boolean> {
   const result = await app.query(`update app.grants set status='denied', decided_by=$2, decided_at=now()
     where id=$1 and status='pending'`, [id, by]);
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function revokeGrant(app: Pool, id: string, by: string): Promise<boolean> {
   const result = await app.query(`update app.grants set status='revoked', decided_by=$2, decided_at=now()
     where id=$1 and status='approved'`, [id, by]);
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 }
