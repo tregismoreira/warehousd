@@ -14,7 +14,6 @@ import { resolveProject, type Project } from "./project";
 import { ensureState, writeOutputs, type Outputs } from "./state";
 import { buildOutputs, formatOutputs } from "./outputs";
 import { getDevClient } from "@warehousd/broker";
-import { dataRoleUrl } from "@warehousd/broker";
 
 // WAREHOUSD_CLI_VERSION is defined by tsup at build time; fallback to 'latest' in dev mode.
 declare const WAREHOUSD_CLI_VERSION: string | undefined;

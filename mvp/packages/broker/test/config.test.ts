@@ -56,6 +56,28 @@ it("skips interpolation inside YAML comment lines", () => {
   expect(cfg.project).toBe("cortex");
 });
 
+it("skips interpolation inside a trailing inline comment on a real line", () => {
+  process.env.WH_TEST_PORT2 = "7001";
+  const yml = `
+project: cortex
+server:
+  port: \${env:WH_TEST_PORT2}  # alternative: \${env:UNDEFINED_VAR2}
+collections:
+  people:
+    description: Employee directory
+    fields:
+      id: { type: uuid, posture: allow, pk: true }
+      email: { type: text, posture: allow }
+      home_address: { type: text, posture: deny }
+synthetic:
+  documents_per_collection: { people: 40 }
+`;
+  writeFileSync(join(dir, "warehousd.yml"), yml);
+  rmSync(join(dir, "warehousd.local.yml"), { force: true });
+  const cfg = loadConfig(dir);
+  expect(cfg.server.port).toBe(7001);
+});
+
 it("rejects a field with an unknown posture", () => {
   writeFileSync(join(dir, "warehousd.yml"),
     base.replace("posture: deny", "posture: sometimes"));
