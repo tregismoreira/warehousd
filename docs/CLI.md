@@ -212,9 +212,9 @@ synthetic:
 ### Demo Mode
 
 Set `demo: true` to seed demo login credentials on startup:
-- Email: `ana@meridian.demo`, Password: `demo`, Role: `admin`
-- Email: `marcus@meridian.demo`, Password: `demo`, Role: `manager`
-- Email: `mia@meridian.demo`, Password: `demo`, Role: `member`
+- Email: `ana@demo.local`, Password: `demo`, Role: `admin`
+- Email: `marcus@demo.local`, Password: `demo`, Role: `manager`
+- Email: `mia@demo.local`, Password: `demo`, Role: `member`
 
 The login page will show buttons for these personas.
 
@@ -300,7 +300,7 @@ Then:
 ```bash
 warehousd start
 # Login page shows demo credential buttons
-# ana@meridian.demo, marcus@meridian.demo, mia@meridian.demo
+# ana@demo.local, marcus@demo.local, mia@demo.local
 warehousd stop --destroy --yes
 ```
 
