@@ -43,7 +43,7 @@ test("demo credentials button pre-fills the login form", async ({ page }) => {
 });
 
 test("successful login redirects to home page", async ({ page }) => {
-  await signIn(page, "mia@meridian.demo");
+  await signIn(page, "mia@demo.local");
 
   // Should be redirected from /login
   await expect(page).not.toHaveURL(/\/login/);
@@ -62,20 +62,25 @@ test("returnTo parameter is preserved through login flow", async ({ page }) => {
   await page.goto(`/login?${returnToParams.toString()}`);
 
   // Fill in the login form
-  await page.getByPlaceholder("email").fill("ana@meridian.demo");
+  await page.getByPlaceholder("email").fill("ana@demo.local");
   await page.getByPlaceholder("password").fill("demo");
 
-  // The login submission should redirect to the OAuth authorize endpoint
-  const signInButton = page.getByRole("button", { name: "Sign in" });
-  await signInButton.click();
+  // Assert on the request to the authorize endpoint rather than on the final URL.
+  // What this test is about is the handoff: that the login page carries the OAuth
+  // params through sign-in instead of dropping them and landing on `/`. Where
+  // authorize *ends up* is a different question — `test-client` is deliberately not
+  // a registered client here, so authorize legitimately answers invalid_client and
+  // the browser settles on /api/auth/error. Waiting for the final URL would be
+  // asserting on client registration, not on returnTo.
+  const authorizeRequest = page.waitForRequest((r) =>
+    r.url().includes("/api/auth/mcp/authorize"),
+  );
+  await page.getByRole("button", { name: "Sign in" }).click();
 
-  // After login, should redirect to /api/auth/mcp/authorize with params preserved
-  await page.waitForURL((u) => u.pathname.includes("/api/auth/mcp/authorize"));
-
-  // Verify the original OAuth params are preserved in the final URL
-  const finalUrl = new URL(page.url());
-  expect(finalUrl.searchParams.get("client_id")).toBe("test-client");
-  expect(finalUrl.searchParams.get("response_type")).toBe("code");
+  const authorizeUrl = new URL((await authorizeRequest).url());
+  expect(authorizeUrl.searchParams.get("client_id")).toBe("test-client");
+  expect(authorizeUrl.searchParams.get("response_type")).toBe("code");
+  expect(authorizeUrl.searchParams.get("redirect_uri")).toBe("http://localhost:8722/callback");
 });
 
 test("loading state is shown during sso status fetch", async ({ page }) => {

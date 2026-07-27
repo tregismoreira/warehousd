@@ -9,7 +9,7 @@ async function signIn(page: Page, email: string) {
 }
 
 async function signOut(page: Page) {
-  await page.getByRole("button", { name: /@meridian\.demo/ }).click();
+  await page.getByRole("button", { name: /@demo\.local/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await page.waitForURL(/\/login/);
 }
@@ -19,7 +19,7 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   await context.clearCookies({ name: "wh_env" });
 
   // 1. Mia requests access to departments.
-  await signIn(page, "mia@meridian.demo");
+  await signIn(page, "mia@demo.local");
   await page.getByRole("button", { name: "Request access" }).click();
   await page.getByLabel("Collection").click();
   await page.getByRole("option", { name: "departments" }).click();
@@ -30,7 +30,7 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   await signOut(page);
 
   // 2. Marcus sees it, trims to one field, sets no expiry, approves.
-  await signIn(page, "marcus@meridian.demo");
+  await signIn(page, "marcus@demo.local");
   const row = page.getByRole("row", { name: /mia.*departments/ });
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Review" }).click();
@@ -40,7 +40,7 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   await signOut(page);
 
   // 3. Mia sees an approved grant scoped to the single remaining field.
-  await signIn(page, "mia@meridian.demo");
+  await signIn(page, "mia@demo.local");
   const mine = page.getByRole("row", { name: /departments/ });
   await expect(mine).toContainText("Approved");
   await expect(mine).toContainText("name");
@@ -48,7 +48,7 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   await signOut(page);
 
   // 4. Marcus revokes it.
-  await signIn(page, "marcus@meridian.demo");
+  await signIn(page, "marcus@demo.local");
   await page.getByRole("link", { name: "Active grants" }).click();
   const active = page.getByRole("row", { name: /mia.*departments/ });
   await active.getByRole("button", { name: "Revoke" }).click();
@@ -56,7 +56,7 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   await signOut(page);
 
   // 5. Mia's grant is revoked, and the audit browser has the whole story for Ana.
-  await signIn(page, "mia@meridian.demo");
+  await signIn(page, "mia@demo.local");
   await expect(page.getByRole("row", { name: /departments/ })).toContainText("Revoked");
   await signOut(page);
 
@@ -66,7 +66,7 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   // filters correctly, not that a "deny" outcome exists for departments. The audit browser's
   // outcome semantics (allow/deny + reason) are covered directly by
   // grant-lifecycle-ui.integration.test.ts, which drives broker.query in-process.
-  await signIn(page, "ana@meridian.demo");
+  await signIn(page, "ana@demo.local");
   await page.goto("/admin/audit");
   await page.getByLabel("Collection").click();
   await page.getByRole("option", { name: "departments" }).click();
