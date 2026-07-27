@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+examples
+.next
+**/.next
+docs
+*.md
+.git
+coverage

@@ -1,6 +1,6 @@
 export * from "./types";
 export { makeBroker } from "./broker";
-export { createPools, type Pools } from "./db/pools";
+export { createPools, onPoolError, type Pools } from "./db/pools";
 export { loadConfig, grantableFields, findCollection } from "./config/load";
 export type { WarehousdConfig } from "./config/schema";
 export { applyConfig } from "./apply/apply";
@@ -9,6 +9,7 @@ export { regenerateSynthetic } from "./synthetic/regenerate";
 export { createAppSchema } from "./db/migrate-app";
 export * from "./grants/manage";
 export * from "./oauth/client-policies";
+export * from "./db/bootstrap";
 export { indexCollection } from "./indexing";
 export type { IndexTaxonomy } from "./indexing/sync";
 export type { DocSearchIntent } from "./types";

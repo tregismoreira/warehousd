@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
+import { onPoolError } from "@warehousd/broker";
 import { mcpPlugin, envScopePlugin } from "./oauth";
 import { ssoPlugin, ssoAdminPlugin, trustedOrigins } from "./sso";
 
@@ -9,6 +10,9 @@ const appPool = new Pool({
   connectionString: process.env.APP_DATABASE_URL,
   options: "-c search_path=app",
 });
+// Without an "error" listener, pg escalates an idle-client failure to an unhandled error
+// and the process exits — a Postgres restart would take the app down with it.
+appPool.on("error", onPoolError("auth"));
 
 // Better Auth manages user/session/account/verification tables in the `app` schema,
 // alongside the hand-written app.grants / app.audit_events (createAppSchema). The two

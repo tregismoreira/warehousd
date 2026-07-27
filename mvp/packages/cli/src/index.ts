@@ -1,10 +1,24 @@
-#!/usr/bin/env node
 import { Command } from "commander";
 import { Pool } from "pg";
 import { resolve } from "node:path";
 import {
   loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection,
 } from "@warehousd/broker";
+import { runInit } from "./init";
+import { runStart } from "./start";
+import { runStop } from "./stop";
+import { runStatus } from "./status";
+import { formatOutputs } from "./outputs";
+import { ensureState, readOutputs } from "./state";
+import { resolveProject } from "./project";
+
+export function resolveDbUrl(dir: string, explicit?: string): string {
+  if (explicit) return explicit;
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const o = readOutputs(dir);
+  if (o) return o.databaseUrl;
+  throw new Error("No database. Pass --db, set DATABASE_URL, or run `warehousd start` first.");
+}
 
 export async function runApply(projectDir: string, dbUrl: string): Promise<void> {
   const cfg = loadConfig(projectDir);
@@ -42,25 +56,99 @@ export async function runIndex(
 }
 
 const program = new Command();
-program.name("warehousd").description("warehousd Phase 0 CLI");
+program.name("warehousd").description("warehousd CLI");
+program.command("init")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--force", "overwrite an existing warehousd.yml")
+  .action(async (o) => {
+    const r = await runInit(o.dir, { force: o.force });
+    for (const f of r.created) console.log(`created ${f}`);
+    for (const f of r.skipped) console.log(`skipped ${f} (already exists)`);
+    console.log("\nNext: warehousd start");
+  });
+program.command("start")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("-s, --seed <n>", "synthetic seed", "42")
+  .option("--verbose", "log every docker command")
+  .action(async (o) => {
+    const outputs = await runStart(o.dir, { seed: Number(o.seed), verbose: o.verbose });
+    const st = ensureState(o.dir);
+    console.log(formatOutputs(outputs, {
+      adminEmail: "admin@warehousd.local",
+      adminPassword: st.adminPassword,
+    }));
+  });
 program.command("apply")
   .option("-d, --dir <dir>", "project dir", process.cwd())
-  .requiredOption("--db <url>", "database url ($DATABASE_URL)", process.env.DATABASE_URL)
-  .action(async (o) => { await runApply(o.dir, o.db); console.log("applied"); });
+  .option("--db <url>", "database url")
+  .action(async (o) => {
+    const db = resolveDbUrl(o.dir, o.db);
+    await runApply(o.dir, db);
+    console.log("applied");
+  });
 program.command("seed")
   .option("-d, --dir <dir>", "project dir", process.cwd())
-  .requiredOption("--db <url>", "database url", process.env.DATABASE_URL)
+  .option("--db <url>", "database url")
   .option("-s, --seed <n>", "seed", "42")
-  .action(async (o) => { await runSeed(o.dir, o.db, Number(o.seed)); console.log("seeded"); });
+  .action(async (o) => {
+    const db = resolveDbUrl(o.dir, o.db);
+    await runSeed(o.dir, db, Number(o.seed));
+    console.log("seeded");
+  });
 program.command("index <collection>")
   .option("-d, --dir <dir>", "project dir", process.cwd())
-  .requiredOption("--db <url>", "database url", process.env.DATABASE_URL)
+  .option("--db <url>", "database url")
   .option("--env <env>", "dev|live", "dev")
   .option("--source <dir>", "override source directory")
   .action(async (collection, o) => {
-    const r = await runIndex(o.dir, o.db, collection, { env: o.env, source: o.source });
+    const db = resolveDbUrl(o.dir, o.db);
+    const r = await runIndex(o.dir, db, collection, { env: o.env, source: o.source });
     console.log(`indexed=${r.indexed} skipped=${r.skipped} deleted=${r.deleted}`);
+  });
+program.command("stop")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--destroy", "remove volume and data (irreversible)")
+  .option("--yes", "skip confirmation for --destroy")
+  .action(async (o) => {
+    await runStop(o.dir, { destroy: o.destroy, yes: o.yes });
+    console.log("stopped");
+  });
+program.command("status")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .action(async (o) => {
+    const result = await runStatus(o.dir);
+    process.exit(result.healthy ? 0 : 1);
+  });
+program.command("regen-synth")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .option("-s, --seed <n>", "seed", "42")
+  .action(async (o) => {
+    const db = resolveDbUrl(o.dir, o.db);
+    const cfg = loadConfig(o.dir);
+    const pool = new Pool({ connectionString: db });
+    try {
+      // Seed truncates and generates synthetic data
+      await runSeed(o.dir, db, Number(o.seed));
+      // Re-index all file collections
+      for (const [name, c] of Object.entries(cfg.collections)) {
+        if (c.type === "file") {
+          const env = "dev";
+          const dir = c.source!;
+          const taxonomy = c.taxonomy
+            ? { field: c.taxonomy, slugs: Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) }
+            : undefined;
+          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomy });
+        }
+      }
+    } finally {
+      await pool.end();
+    }
+    console.log("regenerated synthetic data");
   });
 
 // Only parse argv when run as a binary, not when imported by tests.
-if (import.meta.url === `file://${process.argv[1]}`) program.parseAsync();
+const isMainModule =
+  (typeof require !== 'undefined' && require.main === module) ||
+  (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}`);
+if (isMainModule) program.parseAsync();

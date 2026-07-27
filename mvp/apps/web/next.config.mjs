@@ -1,10 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["@warehousd/broker"],
-  env: {
-    NEXT_PUBLIC_WAREHOUSD_DEMO: process.env.WAREHOUSD_DEMO ?? "",
-    NEXT_PUBLIC_LOCAL_LOGIN_DISABLED: process.env.WAREHOUSD_DISABLE_LOCAL_LOGIN ?? "",
-    NEXT_PUBLIC_BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:8722",
-  },
+  // No `env:` block on purpose. Next inlines these at build time, but the published image is
+  // built once and configured per-consumer at `warehousd start`, so anything baked in here is
+  // wrong for everyone. The demo flag is read per-request in app/login/page.tsx, the auth
+  // client is same-origin, and local-login availability comes from /api/sso/status.
 };
 export default nextConfig;

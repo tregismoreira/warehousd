@@ -47,6 +47,37 @@ it("interpolates ${env:VAR}", () => {
   expect(cfg.server.port).toBe(7000);
 });
 
+it("skips interpolation inside YAML comment lines", () => {
+  writeFileSync(join(dir, "warehousd.yml"),
+    base + "\n# This line contains ${env:UNDEFINED_VAR} in a comment");
+  rmSync(join(dir, "warehousd.local.yml"), { force: true });
+  // Should not throw even though UNDEFINED_VAR is not set
+  const cfg = loadConfig(dir);
+  expect(cfg.project).toBe("cortex");
+});
+
+it("skips interpolation inside a trailing inline comment on a real line", () => {
+  process.env.WH_TEST_PORT2 = "7001";
+  const yml = `
+project: cortex
+server:
+  port: \${env:WH_TEST_PORT2}  # alternative: \${env:UNDEFINED_VAR2}
+collections:
+  people:
+    description: Employee directory
+    fields:
+      id: { type: uuid, posture: allow, pk: true }
+      email: { type: text, posture: allow }
+      home_address: { type: text, posture: deny }
+synthetic:
+  documents_per_collection: { people: 40 }
+`;
+  writeFileSync(join(dir, "warehousd.yml"), yml);
+  rmSync(join(dir, "warehousd.local.yml"), { force: true });
+  const cfg = loadConfig(dir);
+  expect(cfg.server.port).toBe(7001);
+});
+
 it("rejects a field with an unknown posture", () => {
   writeFileSync(join(dir, "warehousd.yml"),
     base.replace("posture: deny", "posture: sometimes"));
@@ -157,4 +188,35 @@ describe("taxonomies", () => {
       briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
         title: { posture: "allow" }, sneaky: { posture: "allow" } } } } })).toThrow(/not in fixed set/);
   });
+});
+
+it("accepts database.port, server.image and demo", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
+  writeFileSync(join(dir, "warehousd.yml"), `
+project: p
+demo: true
+database: { managed: true, port: 8723 }
+server: { port: 8722, image: "ghcr.io/warehousd/warehousd:dev" }
+collections:
+  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
+`);
+  const cfg = loadConfig(dir);
+  expect(cfg.database?.port).toBe(8723);
+  expect(cfg.server.image).toBe("ghcr.io/warehousd/warehousd:dev");
+  expect(cfg.demo).toBe(true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+it("defaults demo to false and leaves image/port undefined", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
+  writeFileSync(join(dir, "warehousd.yml"), `
+project: p
+collections:
+  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
+`);
+  const cfg = loadConfig(dir);
+  expect(cfg.demo).toBe(false);
+  expect(cfg.server.image).toBeUndefined();
+  expect(cfg.database?.port).toBeUndefined();
+  rmSync(dir, { recursive: true, force: true });
 });

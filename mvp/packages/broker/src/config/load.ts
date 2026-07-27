@@ -3,12 +3,38 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { ConfigSchema, type WarehousdConfig } from "./schema";
 
+// Split a line into (code, comment) at the first unquoted "#" preceded by
+// whitespace or start-of-line, per YAML comment syntax — so `${env:...}`
+// refs inside trailing comments aren't mistaken for real references.
+function splitInlineComment(line: string): { code: string; comment: string } {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === "'" && !inDouble) inSingle = !inSingle;
+    else if (c === '"' && !inSingle) inDouble = !inDouble;
+    else if (c === '#' && !inSingle && !inDouble && (i === 0 || /\s/.test(line.charAt(i - 1)))) {
+      return { code: line.slice(0, i), comment: line.slice(i) };
+    }
+  }
+  return { code: line, comment: '' };
+}
+
 function interpolate(raw: string): string {
-  return raw.replace(/\$\{env:([A-Z0-9_]+)\}/g, (_, name) => {
-    const v = process.env[name];
-    if (v === undefined) throw new Error(`Unresolved \${env:${name}} in warehousd.yml`);
-    return v;
+  const lines = raw.split('\n');
+  const interpolated = lines.map(line => {
+    // Skip lines that are YAML comments (trimmed line starts with #)
+    if (line.trim().startsWith('#')) return line;
+
+    const { code, comment } = splitInlineComment(line);
+    const interpolatedCode = code.replace(/\$\{env:([A-Z0-9_]+)\}/g, (_, name) => {
+      const v = process.env[name];
+      if (v === undefined) throw new Error(`Unresolved \${env:${name}} in warehousd.yml`);
+      return v;
+    });
+    return interpolatedCode + comment;
   });
+  return interpolated.join('\n');
 }
 
 function deepMerge<T>(base: T, over: Partial<T>): T {

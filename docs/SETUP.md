@@ -1,5 +1,40 @@
 # Dev Setup Guide
 
+## Two Paths: Contributor vs. Consumer
+
+### Consumer Path: `npx warehousd start`
+
+End users install the published CLI package and launch warehousd with a single command:
+
+```bash
+npx warehousd init my-project
+cd my-project
+npx warehousd start
+```
+
+No clone, no `pnpm install`, no dev tooling required. See [`docs/CLI.md`](CLI.md) for the full CLI reference.
+
+### Contributor Path: Clone + Docker Compose + Dev Bootstrap
+
+Contributors modify the warehousd codebase itself. This path requires:
+- Cloning the repository
+- Running `docker compose up` to start the test database
+- Running `dev-bootstrap.ts` to seed dev data
+- `pnpm dev` to run the web app in dev mode
+
+The contributor path seeds additional data beyond what the consumer path does:
+- The container entrypoint (`apps/web/scripts/entrypoint.ts`) runs in both paths:
+  - Creates the admin user
+  - Seeds an admin password (stored in `.warehousd/state.json`)
+  - In demo mode: seeds three demo personas (ana/marcus/mia) with YAML-derived grants
+  - Generates synthetic data (announcements, employees, etc.)
+  - Indexes file collections (policies, docs)
+
+- The developer bootstrap script (`scripts/dev-bootstrap.ts`) runs only on the contributor path:
+  - Seeds Mia's pending grant request (demonstrating the approve/deny flow)
+  - Runs `seedLive()` to populate the live environment for testing
+  - Sets up additional test data for integration testing
+
 ## Prerequisites
 
 - Node.js 20+, pnpm 9+
@@ -109,9 +144,9 @@ App is available at **http://localhost:8722**.
 
 | Email | Password | Role |
 |---|---|---|
-| `ana@meridian.demo` | `demo` | admin |
-| `marcus@meridian.demo` | `demo` | manager |
-| `mia@meridian.demo` | `demo` | member |
+| `ana@demo.local` | `demo` | admin |
+| `marcus@demo.local` | `demo` | manager |
+| `mia@demo.local` | `demo` | member |
 
 ## Run the test suite
 

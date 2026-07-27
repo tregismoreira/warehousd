@@ -1,4 +1,30 @@
 {
-  "name": "warehousd", "version": "0.0.0", "type": "module", "bin": { "warehousd": "./src/index.ts" },
-  "dependencies": { "@warehousd/broker": "workspace:*", "commander": "^12.1.0", "pg": "^8.13.0" }
+  "name": "warehousd",
+  "version": "0.1.0",
+  "description": "Governed MCP data platform — CLI",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "warehousd": "./dist/index.cjs"
+  },
+  "files": ["dist", "README.md"],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@warehousd/broker": "workspace:*",
+    "commander": "^12.1.0",
+    "tsup": "^8"
+  }
 }

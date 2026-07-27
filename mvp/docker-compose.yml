@@ -1,0 +1,44 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: warehousd
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: warehousd
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warehousd -d warehousd"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: ghcr.io/warehousd/warehousd:dev
+    ports:
+      - "8722:8722"
+    environment:
+      WAREHOUSD_DEMO: "true"
+      APP_DATABASE_URL: postgresql://warehousd:password@db:5432/warehousd
+      WAREHOUSD_ADMIN_EMAIL: admin@example.com
+      WAREHOUSD_ADMIN_PASSWORD: password123
+      WAREHOUSD_DATA_ROLE_PASSWORD: datapassword123
+      BETTER_AUTH_SECRET: development-secret-key-for-testing-only
+    volumes:
+      - ./examples/meridian:/project
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "localhost:8722/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db_data:
