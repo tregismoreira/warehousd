@@ -87,10 +87,19 @@ export async function POST(req: NextRequest) {
     });
     if (!built.ok) return Response.json({ error: built.error }, { status: 400 });
 
-    await approveGrant(app, body.id, by, built.opts);
+    const approved = await approveGrant(app, body.id, by, built.opts);
+    if (!approved) return Response.json({ error: "unknown_grant" }, { status: 404 });
     return Response.json({ ok: true });
   }
-  if (action === "deny") { await denyGrant(app, body.id, by); return Response.json({ ok: true }); }
-  if (action === "revoke") { await revokeGrant(app, body.id, by); return Response.json({ ok: true }); }
+  if (action === "deny") {
+    const denied = await denyGrant(app, body.id, by);
+    if (!denied) return Response.json({ error: "unknown_grant" }, { status: 404 });
+    return Response.json({ ok: true });
+  }
+  if (action === "revoke") {
+    const revoked = await revokeGrant(app, body.id, by);
+    if (!revoked) return Response.json({ error: "unknown_grant" }, { status: 404 });
+    return Response.json({ ok: true });
+  }
   return Response.json({ error: "unknown_action" }, { status: 400 });
 }
