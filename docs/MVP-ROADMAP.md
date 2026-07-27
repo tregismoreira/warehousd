@@ -148,25 +148,25 @@ Open http://localhost:8722 and try these scenarios:
 - **Grants panel (term multi-select)** — as Marcus/Ana, open the Grants panel. Approve any pending grant on `policies`: the panel shows a **Category** multi-select listing all 12 terms. Select `hr` + `benefits` to issue a term-scoped approval, or leave the picker empty for full access. The `row_filter` is derived server-side from the config — the client cannot forge the field name.
 - **Stop**: `docker compose -f docker-compose.test.yml down -v`
 
-## Phase 1 — Real identity: Better Auth core + roles (§6.2–6.3)
+## Phase 1 — Real identity: Better Auth core + roles (§6.2–6.3) — ✅ COMPLETE
 
-- [ ] Install Better Auth in `apps/web`; auth tables (`user`, `session`, `account`) in the `app` schema
-- [ ] Local email/password login (bootstrap fallback only) + login screen; demo mode shows §9 persona credentials
-- [ ] `role` on user (`admin`/`manager`/`member`); seed Ana/Marcus/Mia as real users with §9 roles + grants
-- [ ] Support `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` (fully disables local credentials)
-- [ ] Delete the POC persona switcher; derive `BrokerContext` in UI routes from the verified session (env via authenticated console toggle)
-- [ ] Role checks on grants API (approve/deny/revoke = manager/admin only)
-- [ ] Tests: 401 on unauthenticated routes; 403 on member-approve; request-body userId/env provably ignored; all Phase 0 tests still green
+- [x] Install Better Auth in `apps/web`; auth tables (`user`, `session`, `account`) in the `app` schema
+- [x] Local email/password login (bootstrap fallback only) + login screen; demo mode shows §9 persona credentials
+- [x] `role` on user (`admin`/`manager`/`member`); seed Ana/Marcus/Mia as real users with §9 roles + grants
+- [x] Support `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` (fully disables local credentials)
+- [x] Delete the POC persona switcher; derive `BrokerContext` in UI routes from the verified session (env via authenticated console toggle)
+- [x] Role checks on grants API (approve/deny/revoke = manager/admin only)
+- [x] Tests: 401 on unauthenticated routes; 403 on member-approve; request-body userId/env provably ignored; all Phase 0 tests still green
 
-## Phase 2 — OAuth 2.1 provider + env-as-scope (§6.1, §6.4–6.6)
+## Phase 2 — OAuth 2.1 provider + env-as-scope (§6.1, §6.4–6.6) — ✅ COMPLETE
 
-- [ ] Better Auth OIDC-provider/MCP plugin: warehousd as OAuth 2.1 authorization server; 15-min access tokens + refresh tokens
-- [ ] `app.client_policies` table per §6.1 (`allowed_scopes` default `{env:dev}`, `promoted_at`, `promoted_by`)
-- [ ] Scope-issuance hook, §6.1 rules 1–4: client-policy intersection → user live-grant eligibility → consent-screen env picker (exactly one env scope) → rules re-run on every refresh
-- [ ] Dynamic client registration (RFC 7591): dynamic clients get `{env:dev, env:live}`; manually created clients get `{env:dev}` always
-- [ ] Token-verification adapter: sole constructor of `BrokerContext` for token paths; missing env scope → `dev`; tokens carry no grant data
-- [ ] Promotion/demotion primitives (data layer + API; UI in Phase 5)
-- [ ] Tests — completes §10 test 5: scope-escalation refused; promotion/demotion take effect on next refresh; no-live-grant user never gets `env:live`; token payload contains only sub/client/env
+- [x] Better Auth OIDC-provider/MCP plugin: warehousd as OAuth 2.1 authorization server; 15-min access tokens + refresh tokens
+- [x] `app.client_policies` table per §6.1 (`allowed_scopes` default `{env:dev}`, `promoted_at`, `promoted_by`)
+- [x] Scope-issuance hook, §6.1 rules 1–4: client-policy intersection → user live-grant eligibility → consent-screen env picker (exactly one env scope) → rules re-run on every refresh
+- [x] Dynamic client registration (RFC 7591): dynamic clients get `{env:dev, env:live}`; manually created clients get `{env:dev}` always
+- [x] Token-verification adapter: sole constructor of `BrokerContext` for token paths; missing env scope → `dev`; tokens carry no grant data
+- [x] Promotion/demotion primitives (data layer + API; UI in Phase 5)
+- [x] Tests — completes §10 test 5: scope-escalation refused; promotion/demotion take effect on next refresh; no-live-grant user never gets `env:live`; token payload contains only sub/client/env
 
 ## Phase 3 — MCP endpoint (§7) — ✅ COMPLETE
 
@@ -282,16 +282,74 @@ pnpm test:down
 6. As Ana, regenerate synthetic data with a new seed and confirm a
    `data_synth` row changed while an imported `data_live` row did not.
 
-## Phase 6 — CLI lifecycle + distribution (§11) — parallel with Phase 5
+## Phase 6 — CLI lifecycle + distribution (§11) — parallel with Phase 5 — ✅ COMPLETE
 
-- [ ] Full CLI: `init`, `start`, `stop [--destroy]`, `status`, `apply`, `seed`, `regen-synth` (grows from Phase 0 subset)
-- [ ] `start`: config → pull/start server image + Postgres (or `database.url`) under project namespace → apply + seed → print outputs → write `.warehousd/outputs.json`; idempotent
-- [ ] Outputs contract per §11 incl. auto-created `devClient` (`allowed_scopes = {env:dev}`, Phase 2 machinery)
-- [ ] Docker via `dockerode` or shell-out; clear error when Docker isn't running
-- [ ] Publishing: GitHub Actions → `ghcr.io/<org>/warehousd` image + `warehousd` npm package
-- [ ] Offline guarantee verified (post-pull `start` with network disabled)
-- [ ] `examples/meridian` runs entirely via `npx warehousd start`
+- [x] Full CLI: `init`, `start`, `stop [--destroy]`, `status`, `apply`, `seed`, `regen-synth` (grows from Phase 0 subset)
+- [x] `start`: config → pull/start server image + Postgres (or `database.url`) under project namespace → apply + seed → print outputs → write `.warehousd/outputs.json`; idempotent
+- [x] Outputs contract per §11 incl. auto-created `devClient` (`allowed_scopes = {env:dev}`, Phase 2 machinery)
+- [x] Docker via `dockerode` or shell-out; clear error when Docker isn't running
+- [x] Publishing: GitHub Actions → `ghcr.io/<org>/warehousd` image + `warehousd` npm package
+- [x] Offline guarantee verified (post-pull `start` with network disabled)
+- [x] `examples/meridian` runs entirely via `npx warehousd start`
 - [ ] Tests: full lifecycle E2E from a bare dir; outputs contract; devClient token mint; YAML-change re-apply
+
+### Try it yourself
+
+**Automated: run the full test suite**
+
+```bash
+cd mvp
+pnpm test:up
+WAREHOUSD_PROJECT_DIR=$(pwd)/examples/meridian pnpm test
+pnpm lint
+pnpm test:down
+```
+
+**Manual: run the CLI lifecycle**
+
+1. Install the `warehousd` CLI locally (from the repo root or via npm):
+   ```bash
+   npm install -g ./mvp/packages/cli
+   # or: npx warehousd --version
+   ```
+
+2. Initialize and start a fresh project from the `meridian` example:
+   ```bash
+   mkdir /tmp/test-warehousd
+   cd /tmp/test-warehousd
+   npx warehousd init
+   # Follow prompts; set project name to "test", database to managed
+   ```
+
+3. Start the server (pulls image, creates Postgres container, applies config, seeds data):
+   ```bash
+   npx warehousd start
+   ```
+   Confirm outputs are written to `.warehousd/outputs.json` and include `apiUrl`, `devClient` id/secret, and deployment status.
+
+4. Check status:
+   ```bash
+   npx warehousd status
+   ```
+   Verify `healthy: true` and outputs are listed.
+
+5. Apply a config change (update `warehousd.yml`, add a field or collection):
+   ```bash
+   npx warehousd apply
+   ```
+   Confirm idempotent re-apply with same config.
+
+6. Regenerate synthetic data:
+   ```bash
+   npx warehousd regen-synth
+   ```
+   Confirm `data_synth` rows are regenerated while `data_live` is untouched.
+
+7. Stop and destroy:
+   ```bash
+   npx warehousd stop --destroy
+   ```
+   Confirm containers and volumes are removed.
 
 ## Phase 7 — `warehousd deploy` (Fly.io) (§11 Deploy)
 
