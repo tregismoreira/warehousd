@@ -64,7 +64,7 @@ export async function runIndex(
 }
 
 const program = new Command();
-program.name("warehousd").description("warehousd Phase 0 CLI");
+program.name("warehousd").description("warehousd CLI");
 program.command("init")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--force", "overwrite an existing warehousd.yml")

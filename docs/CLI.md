@@ -14,20 +14,21 @@ npx warehousd
 
 ### init
 
-Initialize a new warehousd project in the current directory.
+Initialize a new warehousd project.
 
 ```bash
-warehousd init [project-name]
+warehousd init
 ```
 
 Creates:
-- `warehousd.yml`: Configuration file (YAML schema for collections, taxonomies, grants, synthetic data)
-- `seed/docs-dev/`: Example policy documents for development
-- `seed/docs-live/`: Example policy documents for production
-- `.warehousd/`: State directory (git-ignored)
+- `warehousd.yml`: Configuration file (YAML schema for collections, taxonomies, synthetic data)
+- `.gitignore` entries for `warehousd.local.yml` and `.warehousd/` (the file is created if absent)
+
+`init` does not create seed directories or `.warehousd/` — the latter is created by `start`.
 
 **Flags:**
-- `--db`: Custom Postgres URL (defaults to `postgres://postgres:postgres@127.0.0.1:5432/warehousd`)
+- `-d, --dir <dir>`: Project directory (default: current working directory)
+- `--force`: Overwrite an existing `warehousd.yml`
 
 ### start
 
@@ -37,12 +38,23 @@ Start the warehousd server and database.
 warehousd start
 ```
 
-Spawns a Docker container running the web server (Next.js) and Postgres. Prints the outputs contract to stdout.
+Spawns a Docker container running the web server (Next.js), plus a managed
+Postgres container unless `database.url` is set in `warehousd.yml`. Prints the
+outputs contract to stdout and writes `.warehousd/outputs.json`.
 
 **Flags:**
-- `--db`: Bring-your-own Postgres URL (e.g., `postgres://user:pw@host:5432/db`)
-- `--image`: Override the container image (defaults to `ghcr.io/warehousd/warehousd:VERSION`)
-- `--offline`: Require the image to exist locally; fail if a pull is needed
+- `-d, --dir <dir>`: Project directory (default: current working directory)
+- `-s, --seed <n>`: Synthetic data PRNG seed (default: `42`)
+- `--verbose`: Log every Docker command
+
+**Image selection** (no CLI flag; resolved in this order):
+1. `server.image` in `warehousd.yml`
+2. `WAREHOUSD_IMAGE` environment variable
+3. `ghcr.io/warehousd/warehousd:<cli-version>`
+
+**Offline behaviour** is automatic: images are only pulled when
+`docker image inspect` fails, so once an image is local, `start` never touches
+the network. See `docs/runbooks/offline-start.md`.
 
 **Output:**
 Prints a structured block with the six-key outputs contract:
@@ -83,7 +95,7 @@ The six outputs contract keys are:
 - `mcpUrl`: MCP server URL (same base URL with `/mcp` path)
 - `databaseUrl`: Postgres connection string (read-write for admin tasks, read-only for data)
 - `adminUrl`: Admin UI URL (`apiUrl/admin`)
-- `devClient`: Object with `id` and `secret` (OAuth client for programmatic access)
+- `devClient`: Object with `clientId` and `clientSecret` (OAuth client for programmatic access)
 - `env`: Environment name (`dev` or `live`)
 
 ### stop
@@ -95,8 +107,10 @@ warehousd stop [--destroy] [--yes]
 ```
 
 **Flags:**
+- `-d, --dir <dir>`: Project directory (default: current working directory)
 - `--destroy`: Remove the Postgres container and volume (irreversible data loss)
-- `--yes`: Skip confirmation prompt when using `--destroy`
+- `--yes`: Required with `--destroy`. There is no interactive prompt; without
+  `--yes`, `--destroy` exits with an error rather than asking.
 
 ### status
 
@@ -113,44 +127,58 @@ Returns:
 
 ### apply
 
-Apply a Postgres migration or configuration change (Advanced).
+Apply the `warehousd.yml` config to the database — creates schemas, tables, and
+`v_<collection>` views (Advanced). Runs against the host, not the container.
 
 ```bash
-warehousd apply <sql-file>
+warehousd apply
 ```
 
-Executes SQL against the app schema. Used to modify collections, grants, or other app-layer configurations.
+**Flags:**
+- `-d, --dir <dir>`: Project directory (default: current working directory)
+- `--db <url>`: Database URL (falls back to `DATABASE_URL`, then `.warehousd/outputs.json`)
 
 ### seed
 
-Seed or regenerate synthetic data (Advanced).
+Generate synthetic data for all data collections (Advanced).
 
 ```bash
-warehousd seed [collection-name]
+warehousd seed
 ```
 
-Regenerates synthetic data for a collection (or all collections if not specified). Useful after adding new fields or changing `synthetic` config.
+**Flags:**
+- `-d, --dir <dir>`: Project directory (default: current working directory)
+- `--db <url>`: Database URL
+- `-s, --seed <n>`: PRNG seed (default: `42`)
 
 ### index
 
-Index file collections for search (Advanced).
+Index a file collection for search (Advanced).
 
 ```bash
-warehousd index <collection-name>
+warehousd index <collection>
 ```
 
 Re-index a file collection (e.g., policies, docs). Called automatically during `start`.
+
+**Flags:**
+- `-d, --dir <dir>`: Project directory (default: current working directory)
+- `--db <url>`: Database URL
+- `--env <env>`: `dev` or `live` (default: `dev`)
+- `--source <dir>`: Override the source directory
 
 ### regen-synth
 
 Regenerate all synthetic data without restarting the server.
 
 ```bash
-warehousd regen-synth [--seed <number>]
+warehousd regen-synth [-s <number>]
 ```
 
 **Flags:**
-- `--seed`: PRNG seed for reproducible synthetic data (default: 42)
+- `-d, --dir <dir>`: Project directory (default: current working directory)
+- `--db <url>`: Database URL
+- `-s, --seed <n>`: PRNG seed for reproducible synthetic data (default: `42`)
 
 ## .warehousd/ Directory Layout
 
@@ -174,8 +202,8 @@ The `.warehousd/` directory is created by `init` and contains state and outputs.
     "databaseUrl": "postgres://warehousd:PASSWORD@localhost:PORT/warehousd",
     "adminUrl": "http://localhost:8722/admin",
     "devClient": {
-      "id": "...",
-      "secret": "..."
+      "clientId": "...",
+      "clientSecret": "..."
     },
     "env": "dev"
   }
@@ -233,7 +261,9 @@ Then run:
 warehousd start
 ```
 
-The CLI will skip Docker entirely and connect directly to your database.
+The CLI skips the managed Postgres container and points the server at your
+database instead. The server itself still runs as a Docker container, and
+`stop --destroy` will not touch a database it does not manage.
 
 ## Troubleshooting
 
@@ -282,8 +312,8 @@ cat .warehousd/outputs.json  # if the file exists
 ### Example: Minimal Project
 
 ```bash
-warehousd init my-project
-cd my-project
+mkdir my-project && cd my-project
+warehousd init
 warehousd start
 curl http://localhost:8722/api/health  # {"ok":true}
 warehousd stop
@@ -307,9 +337,11 @@ warehousd stop --destroy --yes
 ### Example: Custom Database
 
 ```bash
-# Connect to a remote Postgres instance
-warehousd init --db postgres://admin:secret@db.example.com:5432/mydb
-warehousd start  # Uses the configured database, no Docker container
+warehousd init
+# then set database.url in warehousd.yml:
+#   database:
+#     url: postgres://admin:secret@db.example.com:5432/mydb
+warehousd start  # Uses the configured database; no managed DB container
 ```
 
 ## Architecture

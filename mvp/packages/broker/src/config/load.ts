@@ -13,7 +13,7 @@ function splitInlineComment(line: string): { code: string; comment: string } {
     const c = line[i];
     if (c === "'" && !inDouble) inSingle = !inSingle;
     else if (c === '"' && !inSingle) inDouble = !inDouble;
-    else if (c === '#' && !inSingle && !inDouble && (i === 0 || /\s/.test(line[i - 1]))) {
+    else if (c === '#' && !inSingle && !inDouble && (i === 0 || /\s/.test(line.charAt(i - 1)))) {
       return { code: line.slice(0, i), comment: line.slice(i) };
     }
   }

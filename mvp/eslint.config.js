@@ -3,7 +3,10 @@ const tsParser = require("@typescript-eslint/parser");
 
 module.exports = [
   {
-    ignores: ["node_modules/**", "dist/**", ".next/**"],
+    // Patterns must be `**/`-prefixed: a bare `dist/**` only matches the repo
+    // root, leaving built artifacts like packages/cli/dist/index.cjs to be
+    // linted (and fail) as soon as anyone runs a build before `pnpm lint`.
+    ignores: ["**/node_modules/**", "**/dist/**", "**/.next/**"],
   },
   {
     files: ["**/*.ts", "**/*.tsx"],
