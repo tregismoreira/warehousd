@@ -45,6 +45,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Verify version matches tag
+        working-directory: mvp
         run: |
           TAG_VERSION="${{ github.ref_name }}"
           PACKAGE_VERSION="v$(node -p "require('./packages/cli/package.json').version")"
