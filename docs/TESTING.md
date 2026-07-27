@@ -14,9 +14,9 @@ Follow [SETUP.md](./SETUP.md) first. Start the app with `WAREHOUSD_DEMO=true` so
 
 ## 2. Login as a member (Mia)
 
-1. Click the **Mia** demo button or enter `mia@meridian.demo` / `demo`.
+1. Click the **Mia** demo button or enter `mia@demo.local` / `demo`.
 2. **Expected:** redirected to `/` (console).
-3. **Expected:** header shows `mia@meridian.demo (member)` — no persona dropdown anywhere.
+3. **Expected:** header shows `mia@demo.local (member)` — no persona dropdown anywhere.
 4. **Expected:** Grants panel shows Mia's grants. The approve/deny/revoke buttons are absent (members cannot approve).
 
 ---
@@ -35,8 +35,8 @@ While signed in as Mia:
 ## 4. Grant approval flow (Marcus → Mia)
 
 1. Sign out (button in the header).
-2. Sign in as **Marcus** (`marcus@meridian.demo` / `demo`).
-3. **Expected:** header shows `marcus@meridian.demo (manager)`.
+2. Sign in as **Marcus** (`marcus@demo.local` / `demo`).
+3. **Expected:** header shows `marcus@demo.local (manager)`.
 4. **Expected:** Grants panel shows a pending `salaries` request from Mia with an **Approve** button.
 5. Click **Approve**.
 6. **Expected:** the grant status changes to approved.

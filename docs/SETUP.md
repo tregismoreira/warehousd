@@ -129,9 +129,9 @@ App is available at **http://localhost:8722**.
 
 | Email | Password | Role |
 |---|---|---|
-| `ana@meridian.demo` | `demo` | admin |
-| `marcus@meridian.demo` | `demo` | manager |
-| `mia@meridian.demo` | `demo` | member |
+| `ana@demo.local` | `demo` | admin |
+| `marcus@demo.local` | `demo` | manager |
+| `mia@demo.local` | `demo` | member |
 
 ## Run the test suite
 

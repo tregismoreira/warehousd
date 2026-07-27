@@ -13,9 +13,12 @@ const dir = process.env.WAREHOUSD_PROJECT_DIR!;
 // Fixed ids keep them aligned with the pre-seeded app.grants rows (user_id = 'ana'|'marcus'|'mia').
 async function seedPersonaUsers(db: Pool) {
   const personas = [
-    { id: "ana",    email: "ana@meridian.demo",    name: "Ana",    role: "admin" },
-    { id: "marcus", email: "marcus@meridian.demo", name: "Marcus", role: "manager" },
-    { id: "mia",    email: "mia@meridian.demo",    name: "Mia",    role: "member" },
+    // Must match apps/web/scripts/entrypoint.ts and the buttons hardcoded in
+    // app/login/LoginForm.tsx — otherwise the demo buttons shown by this dev
+    // flow reference users that were never seeded and sign-in always fails.
+    { id: "ana",    email: "ana@demo.local",    name: "Ana",    role: "admin" },
+    { id: "marcus", email: "marcus@demo.local", name: "Marcus", role: "manager" },
+    { id: "mia",    email: "mia@demo.local",    name: "Mia",    role: "member" },
   ];
   for (const p of personas) {
     const exists = await db.query(`select 1 from app."user" where id=$1`, [p.id]);
@@ -26,11 +29,26 @@ async function seedPersonaUsers(db: Pool) {
       body: { email: p.email, password: "demo", name: p.name },
     });
     const generatedId = res.user.id;
-    // Delete sessions and accounts, then update user id and role.
-    // This avoids foreign key constraint violations.
+    // account.userId has an ON DELETE CASCADE (not ON UPDATE) FK to user.id, so the
+    // referencing account row must be gone before user.id can be renamed. Preserve its
+    // password hash and reinsert it under the new id — deleting outright leaves the
+    // persona with no credential, so demo sign-in silently never works.
+    const account = await db.query(
+      `select * from app."account" where "userId"=$1 and "providerId"='credential'`,
+      [generatedId]
+    );
     await db.query(`delete from app."session" where "userId"=$1`, [generatedId]);
     await db.query(`delete from app."account" where "userId"=$1`, [generatedId]);
     await db.query(`update app."user" set id=$1, role=$2 where id=$3`, [p.id, p.role, generatedId]);
+    if (account.rowCount && account.rowCount > 0) {
+      const a = account.rows[0];
+      await db.query(
+        `insert into app."account"
+           ("id","accountId","providerId","userId","password","createdAt","updatedAt")
+         values ($1,$2,$3,$4,$5,$6,$7)`,
+        [a.id, a.accountId, a.providerId, p.id, a.password, a.createdAt, a.updatedAt]
+      );
+    }
   }
 }
 
