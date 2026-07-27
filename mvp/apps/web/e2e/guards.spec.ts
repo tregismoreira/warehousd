@@ -1,16 +1,9 @@
-import { test, expect, type Page } from "@playwright/test";
-
-async function signIn(page: Page, email: string) {
-  await page.goto("/login");
-  await page.getByPlaceholder("email").fill(email);
-  await page.getByPlaceholder("password").fill("demo");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((u) => !u.pathname.startsWith("/login"));
-}
+import { test, expect } from "@playwright/test";
+import { as } from "./helpers/auth";
 
 test.describe("role-scoped surfaces", () => {
   test("a member lands on /member and sees only member navigation", async ({ page }) => {
-    await signIn(page, "mia@meridian.demo");
+    await as(page, "member");
     await expect(page).toHaveURL(/\/member$/);
     await expect(page.getByRole("link", { name: "My grants" })).toBeVisible();
     await expect(page.getByRole("link", { name: "How to connect" })).toBeVisible();
@@ -19,27 +12,27 @@ test.describe("role-scoped surfaces", () => {
   });
 
   test("a member navigating to /admin is redirected to 403", async ({ page }) => {
-    await signIn(page, "mia@meridian.demo");
+    await as(page, "member");
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/403$/);
     await expect(page.getByText(/don.t have access/i)).toBeVisible();
   });
 
   test("a member navigating to /manager is redirected to 403", async ({ page }) => {
-    await signIn(page, "mia@meridian.demo");
+    await as(page, "member");
     await page.goto("/manager");
     await expect(page).toHaveURL(/\/403$/);
   });
 
   test("a manager reaches /manager but not /admin", async ({ page }) => {
-    await signIn(page, "marcus@meridian.demo");
+    await as(page, "manager");
     await expect(page).toHaveURL(/\/manager$/);
     await page.goto("/admin/users");
     await expect(page).toHaveURL(/\/403$/);
   });
 
   test("an admin reaches every surface", async ({ page }) => {
-    await signIn(page, "ana@meridian.demo");
+    await as(page, "admin");
     await expect(page).toHaveURL(/\/admin$/);
     for (const path of ["/admin/collections", "/admin/users", "/admin/clients",
                         "/admin/sso", "/admin/audit", "/admin/import"]) {
@@ -57,7 +50,7 @@ test.describe("role-scoped surfaces", () => {
   });
 
   test("the env switcher persists across a reload", async ({ page }) => {
-    await signIn(page, "ana@meridian.demo");
+    await as(page, "admin");
     const liveBtn = page.getByRole("group", { name: "Environment" }).getByText("live");
     const envResponse = page.waitForResponse((r) => r.url().endsWith("/api/env") && r.request().method() === "POST");
     await liveBtn.click();

@@ -10,12 +10,22 @@ export default defineConfig({
   timeout: 120_000,
   fullyParallel: false, // one database, one dev server
   workers: 1,
-  use: { baseURL: "http://localhost:8722", trace: "retain-on-failure" },
+  retries: process.env.CI ? 1 : 0,
+  use: {
+    baseURL: "http://localhost:8722",
+    trace: "retain-on-failure",
+    // Taller than the 720px default: the SSO and approval sheets put their action footer
+    // below the fold at 720, and Playwright refuses to click an off-viewport element.
+    viewport: { width: 1280, height: 1000 },
+  },
   webServer: {
+    // `next dev`, not a production build: better-auth enables rate limiting outside
+    // development (3 sign-ins per 10s per IP), and a suite that signs personas in and out
+    // dozens of times trips it within the first file.
     command: "pnpm dev",
     url: "http://localhost:8722/login",
     reuseExistingServer: !process.env.CI,
-    timeout: 240_000,
+    timeout: 600_000,
     maxStartupAttempts: 3,
     env: {
       APP_DATABASE_URL: DB,
@@ -24,6 +34,9 @@ export default defineConfig({
       IMPORT_DATABASE_URL: "postgres://warehousd_import:pw@127.0.0.1:54330/warehousd_e2e",
       WAREHOUSD_PROJECT_DIR: resolve(__dirname, "../../examples/meridian"),
       WAREHOUSD_DEMO: "true",
+      // Throwaway — this database is dropped and rebuilt by scripts/e2e-setup.ts on every run.
+      BETTER_AUTH_SECRET: "e2e-secret-at-least-32-chars-long-0000",
+      BETTER_AUTH_URL: "http://localhost:8722",
     },
   },
 });
