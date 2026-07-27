@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>The MCP-ready governed data layer for enterprises.</strong><br>
+  <strong>An MCP-ready governed data layer for enterprises.</strong><br>
   Your data, safely queryable by AI assistants.
 </p>
 
