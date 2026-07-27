@@ -80,7 +80,15 @@ async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
     });
     const generatedId = res.user.id;
 
-    // Delete sessions and accounts, then update user id and role
+    // account.userId has an ON DELETE CASCADE (not ON UPDATE) FK to user.id, so renaming
+    // user.id to the fixed slug requires the referencing account row to be gone first.
+    // Preserve its password hash and reinsert it under the new id afterward, rather than
+    // discarding it — deleting outright leaves the persona with no working credential and
+    // "demo login works" (this file's whole point) silently never works again.
+    const account = await db.query(
+      `select * from app."account" where "userId" = $1 and "providerId" = 'credential'`,
+      [generatedId]
+    );
     await db.query(`delete from app."session" where "userId" = $1`, [generatedId]);
     await db.query(`delete from app."account" where "userId" = $1`, [generatedId]);
     await db.query(`update app."user" set id = $1, role = $2 where id = $3`, [
@@ -88,6 +96,15 @@ async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
       p.role,
       generatedId,
     ]);
+    if (account.rowCount && account.rowCount > 0) {
+      const a = account.rows[0];
+      await db.query(
+        `insert into app."account"
+           ("id","accountId","providerId","userId","password","createdAt","updatedAt")
+         values ($1,$2,$3,$4,$5,$6,$7)`,
+        [a.id, a.accountId, a.providerId, p.id, a.password, a.createdAt, a.updatedAt]
+      );
+    }
   }
 
   // Create grants for ana and marcus (they see everything)
