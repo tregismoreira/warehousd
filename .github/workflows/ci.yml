@@ -67,7 +67,10 @@ jobs:
       - run: pnpm --filter warehousd build
         working-directory: mvp
 
-      - run: pnpm test:e2e
+      - run: pnpm test:e2e:cli
         working-directory: mvp
         env:
           WAREHOUSD_IMAGE: warehousd:ci
+
+      - run: pnpm test:e2e:sso
+        working-directory: mvp

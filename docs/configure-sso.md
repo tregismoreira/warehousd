@@ -11,7 +11,7 @@ picks the right client-side flow automatically based on the provider's `type`.
 >
 > The **server-side** flows here are covered by automated tests, including a real
 > Keycloak OIDC **and** SAML round trip (`mvp/apps/web/test/sso-keycloak.integration.test.ts`,
-> run via `pnpm test:e2e`): provider registration, the admin-only gate, JIT
+> run via `pnpm test:e2e:sso`): provider registration, the admin-only gate, JIT
 > provisioning, and the local-login kill switch.
 >
 > **Step 3 is the exception.** The login page (`mvp/apps/web/app/login/page.tsx`)
