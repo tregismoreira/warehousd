@@ -264,6 +264,28 @@ namespaced from the project name, so the suite is safe to run back-to-back.
 
 `pnpm test:e2e` runs both of the above in sequence.
 
+Browser e2e (Playwright — role guards, the grant lifecycle through the UI, and
+the four login-page states):
+
+```bash
+pnpm e2e          # runs e2e:setup first, which drops and recreates warehousd_e2e
+```
+
+**Expected:** 17/17 passing in about a minute.
+
+> ⚠️ **Free port 8722 first.** `playwright.config.ts` sets
+> `reuseExistingServer: !process.env.CI`, so if *anything* is already serving
+> `http://localhost:8722/login` — most easily a warehousd container left running by
+> `warehousd start` — Playwright silently reuses it instead of starting the dev
+> server under test. The suite then runs against the wrong database and fails with
+> `WARN [Better Auth]: User not found` and sign-in timeouts that look like
+> application bugs. Check with `lsof -nP -iTCP:8722 -sTCP:LISTEN` before debugging
+> anything else.
+
+The three personas are seeded by `scripts/dev-bootstrap.ts` as
+`ana@demo.local` / `marcus@demo.local` / `mia@demo.local`, password `demo` —
+specs must sign in with those addresses.
+
 ### Also run these before calling a change done
 
 Neither is covered by `pnpm test` — vitest does not typecheck, so type errors
