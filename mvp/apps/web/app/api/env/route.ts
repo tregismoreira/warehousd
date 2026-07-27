@@ -7,9 +7,14 @@ export async function POST(req: NextRequest) {
   const { env } = await req.json();
   if (env !== "dev" && env !== "live") return Response.json({ error: "invalid env" }, { status: 400 });
   const res = Response.json({ ok: true, env });
-  res.headers.append(
-    "set-cookie",
-    `wh_env=${env}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`,
-  );
+
+  // Determine if the request is over HTTPS (check req.url protocol and x-forwarded-proto header)
+  const url = new URL(req.url);
+  const isHttps = url.protocol === "https:" || req.headers.get("x-forwarded-proto") === "https";
+
+  let cookieValue = `wh_env=${env}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`;
+  if (isHttps) cookieValue += "; Secure";
+
+  res.headers.append("set-cookie", cookieValue);
   return res;
 }
