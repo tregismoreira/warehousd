@@ -11,16 +11,16 @@ picks the right client-side flow automatically based on the provider's `type`.
 >
 > The **server-side** flows here are covered by automated tests, including a real
 > Keycloak OIDC **and** SAML round trip (`mvp/apps/web/test/sso-keycloak.integration.test.ts`,
-> run via `pnpm test:e2e`): provider registration, the admin-only gate, JIT
+> run via `pnpm test:e2e:sso`): provider registration, the admin-only gate, JIT
 > provisioning, and the local-login kill switch.
 >
-> **Step 3 is the exception.** The login page (`mvp/apps/web/app/login/page.tsx`)
-> has **no automated test coverage at all** — no component or browser test
-> exercises the SSO-first rendering, the collapsed local-login disclosure, the
-> "No login method is configured" state, the `returnTo` OAuth-continuation
-> redirect, or the SAML `providerType` branch. Only the `/api/sso/status`
-> endpoint it reads is tested. Verifying step 3 by eye is therefore the *only*
-> check on that code today.
+> **Step 3 is partly covered.** `mvp/apps/web/e2e/login.spec.ts` (Playwright, run
+> via `pnpm e2e`) exercises the login page's SSO-first rendering, the collapsed
+> local-login disclosure, the "No login method is configured" state, and the
+> `returnTo` OAuth-continuation redirect, mocking `/api/sso/status` to drive each
+> branch. The **SAML `providerType` branch** is still unexercised, and no test
+> asserts what the page *looks* like — so the screenshots below remain the only
+> check on the visual result.
 >
 > - [ ] Capture the 3 screenshots marked `*(Screenshot: …)*` below, save them
 >       under `docs/img/`, and replace each placeholder with a markdown image link.

@@ -191,7 +191,7 @@ Plan: [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-
 ### Outstanding human work (blocks Phase 4 sign-off)
 
 Everything above is code-complete and covered by automated tests, including a
-real Keycloak OIDC **and** SAML round trip (`pnpm test:e2e`). What remains
+real Keycloak OIDC **and** SAML round trip (`pnpm test:e2e:sso`). What remains
 cannot be automated — it needs a browser, the Claude connector UI, and a human
 confirming what's on screen:
 
@@ -291,7 +291,7 @@ pnpm test:down
 - [x] Publishing: GitHub Actions → `ghcr.io/<org>/warehousd` image + `warehousd` npm package
 - [x] Offline guarantee verified (post-pull `start` with network disabled)
 - [x] `examples/meridian` runs entirely via `npx warehousd start`
-- [ ] Tests: full lifecycle E2E from a bare dir; outputs contract; devClient token mint; YAML-change re-apply
+- [x] Tests: full lifecycle E2E from a bare dir; outputs contract; devClient token mint; YAML-change re-apply (`pnpm test:e2e:cli`, 9/9)
 
 ### Try it yourself
 

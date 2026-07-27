@@ -238,18 +238,31 @@ Full suite:
 WAREHOUSD_PROJECT_DIR=examples/meridian pnpm test
 ```
 
-**Expected:** 36 files / 172 tests pass, 1 file / 3 tests skipped. The skipped
+**Expected:** 67 files / 437 tests pass, 1 file / 3 tests skipped. The skipped
 file is the Keycloak e2e suite — it is gated behind `WAREHOUSD_E2E_KEYCLOAK` so
 the default run never needs a container beyond Postgres.
 
 Gated Keycloak e2e (real IdP — OIDC login, SAML login, SP metadata):
 
 ```bash
-pnpm test:up    # brings up Postgres AND Keycloak
-pnpm test:e2e
+pnpm test:up      # brings up Postgres AND Keycloak
+pnpm test:e2e:sso
 ```
 
 **Expected:** 3/3 passing.
+
+CLI lifecycle e2e (Docker — `init`/`start`/`stop`/`--destroy`, outputs contract,
+devClient token mint, YAML-change re-apply):
+
+```bash
+pnpm --filter warehousd build   # the suite runs the built dist, not src
+pnpm test:e2e:cli
+```
+
+**Expected:** 9/9 passing. Ports are probed per run and every Docker object is
+namespaced from the project name, so the suite is safe to run back-to-back.
+
+`pnpm test:e2e` runs both of the above in sequence.
 
 ### Also run these before calling a change done
 
