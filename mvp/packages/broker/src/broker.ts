@@ -52,15 +52,23 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       ? intent.fields
       : grant.allowedFields.filter((f) => all.includes(f));
     // 5. build + execute on the env-scoped pool
-    const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { documentFilter: grant.documentFilter });
-    const documents = (await dataPool(pools, ctx).query(text, values)).rows;
-    const fieldsReturned = intent.aggregate && intent.aggregate.length
-      ? [...(intent.groupBy ?? []), ...intent.aggregate.map((a) => `${a.fn}_${a.field}`)]
-      : selectFields;
-    const auditId = await writeAudit(app, {
-      userId: ctx.userId, env: ctx.env, collection: intent.collection, intent,
-      fieldsReturned, grantId: grant.id, outcome: "allowed", reason: null });
-    return { ok: true, documents, fieldsReturned, auditId };
+    try {
+      const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { documentFilter: grant.documentFilter });
+      const documents = (await dataPool(pools, ctx).query(text, values)).rows;
+      const fieldsReturned = intent.aggregate && intent.aggregate.length
+        ? [...(intent.groupBy ?? []), ...intent.aggregate.map((a) => `${a.fn}_${a.field}`)]
+        : selectFields;
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: intent.collection, intent,
+        fieldsReturned, grantId: grant.id, outcome: "allowed", reason: null });
+      return { ok: true, documents, fieldsReturned, auditId };
+    } catch (err) {
+      // Never surface a raw driver error: Postgres messages name columns, tables and
+      // values, which is exactly what §10 test 4 forbids leaking. The audit row is
+      // the non-negotiable part — an unaudited probe leaves no trace.
+      console.error("[broker] query failed", { collection: intent.collection, err });
+      return refuse(ctx, intent.collection, intent, "internal_error", grant?.id ?? null);
+    }
   }
 
   async function describeCollection(ctx: BrokerContext, name: string): Promise<VisibleSchema | Refusal> {
@@ -97,14 +105,22 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
     const selectFields = intent.fields && intent.fields.length
       ? intent.fields : grant.allowedFields.filter((f) => all.includes(f));
-    const { text, values } = buildSelect(ctx.env,
-      { collection: intent.collection, fields: selectFields, limit: intent.limit, offset: intent.offset } as QueryIntent,
-      grant.allowedFields, { q: intent.q, documentFilter: grant.documentFilter });
-    const documents = (await dataPool(pools, ctx).query(text, values)).rows;
-    const auditId = await writeAudit(app, { userId: ctx.userId, env: ctx.env,
-      collection: intent.collection, intent, fieldsReturned: selectFields,
-      grantId: grant.id, outcome: "allowed", reason: null });
-    return { ok: true, documents, fieldsReturned: selectFields, auditId };
+    try {
+      const { text, values } = buildSelect(ctx.env,
+        { collection: intent.collection, fields: selectFields, limit: intent.limit, offset: intent.offset } as QueryIntent,
+        grant.allowedFields, { q: intent.q, documentFilter: grant.documentFilter });
+      const documents = (await dataPool(pools, ctx).query(text, values)).rows;
+      const auditId = await writeAudit(app, { userId: ctx.userId, env: ctx.env,
+        collection: intent.collection, intent, fieldsReturned: selectFields,
+        grantId: grant.id, outcome: "allowed", reason: null });
+      return { ok: true, documents, fieldsReturned: selectFields, auditId };
+    } catch (err) {
+      // Never surface a raw driver error: Postgres messages name columns, tables and
+      // values, which is exactly what §10 test 4 forbids leaking. The audit row is
+      // the non-negotiable part — an unaudited probe leaves no trace.
+      console.error("[broker] searchDocuments failed", { collection: intent.collection, err });
+      return refuse(ctx, intent.collection, intent, "internal_error", grant.id);
+    }
   }
 
   return { query, describeCollection, listCollections, searchDocuments };

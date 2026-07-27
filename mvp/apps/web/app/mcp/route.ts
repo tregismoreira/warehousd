@@ -22,8 +22,15 @@ async function handle(req: Request): Promise<Response> {
     if (!tool) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, reason: "unknown_tool" }) }], isError: true };
     }
-    const out = await tool.handler(ctx, req.params.arguments ?? {});
-    return { content: [{ type: "text", text: JSON.stringify(out) }] };
+    try {
+      const out = await tool.handler(ctx, req.params.arguments ?? {});
+      return { content: [{ type: "text", text: JSON.stringify(out) }] };
+    } catch (err) {
+      // Never surface a raw error: prevent leaking schema details, stack traces, etc.
+      // Log server-side for debugging, but return a generic error to the client.
+      console.error("[mcp] tool handler failed", { tool: req.params.name, err });
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, reason: "internal_error" }) }], isError: true };
+    }
   });
 
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });

@@ -32,7 +32,7 @@ export type DocSearchIntent = {
 
 export type RefusalReason =
   | "no_grant" | "expired_grant" | "field_denied"
-  | "unknown_collection" | "unknown_field" | "invalid_intent";
+  | "unknown_collection" | "unknown_field" | "invalid_intent" | "internal_error";
 
 export type BrokerResult =
   | { ok: true; documents: Document[]; fieldsReturned: string[]; auditId: string }

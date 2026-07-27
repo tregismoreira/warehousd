@@ -188,3 +188,80 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
     expect(logs2.join("\n").includes(DOC_RESTRICTED_CANARY)).toBe(false);
   });
 });
+
+describe("unhandled Postgres errors are caught and audited (design §10 test 4)", () => {
+  it("filter value type mismatch (invalid uuid) is caught and returns internal_error", async () => {
+    const broker = makeBroker(pools, cfg);
+    const intent: QueryIntent = {
+      collection: "people",
+      filters: [{ field: "id", op: "gt", value: "x" }],
+    };
+    const r = await broker.query({ userId: "mia", env: "dev" }, intent);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("internal_error");
+      expect(r.auditId).toBeTruthy();
+      // Verify audit row exists
+      const auditRow = await admin.query(
+        `select outcome, reason from app.audit_events where id = $1`, [r.auditId]
+      );
+      expect(auditRow.rows.length).toBe(1);
+      expect(auditRow.rows[0]).toMatchObject({ outcome: "refused", reason: "internal_error" });
+      // Verify no Postgres error details leaked
+      const payload = JSON.stringify(r);
+      expect(payload.includes("invalid input syntax")).toBe(false);
+      expect(payload.includes("uuid")).toBe(false);
+    }
+  });
+
+  it("aggregate mismatch (sum on text field) is caught and returns internal_error", async () => {
+    const broker = makeBroker(pools, cfg);
+    const intent: QueryIntent = {
+      collection: "people",
+      aggregate: [{ fn: "sum", field: "full_name" }],
+      groupBy: ["department_name"],
+    };
+    const r = await broker.query({ userId: "mia", env: "dev" }, intent);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("internal_error");
+      expect(r.auditId).toBeTruthy();
+      // Verify audit row exists
+      const auditRow = await admin.query(
+        `select outcome, reason from app.audit_events where id = $1`, [r.auditId]
+      );
+      expect(auditRow.rows.length).toBe(1);
+      expect(auditRow.rows[0]).toMatchObject({ outcome: "refused", reason: "internal_error" });
+      // Verify no Postgres error details leaked
+      const payload = JSON.stringify(r);
+      expect(payload.includes("function sum")).toBe(false);
+      expect(payload.includes("does not exist")).toBe(false);
+    }
+  });
+
+  it("orderBy field not in groupBy is caught and returns internal_error", async () => {
+    const broker = makeBroker(pools, cfg);
+    const intent: QueryIntent = {
+      collection: "people",
+      aggregate: [{ fn: "count", field: "id" }],
+      groupBy: ["department_name"],
+      orderBy: { field: "id", dir: "asc" },
+    };
+    const r = await broker.query({ userId: "mia", env: "dev" }, intent);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("internal_error");
+      expect(r.auditId).toBeTruthy();
+      // Verify audit row exists
+      const auditRow = await admin.query(
+        `select outcome, reason from app.audit_events where id = $1`, [r.auditId]
+      );
+      expect(auditRow.rows.length).toBe(1);
+      expect(auditRow.rows[0]).toMatchObject({ outcome: "refused", reason: "internal_error" });
+      // Verify no Postgres error details leaked
+      const payload = JSON.stringify(r);
+      expect(payload.includes("must appear in the GROUP BY")).toBe(false);
+      expect(payload.includes("GROUP BY")).toBe(false);
+    }
+  });
+});

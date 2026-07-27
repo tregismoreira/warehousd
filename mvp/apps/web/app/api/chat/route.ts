@@ -105,7 +105,8 @@ export async function POST(req: NextRequest) {
         emit({ type: "done", messages: convo, text: "(stopped after 5 tool iterations)" });
         controller.close();
       } catch (err) {
-        emit({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        console.error("[chat] request failed", err);
+        emit({ type: "error", message: "chat request failed" });
         controller.close();
       }
     },
