@@ -1,4 +1,5 @@
 project: cortex
+demo: true
 server: { port: 8722 }
 taxonomies:
   category:
