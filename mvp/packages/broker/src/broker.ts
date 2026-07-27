@@ -85,8 +85,12 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     return { collection: name, description: c.description, fields };
   }
 
-  async function listCollections(_ctx: BrokerContext): Promise<{ name: string; description: string }[]> {
-    return Object.entries(cfg.collections).map(([name, c]) => ({ name, description: c.description }));
+  async function listCollections(ctx: BrokerContext): Promise<{ name: string; description: string }[]> {
+    const collections = Object.entries(cfg.collections).map(([name, c]) => ({ name, description: c.description }));
+    await writeAudit(app, {
+      userId: ctx.userId, env: ctx.env, collection: "*", intent: null,
+      fieldsReturned: [], grantId: null, outcome: "allowed", reason: null });
+    return collections;
   }
 
   async function searchDocuments(ctx: BrokerContext, intent: DocSearchIntent): Promise<BrokerResult> {

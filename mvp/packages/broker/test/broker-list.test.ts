@@ -28,3 +28,19 @@ it("lists names + descriptions only, even with zero grants", async () => {
     { name: "salaries", description: "Comp" },
   ]);
 });
+
+it("writes an audit row with collection='*' and outcome='allowed'", async () => {
+  const broker = makeBroker(pools, cfg);
+  await broker.listCollections({ userId: "alice", env: "live" });
+  const audit = await admin.query(
+    `select user_id, env, collection, outcome, reason from app.audit_events
+     where user_id='alice' and env='live' and collection='*' order by at desc limit 1`);
+  expect(audit.rows).toHaveLength(1);
+  expect(audit.rows[0]).toEqual({
+    user_id: "alice",
+    env: "live",
+    collection: "*",
+    outcome: "allowed",
+    reason: null,
+  });
+});
