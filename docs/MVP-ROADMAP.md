@@ -191,7 +191,7 @@ Plan: [plans/2026-07-20-phase-3-mcp-endpoint.md](./superpowers/plans/2026-07-20-
 ### Outstanding human work (blocks Phase 4 sign-off)
 
 Everything above is code-complete and covered by automated tests, including a
-real Keycloak OIDC **and** SAML round trip (`pnpm test:e2e`). What remains
+real Keycloak OIDC **and** SAML round trip (`pnpm test:e2e:sso`). What remains
 cannot be automated — it needs a browser, the Claude connector UI, and a human
 confirming what's on screen:
 

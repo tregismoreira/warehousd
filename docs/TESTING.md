@@ -246,7 +246,7 @@ Gated Keycloak e2e (real IdP — OIDC login, SAML login, SP metadata):
 
 ```bash
 pnpm test:up    # brings up Postgres AND Keycloak
-pnpm test:e2e
+pnpm test:e2e:sso
 ```
 
 **Expected:** 3/3 passing.
