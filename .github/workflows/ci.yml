@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: mvp
+
+      - run: pnpm test:up
+        working-directory: mvp
+
+      - run: pnpm lint
+        working-directory: mvp
+
+      - run: pnpm test
+        working-directory: mvp
+        env:
+          WAREHOUSD_PROJECT_DIR: examples/meridian
+
+      - run: pnpm build
+        working-directory: mvp
+
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: mvp
+
+      - run: pnpm test:up
+        working-directory: mvp
+
+      - run: docker build -f apps/web/Dockerfile -t warehousd:ci .
+        working-directory: mvp
+
+      - run: pnpm --filter warehousd build
+        working-directory: mvp
+
+      - run: pnpm test:e2e
+        working-directory: mvp
+        env:
+          WAREHOUSD_IMAGE: warehousd:ci
