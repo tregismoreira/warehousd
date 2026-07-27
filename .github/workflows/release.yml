@@ -62,6 +62,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: mvp/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org/
 
       - run: pnpm install --frozen-lockfile

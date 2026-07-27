@@ -19,6 +19,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: mvp/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
         working-directory: mvp
@@ -52,6 +53,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: mvp/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
         working-directory: mvp
