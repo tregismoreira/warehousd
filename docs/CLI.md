@@ -50,7 +50,7 @@ outputs contract to stdout and writes `.warehousd/outputs.json`.
 **Image selection** (no CLI flag; resolved in this order):
 1. `server.image` in `warehousd.yml`
 2. `WAREHOUSD_IMAGE` environment variable
-3. `ghcr.io/warehousd/warehousd:<cli-version>`
+3. `ghcr.io/tregismoreira/warehousd:<cli-version>`
 
 **Offline behaviour** is automatic: images are only pulled when
 `docker image inspect` fails, so once an image is local, `start` never touches

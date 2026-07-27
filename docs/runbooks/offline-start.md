@@ -87,7 +87,7 @@ To verify offline operation without physically disconnecting the network (which 
 
 2. **Verify the image is cached:**
    ```bash
-   docker images ghcr.io/warehousd/warehousd:0.1.0
+   docker images ghcr.io/tregismoreira/warehousd:0.1.0
    ```
 
 3. **Simulate offline mode by using `--offline`:**
