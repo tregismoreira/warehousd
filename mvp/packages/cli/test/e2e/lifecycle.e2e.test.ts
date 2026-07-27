@@ -154,7 +154,7 @@ taxonomies:
     writeFileSync(join(docsDir, "doc2.md"), "# Document 2\n\nContent of doc 2");
   });
 
-  it("Step 3: start creates outputs.json with six keys and uses offset port", async () => {
+  it("Step 3: start creates outputs.json with exactly six keys and uses offset port", async () => {
     const env = { ...process.env, WAREHOUSD_IMAGE };
     execFileSync("node", [CLI_DIST, "start"], { cwd: stack.projectDir, env, stdio: "pipe" });
 
@@ -163,13 +163,10 @@ taxonomies:
 
     const outputs = JSON.parse(readFileSync(outputsPath, "utf8"));
 
-    // Check all six keys exist
-    expect(outputs).toHaveProperty("mcpUrl");
-    expect(outputs).toHaveProperty("apiUrl");
-    expect(outputs).toHaveProperty("adminUrl");
-    expect(outputs).toHaveProperty("databaseUrl");
-    expect(outputs).toHaveProperty("env");
-    expect(outputs).toHaveProperty("devClient");
+    // Check exactly six keys exist (no more, no less)
+    const outputKeys = Object.keys(outputs).sort();
+    const expectedKeys = ["adminUrl", "apiUrl", "databaseUrl", "devClient", "env", "mcpUrl"].sort();
+    expect(outputKeys).toEqual(expectedKeys);
 
     expect(outputs.env).toBe("dev");
     expect(outputs.mcpUrl).toContain(String(OFFSET_SERVER_PORT));
@@ -229,37 +226,21 @@ taxonomies:
     }
   });
 
-  it("Step 6: dev client token mint via OAuth flow", async () => {
+  it("Step 6: dev client token mint via OAuth flow using provisioned devClient", async () => {
     // Sign in as admin
     const cookie = await signInViaHttp(stack.apiUrl, stack.adminEmail, stack.adminPassword);
     expect(cookie).toBeTruthy();
 
-    // Create a new OAuth client via Dynamic Client Registration with the redirect URI pre-configured
-    const dcrRes = await fetch(`${stack.apiUrl}/api/auth/mcp/register`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Origin": stack.apiUrl,
-      },
-      body: JSON.stringify({
-        redirect_uris: ["http://localhost/callback"],
-        client_name: "E2E Test Client",
-      }),
-    });
-
-    if (!dcrRes.ok) {
-      const text = await dcrRes.text();
-      throw new Error(`DCR failed: ${dcrRes.status} ${text}`);
-    }
-
-    const { client_id: testClientId, client_secret: testClientSecret } = await dcrRes.json();
+    // Use the devClient that was provisioned during startup (with redirect_uri pre-registered)
+    expect(stack.devClientId).toBeTruthy();
+    expect(stack.devClientSecret).toBeTruthy();
 
     // Generate PKCE pair
     const { verifier, challenge } = pkcePair();
 
-    // Get authorization code
+    // Get authorization code using the actual devClient
     const { code, location } = await authorizeAndGetCode(stack.apiUrl, {
-      clientId: testClientId,
+      clientId: stack.devClientId,
       redirectUri: "http://localhost/callback",
       scope: "env:dev",
       cookie,
@@ -272,10 +253,10 @@ taxonomies:
     expect(code).toBeTruthy();
     expect(location).toContain("code=");
 
-    // Exchange code for token
+    // Exchange code for token using the actual devClient credentials
     const { access_token, scope } = await exchangeCodeForToken(stack.apiUrl, {
-      clientId: testClientId,
-      clientSecret: testClientSecret,
+      clientId: stack.devClientId,
+      clientSecret: stack.devClientSecret,
       code: code!,
       verifier,
       redirectUri: "http://localhost/callback",
@@ -284,15 +265,6 @@ taxonomies:
     expect(access_token).toBeTruthy();
     expect(scope).toContain("env:dev");
     expect(scope).not.toContain("env:live");
-
-    // Ensure the new client has the env:dev policy
-    const dbForPolicy = new Pool({ connectionString: stack.databaseUrl });
-    try {
-      const { getClientPolicy: getCP, upsertClientPolicy } = await import("@warehousd/broker");
-      await upsertClientPolicy(dbForPolicy, testClientId, "E2E Test Client", ["env:dev"]);
-    } finally {
-      await dbForPolicy.end();
-    }
 
     // Verify token works with MCP
     const mcpRes = await fetch(stack.mcpUrl, {
@@ -389,9 +361,22 @@ taxonomies:
       `);
       expect(Number(newDataRows.rows[0].cnt)).toBeGreaterThan(0);
 
-      // Verify name field is absent from views (posture: deny)
-      // This check is tricky since we can't query views directly without schema access
-      // Instead, verify the policy still references the dataset
+      // v_<collection> is a flat projection of every YAML field regardless of posture
+      // (apply/ddl.ts:71-83). Posture is enforced at the grant/query layer, not in the
+      // view: broker.ts:43-44 refuses ungranted fields, and document_filter deliberately
+      // resolves against the full field set so deny fields like `path` can gate documents
+      // (broker.ts:45-48). Asserting the column is still present pins that design.
+      const viewColumns = await db.query(`
+        select column_name
+        from information_schema.columns
+        where table_schema = 'data_synth' and table_name = 'v_dataset_col'
+        order by column_name
+      `);
+      const columnNames = viewColumns.rows.map(row => row.column_name);
+      expect(columnNames).toContain("name");
+      expect(columnNames).toContain("id");
+
+      // Verify the client policy still references the dataset
       const policy = await db.query(`
         select 1 from app.client_policies where client_id=$1
       `, [initialClientId]);
