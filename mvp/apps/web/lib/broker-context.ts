@@ -6,7 +6,7 @@ import { auth } from "./auth";
 // the note there. Tokens carry only sub/client/env scope (§6.1); any env-like value in the
 // request body/params is ignored and never read here.
 export async function deriveTokenContext(req: Request): Promise<BrokerContext | null> {
-  const session = await (auth as any).api.getMcpSession({ headers: req.headers });
+  const session = await auth.api.getMcpSession({ headers: req.headers });
   if (!session) return null;
   const scopes = (session.scopes ?? "").split(" ").filter(Boolean);
   const env = scopes.includes("env:live") ? "live" : "dev";

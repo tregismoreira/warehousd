@@ -1,4 +1,5 @@
 import { mcp } from "better-auth/plugins";
+import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { Pool } from "pg";
 import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy } from "@warehousd/broker";
@@ -9,14 +10,18 @@ const ENV_SCOPES = ["env:dev", "env:live"] as const;
 // (openid, profile, email, offline_access). Rule enforcement (client policy intersection,
 // live-grant eligibility, exactly-one-env, refresh re-evaluation) is added in lib/oauth.ts's
 // envScopePlugin — see Tasks 3-6.
-export const mcpPlugin: any = mcp({
+export const mcpPlugin = mcp({
   loginPage: "/login",
   oidcConfig: {
+    // Required by OIDCOptions as well as at the mcp() top level. Both are backstops only:
+    // envScopePlugin's before-hook intercepts unauthenticated /mcp/authorize first (Task 3),
+    // so Better Auth's own login redirect never fires for this endpoint.
+    loginPage: "/login",
     scopes: ["env:dev", "env:live"],
     accessTokenExpiresIn: 900, // 15 min, per §6.1 rule 4
     allowDynamicClientRegistration: true,
   },
-} as any);
+});
 
 // §6.1 rules 1-4. Intersects the requested scope with the client's allow-list (rule 1) and
 // the user's live-grant eligibility (rule 2) BEFORE Better Auth's own authorize handler runs,
@@ -29,8 +34,20 @@ export function envScopePlugin(app: Pool) {
     hooks: {
       before: [
         {
-          matcher: (ctx: any) => ctx.path === "/mcp/authorize",
+          matcher: (ctx: { path?: string }) => ctx.path === "/mcp/authorize",
           handler: createAuthMiddleware(async (ctx: any) => {
+            // Intercept the unauthenticated case before Better Auth's authorize handler can arm its
+            // `oidc_login_prompt` cookie-resume (better-auth/plugins/mcp/authorize.mjs sets the cookie;
+            // mcp/index.mjs re-enters authorizeMCPOAuth from a `matcher: () => true` after-hook on ANY
+            // response that sets a session cookie). That resume path never re-runs this hook, so §6.1
+            // rules 1-3 would be skipped. Redirecting here means the browser always comes back to
+            // /mcp/authorize WITH a session and the rules run exactly once, on the real request.
+            const session = await getSessionFromCtx(ctx);
+            if (!session) {
+              const qs = ctx.request?.url?.split("?")[1] ?? "";
+              throw ctx.redirect(`/login?${qs}`);
+            }
+
             const clientId = String(ctx.query?.client_id ?? "");
             const requested = String(ctx.query?.scope ?? "").split(" ").filter(Boolean);
             const requestedEnv = requested.filter((s) => (ENV_SCOPES as readonly string[]).includes(s));
@@ -40,7 +57,6 @@ export function envScopePlugin(app: Pool) {
             let survivors = requestedEnv.filter((s) => policy.allowedScopes.includes(s));
 
             if (survivors.includes("env:live")) {
-              const session = await getSessionFromCtx(ctx);
               const userId = session?.user?.id;
               const eligible = userId ? await hasApprovedLiveGrant(app, userId) : false;
               if (!eligible) survivors = survivors.filter((s) => s !== "env:live");
@@ -82,7 +98,7 @@ export function envScopePlugin(app: Pool) {
       ],
       after: [
         {
-          matcher: (ctx: any) => ctx.path === "/mcp/token",
+          matcher: (ctx: { path?: string }) => ctx.path === "/mcp/token",
           handler: createAuthMiddleware(async (ctx: any) => {
             const grantType = ctx.body?.grant_type;
             if (grantType !== "refresh_token") return;
@@ -126,7 +142,7 @@ export function envScopePlugin(app: Pool) {
           }),
         },
         {
-          matcher: (ctx: any) => ctx.path === "/mcp/register",
+          matcher: (ctx: { path?: string }) => ctx.path === "/mcp/register",
           handler: createAuthMiddleware(async (ctx: any) => {
             const returned = ctx.context.returned;
             if (!(returned instanceof Response)) return;
@@ -137,5 +153,9 @@ export function envScopePlugin(app: Pool) {
         },
       ],
     },
-  };
+    // `satisfies` (not a plain literal) so this stays assignable to the plugins tuple in
+    // lib/auth.ts. An unannotated literal degrades Better Auth's InferAPI across the whole
+    // tuple, silently dropping later plugins' endpoints from `auth.api` — that is what hid
+    // `registerSSOProvider` and broke `next build`.
+  } satisfies BetterAuthPlugin;
 }

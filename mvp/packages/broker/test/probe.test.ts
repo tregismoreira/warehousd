@@ -64,6 +64,29 @@ it("no probe leaks any denied canary; outcomes match expectations", async () => 
   expect(still.rows[0].c).toBeGreaterThan(0);
 });
 
+// A collection name every object literal already answers to. `cfg.collections[name]` is a
+// property read, not a membership test, so these returned a truthy non-collection, sailed
+// past the unknown_collection check and threw on `.fields`. The throw is not the problem —
+// refuse() is what writes the audit row, so a probe using one of these names left no trace
+// in the trail at all.
+it("collection names inherited from Object.prototype refuse cleanly and are audited", async () => {
+  const broker = makeBroker(pools, cfg);
+  for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+    for (const r of [
+      await broker.query({ userId: "mia", env: "dev" }, { collection: name, fields: ["id"] }),
+      await broker.describeCollection({ userId: "mia", env: "dev" }, name),
+      await broker.searchDocuments({ userId: "mia", env: "dev" }, { collection: name, q: "x" }),
+    ]) {
+      expect("ok" in r && r.ok, name).toBe(false);
+      const refusal = r as { reason: string; auditId: string };
+      expect(refusal.reason, name).toBe("unknown_collection");
+      const row = await admin.query(
+        `select outcome, reason from app.audit_events where id = $1`, [refusal.auditId]);
+      expect(row.rows[0], name).toMatchObject({ outcome: "refused", reason: "unknown_collection" });
+    }
+  }
+});
+
 describe("document_filter bypass and hostile-q probes (design §8 test 4)", () => {
   let p2: Provisioned;
   let db2: Pool;

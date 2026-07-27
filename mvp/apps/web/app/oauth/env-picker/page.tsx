@@ -6,9 +6,9 @@ export default async function EnvPickerPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const params_obj = await searchParams;
+  const resolvedSearchParams = await searchParams;
   const params = new URLSearchParams(
-    Object.entries(params_obj).map(([k, v]) => [k, Array.isArray(v) ? v[0] ?? "" : v ?? ""]),
+    Object.entries(resolvedSearchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] ?? "" : v ?? ""]),
   );
   return (
     <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "system-ui" }}>

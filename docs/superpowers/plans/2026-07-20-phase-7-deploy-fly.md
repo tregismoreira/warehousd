@@ -10,7 +10,7 @@
 
 - [ ] `deploy:` block in the config Zod schema (`target: fly`, `app_name`, `region`, `database.managed|url`)
 - [ ] `warehousd deploy` shelling out to `flyctl`: detect installed + authenticated; error with install instructions otherwise
-- [ ] **Pre-flight checklist — refuse unless all pass:** SSO configured *or* `--allow-local-login`; `SANDBOXD_DISABLE_DEMO=true` (no demo personas, no seeded `data_live`); all `${env:...}` references resolve
+- [ ] **Pre-flight checklist — refuse unless all pass:** SSO configured *or* `--allow-local-login`; `WAREHOUSD_DISABLE_DEMO=true` (no demo personas, no seeded `data_live`); all `${env:...}` references resolve
 - [ ] Create/update Fly app from the published image; Fly Postgres (`database.managed: true`) or attach `database.url`; secrets via `fly secrets set` — never written to disk
 - [ ] Post-deploy: `apply` + synthetic seed against the deployed instance — **`data_synth` only; deploy never writes `data_live`** (real data arrives via the Phase 5 admin import path)
 - [ ] `.warehousd/outputs.deploy.json` with public HTTPS URLs (`mcpUrl` = paste into Claude connector)

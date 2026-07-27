@@ -83,9 +83,19 @@ APP_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/warehousd
 DEV_DATABASE_URL=postgres://warehousd_dev:pw@127.0.0.1:5432/warehousd
 LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:5432/warehousd
 
+# The admin import path's write role — INSERT-only on data_live, nothing else. Optional:
+# if unset, POST /api/admin/import refuses with `import_not_configured` and there is no
+# write path into data_live at all.
+IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:5432/warehousd
+
 # Better Auth
 BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long
 BETTER_AUTH_URL=http://localhost:8722
+
+# SSO — comma-separated origins trusted as OIDC/SAML issuers (e.g., on-prem IdP or local test IdP)
+# Leave empty or unset to disable SSO registration
+# Required for any loopback/private-network IdP (self-hosted Keycloak, on-prem) — see docs/configure-sso.md
+WAREHOUSD_TRUSTED_ORIGINS=
 
 # Anthropic (for chat)
 ANTHROPIC_API_KEY=sk-ant-...
@@ -93,8 +103,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Demo mode — shows demo credential buttons on the login screen
 WAREHOUSD_DEMO=true
 
-# Kill-switch — uncomment to disable local login (shows SSO notice instead)
-# SANDBOXD_DISABLE_LOCAL_LOGIN=true
+# Kill-switch — uncomment to disable local login. The login page then offers only the
+# SSO button, or "No login method is configured" if no SSO provider is registered.
+# WAREHOUSD_DISABLE_LOCAL_LOGIN=true
 ```
 
 > `NEXT_PUBLIC_*` variants are derived automatically from the non-public ones via `next.config.mjs` — you don't need to set them.
@@ -106,6 +117,9 @@ Run once against a fresh database. Seeds schemas, roles, synthetic data, demo do
 ```bash
 cd mvp
 APP_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/warehousd \
+DEV_DATABASE_URL=postgres://warehousd_dev:pw@127.0.0.1:5432/warehousd \
+LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:5432/warehousd \
+IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:5432/warehousd \
 BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long \
 BETTER_AUTH_URL=http://localhost:8722 \
 WAREHOUSD_PROJECT_DIR=examples/meridian \
@@ -120,6 +134,7 @@ The script is idempotent — safe to re-run on container restart.
 cd mvp
 WAREHOUSD_DEMO=true \
 WAREHOUSD_PROJECT_DIR=examples/meridian \
+IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:5432/warehousd \
 pnpm --filter @warehousd/web dev
 ```
 

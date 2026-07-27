@@ -4,7 +4,7 @@ import { auth, type SessionUser } from "./auth";
 export async function getSessionUser(req: Request): Promise<SessionUser | null> {
   const s = await auth.api.getSession({ headers: req.headers });
   if (!s?.user) return null;
-  return s.user as unknown as SessionUser;
+  return s.user as SessionUser;
 }
 
 // Env is a session-scoped console value read ONLY from the signed cookie, never from

@@ -4,14 +4,16 @@ import LoginForm from "./LoginForm";
 export const dynamic = "force-dynamic";
 
 export default async function Login() {
-  // `dynamic = "force-dynamic"` alone does not reliably opt this route out of
-  // Next's Full Route Cache in this Next.js version (observed x-nextjs-cache: HIT
-  // serving a build-time snapshot of WAREHOUSD_DEMO forever). Calling a real
-  // per-request API forces genuine dynamic rendering so the env var is read fresh
-  // on every request, which is the whole point of Task 4's runtime-config work.
+  // Read the demo flag per-request rather than inlining NEXT_PUBLIC_WAREHOUSD_DEMO at
+  // build time: the published image is built once and configured at `warehousd start`,
+  // so a baked-in value would be wrong for every consumer.
+  //
+  // `dynamic = "force-dynamic"` alone does not reliably opt this route out of Next's
+  // Full Route Cache in this Next.js version (observed x-nextjs-cache: HIT serving a
+  // build-time snapshot forever). Calling a real per-request API forces genuine dynamic
+  // rendering. Local-login availability is resolved client-side via /api/sso/status.
   await headers();
   const demo = process.env.WAREHOUSD_DEMO === "true";
-  const disabled = process.env.SANDBOXD_DISABLE_LOCAL_LOGIN === "true";
 
-  return <LoginForm demo={demo} disabled={disabled} />;
+  return <LoginForm demo={demo} />;
 }

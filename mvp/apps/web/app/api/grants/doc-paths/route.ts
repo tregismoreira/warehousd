@@ -1,37 +1,27 @@
 import { NextRequest } from "next/server";
-import { getAppPool } from "../../../lib/broker";
-import { loadConfig } from "@warehousd/broker";
-import { join } from "node:path";
+import { loadConfig, listDocumentPaths } from "@warehousd/broker";
+import { getBroker } from "../../../lib/broker";
+import { requireRole } from "../../../../lib/authz";
 
 const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
+// Grant-authoring metadata: approvers only. The `env` param is the env of the grant
+// being approved, which is a legitimate query parameter — it selects which
+// environment's file list to show. It is NOT a BrokerContext env: listDocumentPaths
+// builds its own {userId:"", env} for pool selection only.
 export async function GET(req: NextRequest) {
+  const guard = await requireRole(req, "manager");
+  if (!guard.ok) return guard.response;
+
   const collection = req.nextUrl.searchParams.get("collection") ?? "";
-  const env = req.nextUrl.searchParams.get("env") ?? "dev";
-
-  // Validate inputs
-  if (env !== "dev" && env !== "live") {
-    return Response.json({ error: "Invalid env" }, { status: 400 });
-  }
-
-  const cfg = loadConfig(projectDir);
-  const collCfg = cfg.collections[collection];
-  if (!collCfg || collCfg.type !== "file") {
-    return Response.json({ error: "Collection not found or not a file collection" }, { status: 400 });
-  }
-
-  const app = getAppPool();
-  const schema = env === "dev" ? "data_synth" : "data_live";
-  // collection is validated above against the loaded config's file-type collections,
-  // so this identifier interpolation is safe (SQL identifiers can't be parameterized).
-  const tableName = `${collection}__files`;
+  const env = req.nextUrl.searchParams.get("env");
+  if (env !== "dev" && env !== "live")
+    return Response.json({ error: "invalid_env" }, { status: 400 });
 
   try {
-    const result = await app.query(
-      `select path from ${schema}."${tableName}" order by path`,
-    );
-    return Response.json({ paths: result.rows.map(r => r.path) });
-  } catch (err) {
-    return Response.json({ error: "Failed to query file paths" }, { status: 500 });
+    const paths = await listDocumentPaths(getBroker().pools, env, loadConfig(projectDir), collection);
+    return Response.json({ paths });
+  } catch {
+    return Response.json({ error: "unavailable" }, { status: 400 });
   }
 }

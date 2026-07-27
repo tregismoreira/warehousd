@@ -15,7 +15,7 @@
 - **`env` and `userId` are never request-body/query params to the broker.** They come only from the verified session (`userId`) and the session-scoped env cookie (`env`). Any `persona`/`userId`/`env` value in a request body is ignored and never read. This is the §6.1 invariant applied to the web console.
 - **Role values are exactly** `"admin" | "manager" | "member"` (lowercase, these three strings).
 - **User IDs stay stable across the demo:** seeded persona users keep the ids `"ana"`, `"marcus"`, `"mia"` so pre-seeded `app.grants` rows (keyed on those `user_id`s) continue to match. Better Auth's `user.id` for these three is set explicitly to those values in the seed.
-- **Local-login kill switch:** when `SANDBOXD_DISABLE_LOCAL_LOGIN=true`, email/password sign-in is fully disabled and the login screen says so.
+- **Local-login kill switch:** when `WAREHOUSD_DISABLE_LOCAL_LOGIN=true`, email/password sign-in is fully disabled and the login screen says so.
 - **Demo credentials** (shown on the login screen when `WAREHOUSD_DEMO=true`, password `demo` for all three): `ana@meridian.demo` (admin), `marcus@meridian.demo` (manager), `mia@meridian.demo` (member).
 - **Env DB URLs** already exist: `APP_DATABASE_URL`, `DEV_DATABASE_URL`, `LIVE_DATABASE_URL`. Add `BETTER_AUTH_SECRET` (any 32+ char string in dev) and `BETTER_AUTH_URL` (`http://localhost:8722` in dev).
 
@@ -99,7 +99,7 @@ Create `mvp/apps/web/lib/auth.ts`:
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
 
-export const LOCAL_LOGIN_DISABLED = process.env.SANDBOXD_DISABLE_LOCAL_LOGIN === "true";
+export const LOCAL_LOGIN_DISABLED = process.env.WAREHOUSD_DISABLE_LOCAL_LOGIN === "true";
 
 // Better Auth manages user/session/account/verification tables in the `app` schema,
 // alongside the hand-written app.grants / app.audit_events (createAppSchema). The two
@@ -586,7 +586,7 @@ Add to `mvp/apps/web/next.config.mjs` an `env` block so the client can read them
 const nextConfig = {
   env: {
     NEXT_PUBLIC_WAREHOUSD_DEMO: process.env.WAREHOUSD_DEMO ?? "",
-    NEXT_PUBLIC_LOCAL_LOGIN_DISABLED: process.env.SANDBOXD_DISABLE_LOCAL_LOGIN ?? "",
+    NEXT_PUBLIC_LOCAL_LOGIN_DISABLED: process.env.WAREHOUSD_DISABLE_LOCAL_LOGIN ?? "",
     NEXT_PUBLIC_BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:8722",
   },
 };
@@ -1068,7 +1068,7 @@ Run the app (`cd mvp && WAREHOUSD_DEMO=true ... pnpm --filter @warehousd/web dev
 
 - [ ] **Step 3: Kill-switch check**
 
-Restart with `SANDBOXD_DISABLE_LOCAL_LOGIN=true` → `/login` shows the "Local login is disabled" notice and no form.
+Restart with `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` → `/login` shows the "Local login is disabled" notice and no form.
 
 - [ ] **Step 4: Final commit if any fixes were needed**
 
@@ -1080,6 +1080,6 @@ git add -A && git commit -m "chore(web): phase 1 real-identity verification fixe
 
 ## Self-Review Notes
 
-- **Spec coverage:** §6.2 (local creds as fallback + `SANDBOXD_DISABLE_LOCAL_LOGIN`) → Tasks 2, 10. Roles admin/manager/member → Tasks 2, 9. Session-derived `BrokerContext`, env-as-server-value never body → Tasks 4, 5, 7. Role checks on grant mutations → Task 8. Middleware 401 → Task 6. Delete persona → Tasks 7, 11, 12. Seed personas with §9 roles + grants → Task 9 (grants already seeded by existing bootstrap; this adds the auth users). Acceptance gate (401/403/planted-body-ignored/demo arc) → Tasks 15, 16.
+- **Spec coverage:** §6.2 (local creds as fallback + `WAREHOUSD_DISABLE_LOCAL_LOGIN`) → Tasks 2, 10. Roles admin/manager/member → Tasks 2, 9. Session-derived `BrokerContext`, env-as-server-value never body → Tasks 4, 5, 7. Role checks on grant mutations → Task 8. Middleware 401 → Task 6. Delete persona → Tasks 7, 11, 12. Seed personas with §9 roles + grants → Task 9 (grants already seeded by existing bootstrap; this adds the auth users). Acceptance gate (401/403/planted-body-ignored/demo arc) → Tasks 15, 16.
 - **Deferred to Phase 2 (out of scope, per outline):** SSO/OIDC provider, OAuth token scopes (`env:dev`/`env:live`), `client_policies`, MCP OAuth. The env toggle here is a web-console-only session value; token scopes replace it for API paths in Phase 2.
 - **Open item flagged in outline resolved:** Better Auth schema generation coexists with `createAppSchema` because they own disjoint table names in the `app` schema; both use create-if-not-exists. Task 3 Step 2 and Task 9 Step 2 empirically confirm the migration path (programmatic vs CLI) against the installed version before relying on it.

@@ -1,1 +1,5 @@
 .vite/
+
+# Scratch review artifacts (browser screenshots taken during design/QA passes)
+.playwright-mcp/
+/*.png

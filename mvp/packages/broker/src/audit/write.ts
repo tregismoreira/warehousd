@@ -4,8 +4,10 @@ import type { QueryIntent, DocSearchIntent, RefusalReason } from "../types";
 export async function writeAudit(app: Pool, e: {
   userId: string; env: "dev" | "live"; collection: string; intent: QueryIntent | DocSearchIntent | null;
   fieldsReturned: string[]; grantId: string | null;
-  outcome: "allowed" | "refused"; reason: RefusalReason | null;
+  outcome: "allowed" | "refused"; reason: RefusalReason | string | null;
 }): Promise<string> {
+  // Broker query refusals use the fixed RefusalReason set; operational events (import,
+  // regen) carry their own reason codes.
   const r = await app.query(
     `insert into app.audit_events
        (user_id, env, collection, intent, fields_returned, grant_id, outcome, reason)
