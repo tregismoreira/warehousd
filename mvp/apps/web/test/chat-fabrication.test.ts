@@ -2,17 +2,13 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
 import { setupWebDbWithData } from "./helpers/web-db";
 import { getAppPool } from "../app/lib/broker";
+import { looksFabricated, collectQueriedOk } from "../lib/chat-fabrication";
 
 let db: Awaited<ReturnType<typeof setupWebDbWithData>>;
-let looksFabricated: any;
-let collectQueriedOk: any;
 const ctx = { userId: "mia", env: "dev" as const };
 
 beforeAll(async () => {
   db = await setupWebDbWithData("chatfab");
-  const route = await import("../app/api/chat/route");
-  looksFabricated = route.looksFabricated;
-  collectQueriedOk = route.collectQueriedOk;
 }, 60_000);
 afterAll(async () => { await db?.end(); });
 
