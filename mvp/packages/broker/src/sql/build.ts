@@ -9,7 +9,7 @@ const OP_SQL: Record<Exclude<FilterOp, "in">, string> = {
 // (validated against the same YAML set in broker.ts) — never from raw client input.
 // Field names are validated at config load time, so invalid identifiers here indicate a broker bug.
 // If a bad identifier somehow reaches q(), it throws synchronously and is caught by try/catch
-// in broker.queryOrMutate, which wraps execution in audit logging and returns internal_error.
+// in broker.ts's query/searchDocuments, which wraps execution in audit logging and returns internal_error.
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
 const q = (id: string) => {
   if (!IDENT.test(id)) throw new Error(`unsafe identifier: ${id}`);
