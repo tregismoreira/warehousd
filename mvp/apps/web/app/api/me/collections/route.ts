@@ -1,10 +1,8 @@
 import { NextRequest } from "next/server";
-import { loadConfig, grantableFields } from "@warehousd/broker";
-import { getAppPool } from "../../../lib/broker";
+import { grantableFields } from "@warehousd/broker";
+import { getAppPool, getConfig } from "../../../lib/broker";
 import { requireSession } from "../../../../lib/authz";
 import { readEnvCookie } from "../../../../lib/session";
-
-const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
 // Mirrors broker.listCollections' disclosure rule (§10 test 2): names + descriptions are
 // public to any authenticated user, and so is the YAML allow-list, because a user must know
@@ -13,7 +11,7 @@ export async function GET(req: NextRequest) {
   const guard = await requireSession(req);
   if (!guard.ok) return guard.response;
   const env = readEnvCookie(req);
-  const cfg = loadConfig(projectDir);
+  const cfg = getConfig();
   const existing = await getAppPool().query(
     `select collection from app.grants
      where user_id=$1 and env=$2 and status in ('pending','approved')`,

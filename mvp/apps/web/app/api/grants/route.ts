@@ -1,18 +1,16 @@
 import { NextRequest } from "next/server";
-import { getAppPool } from "../../lib/broker";
-import { approveGrant, denyGrant, revokeGrant, loadConfig, requestGrant, validateGrantRequest } from "@warehousd/broker";
+import { getAppPool, getConfig } from "../../lib/broker";
+import { approveGrant, denyGrant, revokeGrant, requestGrant, validateGrantRequest } from "@warehousd/broker";
 import { requireSession, requireRole, atLeast } from "../../../lib/authz";
 import { readEnvCookie } from "../../../lib/session";
 import { buildApproval } from "../../../lib/approve";
-
-const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
 export async function GET(req: NextRequest) {
   const guard = await requireSession(req);
   if (!guard.ok) return guard.response;
   const user = guard.user;
   const app = getAppPool();
-  const cfg = loadConfig(projectDir);
+  const cfg = getConfig();
   const mine = await app.query(
     `select * from app.grants where user_id=$1 order by requested_at desc`, [user.id]);
   // The pending queue is approver-only data: it names who asked for what, and why. A member
@@ -46,7 +44,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { action } = body;
   const app = getAppPool();
-  const cfg = loadConfig(projectDir);
+  const cfg = getConfig();
 
   if (action === "request") {
     // Any authenticated user may ask. Requester and env come from the session and the signed

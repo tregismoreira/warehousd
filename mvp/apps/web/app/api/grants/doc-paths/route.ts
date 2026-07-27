@@ -1,9 +1,7 @@
 import { NextRequest } from "next/server";
-import { loadConfig, listDocumentPaths } from "@warehousd/broker";
-import { getBroker } from "../../../lib/broker";
+import { listDocumentPaths } from "@warehousd/broker";
+import { getBroker, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
-
-const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
 // Grant-authoring metadata: approvers only. The `env` param is the env of the grant
 // being approved, which is a legitimate query parameter — it selects which
@@ -19,7 +17,7 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "invalid_env" }, { status: 400 });
 
   try {
-    const paths = await listDocumentPaths(getBroker().pools, env, loadConfig(projectDir), collection);
+    const paths = await listDocumentPaths(getBroker().pools, env, getConfig(), collection);
     return Response.json({ paths });
   } catch {
     return Response.json({ error: "unavailable" }, { status: 400 });
