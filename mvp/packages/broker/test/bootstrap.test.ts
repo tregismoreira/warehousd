@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Pool } from "pg";
 import { provision } from "./helpers/db";
-import { ensureSchemasAndRoles, dataRoleUrl, getClientPolicy, ensureDevClient } from "../src/index";
+import { ensureSchemasAndRoles, dataRoleUrl } from "../src/index";
 
 describe("bootstrap", () => {
   let db: Pool;

@@ -55,11 +55,14 @@ export async function ensureDevClient(app: Pool, ownerUserId: string | null): Pr
   const id = randomBytes(16).toString("hex");
   const clientId = randomBytes(16).toString("hex");
   const clientSecret = randomBytes(32).toString("hex");
+  // Better Auth's mcp authorize handler reads "redirectUrls" as a comma-separated
+  // string (`res.redirectUrls.split(",")`), not JSON — a JSON-encoded value here
+  // would never match a real redirect_uri and every authorize call would 400.
   await app.query(
     `insert into app."oauthApplication"
        ("id","clientId","clientSecret",name,type,"redirectUrls","userId","createdAt","updatedAt")
-     values ($1,$2,$3,$4,'web','[]',$5,now(),now())`,
-    [id, clientId, clientSecret, DEV_CLIENT_NAME, ownerUserId]);
+     values ($1,$2,$3,$4,'web',$5,$6,now(),now())`,
+    [id, clientId, clientSecret, DEV_CLIENT_NAME, "http://localhost/callback", ownerUserId]);
   await upsertClientPolicy(app, clientId, DEV_CLIENT_NAME, ["env:dev"]);
   return { clientId, clientSecret };
 }

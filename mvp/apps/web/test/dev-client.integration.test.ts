@@ -14,6 +14,21 @@ afterAll(async () => {
 });
 
 describe("ensureDevClient", () => {
+  it("registers redirectUrls so the mcp/authorize flow accepts a stored session cookie", async () => {
+    const app = getAppPool();
+
+    const client = await ensureDevClient(app, null);
+
+    const row = await app.query(
+      `select "redirectUrls" from app."oauthApplication" where "clientId"=$1`,
+      [client.clientId]
+    );
+    expect(row.rowCount).toBe(1);
+    // Better Auth reads this as a comma-separated string, not JSON (mcp/authorize.mjs
+    // does `redirectUrls.split(",")`), so it must be stored as plain text.
+    expect(row.rows[0].redirectUrls.split(",")).toEqual(["http://localhost/callback"]);
+  });
+
   it("called twice returns identical {clientId, clientSecret} and leaves exactly one row", async () => {
     const app = getAppPool();
 
