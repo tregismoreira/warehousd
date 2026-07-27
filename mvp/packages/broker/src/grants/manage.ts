@@ -1,5 +1,36 @@
 import type { Pool } from "pg";
 import type { DocumentFilter } from "../types";
+import type { WarehousdConfig } from "../config/schema";
+import { findCollection, grantableFields } from "../config/load";
+
+export type GrantRequestError = "unknown_collection" | "purpose_required" | "field_not_grantable";
+
+// Validation lives here, not in the callers: the web route and the MCP request_access
+// tool both reach app.grants, and a rule enforced in only one of them is not a rule.
+export function validateGrantRequest(
+  cfg: WarehousdConfig, collection: string, purposeLabel: unknown, fields: unknown,
+): { ok: true; fields: string[] } | { ok: false; error: GrantRequestError } {
+  // Check collection exists
+  const c = findCollection(cfg, collection);
+  if (!c) return { ok: false, error: "unknown_collection" };
+
+  // Check purpose is a non-empty trimmed string
+  if (typeof purposeLabel !== "string" || !purposeLabel.trim())
+    return { ok: false, error: "purpose_required" };
+
+  // Get grantable fields for this collection
+  const grantable = grantableFields(cfg, collection);
+
+  // Default to all grantable fields if not specified, otherwise use provided fields
+  const requested: string[] = Array.isArray(fields) && fields.length ? fields : grantable;
+
+  // Validate all requested fields are grantable (posture:allow)
+  for (const f of requested)
+    if (!grantable.includes(f))
+      return { ok: false, error: "field_not_grantable" };
+
+  return { ok: true, fields: requested };
+}
 
 export async function requestGrant(app: Pool, i: {
   userId: string; collection: string; env: "dev" | "live";

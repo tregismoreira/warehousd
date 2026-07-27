@@ -99,6 +99,59 @@ describe("mcp-tools: request_access", () => {
       allowed_fields: ["id", "department_name"],
     });
   });
+
+  it("rejects an unknown collection with a hint and creates no row", async () => {
+    const tool = toolByName("request_access")!;
+    const out = await tool.handler(ctx, {
+      collection: "does_not_exist", purpose: "test",
+    }) as { ok: boolean; reason: string; hint?: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("unknown_collection");
+    expect(out.hint).toContain("request_access");
+
+    const { getAppPool } = await import("../app/lib/broker");
+    const row = await getAppPool().query(
+      `select * from app.grants where collection = $1 and user_id = $2`,
+      ["does_not_exist", "mia"],
+    );
+    expect(row.rows).toHaveLength(0);
+  });
+
+  it("rejects an empty purpose with a hint and creates no row", async () => {
+    const tool = toolByName("request_access")!;
+    const out = await tool.handler(ctx, {
+      collection: "people", purpose: "",
+    }) as { ok: boolean; reason: string; hint?: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("purpose_required");
+    expect(out.hint).toContain("request_access");
+
+    const { getAppPool } = await import("../app/lib/broker");
+    const row = await getAppPool().query(
+      `select * from app.grants where collection = $1 and user_id = $2 and status = 'pending'`,
+      ["people", "mia"],
+    );
+    expect(row.rows.filter((r: any) => !r.purpose_label || !r.purpose_label.trim())).toHaveLength(0);
+  });
+
+  it("rejects a posture:deny field with a hint and creates no row", async () => {
+    const tool = toolByName("request_access")!;
+    const out = await tool.handler(ctx, {
+      collection: "salaries", purpose: "compensation review", fields: ["id", "ssn"],
+    }) as { ok: boolean; reason: string; hint?: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("field_not_grantable");
+    expect(out.hint).toContain("request_access");
+
+    const { getAppPool } = await import("../app/lib/broker");
+    const row = await getAppPool().query(
+      `select * from app.grants where collection = $1 and user_id = $2 and status = 'pending'`,
+      ["salaries", "mia"],
+    );
+    // Filter out any rows that include ssn — they should be none because the request was rejected
+    const rowsWithSsn = row.rows.filter((r: any) => r.allowed_fields && r.allowed_fields.includes("ssn"));
+    expect(rowsWithSsn).toHaveLength(0);
+  });
 });
 
 describe("TOOLS", () => {

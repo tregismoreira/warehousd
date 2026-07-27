@@ -1,5 +1,5 @@
 import type { BrokerContext, QueryIntent, DocSearchIntent } from "@warehousd/broker";
-import { requestGrant } from "@warehousd/broker";
+import { requestGrant, validateGrantRequest, loadConfig } from "@warehousd/broker";
 import { getBroker, getAppPool } from "../app/lib/broker";
 
 export type JsonSchema = { type: "object"; properties: Record<string, unknown>; required?: string[] };
@@ -145,12 +145,18 @@ export const TOOLS: ToolDef[] = [
       required: ["collection", "purpose"],
     },
     handler: async (ctx, input) => {
+      const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
+      const cfg = loadConfig(projectDir);
+      const validation = validateGrantRequest(cfg, input.collection as string, input.purpose, input.fields);
+      if (!validation.ok)
+        return withHint({ ok: false, reason: validation.error });
+
       const requestId = await requestGrant(getAppPool(), {
         userId: ctx.userId,
         collection: input.collection as string,
         env: ctx.env,
         purposeLabel: input.purpose as string,
-        allowedFields: (input.fields as string[] | undefined) ?? [],
+        allowedFields: validation.fields,
       });
       return { ok: true, requestId };
     },

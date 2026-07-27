@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAppPool } from "../../lib/broker";
-import { approveGrant, denyGrant, revokeGrant, loadConfig, requestGrant, grantableFields, findCollection } from "@warehousd/broker";
+import { approveGrant, denyGrant, revokeGrant, loadConfig, requestGrant, validateGrantRequest } from "@warehousd/broker";
 import { requireSession, requireRole, atLeast } from "../../../lib/authz";
 import { readEnvCookie } from "../../../lib/session";
 import { buildApproval } from "../../../lib/approve";
@@ -52,26 +52,18 @@ export async function POST(req: NextRequest) {
     // Any authenticated user may ask. Requester and env come from the session and the signed
     // cookie — a userId or env in the body is never read.
     const { collection, purposeLabel, purposeDetail, fields } = body;
-    const c = findCollection(cfg, collection);
-    if (!c) return Response.json({ error: "unknown_collection" }, { status: 400 });
-    if (typeof purposeLabel !== "string" || !purposeLabel.trim())
-      return Response.json({ error: "purpose_required" }, { status: 400 });
 
-    const grantable = grantableFields(cfg, collection);
-    const requested: string[] = Array.isArray(fields) && fields.length ? fields : grantable;
-    // Two-tier deny (§5.3): a posture:deny field can never be granted, so it can never even
-    // be requested. Refusing here keeps unaskable fields out of the approver's inbox.
-    for (const f of requested)
-      if (!grantable.includes(f))
-        return Response.json({ error: "field_not_grantable" }, { status: 400 });
+    const validation = validateGrantRequest(cfg, collection, purposeLabel, fields);
+    if (!validation.ok)
+      return Response.json({ error: validation.error }, { status: 400 });
 
     const requestId = await requestGrant(app, {
       userId: user.id,
       collection,
       env: readEnvCookie(req),
-      purposeLabel: purposeLabel.trim(),
+      purposeLabel: (purposeLabel as string).trim(),
       purposeDetail: typeof purposeDetail === "string" ? purposeDetail.trim() : undefined,
-      allowedFields: requested,
+      allowedFields: validation.fields,
     });
     return Response.json({ ok: true, requestId });
   }
