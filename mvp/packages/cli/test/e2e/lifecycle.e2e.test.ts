@@ -7,7 +7,7 @@ import { Pool } from "pg";
 import { pkcePair, signInViaHttp, authorizeAndGetCode, exchangeCodeForToken } from "./helpers/oauth";
 import { getClientPolicy } from "@warehousd/broker";
 
-const WAREHOUSD_IMAGE = process.env.WAREHOUSD_IMAGE ?? "ghcr.io/warehousd/warehousd:dev";
+const WAREHOUSD_IMAGE = process.env.WAREHOUSD_IMAGE ?? "ghcr.io/tregismoreira/warehousd:dev";
 const CLI_DIST = new URL("../../dist/index.cjs", import.meta.url).pathname;
 const OFFSET_SERVER_PORT = 18722;
 const OFFSET_DB_PORT = 18723;

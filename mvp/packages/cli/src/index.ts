@@ -55,8 +55,12 @@ export async function runIndex(
   } finally { await db.end(); }
 }
 
+// WAREHOUSD_CLI_VERSION is defined by tsup at build time; fallback for source runs.
+declare const WAREHOUSD_CLI_VERSION: string | undefined;
+
 const program = new Command();
-program.name("warehousd").description("warehousd CLI");
+program.name("warehousd").description("warehousd CLI")
+  .version(typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "0.0.0-dev");
 program.command("init")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--force", "overwrite an existing warehousd.yml")
