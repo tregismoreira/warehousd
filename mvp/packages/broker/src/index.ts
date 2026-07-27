@@ -1,6 +1,6 @@
 export * from "./types";
 export { makeBroker } from "./broker";
-export { createPools, type Pools } from "./db/pools";
+export { createPools, onPoolError, type Pools } from "./db/pools";
 export { loadConfig, grantableFields, findCollection } from "./config/load";
 export type { WarehousdConfig } from "./config/schema";
 export { applyConfig } from "./apply/apply";
