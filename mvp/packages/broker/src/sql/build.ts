@@ -7,7 +7,14 @@ const OP_SQL: Record<Exclude<FilterOp, "in">, string> = {
 // Identifiers reaching q() are drawn from the collection's YAML-defined field set:
 // granted fields for client intents, plus the grant-author-supplied document_filter.field
 // (validated against the same YAML set in broker.ts) — never from raw client input.
-const q = (id: string) => `"${id}"`;
+// Field names are validated at config load time, so invalid identifiers here indicate a broker bug.
+// If a bad identifier somehow reaches q(), it throws synchronously and is caught by try/catch
+// in broker.queryOrMutate, which wraps execution in audit logging and returns internal_error.
+const IDENT = /^[a-z_][a-z0-9_]*$/i;
+const q = (id: string) => {
+  if (!IDENT.test(id)) throw new Error(`unsafe identifier: ${id}`);
+  return `"${id}"`;
+};
 
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
