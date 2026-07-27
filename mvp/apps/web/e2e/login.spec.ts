@@ -69,9 +69,13 @@ test("returnTo parameter is preserved through login flow", async ({ page }) => {
   const signInButton = page.getByRole("button", { name: "Sign in" });
   await signInButton.click();
 
-  // After login, should redirect to the authorize endpoint (with returnTo preserved)
-  // The exact URL depends on the auth implementation, but we verify it navigated away from login
-  await page.waitForURL((u) => !u.pathname.startsWith("/login"));
+  // After login, should redirect to /api/auth/mcp/authorize with params preserved
+  await page.waitForURL((u) => u.pathname.includes("/api/auth/mcp/authorize"));
+
+  // Verify the original OAuth params are preserved in the final URL
+  const finalUrl = new URL(page.url());
+  expect(finalUrl.searchParams.get("client_id")).toBe("test-client");
+  expect(finalUrl.searchParams.get("response_type")).toBe("code");
 });
 
 test("loading state is shown during sso status fetch", async ({ page }) => {
@@ -103,4 +107,79 @@ test("form submission with invalid credentials shows error", async ({ page }) =>
   // Should show error message (stays on login page)
   const errorMessage = page.getByRole("alert");
   await expect(errorMessage).toBeVisible();
+});
+
+test("SSO-first render when a provider is configured", async ({ page }) => {
+  // Mock /api/sso/status to return an SSO provider
+  await page.route("**/api/sso/status", (route) =>
+    route.fulfill({
+      json: {
+        providers: [{ providerId: "okta", domain: "acme.com", type: "oidc" }],
+        localLoginEnabled: true,
+      },
+    })
+  );
+
+  await page.goto("/login");
+
+  // Should show SSO button instead of email/password
+  await expect(page.getByRole("button", { name: /sign in with your company account/i })).toBeVisible();
+
+  // Local login should be hidden in a collapsed <details> element
+  const detailsElement = page.locator("details");
+  await expect(detailsElement).toBeVisible();
+
+  // Email input should not be visible (hidden inside collapsed details)
+  await expect(page.getByPlaceholder("email")).not.toBeVisible();
+});
+
+test("collapsed local login section when both SSO and local login configured", async ({ page }) => {
+  // Mock /api/sso/status to return both SSO provider and local login enabled
+  await page.route("**/api/sso/status", (route) =>
+    route.fulfill({
+      json: {
+        providers: [{ providerId: "okta", domain: "acme.com", type: "oidc" }],
+        localLoginEnabled: true,
+      },
+    })
+  );
+
+  await page.goto("/login");
+
+  // The <details> element should exist and be collapsed by default
+  const details = page.locator("details");
+  await expect(details).toBeVisible();
+
+  // Summary should contain the expand text
+  const summary = details.locator("summary");
+  await expect(summary).toContainText("Use a local account");
+
+  // Local login form should be hidden initially
+  const emailInput = page.getByPlaceholder("email");
+  await expect(emailInput).not.toBeVisible();
+
+  // Click to expand and verify form becomes visible
+  await summary.click();
+  await expect(emailInput).toBeVisible();
+});
+
+test("no login method is configured state", async ({ page }) => {
+  // Mock /api/sso/status to return no providers and local login disabled
+  await page.route("**/api/sso/status", (route) =>
+    route.fulfill({
+      json: {
+        providers: [],
+        localLoginEnabled: false,
+      },
+    })
+  );
+
+  await page.goto("/login");
+
+  // Should show the "No login method is configured" message
+  await expect(page.getByText("No login method is configured")).toBeVisible();
+
+  // Should not show any login form
+  await expect(page.getByPlaceholder("email")).not.toBeVisible();
+  await expect(page.getByRole("button", { name: /sign in/i })).not.toBeVisible();
 });

@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
-import { setupWebDb } from "./helpers/web-db";
+import { setupWebDbWithData } from "./helpers/web-db";
+import { getAppPool } from "../app/lib/broker";
 
-let db: Awaited<ReturnType<typeof setupWebDb>>;
+let db: Awaited<ReturnType<typeof setupWebDbWithData>>;
 let looksFabricated: any;
 let collectQueriedOk: any;
 const ctx = { userId: "mia", env: "dev" as const };
 
 beforeAll(async () => {
-  db = await setupWebDb("chatfab");
+  db = await setupWebDbWithData("chatfab");
   const route = await import("../app/api/chat/route");
   looksFabricated = route.looksFabricated;
   collectQueriedOk = route.collectQueriedOk;
@@ -29,6 +30,16 @@ describe("collectQueriedOk", () => {
 
   it("extracts collection name from successful query_collection tool call", async () => {
     const { toolByName } = await import("../lib/mcp-tools");
+
+    // Seed an approved grant for mia on people collection
+    const pool = getAppPool();
+    await pool.query(`delete from app.grants where user_id=$1 and collection=$2 and env=$3`, ["mia", "people", "dev"]);
+    await pool.query(
+      `insert into app.grants (user_id, collection, allowed_fields, env, status)
+       values ($1, $2, $3, $4, $5)`,
+      ["mia", "people", ["id", "full_name", "email", "department_name", "department_id"], "dev", "approved"]
+    );
+
     const tool = toolByName("query_collection")!;
     const result = await tool.handler(ctx, { collection: "people" });
     const toolResultContent = JSON.stringify(result);
@@ -82,8 +93,24 @@ describe("collectQueriedOk", () => {
 
   it("collects multiple successfully queried collections across turns", async () => {
     const { toolByName } = await import("../lib/mcp-tools");
+
+    // Seed approved grants for mia on both people and departments
+    const pool = getAppPool();
+    await pool.query(`delete from app.grants where user_id=$1 and env=$2`, ["mia", "dev"]);
+    await pool.query(
+      `insert into app.grants (user_id, collection, allowed_fields, env, status)
+       values ($1, $2, $3, $4, $5)`,
+      ["mia", "people", ["id", "full_name", "email", "department_name", "department_id"], "dev", "approved"]
+    );
+    await pool.query(
+      `insert into app.grants (user_id, collection, allowed_fields, env, status)
+       values ($1, $2, $3, $4, $5)`,
+      ["mia", "departments", ["id", "name"], "dev", "approved"]
+    );
+
     const tool = toolByName("query_collection")!;
     const peopleResult = await tool.handler(ctx, { collection: "people" });
+    const departmentsResult = await tool.handler(ctx, { collection: "departments" });
 
     const messages: Anthropic.MessageParam[] = [
       {
@@ -125,7 +152,7 @@ describe("collectQueriedOk", () => {
         content: [{
           type: "tool_result",
           tool_use_id: "call_2",
-          content: JSON.stringify(peopleResult),
+          content: JSON.stringify(departmentsResult),
         }],
       },
     ];
