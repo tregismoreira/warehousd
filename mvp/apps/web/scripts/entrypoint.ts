@@ -62,9 +62,9 @@ async function ensureAdminUser(db: Pool): Promise<string> {
 // Seed demo personas (ana/marcus/mia with appropriate roles and grants)
 async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
   const personas = [
-    { id: "ana", email: "ana@meridian.demo", name: "Ana", role: "admin" },
-    { id: "marcus", email: "marcus@meridian.demo", name: "Marcus", role: "manager" },
-    { id: "mia", email: "mia@meridian.demo", name: "Mia", role: "member" },
+    { id: "ana", email: "ana@demo.local", name: "Ana", role: "admin" },
+    { id: "marcus", email: "marcus@demo.local", name: "Marcus", role: "manager" },
+    { id: "mia", email: "mia@demo.local", name: "Mia", role: "member" },
   ];
 
   // Check if personas already exist to guard against duplicates on re-run

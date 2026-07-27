@@ -8,9 +8,9 @@ interface LoginFormProps {
 }
 
 const DEMO_CREDS = [
-  { email: "ana@meridian.demo", role: "admin" },
-  { email: "marcus@meridian.demo", role: "manager" },
-  { email: "mia@meridian.demo", role: "member" },
+  { email: "ana@demo.local", role: "admin" },
+  { email: "marcus@demo.local", role: "manager" },
+  { email: "mia@demo.local", role: "member" },
 ];
 
 export default function LoginForm({ demo, disabled }: LoginFormProps) {
