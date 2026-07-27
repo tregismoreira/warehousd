@@ -46,10 +46,10 @@ it("hasApprovedLiveGrant: true only for approved, env=live, unexpired grants", a
   expect(await hasApprovedLiveGrant(admin, "u1")).toBe(true);
 });
 
-it("hasApprovedLiveGrant: false when the only approved live grant has NULL expires_at (spec-literal rule 2)", async () => {
+it("hasApprovedLiveGrant: true when the only approved live grant has NULL expires_at (no expiry = never expires)", async () => {
   await admin.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at) values
     ('u2','people',array['id'],'live','approved', null)`);
-  expect(await hasApprovedLiveGrant(admin, "u2")).toBe(false);
+  expect(await hasApprovedLiveGrant(admin, "u2")).toBe(true);
 });
 
 it("hasApprovedLiveGrant: false when the grant is expired", async () => {

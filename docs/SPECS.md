@@ -277,7 +277,7 @@ create table app.client_policies (
 **Rules the authorization server enforces at token issuance** (implement as a hook in the OAuth provider's scope-granting step):
 
 1. Requested scopes are intersected with `client_policies.allowed_scopes`. A client whose policy lacks `env:live` can request anything it wants — it will only ever receive `env:dev`. This is the tamper-proofing: escalation is impossible by construction, not by validation.
-2. `env:live` is additionally intersected with the *user's* eligibility: the authenticated user must have ≥1 grant with `status='approved' AND env='live' AND expires_at > now()`. No approved live grant → `env:live` silently dropped from the issued scopes even for a live-allowed client.
+2. `env:live` is additionally intersected with the *user's* eligibility: the authenticated user must have ≥1 grant with `status='approved' AND env='live' AND (expires_at IS NULL OR expires_at > now())`. This matches `loadActiveGrant`'s definition in `grants/eval.ts` — NULL means no expiry. No approved live grant → `env:live` silently dropped from the issued scopes even for a live-allowed client.
 3. If both `env:dev` and `env:live` survive, the consent screen shows an env picker (radio, default `dev`). Exactly one env scope ends up in the token — never both.
 4. Tokens are short-lived (15 min) with refresh tokens; scope rules re-run on every refresh, so a revoked promotion or expired grant takes effect within minutes without waiting for logout.
 
