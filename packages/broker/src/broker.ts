@@ -5,7 +5,7 @@ import type {
   GetDocumentIntent, GetDocumentResult, Document, Filter, DocumentFilter,
   MutationIntent, MutationResult, MutationRefusalReason,
 } from "./types";
-import { MAX_LIMIT } from "./types";
+import { DEFAULT_LIMIT, MAX_LIMIT } from "./types";
 import type { WarehousdConfig } from "./config/schema";
 import type { ActiveGrant } from "./grants/eval";
 import type { Pools } from "./db/pools";
@@ -419,6 +419,9 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
             `insert into ${docs} (id, file_id, org_id, document_seq, content) values ($1,$2,$3,$4,$5)`,
             [randomUUID(), fileId, ctx.orgId, seq, chunk]);
 
+        // For files, store the file_id as the rev identifier in change_log; the checksum is
+        // returned to the caller as the If-Match value but is not a UUID for storage.
+        await writeChangeLog(client, ctx, intent.collection, fileId, fileId, "create", "approved");
         const auditId = await auditMutation(ctx, intent, grant.id, Object.keys(values));
         // A file has no revisions, so its checksum is the closest thing to one: it identifies
         // the content that was stored, and it is what a later If-Match would compare.
@@ -489,6 +492,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
           const revId = await insertRevision(client,
             { seq: 1, op: "create", fields: Object.keys(coerced), base: null, current: true }, coerced);
+          await writeChangeLog(client, ctx, intent.collection, String(docId), revId, "create", "approved");
           const auditId = await auditMutation(ctx, intent, grant.id, Object.keys(coerced));
           return { ok: true as const, status: "applied" as const, documentId: String(docId), rev: revId, auditId };
         }
@@ -525,6 +529,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           current: true,
         }, next);
 
+        await writeChangeLog(client, ctx, intent.collection, String(intent.id), revId, isDelete ? "delete" : "update", "approved");
         const auditId = await auditMutation(ctx, intent, grant.id, isDelete ? [] : Object.keys(coerced));
         return { ok: true as const, status: "applied" as const, documentId: String(intent.id), rev: revId, auditId };
       });
@@ -580,6 +585,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           await client.query(
             `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
 
+          await writeChangeLog(client, ctx, intent.collection, String(docId), revId, "create", "pending");
           const auditId = await auditMutation(ctx, intent, grant.id, Object.keys(coerced));
           return { ok: true as const, status: "pending" as const, proposalId: revId, auditId };
         }
@@ -608,6 +614,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         await client.query(
           `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
 
+        await writeChangeLog(client, ctx, intent.collection, String(intent.id), revId, isDelete ? "delete" : "update", "pending");
         const auditId = await auditMutation(ctx, intent, grant.id, isDelete ? [] : Object.keys(coerced));
         return { ok: true as const, status: "pending" as const, proposalId: revId, auditId };
       });
@@ -825,6 +832,8 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         // Get the document ID for the response
         const docId = String(merged[pk] ?? proposal[pk]);
 
+        await writeChangeLog(client, ctx, collectionName, docId, newRevId, proposal._rev_op, "approved");
+
         const auditId = await writeAudit(app, {
           userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
           intent: null, fieldsReturned: [], grantId: grant.id, outcome: "allowed", reason: null });
@@ -884,6 +893,11 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
         const table = `${schema}.${ident(collectionName)}`;
         await client.query(`update ${table} set _rev_status = 'rejected' where _rev = $1`, [proposalId]);
+
+        const c = findCollection(cfg, collectionName);
+        const pk = c ? Object.entries(c.fields).find(([, f]) => f.pk)?.[0] : null;
+        const docId = pk ? String(proposal[pk]) : String(proposal.id ?? proposal.document_id);
+        await writeChangeLog(client, ctx, collectionName, docId, proposalId, proposal._rev_op, "rejected");
 
         const auditId = await writeAudit(app, {
           userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
@@ -977,7 +991,87 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     }
   }
 
-  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate, approveProposal, rejectProposal, listProposals };
+  async function changes(
+    ctx: BrokerContext,
+    opts: { since?: number; limit?: number } = {},
+  ): Promise<
+    | { ok: true; entries: Array<{ seq: number; collection: string; documentId: string; rev: string; op: string; status: string; at: string; by: string }>; auditId: string }
+    | { ok: false; reason: RefusalReason; auditId: string }
+  > {
+    const since = opts.since ?? 0;
+    const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
+
+    try {
+      // Load all grants to filter collections; caller sees only collections they can read
+      const collections = Object.keys(cfg.collections);
+      const grantsByCollection = new Map<string, ActiveGrant | null>();
+      for (const c of collections) {
+        const grant = await loadActiveGrant(app, ctx.userId, c, ctx.env, ctx.orgId);
+        // No grant or no read verb → no entries for this collection
+        if (grant && grant.verbs.includes("read")) grantsByCollection.set(c, grant);
+      }
+
+      // `seq` order is not commit order. bigserial hands out numbers when a statement runs,
+      // not when its transaction commits, so a writer can take seq 7 and commit *after* a
+      // writer holding seq 8. A reader that polls in between would see 8, advance its cursor
+      // past 7, and lose that entry forever — a silently lossy feed.
+      //
+      // So hold back anything an in-flight transaction could still be sitting on: only return
+      // rows whose inserting transaction is older than the oldest one currently running.
+      // `xmin` is the row's inserting xid; pg_snapshot_xmin is the watermark below which every
+      // transaction has finished. Once a row passes this test, no lower `seq` can appear later.
+      // The alternative — a fixed time delay — is both laggy and still wrong for any
+      // transaction that outlives the delay.
+      const entries = await withOrg(dataPool(pools, ctx), ctx.orgId, async (client: PoolClient) => {
+        const q = await client.query(
+          `select seq, collection, document_id, rev, op, status, at, by
+           from app.change_log
+           where org_id = $1 and env = $2 and seq > $3
+             and xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
+           order by seq asc limit $4`,
+          [ctx.orgId, ctx.env, since, limit],
+        );
+        return q.rows;
+      });
+
+      // Grant-filtered by collection only. A grant's document_filter is NOT applied: the feed
+      // carries no field data, so there is nothing here to test a field predicate against. The
+      // consequence is deliberate and bounded — a caller with a document-filtered grant learns
+      // that *some* document in that collection changed, and its id, but not which fields moved
+      // or what they now hold. getDocument then refuses the ones outside the filter. Stated in
+      // docs/architecture.md rather than left to be discovered.
+      const filtered = entries.filter((e) => grantsByCollection.has(e.collection));
+
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId, intent: null,
+        fieldsReturned: [], grantId: null, outcome: "allowed", reason: null,
+      });
+
+      return {
+        ok: true as const,
+        entries: filtered.map((e) => ({
+          seq: Number(e.seq),
+          collection: e.collection,
+          documentId: e.document_id,
+          rev: String(e.rev),
+          op: e.op,
+          status: e.status,
+          at: new Date(e.at).toISOString(),
+          by: e.by,
+        })),
+        auditId,
+      };
+    } catch (err) {
+      console.error("[broker] changes failed", { err });
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId, intent: null,
+        fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error",
+      });
+      return { ok: false, reason: "internal_error", auditId };
+    }
+  }
+
+  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate, approveProposal, rejectProposal, listProposals, changes };
 }
 
 // Identifier quoting for the write path. Column and collection names come from the loaded
@@ -988,6 +1082,24 @@ const WRITE_IDENT = /^[a-z_][a-z0-9_]*$/i;
 function ident(id: string): string {
   if (!WRITE_IDENT.test(id)) throw new Error(`unsafe identifier: ${id}`);
   return `"${id}"`;
+}
+
+// Write a change log entry in the same transaction as the revision. Must be called inside
+// withOrg on the write pool. This binds the feed to revisions: if the tx rolls back,
+// so does the feed entry, keeping them consistent.
+async function writeChangeLog(
+  client: PoolClient,
+  ctx: BrokerContext,
+  collection: string,
+  documentId: string,
+  rev: string,
+  op: string,
+  status: string,
+): Promise<void> {
+  await client.query(
+    `insert into app.change_log (org_id, env, collection, document_id, rev, op, status, by) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [ctx.orgId, ctx.env, collection, documentId, rev, op, status, ctx.userId],
+  );
 }
 
 // The grant's document filter, evaluated against a row the write path already holds. Reading

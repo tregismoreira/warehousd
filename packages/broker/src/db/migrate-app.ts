@@ -83,12 +83,41 @@ export async function createAppSchema(db: Pool): Promise<void> {
       promoted_by text);
   `);
   await addOrgColumn(db, "client_policies");
+  // change_log tracks all mutations to data tables (§6); seq is a global monotonic cursor.
+  // _rev_seq is per-document and unsuitable for a feed cursor — gaps would cause the feed
+  // to skip revisions under even mild concurrency. This table exists because seq order is not
+  // commit order: under concurrency, seq can advance before an earlier tx commits, so readers
+  // polling seq > cursor might miss committed rows. The feed mitigates this by capping results
+  // to entries committed before the oldest in-flight tx (the standard snapshot isolation pattern).
+  await db.query(`
+    create table if not exists app.change_log (
+      seq         bigserial primary key,
+      org_id      text        not null references app.organizations(id),
+      env         text        not null check (env in ('dev','live')),
+      collection  text        not null,
+      document_id text        not null,
+      rev         uuid        not null,
+      op          text        not null,
+      status      text        not null,
+      at          timestamptz not null default now(),
+      by          text        not null);
+    create index if not exists change_log_org_env_seq_idx
+      on app.change_log (org_id, env, seq);
+  `);
   // audit_events is INSERT-only for data roles (§5.5 / test 9)
   await db.query(`
     grant usage on schema app to warehousd_dev, warehousd_live;
     grant select on app.grants, app.collections, app.vocabularies, app.terms to warehousd_dev, warehousd_live;
     grant insert on app.audit_events to warehousd_dev, warehousd_live;
     revoke update, delete on app.audit_events from warehousd_dev, warehousd_live;
+  `);
+  // Write roles can insert change log entries in the same transaction as revisions.
+  // They need insert on the table, usage on the sequence (bigserial), and usage on the schema.
+  await db.query(`
+    grant usage on schema app to warehousd_dev_write, warehousd_live_write;
+    grant insert on app.change_log to warehousd_dev_write, warehousd_live_write;
+    grant usage on sequence app.change_log_seq_seq to warehousd_dev_write, warehousd_live_write;
+    grant select on app.change_log to warehousd_dev, warehousd_live;
   `);
 }
 

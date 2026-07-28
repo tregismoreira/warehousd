@@ -13,6 +13,7 @@ with real data, this is the document to read.
 - [Revisions, and immutability by privilege](#revisions-and-immutability-by-privilege)
 - [The write path: broker.mutate](#the-write-path-brokermutate)
 - [Proposals](#proposals)
+- [The change feed](#the-change-feed)
 - [Full-document reads](#full-document-reads)
 - [Identity, OAuth, and env-as-scope](#identity-oauth-and-env-as-scope)
 - [File collections and search](#file-collections-and-search)
@@ -139,6 +140,7 @@ broker.mutate(ctx, intent)              // create | update | delete, on a writab
 broker.listProposals(ctx, opts)         // pending revisions the caller may approve — metadata only
 broker.approveProposal(ctx, { proposalId })
 broker.rejectProposal(ctx, { proposalId })
+broker.changes(ctx, { since, limit })   // control-plane feed; metadata only, no field data
 broker.describeCollection(ctx, name)    // only fields visible under the caller's grants
 broker.listCollections(ctx)             // names and descriptions only
 ```
@@ -576,6 +578,57 @@ the view.
 > authenticated human surface — the warehousd web UI, or the integrating app's
 > own UI over REST.
 
+## The change feed
+
+Without a feed, every review UI polls the data. The revision history is already
+an event log, so the feed is nearly free — but it is a **control-plane artifact
+carrying no field data**, or it would become a posture bypass.
+
+```sql
+create table app.change_log (
+  seq         bigserial primary key,   -- the cursor
+  org_id      text not null, env text not null,
+  collection  text not null, document_id text not null,
+  rev         uuid not null, op text not null, status text not null,
+  at          timestamptz not null default now(), by text not null);
+```
+
+`seq` is a **global** monotonic cursor; `_rev_seq` is per-document and cannot
+serve as one, which is why this table exists rather than reading the revision
+tables directly.
+
+**Written in the same transaction as the revision.** If the revision rolls back,
+the feed entry does too. That requires the write roles to hold `usage` on schema
+`app` and `insert` on `app.change_log` — and nothing else there. Writing the feed
+row on the app pool after commit was rejected: that is a second transaction, and
+the feed would drift from the revisions on any crash between them. A test proves
+it by revoking the feed insert and asserting the revision disappears with it.
+
+**`seq` order is not commit order.** `bigserial` hands out numbers when a
+statement runs, not when its transaction commits, so a writer can take `seq 7`
+and commit after one holding `seq 8`. A reader polling in between would see 8,
+advance past 7, and lose it. The feed therefore returns only rows whose inserting
+transaction is older than the oldest still-running one
+(`xmin < pg_snapshot_xmin(pg_current_snapshot())`). Once a row is returned, no
+lower `seq` can appear afterwards. A fixed time delay was rejected: it is both
+laggy and still wrong for any transaction outliving the delay.
+
+`broker.changes(ctx, { since, limit })` returns entries for `(org, env)` with
+`seq > since`, filtered to collections the caller holds a `read` grant on. A
+caller with no grants gets an empty feed, not a refusal — the feed is not an
+existence oracle for collections.
+
+**A grant's document filter is not applied**, because the feed holds no field
+data to test a predicate against. The consequence is deliberate and bounded: such
+a caller learns that *some* document in that collection changed, and its id, but
+not which fields moved or what they hold. `getDocument` then refuses the ones
+outside the filter.
+
+**Retention is deferred.** Revision history and the change log both grow without
+bound on a writable collection. The eventual answer is a retention policy or
+partitioning on `_rev_at` / `at`; until then an operator should plan for growth
+rather than discover it.
+
 ## Full-document reads
 
 `broker.getDocument(ctx, { collection, id | path })` returns one document's full
@@ -639,6 +692,11 @@ create table app.client_policies (
 create table app.audit_events (
   id uuid pk, at timestamptz, user_id text, org_id text, env text, collection text,
   intent jsonb, fields_returned text[], grant_id uuid, outcome text, reason text
+);
+
+create table app.change_log (          -- the change feed; carries no field data
+  seq bigserial pk, org_id text, env text, collection text, document_id text,
+  rev uuid, op text, status text, at timestamptz, by text
 );
 -- audit_events is INSERT-only for the app role: no UPDATE, no DELETE privilege.
 ```

@@ -1,4 +1,4 @@
-import { pgSchema, text, uuid, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgSchema, text, uuid, timestamp, jsonb, bigint } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const app = pgSchema("app");
@@ -63,4 +63,17 @@ export const clientPolicies = app.table("client_policies", {
   allowedScopes: text("allowed_scopes").array().notNull().default(sql`'{env:dev}'`),
   promotedAt: timestamp("promoted_at", { withTimezone: true }),
   promotedBy: text("promoted_by"),
+});
+
+export const changeLog = app.table("change_log", {
+  seq: bigint("seq", { mode: "number" }).primaryKey(),      // bigserial in DDL
+  orgId: text("org_id").notNull(),                          // FK enforced in DDL
+  env: text("env").notNull(),                                // check (env in ('dev','live'))
+  collection: text("collection").notNull(),
+  documentId: text("document_id").notNull(),
+  rev: uuid("rev").notNull(),
+  op: text("op").notNull(),                                  // create, update, delete, or proposal
+  status: text("status").notNull(),                          // approved, pending, rejected
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  by: text("by").notNull(),
 });

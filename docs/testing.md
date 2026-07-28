@@ -163,6 +163,15 @@ The interesting ones, and where they live:
   document gets `not_found`; a grant without `approve` gets `verb_denied`;
   `listProposals` returns no field values, asserted by stringifying and grepping
   for the proposed value.
+- **Change feed** (`change-feed`) — a create, update, delete, file create, proposal
+  and approval each write exactly one entry; the feed carries no field values and
+  no field names, asserted by stringifying and grepping; `since` is exclusive and
+  strictly ordered; a caller sees only their own org's and env's entries, and none
+  from a collection they hold no grant on. Two proofs worth naming: revoking the
+  write role's `insert` on `app.change_log` makes the whole mutation disappear,
+  showing the revision and the feed row share one transaction; and two interleaved
+  writers yield every committed revision exactly once across successive polls,
+  showing the cursor is not lossy when `seq` order diverges from commit order.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
 - **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a

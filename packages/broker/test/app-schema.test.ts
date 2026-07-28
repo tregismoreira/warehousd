@@ -14,7 +14,7 @@ describe("app schema", () => {
     const r = await db.query(
       `select table_name from information_schema.tables where table_schema='app' order by table_name`);
     await db.end();
-    expect(r.rows.map((x) => x.table_name)).toEqual(["audit_events", "client_policies", "collections", "grants", "organizations", "terms", "vocabularies"]);
+    expect(r.rows.map((x) => x.table_name)).toEqual(["audit_events", "change_log", "client_policies", "collections", "grants", "organizations", "terms", "vocabularies"]);
   });
 
   it("bootstraps exactly one implicit org, and stays at one across re-runs", async () => {
