@@ -55,8 +55,8 @@ describe("auth gate", () => {
       method: "POST", cookie: marcusCookie,
       body: { action: "revoke", id: "00000000-0000-0000-0000-000000000000" },
     }) as any);
-    // A non-existent id is a no-op in approve/deny/revoke, but the role check passes → ok:true.
-    expect(res.status).toBe(200);
+    // A non-existent id returns 404 (not 403), confirming the role check passed.
+    expect(res.status).toBe(404);
   });
 
   it("planted userId/env in body is ignored; context derives from session", async () => {

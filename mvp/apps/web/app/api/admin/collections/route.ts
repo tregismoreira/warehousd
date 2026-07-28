@@ -1,16 +1,13 @@
 import { NextRequest } from "next/server";
-import { loadConfig } from "@warehousd/broker";
-import { getAppPool } from "../../../lib/broker";
+import { getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
 import { applyStatus } from "../../../../lib/apply-status";
-
-const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
 export async function GET(req: NextRequest) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
 
-  const cfg = loadConfig(projectDir);
+  const cfg = getConfig();
   const r = await getAppPool().query(`select name, config, updated_at from app.collections`);
   const applied = new Map(r.rows.map((x) => [x.name as string, x]));
 

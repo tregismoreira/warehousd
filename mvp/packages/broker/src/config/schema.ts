@@ -36,6 +36,11 @@ export const CollectionSchema = z.object({
   taxonomy: z.string().optional(),      // vocabulary slug — validated against `taxonomies` at ConfigSchema level
   fields: z.record(FieldSchema),
 }).superRefine((c, ctx) => {
+  const FIELD_NAME = /^[a-z_][a-z0-9_]*$/i;
+  for (const name of Object.keys(c.fields))
+    if (!FIELD_NAME.test(name))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field name "${name}" invalid (must match [a-z_][a-z0-9_]*)` });
+
   const tf = c.taxonomy ? c.fields[c.taxonomy] : undefined;
   if (tf) {
     if (tf.type && tf.type !== "text")

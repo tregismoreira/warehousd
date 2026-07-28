@@ -28,6 +28,15 @@ export const mcpPlugin = mcp({
 // by rewriting ctx.query.scope in place — so escalation is impossible by construction, not by
 // after-the-fact validation. Rules 3 (env picker) and 4 (refresh re-evaluation) are added in
 // Tasks 6 and 7 respectively, in the same hook bodies below.
+//
+// The three hook handlers below take `ctx: any` deliberately. The context type that
+// createAuthMiddleware infers for its callback does not describe the fields these handlers
+// legitimately read at runtime, so annotating them narrowly does not type-check: dropping
+// the `: any` produces "ctx.query is possibly undefined" and "Property 'scopes' does not
+// exist on type '{}'" against ctx.query / ctx.body / ctx.context.returned / ctx.context.adapter.
+// Verified by removing the annotations and running tsc. Revisit if Better Auth ever exports
+// a per-endpoint context type. (Unrelated to the `satisfies` at the end of this function,
+// which addresses a different problem — see its own comment.)
 export function envScopePlugin(app: Pool) {
   return {
     id: "env-scope",

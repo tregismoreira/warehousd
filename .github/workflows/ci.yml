@@ -38,6 +38,38 @@ jobs:
       - run: pnpm build
         working-directory: mvp
 
+  playwright:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mvp/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: mvp
+
+      - run: pnpm test:up
+        working-directory: mvp
+
+      - run: pnpm --filter @warehousd/web exec playwright install --with-deps chromium
+        working-directory: mvp
+
+      - run: pnpm e2e
+        working-directory: mvp
+
+      - run: pnpm test:down
+        working-directory: mvp
+
   # Packaging fidelity: installs the actual tarball outside the workspace, so a broken `bin`
   # path, a missing shebang, a `files` omission, or an unresolvable external `pg` fails here
   # rather than after publishing.

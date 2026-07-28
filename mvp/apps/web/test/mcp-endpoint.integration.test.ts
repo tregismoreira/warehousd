@@ -62,6 +62,39 @@ describe("/mcp endpoint", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 with WWW-Authenticate header when unauthenticated", async () => {
+    const { POST } = await import("../app/mcp/route");
+    const res = await POST(new Request("http://localhost:8722/mcp", { method: "POST", body: "{}" }));
+    expect(res.status).toBe(401);
+    const wwwAuth = res.headers.get("WWW-Authenticate");
+    expect(wwwAuth).toBeDefined();
+    expect(wwwAuth).toContain("Bearer resource_metadata=");
+    expect(wwwAuth).toContain("/.well-known/oauth-protected-resource");
+  });
+
+  it("/.well-known/oauth-protected-resource returns 200 with valid metadata", async () => {
+    const { GET } = await import("../app/.well-known/oauth-protected-resource/route");
+    const res = await GET(new Request("http://localhost:8722/.well-known/oauth-protected-resource"));
+    expect(res.status).toBe(200);
+    const metadata = await res.json();
+    expect(metadata.resource).toBeDefined();
+    expect(Array.isArray(metadata.authorization_servers)).toBe(true);
+    expect(metadata.authorization_servers.length).toBeGreaterThan(0);
+    expect(Array.isArray(metadata.scopes_supported)).toBe(true);
+  });
+
+  it("/.well-known/oauth-authorization-server returns 200 with valid OIDC metadata", async () => {
+    const { GET } = await import("../app/.well-known/oauth-authorization-server/route");
+    const res = await GET(new Request("http://localhost:8722/.well-known/oauth-authorization-server"));
+    expect(res.status).toBe(200);
+    const metadata = await res.json();
+    expect(metadata).toBeDefined();
+    // OIDC metadata must have certain required fields
+    expect(metadata.issuer).toBeDefined();
+    expect(metadata.token_endpoint).toBeDefined();
+    expect(metadata.authorization_endpoint).toBeDefined();
+  });
+
   it("list_collections returns names+descriptions only", async () => {
     const token = await mintAccessToken("env:dev");
     const { status, body } = await rpc(token, "tools/call", { name: "list_collections", arguments: {} });

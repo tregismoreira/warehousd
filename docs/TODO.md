@@ -12,14 +12,14 @@ Tasks surfaced while executing `docs/superpowers/plans/2026-07-25-phase-5-web-ui
 
 ## Phase 5 wrap-up
 
-- [ ] **Push `phase-5-web-ui` and open the PR to `main`** (plan Task 25, Step 7). All 26 tasks are implemented, verified, and committed locally; the full acceptance gate is green (Vitest 350/350, ESLint clean, `tsc --noEmit` clean, `next build` succeeds, Playwright 8/8). Pushing and opening a PR is visible to others and was left for explicit human confirmation rather than done automatically.
+- [x] **Push `phase-5-web-ui` and open the PR to `main`** (plan Task 25, Step 7) — done; merged as PR #6 (`a32f2ce`).
 
 Task 23 (Playwright) and Task 24 (design review) did not surface anything requiring human-only judgment beyond the above — both were completed end-to-end by the agent, including real-browser screenshots of all eleven surfaces via the Playwright MCP tools, and several real bugs found and fixed along the way (see the `polish(web): design review pass` commit).
 
 ## Deferred hardening (reviewed, not blocking Phase 5)
 
-- [ ] **Mark the `wh_env` cookie `Secure`** — `app/api/env/route.ts` sets it `HttpOnly; SameSite=Lax` but not `Secure`, because the dev/demo setup is plain HTTP on localhost. Not a privilege path (flipping it to `live` without a live grant still refuses with `no_grant`), but it should be conditional on HTTPS before any real deployment.
-- [ ] **`deepMerge` in `config/load.ts` assigns `__proto__` as a computed key** — reachable only through `warehousd.local.yml`, an operator-controlled file, so this is a trusted-input path today. Worth closing if config ever becomes untrusted.
+- [x] **Mark the `wh_env` cookie `Secure`** — done in `f11fb7b`. `app/api/env/route.ts` now adds `Secure` when the request arrives over HTTPS and omits it on plain-HTTP localhost, so the dev/demo setup keeps working.
+- [x] **`deepMerge` in `config/load.ts` assigns `__proto__` as a computed key** — done in `f11fb7b`. The accumulator is now `Object.create(null)`, so a `__proto__` key in `warehousd.local.yml` lands as an ordinary property instead of reaching the prototype chain.
 
 ---
 
@@ -27,10 +27,20 @@ Task 23 (Playwright) and Task 24 (design review) did not surface anything requir
 
 ## 1. Close the two-tier grant/deny posture gap
 
-**What:** `approveGrant`/`requestGrant` (broker package) currently accept
-any `allowedFields` the caller supplies. There's no validation that
-`allowedFields ⊆ grantableFields(cfg, collection)`, so a grant could in
-principle include fields the config marks `posture: deny`.
+**Status: half closed.** `requestGrant`'s side is done — `validateGrantRequest`
+(`packages/broker/src/grants/manage.ts`) now enforces
+`allowedFields ⊆ grantableFields(cfg, collection)`, and both callers that reach
+`app.grants` go through it: the web route (`app/api/grants/route.ts`) and the MCP
+`request_access` tool (`lib/mcp-tools.ts`). **`approveGrant` is still unvalidated**
+— the remaining work below is that half only.
+
+**What:** `approveGrant` (broker package) still accepts any `allowedFields` the
+caller supplies. There's no validation that
+`allowedFields ⊆ grantableFields(cfg, collection)`, so an approval could in
+principle include fields the config marks `posture: deny`. (The web approve path
+is safe today because `buildApproval` in `apps/web/lib/approve.ts` derives the
+field set from YAML rather than the request body — but that is a caller-side
+guarantee, not one the broker enforces.)
 
 **Why it matters:** During Task 12 we confirmed `v_<collection>` views are
 *intentionally* flat (every field present regardless of posture) — access
@@ -58,8 +68,15 @@ as-is but are worth a deliberate decision later:
   for interactive use.
 - **`as any` type casts** in `apps/web/lib/auth.ts`, `lib/oauth.ts`,
   `lib/broker-context.ts`, `lib/session.ts` — worked around a loosely-typed
-  Better Auth plugin API surface. No known runtime impact, but hides real
-  type errors if the Better Auth API shape changes underneath them.
+  Better Auth plugin API surface. **Investigated and deliberately kept for
+  `lib/oauth.ts`:** the context type `createAuthMiddleware` infers for its
+  callback does not describe the fields the three `envScopePlugin` hooks read at
+  runtime, so removing the annotations does not type-check — it produces
+  "ctx.query is possibly undefined" and "Property 'scopes' does not exist on
+  type '{}'" against `ctx.query` / `ctx.body` / `ctx.context.returned` /
+  `ctx.context.adapter`. Verified by removing them and running `tsc`. The
+  rationale now lives in a comment above the plugin. Revisit if Better Auth ever
+  exports a per-endpoint context type.
 
 ---
 

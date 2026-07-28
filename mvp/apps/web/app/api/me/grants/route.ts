@@ -1,15 +1,12 @@
 import { NextRequest } from "next/server";
-import { loadConfig } from "@warehousd/broker";
-import { getAppPool } from "../../../lib/broker";
+import { getAppPool, getConfig } from "../../../lib/broker";
 import { requireSession } from "../../../../lib/authz";
-
-const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
 export async function GET(req: NextRequest) {
   const guard = await requireSession(req);
   if (!guard.ok) return guard.response;
   // user_id comes from the verified session — a ?user= param is never read.
-  const cfg = loadConfig(projectDir);
+  const cfg = getConfig();
   const r = await getAppPool().query(
     `select * from app.grants where user_id=$1 order by requested_at desc`, [guard.user.id]);
 

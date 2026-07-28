@@ -6,7 +6,7 @@ import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
 import { createPools, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
-import { requestGrant, approveGrant, revokeGrant } from "../src/grants/manage";
+import { requestGrant, approveGrant, revokeGrant, denyGrant } from "../src/grants/manage";
 import { loadActiveGrant } from "../src/grants/eval";
 import type { WarehousdConfig } from "../src/config/schema";
 
@@ -66,4 +66,35 @@ it("approveGrant persists documentFilter", async () => {
   await approveGrant(admin, id, "marcus", { documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] } });
   const g = await loadActiveGrant(admin, "u2", "people", "dev");
   expect(g?.documentFilter?.op).toBe("in");
+});
+
+it("denyGrant returns false for nonexistent grant", async () => {
+  const result = await denyGrant(admin, "00000000-0000-0000-0000-000000000000", "marcus");
+  expect(result).toBe(false);
+});
+
+it("denyGrant returns false for already-denied grant", async () => {
+  const id = await requestGrant(admin, { userId: "u3", collection: "people", env: "dev", purposeLabel: "test", allowedFields: ["id"] });
+  const denied1 = await denyGrant(admin, id, "marcus");
+  expect(denied1).toBe(true);
+  const denied2 = await denyGrant(admin, id, "marcus");
+  expect(denied2).toBe(false);
+});
+
+it("revokeGrant returns false for nonexistent grant", async () => {
+  const result = await revokeGrant(admin, "00000000-0000-0000-0000-000000000000", "marcus");
+  expect(result).toBe(false);
+});
+
+it("revokeGrant returns false for pending grant (not approved)", async () => {
+  const id = await requestGrant(admin, { userId: "u4", collection: "people", env: "dev", purposeLabel: "test", allowedFields: ["id"] });
+  const revoked = await revokeGrant(admin, id, "marcus");
+  expect(revoked).toBe(false);
+});
+
+it("denyGrant returns false for approved grant", async () => {
+  const id = await requestGrant(admin, { userId: "u5", collection: "people", env: "dev", purposeLabel: "test", allowedFields: ["id"] });
+  await approveGrant(admin, id, "marcus");
+  const denied = await denyGrant(admin, id, "marcus");
+  expect(denied).toBe(false);
 });

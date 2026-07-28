@@ -40,6 +40,26 @@ rather than leaking data or crashing.
 - The app's `mcpUrl` — for local dev, `http://localhost:8722/mcp`; for a
   deployed instance, the HTTPS URL from `.warehousd/outputs.deploy.json`.
 
+### Sanity-check discovery before you start
+
+Claude's connector finds the authorization server by calling `mcpUrl`
+unauthenticated, reading the `WWW-Authenticate` header, and fetching the metadata
+URL it names (RFC 9728). If that chain is broken the connector fails with an
+unhelpful error, so confirm both hops answer first:
+
+```bash
+curl -i -X POST http://localhost:8722/mcp | grep -i www-authenticate
+# → WWW-Authenticate: Bearer resource_metadata="http://localhost:8722/.well-known/oauth-protected-resource"
+
+curl -s http://localhost:8722/.well-known/oauth-protected-resource | jq .
+# → { "resource": …, "authorization_servers": [ … ], "scopes_supported": [ … ] }
+```
+
+Both are covered by `apps/web/test/mcp-endpoint.integration.test.ts`, so a failure
+here means the instance is misconfigured (most likely `BETTER_AUTH_URL`, which is
+what the header's origin is derived from — never the `Host` header) rather than a
+code regression.
+
 ## 1. Add the connector in Claude
 
 In Claude's connector settings, add a new MCP connector pointing at `mcpUrl`.
