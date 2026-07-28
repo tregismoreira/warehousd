@@ -82,7 +82,7 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean }
 // already creates on this database, so apps/web's getBroker() can serve real dev/live queries.
 export async function setupWebDbWithData(label: string) {
   const base = await setupWebDb(label);
-  const { loadConfig, applyConfig, generateSynthetic, indexCollection, syncDatasetTerms } = await import("@warehousd/broker");
+  const { loadConfig, applyConfig, generateSynthetic, indexCollection, syncDatasetTerms, loadTaxonomyBindings } = await import("@warehousd/broker");
   const meridianDir = new URL("../../../../examples/meridian", import.meta.url).pathname;
   const { seedLive } = await import("../../../../examples/meridian/seed/live");
   const cfg = loadConfig(meridianDir);
@@ -93,8 +93,10 @@ export async function setupWebDbWithData(label: string) {
   await syncDatasetTerms(db, cfg, "dev");
   await seedLive(db);
   await syncDatasetTerms(db, cfg, "live");
-  await indexCollection(db, cfg, "dev", "policies", `${meridianDir}/seed/docs-dev`);
-  await indexCollection(db, cfg, "live", "policies", `${meridianDir}/seed/docs-live`);
+  await indexCollection(db, "dev", "policies", `${meridianDir}/seed/docs-dev`,
+    { taxonomies: await loadTaxonomyBindings(db, cfg, "policies", "dev") });
+  await indexCollection(db, "live", "policies", `${meridianDir}/seed/docs-live`,
+    { taxonomies: await loadTaxonomyBindings(db, cfg, "policies", "live") });
   await db.end();
 
   process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${base.dbName}`;

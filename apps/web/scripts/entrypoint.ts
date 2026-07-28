@@ -8,6 +8,7 @@ import {
   applyConfig,
   generateSynthetic,
   indexCollection,
+  loadTaxonomyBindings,
   syncDatasetTerms,
   ensureDevClient,
   dataRoleUrl,
@@ -182,10 +183,12 @@ export async function bootstrap(): Promise<void> {
     // 9. Index file collections
     for (const [name, c] of Object.entries(cfg.collections)) {
       if (c.type !== "file") continue;
-      await indexCollection(db, cfg, "dev", name, resolve(dir, c.source!));
+      const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
+      await indexCollection(db, "dev", name, resolve(dir, c.source!), { taxonomies: devTaxonomies });
       if (c.source_live) {
         await syncDatasetTerms(db, cfg, "live");
-        await indexCollection(db, cfg, "live", name, resolve(dir, c.source_live));
+        const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
+        await indexCollection(db, "live", name, resolve(dir, c.source_live), { taxonomies: liveTaxonomies });
       }
     }
 

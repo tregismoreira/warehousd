@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import {
-  createAppSchema, applyConfig, createPools, indexCollection, syncDatasetTerms, type Pools,
+  createAppSchema, applyConfig, createPools, indexCollection, syncDatasetTerms, loadTaxonomyBindings, type Pools,
 } from "../src/index";
 import { loadConfig } from "../src/config/load";
 import { listDocumentPaths } from "../src/documents/paths";
@@ -17,9 +17,11 @@ beforeAll(async () => {
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   await syncDatasetTerms(admin, cfg, "dev");
-  await indexCollection(admin, cfg, "dev", "policies", `${meridian}/seed/docs-dev`);
+  await indexCollection(admin, "dev", "policies", `${meridian}/seed/docs-dev`,
+    { taxonomies: await loadTaxonomyBindings(admin, cfg, "policies", "dev") });
   await syncDatasetTerms(admin, cfg, "live");
-  await indexCollection(admin, cfg, "live", "policies", `${meridian}/seed/docs-live`);
+  await indexCollection(admin, "live", "policies", `${meridian}/seed/docs-live`,
+    { taxonomies: await loadTaxonomyBindings(admin, cfg, "policies", "live") });
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
 }, 60_000);
 

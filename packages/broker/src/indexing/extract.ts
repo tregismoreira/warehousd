@@ -1,45 +1,47 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 
+// One entry per vocabulary bound to the collection. `multiple` decides whether the
+// frontmatter value parses as a list (string[]) or a scalar (string).
+export type TermField = { field: string; multiple?: boolean };
+
 export type ExtractedFile = {
-  path: string; title: string; owner: string | null; terms: Record<string, string | string[] | null>;
+  path: string; title: string; owner: string | null;
+  // Exactly one key per requested term field. A requested field absent from the
+  // frontmatter is `null` — never `undefined` — so callers can tell "not asked for"
+  // (key missing) from "asked for, not present" (null).
+  terms: Record<string, string | string[] | null>;
   updatedAt: Date; content: string; checksum: string;
 };
 
-export function extractFile(relPath: string, raw: string, mtime: Date, termFields?: string[]): ExtractedFile {
+// `tags: [a, b]` or `tags: a, b` for a multi-value vocabulary; a bare scalar for a
+// single-value one. Trailing/leading whitespace and empty entries are dropped.
+function parseTermValue(relPath: string, tf: TermField, raw: string): string | string[] {
+  const bracketed = raw.startsWith("[") && raw.endsWith("]");
+  const body = bracketed ? raw.slice(1, -1) : raw;
+  const parts = body.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (tf.multiple) return parts;
+  if (bracketed || parts.length > 1)
+    throw new Error(`${relPath}: ${tf.field} is a single-value vocabulary and may not hold a list`);
+  return parts[0] ?? "";
+}
+
+export function extractFile(
+  relPath: string, raw: string, mtime: Date, termFields?: TermField[],
+): ExtractedFile {
   let content = raw;
   let owner: string | null = null;
-  // Initialize requested term fields to null (contract: requested fields are always present in result)
   const terms: Record<string, string | string[] | null> = {};
-  if (termFields) {
-    for (const field of termFields) {
-      terms[field] = null;
-    }
-  }
+  for (const tf of termFields ?? []) terms[tf.field] = null;
+
   const fm = raw.match(/^---\n([\s\S]*?)\n---\n?/);
   if (fm) {
     const m = fm[1]!.match(/^owner:\s*(.+)$/m);
     if (m) owner = m[1]!.trim();
-    if (termFields) {
-      for (const termField of termFields) {
-        // termField is a config-validated vocabulary slug ([a-z][a-z0-9_]*) — safe inside a regex.
-        const tm = fm[1]!.match(new RegExp(`^${termField}:\\s*(.+)$`, "m"));
-        if (tm) {
-          const val = tm[1]!.trim();
-          // Try to parse as YAML array [a, b] or semicolon-separated list a;b or single value
-          if (val.startsWith('[') && val.endsWith(']')) {
-            // YAML array format [a, b, c]
-            const items = val.slice(1, -1).split(',').map(s => s.trim());
-            terms[termField] = items;
-          } else if (val.includes(';')) {
-            // Semicolon-separated format a;b;c
-            terms[termField] = val.split(';').map(s => s.trim());
-          } else {
-            // Single value
-            terms[termField] = val;
-          }
-        }
-      }
+    for (const tf of termFields ?? []) {
+      // tf.field is a config-validated vocabulary slug ([a-z][a-z0-9_]*) — safe inside a regex.
+      const tm = fm[1]!.match(new RegExp(`^${tf.field}:\\s*(.+)$`, "m"));
+      if (tm) terms[tf.field] = parseTermValue(relPath, tf, tm[1]!.trim());
     }
     content = raw.slice(fm[0]!.length);
   }

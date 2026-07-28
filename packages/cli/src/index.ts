@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { resolve } from "node:path";
 import {
   loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms,
+  loadTaxonomyBindings,
 } from "@warehousd/broker";
 import { runInit } from "./init";
 import { runStart } from "./start";
@@ -50,7 +51,8 @@ export async function runIndex(
   try {
     // Sync dataset-sourced vocabulary terms before indexing
     await syncDatasetTerms(db, cfg, env);
-    return await indexCollection(db, cfg, env, collection, resolve(projectDir, dir));
+    const taxonomies = await loadTaxonomyBindings(db, cfg, collection, env);
+    return await indexCollection(db, env, collection, resolve(projectDir, dir), { taxonomies });
   } finally { await db.end(); }
 }
 
@@ -140,7 +142,8 @@ program.command("regen-synth")
         if (c.type === "file") {
           const env = "dev";
           const dir = c.source!;
-          await indexCollection(pool, cfg, env, name, resolve(o.dir, dir));
+          const taxonomies = await loadTaxonomyBindings(pool, cfg, name, env);
+          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomies });
         }
       }
     } finally {

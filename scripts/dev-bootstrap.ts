@@ -1,7 +1,7 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
 import { execSync } from "child_process";
-import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, ensureSchemasAndRoles } from "@warehousd/broker";
+import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, loadTaxonomyBindings, ensureSchemasAndRoles } from "@warehousd/broker";
 import { seedLive } from "../examples/meridian/seed/live";
 import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
@@ -78,8 +78,10 @@ async function main() {
   // Sync dataset-sourced vocabulary terms for live
   await syncDatasetTerms(db, cfg, "live");
   // Index policies collection from seed docs (dev and live environments)
-  const devIndexed = await indexCollection(db, cfg, "dev", "policies", `${dir}/seed/docs-dev`);
-  const liveIndexed = await indexCollection(db, cfg, "live", "policies", `${dir}/seed/docs-live`);
+  const devIndexed = await indexCollection(db, "dev", "policies", `${dir}/seed/docs-dev`,
+    { taxonomies: await loadTaxonomyBindings(db, cfg, "policies", "dev") });
+  const liveIndexed = await indexCollection(db, "live", "policies", `${dir}/seed/docs-live`,
+    { taxonomies: await loadTaxonomyBindings(db, cfg, "policies", "live") });
   // Mia's pending salaries request (Marcus's inbox) + her approved dev grants (§9) —
   // only seed if not already present, so re-running bootstrap doesn't duplicate grant rows.
   const existing = await db.query(`select 1 from app.grants where user_id='mia' limit 1`);

@@ -7,7 +7,8 @@ import { provision, type Provisioned } from "./helpers/db";
 import { ConfigSchema } from "../src/config/schema";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
-import { indexCollection, syncDatasetTerms } from "../src/indexing";
+import { indexCollection } from "../src/indexing";
+import { syncDatasetTerms, loadTaxonomyBindings } from "../src/taxonomy";
 import { makeBroker } from "../src/broker";
 import { createPools, type Pools } from "../src/db/pools";
 
@@ -43,7 +44,8 @@ beforeAll(async () => {
   writeFileSync(join(dir, "handbook.md"), "---\ncategory: hr\n---\n# Handbook\n\nVacation policy paragraph.");
   writeFileSync(join(dir, "budget.md"), "---\ncategory: finance\n---\n# Budget\n\nVacation budget paragraph.");
   await syncDatasetTerms(admin, cfg, "dev");
-  await indexCollection(admin, cfg, "dev", "briefs", dir);
+  await indexCollection(admin, "dev", "briefs", dir,
+    { taxonomies: await loadTaxonomyBindings(admin, cfg, "briefs", "dev") });
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
 });
