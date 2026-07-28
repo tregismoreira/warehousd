@@ -3,6 +3,7 @@ import type { Pools } from "../db/pools";
 import { writeAudit } from "../audit/write";
 import { parseImportPayload } from "./csv";
 import { validateImportRows, type ImportError } from "./validate";
+import { syncDatasetTerms } from "../taxonomy";
 
 export type ImportResult =
   | { ok: true; imported: number; columns: string[]; auditId: string }
@@ -73,6 +74,11 @@ export async function importCollection(
   } finally {
     client.release();
   }
+
+  // Imported rows may be the source of a dataset-backed vocabulary, so the live term set is
+  // stale the moment the transaction commits. Refreshing here — rather than at each call site —
+  // is what keeps a later `indexCollection` from throwing on an unknown term.
+  await syncDatasetTerms(pools.app, cfg, "live");
 
   const auditId = await audit("allowed", null, { rows: v.values.length, columns: v.columns });
   return { ok: true, imported: v.values.length, columns: v.columns, auditId };

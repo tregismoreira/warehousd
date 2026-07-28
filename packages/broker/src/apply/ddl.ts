@@ -19,6 +19,10 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
       const colType = vocab?.multiple ? "text[]" : "text";
       termCols.push(`\n        "${taxSlug}" ${colType}`);
       termAlters.push(`\n      alter table ${schema}."${collection}__files" add column if not exists "${taxSlug}" ${colType};`);
+      // A multi-value term column is only ever queried with `&&`/`= any`, which needs GIN.
+      if (vocab?.multiple)
+        termAlters.push(`\n      create index if not exists "${collection}__files_${taxSlug}_idx"`
+          + ` on ${schema}."${collection}__files" using gin ("${taxSlug}");`);
     }
     const termCol = termCols.length > 0 ? termCols.join(",") + "," : "";
     const termAlter = termAlters.length > 0 ? termAlters.join("") : "";
@@ -56,6 +60,10 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
     const vocab = cfg.taxonomies[taxSlug];
     const colType = vocab?.multiple ? "text[]" : "text";
     ddl += ` alter table ${schema}.${collection} add column if not exists "${taxSlug}" ${colType};`;
+    // A multi-value term column is only ever queried with `&&`/`= any`, which needs GIN.
+    if (vocab?.multiple)
+      ddl += ` create index if not exists "${collection}_${taxSlug}_idx"`
+        + ` on ${schema}.${collection} using gin ("${taxSlug}");`;
   }
   return ddl;
 }

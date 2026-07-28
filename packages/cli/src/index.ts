@@ -30,7 +30,12 @@ export async function runApply(projectDir: string, dbUrl: string): Promise<void>
 export async function runSeed(projectDir: string, dbUrl: string, seed = 42): Promise<void> {
   const cfg = loadConfig(projectDir);
   const db = new Pool({ connectionString: dbUrl });
-  try { await regenerateSynthetic(db, cfg, seed); } finally { await db.end(); }
+  // Dataset-backed vocabularies read their terms out of the rows just generated, so the sync
+  // has to happen here — a later `warehousd index` would otherwise see a stale term set.
+  try {
+    await regenerateSynthetic(db, cfg, seed);
+    await syncDatasetTerms(db, cfg, "dev");
+  } finally { await db.end(); }
 }
 
 export async function runIndex(

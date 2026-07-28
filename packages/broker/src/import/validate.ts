@@ -134,10 +134,19 @@ export function validateImportRows(
       // Check if this column is a vocabulary field
       const vocabTerms = termSlugsMap.get(col);
       if (vocabTerms) {
-        // For single-value vocabularies, validate that the value is a valid term
-        // (multi-value columns would need semicolon-separated parsing, handled elsewhere)
-        const vocab = cfg.taxonomies[col];
-        if (!vocab?.multiple && !vocabTerms.has(String(raw))) {
+        // A multi-value column arrives semicolon-separated (a comma would collide with the
+        // CSV delimiter); every part is validated against the term set independently.
+        if (cfg.taxonomies[col]?.multiple) {
+          const parts = String(raw).split(";").map((s) => s.trim()).filter((s) => s.length > 0);
+          if (!parts.length || parts.some((t) => !vocabTerms.has(t))) {
+            push({ row: idx, column: col, reason: "unknown_term" });
+            out.push(null);
+            continue;
+          }
+          out.push(parts);
+          continue;
+        }
+        if (!vocabTerms.has(String(raw))) {
           push({ row: idx, column: col, reason: "unknown_term" });
           out.push(null);
           continue;
