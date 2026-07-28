@@ -12,6 +12,7 @@ with real data, this is the document to read.
 - [Postures, verbs, and writability](#postures-verbs-and-writability)
 - [Revisions, and immutability by privilege](#revisions-and-immutability-by-privilege)
 - [The write path: broker.mutate](#the-write-path-brokermutate)
+- [Proposals](#proposals)
 - [Full-document reads](#full-document-reads)
 - [Identity, OAuth, and env-as-scope](#identity-oauth-and-env-as-scope)
 - [File collections and search](#file-collections-and-search)
@@ -135,6 +136,9 @@ broker.query(ctx, intent)
 broker.searchDocuments(ctx, intent)     // file collections, and datasets with a searchable field
 broker.getDocument(ctx, { collection, id | path })   // one document, full granted field set
 broker.mutate(ctx, intent)              // create | update | delete, on a writable collection
+broker.listProposals(ctx, opts)         // pending revisions the caller may approve — metadata only
+broker.approveProposal(ctx, { proposalId })
+broker.rejectProposal(ctx, { proposalId })
 broker.describeCollection(ctx, name)    // only fields visible under the caller's grants
 broker.listCollections(ctx)             // names and descriptions only
 ```
@@ -512,9 +516,65 @@ since naming a type is itself a small disclosure.
 inserted — both would otherwise be `_current` between the two statements and the
 partial unique index would reject the write.
 
-**`mode: proposal_only` is refused for now** with `verb_denied`. Treating it as
-`direct` would be a governance hole shipped for a phase; the pending path lands
-with proposals.
+## Proposals
+
+`request_access → pending grant → manager approval` was already a
+proposal/approval engine. Pointed at *mutations* instead of *access*, it becomes
+the governed write path: **an agent may propose; only an authenticated human may
+approve.**
+
+Whether a write applies directly or becomes a proposal is a property of the
+**grant**, not of the caller: `mode: direct | proposal_only`. An agent-driven
+integration gets `proposal_only`; a trusted back-office tool gets `direct`.
+
+A `proposal_only` write runs the *identical* validation chain and then, instead
+of promoting, stores the revision with `_rev_status = 'pending'` and
+`_current = false`, returning `{ status: "pending", proposalId }`. Two properties
+follow from the storage model rather than from code:
+
+- Pending revisions never contend for the partial unique index, so **multiple
+  proposals can coexist** against one document.
+- **The proposed after-state is never readable through the view**, so unapproved
+  agent output cannot leak into ordinary `query` or `search` results.
+
+### Promotion is a merge, not a replace
+
+Replacing the current row would make two agents editing *disjoint* fields collide
+spuriously. Instead, promoting a pending revision writes a new current revision
+whose values are *current values, overwritten by the proposal's `_rev_fields`*.
+Two disjoint proposals both apply cleanly, in approval order.
+
+**Conflict is detected semantically.** A proposal carries `_rev_base`, the
+`_rev_seq` it was derived from. At promotion, if any field in its `_rev_fields`
+was also changed by an approved revision after `_rev_base`, it refuses with
+`conflict`. Staleness alone is not a conflict — overlap is.
+
+The merged revision records the **proposer** as `_rev_by`: that column is who
+authored the content. Who approved it is in the audit row.
+
+`broker.listProposals` returns metadata and the *names* of the fields a proposal
+touches — **never their values**. A reviewer fetches content through
+`getDocument`, where postures are already enforced; duplicating values into the
+listing would be a posture bypass. It reads through the write pool, the only role
+with `SELECT` on base tables, because a pending revision is by definition not in
+the view.
+
+### Approval authorization
+
+- `approve ∈ grant.verbs`, loaded fresh, so a revoked grant fails the very next
+  call with no token wait.
+- The proposal's document must pass the **approver's** document filter; failure
+  is `not_found`, not a distinguishable refusal.
+- **`approve` requires `read` coverage of every field in the proposal.** If any
+  field in `_rev_fields` is outside the approver's `allowedFields`, the approval
+  refuses `field_denied`. You cannot approve what you cannot see; without this,
+  "approve, then read the diff" is a privilege-escalation path around field
+  postures. This is enforced at approval time as well as at grant time.
+
+> **`approve` and `reject` are deliberately not MCP tools.** The untrusted model
+> may propose; it may never approve. Approval happens only through an
+> authenticated human surface — the warehousd web UI, or the integrating app's
+> own UI over REST.
 
 ## Full-document reads
 

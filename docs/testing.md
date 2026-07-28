@@ -147,6 +147,22 @@ The interesting ones, and where they live:
 - **Write env isolation** (`mutate-env-isolation`) — a dev context reaches only
   the dev write pool, and with no write pool configured `mutate` returns
   `not_writable` rather than throwing.
+- **Proposals** (`proposals`) — a `proposal_only` grant yields `status: "pending"`
+  and leaves the document unchanged in both `query` and `getDocument`; the pending
+  after-state is not readable through the view by anyone; approve merges and
+  promotes; reject leaves the row in place with `_rev_status='rejected'`; revoking
+  the approver's grant makes the very next approval refuse.
+- **Merge and conflict** (`proposal-merge`) — two proposals on disjoint fields both
+  promote and the final document carries both changes; two on overlapping fields
+  make the second refuse `conflict`; a stale `_rev_base` with overlap refuses while
+  a stale base without overlap promotes; the merged revision credits the proposer,
+  not the approver; `_rev_seq` is strictly increasing per document throughout.
+- **Approval authorization** (`proposal-authz`) — approving a proposal touching a
+  field outside the approver's grant refuses `field_denied` (the
+  approve-requires-read invariant); an approver whose document filter excludes the
+  document gets `not_found`; a grant without `approve` gets `verb_denied`;
+  `listProposals` returns no field values, asserted by stringifying and grepping
+  for the proposed value.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
 - **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a

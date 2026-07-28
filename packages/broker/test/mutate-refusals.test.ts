@@ -103,7 +103,7 @@ describe("broker.mutate refusals", () => {
     assertNoLeak(result);
   });
 
-  it("verb_denied: proposal_only mode returns verb_denied", async () => {
+  it("proposal_only mode creates pending revision for dataset mutations", async () => {
     const grantId = await requestGrant(app, {
       userId: "proposal_user", collection: "people", env: "dev", orgId: "default",
       purposeLabel: "test", allowedFields: ["id", "email"],
@@ -112,9 +112,11 @@ describe("broker.mutate refusals", () => {
 
     const ctx: BrokerContext = { userId: "proposal_user", env: "dev", orgId: "default" };
     const result = await broker.mutate(ctx, { collection: "people", op: "create", values: { email: "test@ex.com" } });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("verb_denied");
-    assertNoLeak(result);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.status).toBe("pending");
+      expect(result.proposalId).toBeDefined();
+    }
   });
 
   it("unknown_collection: collection does not exist", async () => {

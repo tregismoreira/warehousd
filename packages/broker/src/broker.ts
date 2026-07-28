@@ -302,12 +302,16 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       return { ok: false, reason: "verb_denied", auditId };
     }
 
-    // Phase 5: proposal_only mode returns verb_denied
+    // Phase 5: proposal_only mode creates pending revisions for dataset collections.
+    // File collections are append-only; they don't support this mode.
     if (grant.mode === "proposal_only") {
-      const auditId = await writeAudit(app, {
-        userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied" });
-      return { ok: false, reason: "verb_denied", auditId };
+      if (c.type === "file") {
+        const auditId = await writeAudit(app, {
+          userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied" });
+        return { ok: false, reason: "verb_denied", auditId };
+      }
+      return proposeDataset(ctx, intent, c, grant, pools, app);
     }
 
     // Write pool: env determines which pool; no pool configured → not_writable
@@ -532,7 +536,448 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     }
   }
 
-  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate };
+  async function proposeDataset(
+    ctx: BrokerContext, intent: MutationIntent, c: CollectionConfig, grant: ActiveGrant, pools: Pools, appPool: Pool,
+  ): Promise<MutationResult> {
+    const schema = ctx.env === "live" ? "data_live" : "data_synth";
+    const table = `${schema}.${ident(intent.collection)}`;
+    const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
+    if (!pk) return refuseMutation(ctx, intent, grant.id, "invalid_intent");
+
+    const submitted = intent.op === "delete" ? {} : intent.values;
+    const coerced: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(submitted)) {
+      const r = coerce(value, c.fields[name]!);
+      if (!r.ok) return refuseMutation(ctx, intent, grant.id, "invalid_value");
+      coerced[name] = r.value;
+    }
+
+    const dataCols = Object.entries(c.fields).filter(([, f]) => !f.view_join).map(([n]) => n);
+    const REV_COLS = ["_rev", "_rev_seq", "_rev_at", "_rev_by", "_rev_op", "_rev_status",
+      "_rev_fields", "_rev_base", "_current", "org_id"];
+
+    const pool = writePool(pools, ctx);
+    if (!pool) return refuseMutation(ctx, intent, grant.id, "not_writable");
+
+    try {
+      return await withOrg(pool, ctx.orgId, async (client) => {
+        if (intent.op === "create") {
+          let docId = coerced[pk];
+          if (docId === undefined && c.fields[pk]!.type === "uuid") {
+            docId = randomUUID();
+            coerced[pk] = docId;
+          }
+          if (docId === undefined) return refuseMutation(ctx, intent, grant.id, "invalid_intent");
+
+          const clash = await client.query(
+            `select 1 from ${table} where ${ident(pk)} = $1 and (_current or _rev_status = 'pending')`, [docId]);
+          if ((clash.rowCount ?? 0) > 0) return refuseMutation(ctx, intent, grant.id, "conflict");
+
+          const revId = randomUUID();
+          const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
+          const vals: unknown[] = [revId, 1, new Date(), ctx.userId, "create", "pending",
+            Object.keys(coerced), null, false, ctx.orgId, ...dataCols.map((k) => coerced[k] ?? null)];
+          await client.query(
+            `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
+
+          const auditId = await auditMutation(ctx, intent, grant.id, Object.keys(coerced));
+          return { ok: true as const, status: "pending" as const, proposalId: revId, auditId };
+        }
+
+        // update and delete: fetch current revision and create pending
+        const cur = await client.query(
+          `select * from ${table} where ${ident(pk)} = $1 and _current`, [intent.id]);
+        if (cur.rowCount === 0) return refuseMutation(ctx, intent, grant.id, "not_found");
+        const current = cur.rows[0]!;
+
+        if (grant.documentFilter && !matchesFilter(current, grant.documentFilter))
+          return refuseMutation(ctx, intent, grant.id, "not_found");
+
+        const isDelete = intent.op === "delete";
+        // For pending revisions, store the proposed changes in _rev_fields (the field names).
+        // The data columns store the proposed state (the values).
+        const next: Record<string, unknown> = {};
+        for (const f of dataCols) next[f] = f in coerced ? coerced[f] : current[f];
+
+        const revId = randomUUID();
+        const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
+        const vals: unknown[] = [revId, Number(current._rev_seq) + 1, new Date(), ctx.userId,
+          isDelete ? "delete" : "update", "pending",
+          isDelete ? [] : Object.keys(coerced),
+          Number(current._rev_seq), false, ctx.orgId, ...dataCols.map((k) => next[k] ?? null)];
+        await client.query(
+          `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
+
+        const auditId = await auditMutation(ctx, intent, grant.id, isDelete ? [] : Object.keys(coerced));
+        return { ok: true as const, status: "pending" as const, proposalId: revId, auditId };
+      });
+    } catch (err) {
+      console.error("[broker] proposeDataset failed", { collection: intent.collection, err });
+      return refuseMutation(ctx, intent, grant.id, "internal_error");
+    }
+  }
+
+  // Approve and reject are deliberately NOT MCP tools — the untrusted model may propose,
+  // but only an authenticated human may approve. Approval happens only through an authenticated
+  // human surface. A future contributor should not add these as MCP tools.
+  async function approveProposal(
+    ctx: BrokerContext, proposalId: string,
+  ): Promise<{ ok: true; documentId: string; rev: string; auditId: string } | { ok: false; reason: MutationRefusalReason; auditId: string }> {
+    const schema = ctx.env === "live" ? "data_live" : "data_synth";
+
+    // Find the proposal by proposalId
+    const pool = writePool(pools, ctx);
+    if (!pool) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable" });
+      return { ok: false, reason: "not_writable", auditId };
+    }
+
+    try {
+      return await withOrg(pool, ctx.orgId, async (client) => {
+        // Scan collections to find the proposal
+        const collections = Object.keys(cfg.collections);
+        let proposal: any = null;
+        let collectionName: string | null = null;
+
+        for (const coll of collections) {
+          const table = `${schema}.${ident(coll)}`;
+          const q = await client.query(`select * from ${table} where _rev = $1 and _rev_status = 'pending'`, [proposalId]);
+          if (q.rowCount && q.rowCount > 0) {
+            proposal = q.rows[0];
+            collectionName = coll;
+            break;
+          }
+        }
+
+        if (!proposal || !collectionName) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_found" });
+          return { ok: false, reason: "not_found", auditId };
+        }
+
+        const c = findCollection(cfg, collectionName);
+        if (!c) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "unknown_collection" });
+          return { ok: false, reason: "unknown_collection", auditId };
+        }
+
+        // Load the approver's grant
+        const grant = await loadActiveGrant(app, ctx.userId, collectionName, ctx.env, ctx.orgId);
+        if (!grant) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant" });
+          return { ok: false, reason: "no_grant", auditId };
+        }
+
+        // Require approve verb
+        if (!grant.verbs.includes("approve")) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied" });
+          return { ok: false, reason: "verb_denied", auditId };
+        }
+
+        // Invariant: approve requires read coverage of every field in the proposal. Without this,
+        // "approve, then read the diff" is a privilege-escalation path around field postures.
+        const proposedFields: string[] = proposal._rev_fields || [];
+        for (const f of proposedFields) {
+          if (!grant.allowedFields.includes(f)) {
+            const auditId = await writeAudit(app, {
+              userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "field_denied" });
+            return { ok: false, reason: "field_denied", auditId };
+          }
+        }
+
+        // Get the pk field for this collection
+        const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
+        if (!pk) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "invalid_intent" });
+          return { ok: false, reason: "invalid_intent", auditId };
+        }
+
+        const table = `${schema}.${ident(collectionName)}`;
+
+        // Check document filter for approver
+        let currentRev: any = null;
+        if (proposal._rev_op === "create") {
+          // For create proposals, there's no current revision yet. We need to check if the proposed
+          // values would pass the filter. For now, we'll build a temporary object to check.
+          if (grant.documentFilter) {
+            const tempDoc: Record<string, unknown> = {};
+            for (const f of Object.keys(c.fields)) {
+              tempDoc[f] = proposal[f];
+            }
+            if (!matchesFilter(tempDoc, grant.documentFilter)) {
+              const auditId = await writeAudit(app, {
+                userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+                intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found" });
+              return { ok: false, reason: "not_found", auditId };
+            }
+          }
+        } else {
+          // For update/delete, fetch the current revision
+          currentRev = await client.query(
+            `select * from ${table} where ${ident(pk)} = $1 and _current`,
+            [proposal[pk]]);
+          if (!currentRev.rows || currentRev.rows.length === 0) {
+            const auditId = await writeAudit(app, {
+              userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found" });
+            return { ok: false, reason: "not_found", auditId };
+          }
+          currentRev = currentRev.rows[0];
+
+          // Check document filter
+          if (grant.documentFilter && !matchesFilter(currentRev, grant.documentFilter)) {
+            const auditId = await writeAudit(app, {
+              userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found" });
+            return { ok: false, reason: "not_found", auditId };
+          }
+
+          // Conflict check: if any field in proposal._rev_fields was changed after _rev_base,
+          // refuse with conflict. Scan revisions with _rev_seq > _rev_base and _rev_status = 'approved'.
+          if (proposal._rev_base !== null && proposedFields.length > 0) {
+            const conflictQ = await client.query(
+              `select _rev_fields from ${table}
+               where ${ident(pk)} = $1 and _rev_status = 'approved' and _rev_seq > $2
+               order by _rev_seq asc`,
+              [proposal[pk], proposal._rev_base]);
+
+            const changedSince = new Set<string>();
+            for (const row of conflictQ.rows) {
+              const fields = row._rev_fields || [];
+              for (const f of fields) changedSince.add(f);
+            }
+
+            // Check for overlap
+            const overlap = proposedFields.some(f => changedSince.has(f));
+            if (overlap) {
+              const auditId = await writeAudit(app, {
+                userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+                intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "conflict" });
+              return { ok: false, reason: "conflict", auditId };
+            }
+          }
+        }
+
+        // Promotion: merge the proposal with the current state
+        const dataCols = Object.entries(c.fields).filter(([, f]) => !f.view_join).map(([n]) => n);
+
+        // Build the merged row: start with current, overwrite with proposal's changes
+        const merged: Record<string, unknown> = {};
+        if (currentRev) {
+          for (const f of dataCols) merged[f] = currentRev[f];
+        } else {
+          // Create case: use proposal values
+          for (const f of dataCols) merged[f] = proposal[f];
+        }
+        // Overwrite with proposed changes
+        for (const f of proposedFields) {
+          if (dataCols.includes(f)) {
+            merged[f] = proposal[f];
+          }
+        }
+
+        // Determine the new _rev_seq: max(_rev_seq for that document) + 1
+        let newSeq: number;
+        if (proposal._rev_op === "create") {
+          newSeq = 1;
+        } else {
+          // For update/delete, find max _rev_seq and add 1
+          const maxSeqQ = await client.query(
+            `select max(_rev_seq) as max_seq from ${table} where ${ident(pk)} = $1`,
+            [proposal[pk]]);
+          const maxSeq = maxSeqQ.rows[0]?.max_seq ? Number(maxSeqQ.rows[0].max_seq) : 0;
+          newSeq = maxSeq + 1;
+        }
+
+        // Write the new current revision
+        const newRevId = randomUUID();
+        const REV_COLS = ["_rev", "_rev_seq", "_rev_at", "_rev_by", "_rev_op", "_rev_status",
+          "_rev_fields", "_rev_base", "_current", "org_id"];
+        const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
+        const vals: unknown[] = [newRevId, newSeq, new Date(), proposal._rev_by, proposal._rev_op,
+          "approved", proposal._rev_fields, proposal._rev_base, true, ctx.orgId,
+          ...dataCols.map((k) => merged[k] ?? null)];
+
+        // If there's a current revision, demote it BEFORE promoting the new one
+        if (currentRev) {
+          await client.query(`update ${table} set _current = false where _rev = $1`, [currentRev._rev]);
+        }
+
+        // Insert the new merged revision
+        await client.query(
+          `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
+
+        // Mark the proposal as approved
+        await client.query(`update ${table} set _rev_status = 'approved' where _rev = $1`, [proposalId]);
+
+        // Get the document ID for the response
+        const docId = String(merged[pk] ?? proposal[pk]);
+
+        const auditId = await writeAudit(app, {
+          userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "allowed", reason: null });
+
+        return { ok: true as const, documentId: docId, rev: newRevId, auditId };
+      });
+    } catch (err) {
+      console.error("[broker] approveProposal failed", { proposalId, err });
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error" });
+      return { ok: false, reason: "internal_error", auditId };
+    }
+  }
+
+  async function rejectProposal(ctx: BrokerContext, proposalId: string): Promise<{ ok: true; auditId: string } | { ok: false; reason: MutationRefusalReason; auditId: string }> {
+    const schema = ctx.env === "live" ? "data_live" : "data_synth";
+
+    const pool = writePool(pools, ctx);
+    if (!pool) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable" });
+      return { ok: false, reason: "not_writable", auditId };
+    }
+
+    try {
+      return await withOrg(pool, ctx.orgId, async (client) => {
+        const collections = Object.keys(cfg.collections);
+        let proposal: any = null;
+        let collectionName: string | null = null;
+
+        for (const coll of collections) {
+          const table = `${schema}.${ident(coll)}`;
+          const q = await client.query(`select * from ${table} where _rev = $1 and _rev_status = 'pending'`, [proposalId]);
+          if (q.rowCount && q.rowCount > 0) {
+            proposal = q.rows[0];
+            collectionName = coll;
+            break;
+          }
+        }
+
+        if (!proposal || !collectionName) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_found" });
+          return { ok: false, reason: "not_found", auditId };
+        }
+
+        const grant = await loadActiveGrant(app, ctx.userId, collectionName, ctx.env, ctx.orgId);
+        if (!grant || !grant.verbs.includes("approve")) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: grant?.id ?? null, outcome: "refused", reason: "verb_denied" });
+          return { ok: false, reason: "verb_denied", auditId };
+        }
+
+        const table = `${schema}.${ident(collectionName)}`;
+        await client.query(`update ${table} set _rev_status = 'rejected' where _rev = $1`, [proposalId]);
+
+        const auditId = await writeAudit(app, {
+          userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "allowed", reason: null });
+
+        return { ok: true as const, auditId };
+      });
+    } catch (err) {
+      console.error("[broker] rejectProposal failed", { proposalId, err });
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error" });
+      return { ok: false, reason: "internal_error", auditId };
+    }
+  }
+
+  type ProposalSummary = {
+    proposalId: string; collection: string; op: string; fields: string[];
+    proposedBy: string; proposedAt: string;
+  };
+
+  // What a reviewer may see BEFORE deciding: metadata and the names of the fields a proposal
+  // touches — never their values. A reviewer fetches content with getDocument, where postures
+  // are already enforced; duplicating values into this listing would be a posture bypass.
+  //
+  // It reads the revision tables through the WRITE pool, because that is the only role with
+  // SELECT on base tables — the read roles see views, and a view shows only current,
+  // non-tombstoned revisions, which is exactly the set a pending proposal is not in.
+  async function listProposals(
+    ctx: BrokerContext, opts: { collection?: string; status?: "pending" | "approved" | "rejected" } = {},
+  ): Promise<
+    { ok: true; proposals: ProposalSummary[]; auditId: string }
+    | { ok: false; reason: RefusalReason; auditId: string }
+  > {
+    const auditList = (outcome: "allowed" | "refused", reason: RefusalReason | null) =>
+      writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection ?? "*", orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome, reason });
+
+    const pool = writePool(pools, ctx);
+    if (!pool) return { ok: false, reason: "internal_error", auditId: await auditList("refused", "internal_error") };
+
+    const schema = ctx.env === "live" ? "data_live" : "data_synth";
+    const status = opts.status ?? "pending";
+    const names = opts.collection ? [opts.collection] : Object.keys(cfg.collections);
+
+    try {
+      const proposals = await withOrg(pool, ctx.orgId, async (client) => {
+        const out: ProposalSummary[] = [];
+        for (const name of names) {
+          const c = findCollection(cfg, name);
+          // Only revisable collections have proposals at all.
+          if (!c || !c.writable || c.type === "file") continue;
+
+          // Fresh per collection, like every other grant check. No approve verb → this
+          // collection is simply absent from the feed, not a refusal: a reviewer learning
+          // which collections they cannot approve for is itself a disclosure.
+          const grant = await loadActiveGrant(app, ctx.userId, name, ctx.env, ctx.orgId);
+          if (!grant || !grant.verbs.includes("approve")) continue;
+
+          // Bookkeeping columns only, plus the document-filter field when one is set. Selecting
+          // `*` would pull ungranted values into memory even if they were never returned, and
+          // "denied means absent" means never fetched, not filtered afterwards.
+          const cols = ["_rev", "_rev_op", "_rev_fields", "_rev_by", "_rev_at"];
+          const filterField = grant.documentFilter?.field;
+          if (filterField && Object.hasOwn(c.fields, filterField)) cols.push(filterField);
+
+          const q = await client.query(
+            `select ${cols.map(ident).join(", ")} from ${schema}.${ident(name)}
+             where _rev_status = $1 order by _rev_at`, [status]);
+
+          for (const row of q.rows) {
+            if (grant.documentFilter && !matchesFilter(row, grant.documentFilter)) continue;
+            out.push({
+              proposalId: row._rev,
+              collection: name,
+              op: row._rev_op,
+              fields: row._rev_fields ?? [],
+              proposedBy: row._rev_by,
+              proposedAt: row._rev_at,
+            });
+          }
+        }
+        return out;
+      });
+
+      return { ok: true as const, proposals, auditId: await auditList("allowed", null) };
+    } catch (err) {
+      console.error("[broker] listProposals failed", { err });
+      return { ok: false, reason: "internal_error", auditId: await auditList("refused", "internal_error") };
+    }
+  }
+
+  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate, approveProposal, rejectProposal, listProposals };
 }
 
 // Identifier quoting for the write path. Column and collection names come from the loaded
