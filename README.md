@@ -113,9 +113,11 @@ synthetic:
   documents_per_collection: { people: 40 }
 ```
 
-Postures are two-tier. `posture: deny` means the field can *never* be granted
-without editing the file. `posture: allow` only makes a field **grantable** —
-it stays denied per user until a manager approves a grant covering it.
+Postures are two-tier and have two axes. `posture: deny` means the field can
+*never* be granted without editing the file. `posture: allow` only makes a field
+**grantable** — it stays denied per user until a manager approves a grant
+covering it. A bare value governs *reading* and leaves writing denied; the long
+form `posture: { read: allow, write: allow }` opts a field into the write path.
 
 Every key: [configuration.md](docs/configuration.md).
 
@@ -270,7 +272,8 @@ yet built:
 | Masking / transform postures | *not built* | Fields are allow or deny — nothing in between. |
 | Connect-in-place to external databases | *not built* | Collections live in warehousd's Postgres. |
 | PDF/DOCX extraction, upload UI | *not built* | Indexing reads local directories. |
-| Multi-tenancy, SCIM, compliance exports, IdP group→role mapping | *not built* | One deployment = one organization; JIT provisioning creates a `member`. |
+| Multi-tenancy (`org_id`) | *partial* | Every grant, audit event and document carries an org, isolated by a view predicate and RLS. A single implicit org is created at bootstrap; there is no UI for creating or switching orgs yet. |
+| SCIM, compliance exports, IdP group→role mapping | *not built* | JIT provisioning creates a `member`. |
 
 ## Contributing
 

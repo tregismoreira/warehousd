@@ -2,7 +2,7 @@ import { mcp } from "better-auth/plugins";
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { Pool } from "pg";
-import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy } from "@warehousd/broker";
+import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy, DEFAULT_ORG_ID } from "@warehousd/broker";
 
 const ENV_SCOPES = ["env:dev", "env:live"] as const;
 
@@ -67,7 +67,11 @@ export function envScopePlugin(app: Pool) {
 
             if (survivors.includes("env:live")) {
               const userId = session?.user?.id;
-              const eligible = userId ? await hasApprovedLiveGrant(app, userId) : false;
+              // The org comes from the session's own user row, matching the key loadActiveGrant
+              // uses. Eligibility and enforcement must agree on the tenant, or a token gets
+              // issued for an env the broker then refuses to serve.
+              const orgId = session?.user?.orgId ?? DEFAULT_ORG_ID;
+              const eligible = userId ? await hasApprovedLiveGrant(app, userId, orgId) : false;
               if (!eligible) survivors = survivors.filter((s) => s !== "env:live");
             }
 
@@ -133,7 +137,10 @@ export function envScopePlugin(app: Pool) {
             const policy = await getClientPolicy(app, row.clientId);
             let liveEligible = policy.allowedScopes.includes("env:live");
             if (liveEligible) {
-              const eligible = await hasApprovedLiveGrant(app, row.userId);
+              // Same org rule as the issuance path: read it from the token subject's user row.
+              const u = await app.query(`select "orgId" from app."user" where id=$1`, [row.userId]);
+              const eligible = await hasApprovedLiveGrant(
+                app, row.userId, u.rows[0]?.orgId ?? DEFAULT_ORG_ID);
               if (!eligible) liveEligible = false;
             }
             const devEligible = policy.allowedScopes.includes("env:dev");

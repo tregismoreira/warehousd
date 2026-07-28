@@ -8,6 +8,14 @@ export async function getSessionUser(req: Request): Promise<SessionUser | null> 
   return s.user as SessionUser;
 }
 
+// The org a session acts in. Control-plane routes read app.grants / app.audit_events /
+// app.client_policies directly rather than through the broker, so each one has to carry the
+// org predicate itself — there is no view or RLS policy standing behind them the way there is
+// on the data plane. Every such query scopes by this.
+export function orgOf(user: SessionUser): string {
+  return user.orgId ?? DEFAULT_ORG_ID;
+}
+
 // Env is a session-scoped console value read ONLY from the signed cookie, never from
 // the request body/params (see docs/architecture.md). Default dev.
 export function readEnvCookie(req: Request): "dev" | "live" {

@@ -8,6 +8,8 @@ with real data, this is the document to read.
 - [The broker](#the-broker)
 - [Named views](#named-views)
 - [Environments: dev and live](#environments-dev-and-live)
+- [Organizations and tenant isolation](#organizations-and-tenant-isolation)
+- [Postures, verbs, and writability](#postures-verbs-and-writability)
 - [Identity, OAuth, and env-as-scope](#identity-oauth-and-env-as-scope)
 - [File collections and search](#file-collections-and-search)
 - [Taxonomies](#taxonomies)
@@ -59,12 +61,14 @@ is testable on its own and identical no matter which adapter called it.
 | **Collection** | A named, governed set of documents. `type: dataset` (default) for queryable tables, `type: file` for indexed files. Backed by Postgres tables, one set per environment. |
 | **Document** | One governed, queryable record. For dataset collections, one table row. For file collections, one indexed segment of a parsed file. |
 | **Field** | A document's governed attribute. Postures and grants operate on fields. |
-| **Field posture** | Per-field `allow` or `deny`, declared in `warehousd.yml`. `deny` means the field can *never* be granted. `allow` only makes a field **grantable** — it stays denied per user until a grant covers it. No posture means denied. |
-| **Grant** | `(user, collection, purpose, allowed fields ⊆ grantable fields, env, expires_at, optional document filter)`. Requested by a user, approved by a manager or admin, evaluated at query time. |
+| **Field posture** | Per-field, two-axis: `{ read, write }`, each `allow` or `deny`, declared in `warehousd.yml`. `deny` means that axis can *never* be granted. `allow` only makes a field **grantable** on that axis — it stays denied per user until a grant covers it. No posture means denied on both. A bare `posture: allow` is read-allow, **write-deny**. |
+| **Grant** | `(org, user, collection, purpose, verbs, allowed fields ⊆ grantable fields, env, mode, expires_at, optional document filter)`. Requested by a user, approved by a manager or admin, evaluated at query time. |
+| **Verb** | `read`, `create`, `update`, `delete`, `approve`. A grant carries a set. Which verbs a collection can support at all is **structural** — it follows from its type, not from the grant. |
 | **Environment** | `dev` or `live`. Dev resolves to synthetic data, live to real data. Carried in the access token, never in a request. |
+| **Organization** | The tenant. Every grant, audit event and document belongs to exactly one. Derived from the authenticated user, never from a request. |
 | **Purpose** | A short label plus free text, stated at request time and stamped on every audit event the grant produces. |
 | **Role** | `admin` (collections, SSO, users, clients, import, audit), `manager` (approves grants, promotes clients), `member` (requests grants, queries). |
-| **Audit event** | Immutable record of every broker decision: who, env, collection, intent, fields returned, grant id, outcome, timestamp. |
+| **Audit event** | Immutable record of every broker decision: who, org, env, collection, intent, fields returned, grant id, outcome, timestamp. |
 
 Configuration is declarative and lives in the consuming project's repo — see
 [configuration.md](configuration.md).
@@ -94,12 +98,15 @@ tests in the suite.
    difference is the source schema; the response shape is the same.
 7. **Everything is audited**, before the response is returned — refusals
    included.
+8. **Tenants are separated by the database, not by a predicate the broker
+   remembers.** See [Organizations](#organizations-and-tenant-isolation).
 
 ## The broker
 
 ```ts
 interface BrokerContext {
   userId: string;
+  orgId: string;              // from the token/session's user row, never from a request
   env: "dev" | "live";        // from the token, never from a request body
 }
 
@@ -233,8 +240,9 @@ Adapters derive the context in exactly one place:
 ```ts
 const token = await auth.verifyAccessToken(req);        // signature + expiry
 const env = token.scopes.includes("env:live") ? "live" : "dev";
-const ctx: BrokerContext = { userId: token.sub, env };
-// Any env-like value in the request body or params is ignored and never read.
+const orgId = await orgOfUser(token.sub);               // from the user row, not the token
+const ctx: BrokerContext = { userId: token.sub, orgId, env };
+// Any env-like or org-like value in the request body or params is ignored and never read.
 ```
 
 ## File collections and search
@@ -278,9 +286,113 @@ without ever being readable. It is author-supplied at approval time, never
 client-supplied. It is ANDed into the same parameterized WHERE machinery as
 client filters, an empty `in` list compiles to constant-false rather than a SQL
 error, and excluded documents are silently absent rather than a distinguishable
-refusal. A partial unique index guarantees at most one approved grant per
+refusal.
+
+The value may be the sentinel **`$self`**, bound to the calling user's id when
+the grant is loaded:
+
+```yaml
+document_filter: { field: owner, op: eq, value: $self }
+```
+
+That makes "lower-level roles see and edit only what is assigned to them" a
+property of the *grant* rather than of application logic. Binding happens in
+`loadActiveGrant`, so no caller can forget it and the SQL builder still sees a
+plain literal. Only the exact string `$self` is a sentinel — `$self-service` is
+a literal, and there is no substring interpolation. A partial unique index guarantees at most one approved grant per
 `(user, collection, env)`, so a second, broader grant can never silently override
 the restriction.
+
+## Organizations and tenant isolation
+
+Every deployment has at least one organization. An existing single-tenant install
+gets one implicit org, `default`, created at bootstrap, and behaves exactly as it
+did before — `org_id` defaults to it on every table.
+
+`org_id` is on `app.collections`, `app.grants`, `app.audit_events`,
+`app.client_policies`, Better Auth's `user`, and every data table in
+`data_synth` / `data_live`. Grant lookup keys on
+`(org_id, user_id, collection, env)`.
+
+**`ctx.orgId` is derived from the verified session or token, never from the
+request** — the same rule as `ctx.env`. A caller cannot name its own tenant any
+more than it can name its own environment.
+
+Isolation is enforced **in the database, twice**, because two different kinds of
+role reach the data by two different routes:
+
+```sql
+-- the wall for the read roles, which only ever see the view
+create or replace view data_live.v_pages as
+  select ... from data_live.pages base
+  where base.org_id = current_setting('warehousd.org_id', true);
+
+-- the wall for roles that touch base tables directly (import, and the write roles)
+alter table data_live.pages enable row level security;
+create policy org_isolation on data_live.pages
+  using      (org_id = current_setting('warehousd.org_id', true))
+  with check (org_id = current_setting('warehousd.org_id', true));
+```
+
+The broker sets `warehousd.org_id` transaction-locally from `ctx.orgId` before
+any data statement (`withOrg` in `db/pools.ts`); `set_config(..., true)` means a
+pooled connection can never leak one org's setting into another's query. **The
+broker's generated SQL contains no org predicate at all** — that is deliberate,
+and a test asserts it. A bug in the broker cannot cross the tenant wall, exactly
+as a bug in schema-name resolution cannot cross the env wall (invariant 5).
+
+The two-argument `current_setting` returns NULL when the setting is absent, so an
+unset org yields no rows rather than all rows. **It fails closed.**
+
+The control plane is the other half, and it has no view and no RLS policy behind
+it: `/api/grants`, `/api/audit`, `/api/me/*` and `/api/admin/users` read
+`app.*` directly, so each carries the org predicate itself. The grant decision
+functions (`approveGrant`, `denyGrant`, `revokeGrant`) scope by org as well as
+id; an omitted org scopes to the implicit one, which fails to find a foreign
+grant rather than finding one.
+
+## Postures, verbs, and writability
+
+A posture has **two axes**. A bare value sets the read axis and leaves write
+denied, so every configuration written before the write path existed stays valid
+and nothing becomes writable by accident:
+
+```yaml
+email:       { type: text,    posture: allow }                        # read allow, write deny
+base_salary: { type: numeric, posture: { read: deny, write: allow } }
+```
+
+`view_join` fields are **always** write-deny, structurally — a joined view is not
+updatable in Postgres and the field belongs to another collection anyway. Asking
+for `write: allow` on one is a config error, not a silent override.
+
+A grant carries **verbs**: `read`, `create`, `update`, `delete`, `approve`.
+Existing grants are `['read']`. A grant without `read` refuses reads with
+`no_grant` — not a distinct code, because "you have a grant but not for reading"
+would be an information leak.
+
+Two rules are enforced at approval time, in one place
+(`validateVerbs`), so no approval path can skip them:
+
+- **`approve` requires `read`.** You cannot approve what you cannot see; without
+  this, "approve, then read the diff" is a privilege-escalation path around field
+  postures. Read is *not* required in general — an append-only ingestion grant
+  (`create`, no `read`) is legitimate and forcing `read` onto it would widen
+  access rather than narrow it.
+- **Verb support is structural.** It follows from the collection's type, so
+  `update` on a file collection is refused regardless of what an approver asks
+  for. File collections are a record of what was *ingested*; dataset collections
+  are a record of what is currently *true*. You append to the former and revise
+  the latter.
+
+`writable: true` on a collection opts it into the write path. Collections that do
+not opt in are physically untouched — no extra columns, no extra view predicate,
+no read cost.
+
+`searchable: true` on a dataset text field generates the same `tsv` column and
+GIN index the file branch already emits, and makes `broker.searchDocuments` work
+against datasets. A dataset with no searchable field still refuses
+`invalid_intent`.
 
 ## Taxonomies
 
@@ -296,29 +408,37 @@ columns (`id`, `checksum`, `file_id`, `document_seq`, `tsv`, `_rank`).
 
 ```sql
 -- Better Auth manages: user, session, account, sso_provider, oauth_client
-create table app.collections (name text pk, description text, config jsonb, updated_at timestamptz);
+-- (user gains an orgId column via additionalFields)
+create table app.organizations (id text pk, name text, created_at timestamptz);
+
+create table app.collections (
+  name text pk, description text, config jsonb, org_id text, updated_at timestamptz);
 
 create table app.grants (
-  id uuid pk, user_id text references "user", collection text references collections,
+  id uuid pk, org_id text references organizations,
+  user_id text references "user", collection text references collections,
   purpose_label text, purpose_detail text,
   allowed_fields text[],            -- ⊆ the collection's grantable fields
+  verbs text[] not null default '{read}',   -- read|create|update|delete|approve
+  mode text not null default 'direct',      -- direct | proposal_only
   document_filter jsonb,            -- optional, author-supplied; null = whole collection
+                                    -- value may be the sentinel $self, bound at eval time
   env text check (env in ('dev','live')),
   status text check (status in ('pending','approved','denied','revoked')),
   requested_at timestamptz, decided_at timestamptz, decided_by text, expires_at timestamptz
 );
-create unique index grants_one_active on app.grants (user_id, collection, env)
-  where status = 'approved';
+create unique index grants_one_active
+  on app.grants (org_id, user_id, collection, env) where status = 'approved';
 
 create table app.client_policies (
   client_id text pk references oauth_client,
-  display_name text,
+  display_name text, org_id text references organizations,
   allowed_scopes text[] not null default '{env:dev}',
   promoted_at timestamptz, promoted_by text
 );
 
 create table app.audit_events (
-  id uuid pk, at timestamptz, user_id text, env text, collection text,
+  id uuid pk, at timestamptz, user_id text, org_id text, env text, collection text,
   intent jsonb, fields_returned text[], grant_id uuid, outcome text, reason text
 );
 -- audit_events is INSERT-only for the app role: no UPDATE, no DELETE privilege.

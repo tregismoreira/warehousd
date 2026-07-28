@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getAppPool, getConfig } from "../../lib/broker";
 import { approveGrant, denyGrant, revokeGrant, requestGrant, validateGrantRequest } from "@warehousd/broker";
 import { requireSession, requireRole, atLeast } from "../../../lib/authz";
-import { readEnvCookie } from "../../../lib/session";
+import { readEnvCookie, orgOf } from "../../../lib/session";
 import { buildApproval } from "../../../lib/approve";
 
 export async function GET(req: NextRequest) {
@@ -11,17 +11,21 @@ export async function GET(req: NextRequest) {
   const user = guard.user;
   const app = getAppPool();
   const cfg = getConfig();
+  const org = orgOf(user);
   const mine = await app.query(
-    `select * from app.grants where user_id=$1 order by requested_at desc`, [user.id]);
+    `select * from app.grants where org_id=$1 and user_id=$2 order by requested_at desc`,
+    [org, user.id]);
   // The pending queue is approver-only data: it names who asked for what, and why. A member
-  // calling this endpoint directly used to receive the whole organisation's queue.
+  // calling this endpoint directly used to receive the whole organisation's queue. It is also
+  // org-scoped: a manager approves for their own tenant, never another's.
   const pending = atLeast(user.role, "manager")
-    ? await app.query(`select * from app.grants where status='pending' order by requested_at desc`)
+    ? await app.query(
+        `select * from app.grants where org_id=$1 and status='pending' order by requested_at desc`, [org])
     : { rows: [] as typeof mine.rows };
 
   const active = atLeast(user.role, "manager")
     ? await app.query(
-        `select * from app.grants where status='approved' order by decided_at desc nulls last`)
+        `select * from app.grants where org_id=$1 and status='approved' order by decided_at desc nulls last`, [org])
     : { rows: [] as typeof mine.rows };
 
   const enriched = (rows: typeof mine.rows) => rows.map((g) => ({
@@ -59,7 +63,7 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       collection,
       env: readEnvCookie(req),
-      orgId: user.orgId ?? "default",
+      orgId: orgOf(user),
       purposeLabel: (purposeLabel as string).trim(),
       purposeDetail: typeof purposeDetail === "string" ? purposeDetail.trim() : undefined,
       allowedFields: validation.fields,
@@ -72,9 +76,12 @@ export async function POST(req: NextRequest) {
   if (!priv.ok) return priv.response;
   const by = user.id; // decided_by comes from the session, never the request body
 
+  const org = orgOf(user);
+
   if (action === "approve") {
     const cur = await app.query(
-      `select collection, allowed_fields, status from app.grants where id=$1`, [body.id]);
+      `select collection, allowed_fields, status from app.grants where id=$1 and org_id=$2`,
+      [body.id, org]);
     const row = cur.rows[0];
     if (!row) return Response.json({ error: "unknown_grant" }, { status: 404 });
     if (row.status !== "pending") return Response.json({ error: "not_pending" }, { status: 409 });
@@ -88,19 +95,19 @@ export async function POST(req: NextRequest) {
     });
     if (!built.ok) return Response.json({ error: built.error }, { status: 400 });
 
-    const approved = await approveGrant(app, cfg, body.id, by, { ...built.opts, verbs: body.verbs });
+    const approved = await approveGrant(app, cfg, body.id, by, { ...built.opts, verbs: body.verbs, orgId: org });
     if (!approved.ok)
       return Response.json({ error: approved.error },
         { status: approved.error === "unknown_grant" ? 404 : 400 });
     return Response.json({ ok: true });
   }
   if (action === "deny") {
-    const denied = await denyGrant(app, body.id, by);
+    const denied = await denyGrant(app, body.id, by, org);
     if (!denied) return Response.json({ error: "unknown_grant" }, { status: 404 });
     return Response.json({ ok: true });
   }
   if (action === "revoke") {
-    const revoked = await revokeGrant(app, body.id, by);
+    const revoked = await revokeGrant(app, body.id, by, org);
     if (!revoked) return Response.json({ error: "unknown_grant" }, { status: 404 });
     return Response.json({ ok: true });
   }

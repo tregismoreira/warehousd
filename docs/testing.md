@@ -89,6 +89,32 @@ The interesting ones, and where they live:
 - **Document and term scoping** (`document-paths`, `taxonomy-grants`) — scoped
   documents are silently absent, bypass probes leak nothing, an empty `in` list
   denies everything, and a second approved grant is refused by the unique index.
+- **Tenant isolation, data plane** (`org-isolation`) — two orgs' documents in one
+  collection; each org's query returns only its own. The proof that *the database*
+  is what refuses: the SQL `buildSelect` produced is asserted to contain no
+  `org_id`, then run directly against the view under each org, and it still
+  separates the rows. With no org in scope the view returns nothing — the wall
+  fails closed.
+- **Tenant isolation, control plane** (`org-control-plane`) — `app.grants` has no
+  view or RLS policy behind it, so each decision function carries the predicate:
+  a manager cannot approve, deny or revoke another org's grant, an omitted org
+  fails closed rather than open, and `env:live` eligibility does not leak across
+  orgs for the same user id.
+- **Two-axis postures** (`postures-two-axis`) — a bare `allow` normalizes to
+  read-allow/write-deny, so no pre-existing config becomes writable; `view_join`
+  plus `write: allow` is a config error; a posture stored in the old bare-string
+  form still reads back correctly.
+- **Verbs** (`verbs`) — existing grants default to `['read']`; a grant without
+  `read` refuses with `no_grant` rather than a distinguishable code; `approve`
+  without `read` is rejected at approval time; `update` on a file collection is
+  rejected structurally; an append-only `create` grant with no `read` is valid.
+- **`$self` filters** (`self-filter`) — the sentinel binds to the caller, resolves
+  per element inside an `in` list, `$self-service` stays a literal, and the
+  generated SQL never contains the string `$self`.
+- **Dataset search** (`searchable`) — `searchable: true` makes a dataset reachable
+  from `search_documents`, a non-searchable field on the same collection is not
+  matched, and the generated `<field>_tsv` column never appears in
+  `describe_collection` or in `fieldsReturned`.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
 - **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a

@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { randomBytes } from "node:crypto";
+import { DEFAULT_ORG_ID } from "../db/migrate-app";
 
 export const DEV_CLIENT_NAME = "warehousd dev client";
 
@@ -29,15 +30,19 @@ export async function setAllowedScopes(
     [clientId, allowedScopes, by]);
 }
 
-export async function hasApprovedLiveGrant(app: Pool, userId: string): Promise<boolean> {
+export async function hasApprovedLiveGrant(
+  app: Pool, userId: string, orgId = DEFAULT_ORG_ID,
+): Promise<boolean> {
   // NULL expires_at means "no expiry", matching loadActiveGrant (grants/eval.ts).
   // The two must agree: a grant the broker honors must also make the user
-  // eligible for the env:live scope, or live access silently half-works.
+  // eligible for the env:live scope, or live access silently half-works. That includes the
+  // org predicate — loadActiveGrant keys on it, so eligibility has to as well, or a token
+  // could be issued for an env the broker will then refuse to serve.
   const r = await app.query(
     `select 1 from app.grants
-     where user_id=$1 and env='live' and status='approved'
+     where org_id=$2 and user_id=$1 and env='live' and status='approved'
        and (expires_at is null or expires_at > now()) limit 1`,
-    [userId]);
+    [userId, orgId]);
   return (r.rowCount ?? 0) > 0;
 }
 
