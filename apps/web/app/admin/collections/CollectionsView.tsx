@@ -10,13 +10,19 @@ import { Mono } from "@/components/common/Mono";
 type ApplyStatus = "not_applied" | "applied" | "drifted";
 type Posture = "allow" | "deny";
 
+interface ViewJoin {
+  table: string;
+  column: string;
+  on: string;
+}
+
 interface Field {
   name: string;
   type: string | null;
   posture: Posture;
   pk: boolean;
   fk: string | null;
-  view_join: string | null;
+  view_join: ViewJoin | null;
 }
 
 interface Collection {
@@ -137,7 +143,7 @@ export function CollectionsView() {
                         <PostureBadge posture={field.posture} />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {field.pk ? "pk" : field.fk ? `fk:${field.fk}` : field.view_join ? `join:${field.view_join}` : "—"}
+                        {field.pk ? "pk" : field.fk ? `fk:${field.fk}` : field.view_join ? `join:${field.view_join.table}.${field.view_join.column}` : "—"}
                       </TableCell>
                     </TableRow>
                   ))}

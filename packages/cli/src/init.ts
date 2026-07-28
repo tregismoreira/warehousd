@@ -28,7 +28,7 @@ collections:
 #    fields:
 #      id:              { type: uuid, posture: allow, pk: true }
 #      full_name:       { type: text, posture: allow }
-#      department_name: { type: text, posture: allow, view_join: departments.name }
+#      department_name: { type: text, posture: allow, view_join: { table: departments, column: name, on: department_id } }
 #      department_id:   { type: uuid, posture: allow, fk: departments.id }
 #      home_address:    { type: text, posture: deny }
 #

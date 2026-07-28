@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import { extractFile } from "./extract";
+import { extractFile, type MetadataField } from "./extract";
 import { chunkText } from "./chunk";
 import type { TaxonomyBinding } from "../taxonomy";
 
@@ -21,7 +21,7 @@ function walk(root: string, dir = root): string[] {
 // the YAML. Omitting them indexes the collection as unbound.
 export async function indexCollection(
   db: Pool, env: "dev" | "live", collection: string, sourceDir: string,
-  opts: { taxonomies?: TaxonomyBinding[] } = {},
+  opts: { taxonomies?: TaxonomyBinding[], metadata?: MetadataField[] } = {},
 ): Promise<{ indexed: number; skipped: number; deleted: number }> {
   const schema = env === "dev" ? "data_synth" : "data_live";
   // collection is caller-controlled (server-side config/CLI, not raw user input),
@@ -36,12 +36,14 @@ export async function indexCollection(
 
   const bindings = opts.taxonomies ?? [];
   const termFields = bindings.map((b) => ({ field: b.field, multiple: b.multiple }));
+  const metadataFields = opts.metadata ?? [];
 
   for (const rel of walk(sourceDir).sort()) {
     seen.add(rel);
     const abs = join(sourceDir, rel);
     const file = extractFile(rel, readFileSync(abs, "utf8"), statSync(abs).mtime,
-      termFields.length ? termFields : undefined);
+      termFields.length ? termFields : undefined,
+      metadataFields.length ? metadataFields : undefined);
 
     // Every bound vocabulary is required frontmatter, and every term must be known.
     // Failing loudly here is deliberate: a silently unscoped document would be reachable
@@ -62,20 +64,24 @@ export async function indexCollection(
     if (prev && prev.checksum === file.checksum) { skipped++; continue; }
     const id = prev?.id ?? randomUUID();
     const termCols = bindings.map((b) => `"${b.field}"`);
+    const metadataCols = metadataFields.map((m) => `"${m.field}"`);
+    const metadataValues = metadataFields.map((m) => file.metadata[m.field] ?? null);
 
     if (prev) {
-      const sets = termCols.map((col, i) => `, ${col}=$${i + 6}`).join("");
+      let sets = termCols.map((col, i) => `, ${col}=$${i + 6}`).join("");
+      sets += metadataCols.map((col, i) => `, ${col}=$${i + 6 + termCols.length}`).join("");
       await db.query(
         `update ${filesT} set title=$2, owner=$3, checksum=$4, updated_at=$5${sets} where id=$1`,
-        [id, file.title, file.owner, file.checksum, file.updatedAt, ...termValues]);
+        [id, file.title, file.owner, file.checksum, file.updatedAt, ...termValues, ...metadataValues]);
       await db.query(`delete from ${documentsT} where file_id=$1`, [id]);
     } else {
-      const cols = termCols.length ? `, ${termCols.join(", ")}` : "";
-      const ph = termValues.map((_, i) => `,$${i + 7}`).join("");
+      const allCols = [...termCols, ...metadataCols];
+      const cols = allCols.length ? `, ${allCols.join(", ")}` : "";
+      const ph = [...termValues, ...metadataValues].map((_, i) => `,$${i + 7}`).join("");
       await db.query(
         `insert into ${filesT} (id, title, path, owner, checksum, updated_at${cols})
          values ($1,$2,$3,$4,$5,$6${ph})`,
-        [id, file.title, rel, file.owner, file.checksum, file.updatedAt, ...termValues]);
+        [id, file.title, rel, file.owner, file.checksum, file.updatedAt, ...termValues, ...metadataValues]);
     }
 
     const pieces = chunkText(file.content);

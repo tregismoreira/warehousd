@@ -179,14 +179,20 @@ describe("taxonomies", () => {
     expect(() => ConfigSchema.parse({ ...base, collections: {
       notes: { description: "d", taxonomies: ["category"], fields: {
         id: { type: "uuid", posture: "allow", pk: true },
-        category: { posture: "allow", view_join: "departments.name" } } } } }))
+        category: { posture: "allow", view_join: { table: "departments", column: "name", on: "dept_id" } } } } } }))
       .toThrow(/pk\/fk\/view_join/);
   });
 
-  it("still rejects unknown extra file fields on bound collections", () => {
+  it("rejects untyped extra file fields and allows typed metadata fields", () => {
+    // Untyped field without type is rejected
     expect(() => ConfigSchema.parse({ ...base, collections: {
       briefs: { description: "d", type: "file", source: "./x", taxonomies: ["category"], fields: {
-        title: { posture: "allow" }, sneaky: { posture: "allow" } } } } })).toThrow(/not in fixed set/);
+        title: { posture: "allow" }, sneaky: { posture: "allow" } } } } })).toThrow(/must have type text\/date/);
+    // Typed metadata field is allowed
+    const cfg = ConfigSchema.parse({ ...base, collections: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomies: ["category"], fields: {
+        title: { posture: "allow" }, filed_date: { type: "date", posture: "allow" } } } } });
+    expect(cfg.collections.briefs.fields.filed_date.type).toBe("date");
   });
 });
 

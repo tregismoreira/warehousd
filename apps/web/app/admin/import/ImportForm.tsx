@@ -15,6 +15,12 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mono } from "@/components/common/Mono";
 
+interface ViewJoin {
+  table: string;
+  column: string;
+  on: string;
+}
+
 interface Collection {
   name: string;
   description: string;
@@ -25,7 +31,7 @@ interface Collection {
     posture: string;
     pk: boolean;
     fk: string | null;
-    view_join: string | null;
+    view_join: ViewJoin | null;
     nullable: boolean;
   }>;
 }

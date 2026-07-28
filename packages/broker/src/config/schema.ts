@@ -28,12 +28,19 @@ export const VocabularySchema = z.object({
 });
 export type VocabularyConfig = z.infer<typeof VocabularySchema>;
 
+export const ViewJoinSchema = z.object({
+  table: z.string(),
+  column: z.string(),
+  on: z.string(),
+});
+export type ViewJoinConfig = z.infer<typeof ViewJoinSchema>;
+
 export const FieldSchema = z.object({
   type: z.enum(["uuid", "text", "numeric", "int", "timestamptz", "date", "boolean", "json"]).optional(),
   posture: z.enum(["allow", "deny"]),
   pk: z.boolean().optional(),
   fk: z.string().optional(),            // "people.id"
-  view_join: z.string().optional(),     // "departments.name"
+  view_join: ViewJoinSchema.optional(), // { table: "people", column: "full_name", on: "responsible_attorney_id" }
   nullable: z.boolean().optional(),
   min: z.number().optional(),
   max: z.number().optional(),
@@ -67,12 +74,34 @@ export const CollectionSchema = z.object({
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `taxonomy field "${taxSlug}" may not set pk/fk/view_join` });
     }
   }
+
+  // Validate view_join fields: 'on' must reference a field with fk: <table>.id
+  for (const [name, f] of Object.entries(c.fields)) {
+    if (f.view_join) {
+      const fkFieldName = f.view_join.on;
+      const fkField = c.fields[fkFieldName];
+      if (!fkField)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" view_join references unknown field "${fkFieldName}"` });
+      else if (!fkField.fk)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" view_join references field "${fkFieldName}" which does not have fk` });
+      else if (!fkField.fk.startsWith(`${f.view_join.table}.`))
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" view_join references table "${f.view_join.table}" but field "${fkFieldName}" has fk: ${fkField.fk}` });
+    }
+  }
   if (c.type === "file") {
     if (!c.source) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "file collection requires `source`" });
-    const allowedFieldNames = new Set([...FILE_FIELDS, ...c.taxonomies]);
-    for (const k of Object.keys(c.fields))
-      if (!allowedFieldNames.has(k))
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${k}" not in fixed set ${[...FILE_FIELDS, ...c.taxonomies].join(",")}` });
+    const allowedFileFieldNames = new Set(FILE_FIELDS as readonly string[]);
+    const allowedMetadataFieldTypes = new Set(["text", "date", "timestamptz", "numeric", "int", "boolean"]);
+    for (const [k, f] of Object.entries(c.fields)) {
+      if (allowedFileFieldNames.has(k)) continue; // fixed FILE_FIELDS are always allowed
+      if (c.taxonomies.includes(k)) continue; // taxonomy fields are allowed
+      // Extra metadata fields: must have a type from the allowed set
+      if (!f.type || !allowedMetadataFieldTypes.has(f.type))
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `file collection field "${k}" must have type text/date/timestamptz/numeric/int/boolean (or be a FILE_FIELD or bound taxonomy)` });
+      // Metadata fields cannot be pk/fk/view_join
+      if (f.pk || f.fk || f.view_join)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `file metadata field "${k}" cannot have pk/fk/view_join` });
+    }
   } else {
     const taxonomySet = new Set(c.taxonomies);
     for (const [k, f] of Object.entries(c.fields))

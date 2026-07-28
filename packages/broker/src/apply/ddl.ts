@@ -24,16 +24,31 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
         termAlters.push(`\n      create index if not exists "${collection}__files_${taxSlug}_idx"`
           + ` on ${schema}."${collection}__files" using gin ("${taxSlug}");`);
     }
+    // Add metadata field columns
+    const allowedMetadataFieldTypes = new Set(["text", "date", "timestamptz", "numeric", "int", "boolean"]);
+    const metadataCols: string[] = [];
+    const metadataAlters: string[] = [];
+    for (const [name, f] of Object.entries(c.fields)) {
+      if ((c.taxonomies ?? []).includes(name)) continue; // skip taxonomy fields
+      if (["title", "content", "path", "owner", "updated_at"].includes(name)) continue; // skip fixed fields
+      if (f.type && allowedMetadataFieldTypes.has(f.type)) {
+        const colType = PG_TYPE[f.type];
+        metadataCols.push(`\n        "${name}" ${colType}`);
+        metadataAlters.push(`\n      alter table ${schema}."${collection}__files" add column if not exists "${name}" ${colType};`);
+      }
+    }
     const termCol = termCols.length > 0 ? termCols.join(",") + "," : "";
+    const metadataCol = metadataCols.length > 0 ? metadataCols.join(",") + "," : "";
     const termAlter = termAlters.length > 0 ? termAlters.join("") : "";
+    const metadataAlter = metadataAlters.length > 0 ? metadataAlters.join("") : "";
     return `
       create table if not exists ${schema}."${collection}__files" (
         id uuid primary key,
         title text,
-        path text not null unique,${termCol}
+        path text not null unique,${termCol}${metadataCol}
         owner text,
         checksum text not null,
-        updated_at timestamptz not null);${termAlter}
+        updated_at timestamptz not null);${termAlter}${metadataAlter}
       create table if not exists ${schema}."${collection}__documents" (
         id uuid primary key,
         file_id uuid not null references ${schema}."${collection}__files"(id) on delete cascade,
@@ -75,27 +90,27 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
   if (!c) throw new Error(`Unknown collection: ${collection}`);
 
   if (c.type === "file") {
-    // Each bound vocabulary gets selected from the files table
+    // Each bound vocabulary and metadata field gets selected from the files table
     const termSels = (c.taxonomies ?? []).map(taxSlug => `, d."${taxSlug}"`).join("");
+    const allowedMetadataFieldTypes = new Set(["text", "date", "timestamptz", "numeric", "int", "boolean"]);
+    const metadataSels = Object.entries(c.fields)
+      .filter(([k]) => !k.startsWith("_") && !(c.taxonomies ?? []).includes(k) && k !== "title" && k !== "content" && k !== "path" && k !== "owner" && k !== "updated_at")
+      .filter(([, f]) => f.type && allowedMetadataFieldTypes.has(f.type))
+      .map(([k]) => `, d."${k}"`).join("");
     return `create or replace view ${schema}.v_${collection} as
       select c.id as document_id, c.document_seq, c.content, c.tsv,
-             d.id as file_id, d.title, d.path, d.owner, d.updated_at${termSels}
+             d.id as file_id, d.title, d.path, d.owner, d.updated_at${termSels}${metadataSels}
       from ${schema}."${collection}__documents" c
       join ${schema}."${collection}__files" d on d.id = c.file_id;`;
   }
 
   const selects: string[] = [];
   const joins: string[] = [];
-  const seenJoin = new Set<string>();
   for (const [name, f] of Object.entries(c.fields)) {
     if (f.view_join) {
-      const [jt, jc] = f.view_join.split("."); // "departments.name"
-      if (!jt || !jc) throw new Error(`Malformed view_join on field ${name}: ${f.view_join}`);
-      const alias = `j_${jt}`;
-      if (!seenJoin.has(jt)) {
-        joins.push(`left join ${schema}.${jt} ${alias} on ${alias}.id = base.${jt.replace(/s$/, "")}_id`);
-        seenJoin.add(jt);
-      }
+      const { table: jt, column: jc, on: onField } = f.view_join;
+      const alias = `j_${name}`;
+      joins.push(`left join ${schema}.${jt} ${alias} on ${alias}.id = base.${onField}`);
       selects.push(`${alias}."${jc}" as "${name}"`);
     } else {
       selects.push(`base."${name}"`);

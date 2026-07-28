@@ -57,7 +57,13 @@ export async function runIndex(
     // Sync dataset-sourced vocabulary terms before indexing
     await syncDatasetTerms(db, cfg, env);
     const taxonomies = await loadTaxonomyBindings(db, cfg, collection, env);
-    return await indexCollection(db, env, collection, resolve(projectDir, dir), { taxonomies });
+    // Extract metadata fields (typed extra fields on file collections)
+    const allowedMetadataFieldTypes = new Set(["text", "date", "timestamptz", "numeric", "int", "boolean"]);
+    const metadata = Object.entries(c.fields)
+      .filter(([k]) => !k.startsWith("_") && !(c.taxonomies ?? []).includes(k) && k !== "title" && k !== "content" && k !== "path" && k !== "owner" && k !== "updated_at")
+      .filter(([, f]) => f.type && allowedMetadataFieldTypes.has(f.type))
+      .map(([k, f]) => ({ field: k, type: f.type as "text" | "date" | "timestamptz" | "numeric" | "int" | "boolean" }));
+    return await indexCollection(db, env, collection, resolve(projectDir, dir), { taxonomies, metadata });
   } finally { await db.end(); }
 }
 
