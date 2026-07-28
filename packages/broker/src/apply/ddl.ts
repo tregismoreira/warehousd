@@ -47,6 +47,41 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
     // type is guaranteed by CollectionSchema refinement for structured collections
     cols.push(`"${name}" ${PG_TYPE[f.type!]}${pk}`);
   }
+
+  // Writable datasets get revision columns and drop pk constraint; the declared pk becomes document identity
+  if (c.writable) {
+    // Find the pk field name for the unique index on _current
+    let pkField = "id";
+    for (const [name, f] of Object.entries(c.fields)) {
+      if (f.pk) { pkField = name; break; }
+    }
+
+    const revCols = `
+        _rev        uuid primary key default gen_random_uuid(),
+        _rev_seq    bigint      not null,
+        _rev_at     timestamptz not null default now(),
+        _rev_by     text        not null,
+        _rev_op     text        not null check (_rev_op in ('create','update','delete')),
+        _rev_status text        not null check (_rev_status in ('pending','approved','rejected')),
+        _rev_fields text[]      not null,
+        _rev_base   bigint,
+        _current    boolean     not null default false,
+        org_id      text        not null default 'default',`;
+    // Remove pk constraint from data columns
+    const dataColsNoPk = cols.map(col => col.replace(/ primary key$/, ""));
+    let ddl = `create table if not exists ${schema}.${collection} (${revCols} ${dataColsNoPk.join(", ")});`;
+    ddl += ` alter table ${schema}.${collection} add column if not exists org_id text not null default 'default';`;
+    ddl += ` create unique index if not exists "${collection}_current_idx" on ${schema}.${collection} (org_id, "${pkField}") where _current;`;
+    if (c.taxonomy) ddl += ` alter table ${schema}.${collection} add column if not exists "${c.taxonomy}" text;`;
+    for (const [name, f] of Object.entries(c.fields)) {
+      if (f.searchable) {
+        ddl += `\n      alter table ${schema}.${collection} add column if not exists "${name}_tsv" tsvector generated always as (to_tsvector('english', coalesce("${name}", ''))) stored;`;
+        ddl += `\n      create index if not exists "${collection}_${name}_tsv_idx" on ${schema}.${collection} using gin ("${name}_tsv");`;
+      }
+    }
+    return ddl;
+  }
+
   let ddl = `create table if not exists ${schema}.${collection} (org_id text not null default 'default', ${cols.join(", ")});`;
   ddl += ` alter table ${schema}.${collection} add column if not exists org_id text not null default 'default';`;
   // Re-apply upgrade path for a newly bound taxonomy on a pre-existing table.
@@ -66,6 +101,8 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
 // One flat view per collection/env. Joins resolve view_join columns.
 // Views filter by current_setting('warehousd.org_id') — the database enforces org isolation,
 // so broker-built SQL never carries an org predicate (see Phase 1 acceptance criterion).
+// For writable datasets, the view also filters to _current=true and _rev_op<>'delete' —
+// pending revisions never appear, so unapproved agent output cannot leak into ordinary queries.
 export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const c = cfg.collections[collection];
@@ -101,9 +138,14 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
       if (f.searchable) selects.push(`base."${name}_tsv"`);
     }
   }
+
+  const whereClause = c.writable
+    ? `where base.org_id = current_setting('warehousd.org_id', true) and base._current and base._rev_op <> 'delete'`
+    : `where base.org_id = current_setting('warehousd.org_id', true)`;
+
   return `create or replace view ${schema}.v_${collection} as
     select ${selects.join(", ")} from ${schema}.${collection} base ${joins.join(" ")}
-    where base.org_id = current_setting('warehousd.org_id', true);`;
+    ${whereClause};`;
 }
 
 export function grantViewDDL(env: "dev" | "live", collection: string): string {
@@ -146,4 +188,27 @@ export function grantImportDDL(collection: string, cfg: WarehousdConfig): string
   // File collections are populated by the indexer under the owner role, not by import.
   if (c.type === "file") return "";
   return `grant insert on data_live.${collection} to warehousd_import;`;
+}
+
+// Write roles can insert, can select base table (for concurrency/merge), can update only
+// _current and _rev_status (promotion columns). No DELETE privilege ever. Immutability is
+// enforced by privilege, not by application code.
+export function grantWriteDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
+  const schema = env === "dev" ? "data_synth" : "data_live";
+  const role = env === "dev" ? "warehousd_dev_write" : "warehousd_live_write";
+  const c = cfg.collections[collection];
+  if (!c) throw new Error(`Unknown collection: ${collection}`);
+
+  if (!c.writable) return "";
+
+  if (c.type === "file") {
+    return `grant insert on ${schema}."${collection}__files", ${schema}."${collection}__documents" to ${role};`;
+  }
+
+  // Dataset: insert all, update only promotion columns, select base table for concurrency checks
+  return `
+grant insert on ${schema}.${collection} to ${role};
+grant update (_current, _rev_status) on ${schema}.${collection} to ${role};
+grant select on ${schema}.${collection} to ${role};
+  `.trim();
 }

@@ -209,6 +209,7 @@ Set on the container or the dev process, not in YAML:
 | `APP_DATABASE_URL` | The `app` schema: users, sessions, grants, collections, audit. |
 | `DEV_DATABASE_URL` / `LIVE_DATABASE_URL` | The two role-scoped data pools. |
 | `IMPORT_DATABASE_URL` | The admin import role — `INSERT`-only on `data_live`. Unset means no write path at all. |
+| `DEV_WRITE_DATABASE_URL` / `LIVE_WRITE_DATABASE_URL` | The per-env write roles behind `broker.mutate`. They hold `INSERT`, `SELECT`, and `UPDATE` on the two revision-bookkeeping columns only — never on a data column, and never `DELETE`. Unset means no mutation path for that env. |
 | `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` | Session and token signing; the app's public origin. |
 | `WAREHOUSD_PROJECT_DIR` | Where `warehousd.yml` lives (`/project` in the container). |
 | `WAREHOUSD_TRUSTED_ORIGINS` | Comma-separated origins allowed as OIDC/SAML issuers. Required for loopback or private-network IdPs — see [configure-sso.md](configure-sso.md). |

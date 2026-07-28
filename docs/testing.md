@@ -115,6 +115,22 @@ The interesting ones, and where they live:
   from `search_documents`, a non-searchable field on the same collection is not
   matched, and the generated `<field>_tsv` column never appears in
   `describe_collection` or in `fieldsReturned`.
+- **Revision storage** (`revisions-ddl`) — a `writable` dataset gets `_rev*` and
+  the partial unique index, and its declared pk stops being the primary key; a
+  second *current* revision for one document is rejected by the database while a
+  non-current one is accepted, which is what lets proposals coexist; the view
+  hides superseded and tombstoned revisions while the history stays in the table;
+  a non-writable dataset gains none of it; turning `writable: true` on over an
+  existing plain table fails the apply.
+- **Immutability by privilege** (`write-privileges`, against real Postgres) — the
+  write role *cannot* UPDATE a data column and *cannot* DELETE, asserted as
+  Postgres errors and again against `information_schema`; it *can* insert and
+  update `_current`/`_rev_status`; RLS confines its base-table SELECT to one org.
+- **Full-document reads** (`get-document`) — only granted fields come back; a
+  document the filter excludes is `not_found`, the same answer as one that does
+  not exist; `$self` scopes it; `path` on a dataset is `invalid_intent`; a file's
+  chunks are rejoined into one document rather than returning the first chunk;
+  `org_id` and `_rev*` never appear; every outcome writes an audit row.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
 - **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a

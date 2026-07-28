@@ -1,7 +1,9 @@
 import type { Pool, PoolClient } from "pg";
 import type {
   BrokerContext, QueryIntent, DocSearchIntent, BrokerResult, RefusalReason, VisibleSchema, Refusal,
+  GetDocumentIntent, GetDocumentResult, Document, Filter,
 } from "./types";
+import { MAX_LIMIT } from "./types";
 import type { WarehousdConfig } from "./config/schema";
 import type { Pools } from "./db/pools";
 import { dataPool, withOrg } from "./db/pools";
@@ -9,6 +11,7 @@ import { loadActiveGrant } from "./grants/eval";
 import { buildSelect } from "./sql/build";
 import { writeAudit } from "./audit/write";
 import { findCollection } from "./config/load";
+import { reassembleChunks } from "./indexing/chunk";
 
 export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   const app = pools.app;
@@ -145,7 +148,80 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     }
   }
 
-  return { query, describeCollection, listCollections, searchDocuments };
+  // The full-document read. It shares query's prologue deliberately — same grant, same read
+  // verb, same field postures, same document filter — and differs only in how the target is
+  // addressed and, for file collections, in reassembling the chunks back into one document.
+  async function getDocument(ctx: BrokerContext, intent: GetDocumentIntent): Promise<GetDocumentResult> {
+    const c = findCollection(cfg, intent.collection);
+    if (!c) return refuse(ctx, intent.collection, null, "unknown_collection");
+    const isFile = c.type === "file";
+    const byPath = "path" in intent;
+    // A path addresses a source file; a dataset has none.
+    if (byPath && !isFile) return refuse(ctx, intent.collection, null, "invalid_intent");
+
+    const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env, ctx.orgId);
+    if (!grant) return refuse(ctx, intent.collection, null, "no_grant");
+    if (!grant.verbs.includes("read")) return refuse(ctx, intent.collection, null, "no_grant");
+
+    const all = Object.keys(c.fields);
+    if (grant.documentFilter && !all.includes(grant.documentFilter.field))
+      return refuse(ctx, intent.collection, null, "invalid_intent", grant.id);
+
+    // How the caller names the document. Like documentFilter this is broker-supplied rather
+    // than client-supplied, so it may reference a column outside allowedFields — a file's
+    // `path` is commonly posture:deny yet is exactly how you address the file.
+    let key: Filter;
+    if (isFile) {
+      key = byPath
+        ? { field: "path", op: "eq", value: (intent as { path: string }).path }
+        : { field: "file_id", op: "eq", value: (intent as { id: string }).id };
+    } else {
+      const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
+      // Without a declared pk there is no document identity to address by id.
+      if (!pk) return refuse(ctx, intent.collection, null, "invalid_intent", grant.id);
+      key = { field: pk, op: "eq", value: (intent as { id: string }).id };
+    }
+
+    const selectFields = grant.allowedFields.filter((f) => all.includes(f));
+
+    try {
+      // One file yields many documents, so the file form fetches every chunk in order and
+      // rejoins them. A dataset document is a single row.
+      const shaped: QueryIntent = isFile
+        ? { collection: intent.collection, fields: selectFields, filters: [key],
+            orderBy: { field: "document_seq", dir: "asc" }, limit: MAX_LIMIT }
+        : { collection: intent.collection, fields: selectFields, filters: [key], limit: 1 };
+
+      const { text, values } = buildSelect(ctx.env, shaped, grant.allowedFields,
+        { documentFilter: grant.documentFilter });
+      const rows = await withOrg(dataPool(pools, ctx), ctx.orgId,
+        async (client: PoolClient) => (await client.query(text, values)).rows);
+
+      // Absent and excluded-by-filter are the same answer. Distinguishing them would make this
+      // an existence oracle for documents the grant deliberately hides.
+      if (rows.length === 0) {
+        const auditId = await writeAudit(app, {
+          userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found" });
+        return { ok: false, reason: "not_found", auditId };
+      }
+
+      const document: Document = { ...rows[0] };
+      if (isFile && selectFields.includes("content"))
+        document.content = reassembleChunks(rows.map((r) => String(r.content ?? "")));
+
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: selectFields, grantId: grant.id, outcome: "allowed", reason: null });
+      return { ok: true, document, fieldsReturned: selectFields, auditId };
+    } catch (err) {
+      // Same discipline as query: a driver error names columns and values, so it goes to the
+      // log and the caller gets a bare reason code. The audit row is written either way.
+      console.error("[broker] getDocument failed", { collection: intent.collection, err });
+      return refuse(ctx, intent.collection, null, "internal_error", grant.id);
+    }
+  }
+  return { query, describeCollection, listCollections, searchDocuments, getDocument };
 }
 
 // Every field named anywhere in the intent (fields, filters, orderBy, aggregate, groupBy).

@@ -31,12 +31,20 @@ export type DocSearchIntent = {
   offset?: number;
 };
 
+export type GetDocumentIntent =
+  | { collection: string; id: string }
+  | { collection: string; path: string };
+
 export type RefusalReason =
   | "no_grant" | "expired_grant" | "field_denied"
-  | "unknown_collection" | "unknown_field" | "invalid_intent" | "internal_error";
+  | "unknown_collection" | "unknown_field" | "invalid_intent" | "internal_error" | "not_found";
 
 export type BrokerResult =
   | { ok: true; documents: Document[]; fieldsReturned: string[]; auditId: string }
+  | { ok: false; reason: RefusalReason; auditId: string };
+
+export type GetDocumentResult =
+  | { ok: true; document: Document; fieldsReturned: string[]; auditId: string }
   | { ok: false; reason: RefusalReason; auditId: string };
 
 export type VisibleField = { name: string; type: string; pk?: boolean };

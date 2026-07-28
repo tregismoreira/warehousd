@@ -195,9 +195,12 @@ export async function bootstrap(): Promise<void> {
     // 10. The outputs-contract OAuth client
     await ensureDevClient(db, adminId);
 
-    // Inject DEV_DATABASE_URL and LIVE_DATABASE_URL for the app to use
+    // Inject the role-scoped URLs for the app to use. The write roles are separate
+    // principals from the read roles — a read pool can never write, whatever the broker does.
     process.env.DEV_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_dev", rolePw);
     process.env.LIVE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_live", rolePw);
+    process.env.DEV_WRITE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_dev_write", rolePw);
+    process.env.LIVE_WRITE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_live_write", rolePw);
 
     console.log("bootstrap complete");
   } finally {

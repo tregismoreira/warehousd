@@ -10,6 +10,8 @@ with real data, this is the document to read.
 - [Environments: dev and live](#environments-dev-and-live)
 - [Organizations and tenant isolation](#organizations-and-tenant-isolation)
 - [Postures, verbs, and writability](#postures-verbs-and-writability)
+- [Revisions, and immutability by privilege](#revisions-and-immutability-by-privilege)
+- [Full-document reads](#full-document-reads)
 - [Identity, OAuth, and env-as-scope](#identity-oauth-and-env-as-scope)
 - [File collections and search](#file-collections-and-search)
 - [Taxonomies](#taxonomies)
@@ -125,11 +127,12 @@ type BrokerResult =
   | { ok: true;  documents: Document[]; fieldsReturned: string[]; auditId: string }
   | { ok: false; reason: "no_grant" | "expired_grant" | "field_denied"
                | "unknown_collection" | "unknown_field" | "invalid_intent"
-               | "internal_error";
+               | "not_found" | "internal_error";
       auditId: string };       // reason codes only — never a denied value, never SQL
 
 broker.query(ctx, intent)
-broker.searchDocuments(ctx, intent)     // file collections only
+broker.searchDocuments(ctx, intent)     // file collections, and datasets with a searchable field
+broker.getDocument(ctx, { collection, id | path })   // one document, full granted field set
 broker.describeCollection(ctx, name)    // only fields visible under the caller's grants
 broker.listCollections(ctx)             // names and descriptions only
 ```
@@ -393,6 +396,87 @@ no read cost.
 GIN index the file branch already emits, and makes `broker.searchDocuments` work
 against datasets. A dataset with no searchable field still refuses
 `invalid_intent`.
+
+## Revisions, and immutability by privilege
+
+A `writable: true` **dataset** is append-only. There is no in-place `UPDATE` of
+data, and no config knob to allow one. Its declared `pk` stops being row identity
+and becomes **document identity**:
+
+```sql
+create table data_live.pages (
+  _rev uuid primary key default gen_random_uuid(),
+  _rev_seq bigint not null,          -- monotonic per document
+  _rev_at timestamptz not null default now(),
+  _rev_by text not null,             -- the author, not the approver
+  _rev_op text not null,             -- create | update | delete
+  _rev_status text not null,         -- pending | approved | rejected
+  _rev_fields text[] not null,       -- which fields this revision touches
+  _rev_base bigint,                  -- the _rev_seq it was derived from
+  _current boolean not null default false,
+  org_id text not null,
+  id uuid not null,                  -- the declared pk; no longer unique
+  ...);
+create unique index on data_live.pages (org_id, id) where _current;
+```
+
+- **Exactly-one-current is a database guarantee** — the partial unique index —
+  not an ordering convention.
+- **Pending revisions have `_current = false`**, so they never contend for that
+  index. Multiple proposals can coexist against one document, and the proposed
+  after-state is never readable through the view.
+- **Delete is a tombstone revision.** No `DELETE` privilege is granted anywhere,
+  and the view's `_rev_op <> 'delete'` predicate makes the document disappear
+  from reads while the history stays.
+- **`_rev*` and `org_id` can never be granted.** They are not in `warehousd.yml`,
+  so no grant can name them and `describe_collection` never shows them.
+  Bookkeeping is invisible to the query surface for free, with no filtering code.
+
+**File collections keep their existing shape.** No revision columns, no
+migration: a `create` appends a file row plus its derived chunks, `path` stays
+unique so a repeat is a `conflict`, and chunks are never re-derived — which is
+why the "search still returns pre-edit text" bug class cannot occur here.
+
+Turning `writable: true` on over a collection that already has a plain table
+**fails the apply** with an operator-facing error. Migrating existing rows into
+revisions is deferred, and silently emitting a table that cannot hold a revision
+would be worse than refusing.
+
+### Immutability is enforced by privilege, not by code
+
+Two new roles, `warehousd_dev_write` and `warehousd_live_write`, mirror the read
+split. Their grants are column-level:
+
+```sql
+grant insert on data_live.pages to warehousd_live_write;
+grant update (_current, _rev_status) on data_live.pages to warehousd_live_write;
+grant select on data_live.pages to warehousd_live_write;   -- concurrency checks and merges
+```
+
+**Postgres itself refuses any change to a data column**, and no role anywhere
+holds `DELETE`. A broker bug cannot rewrite history. The write role's `select` on
+the base table is confined to one tenant by the RLS policy above — that is
+precisely the case RLS exists for, since the write role bypasses the view.
+
+If `DEV_WRITE_DATABASE_URL` / `LIVE_WRITE_DATABASE_URL` are unset there is no
+mutation path at all, which is the safer default.
+
+## Full-document reads
+
+`broker.getDocument(ctx, { collection, id | path })` returns one document's full
+granted field set, subject to **the same grant, read verb, field postures and
+document filter as `query`** — it shares that prologue rather than duplicating
+it, and builds its SQL through the same builder.
+
+A document excluded by the document filter is `not_found`, indistinguishable
+from one that does not exist: a distinct code would be an existence oracle.
+
+`path` addresses a source file and is file-collections-only; on a dataset it is
+`invalid_intent`. Because one file yields many documents, the file form fetches
+every chunk in `document_seq` order and rejoins them, undoing the indexer's
+overlap. That reconstructs the *chunked* text, not the source file byte-for-byte
+— chunking trims and rejoins paragraphs, and nothing stores the original body.
+A caller needing the exact source must keep it.
 
 ## Taxonomies
 

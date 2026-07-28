@@ -12,7 +12,7 @@ export async function ensureSchemasAndRoles(db: Pool, dataRolePassword: string):
   // then build CREATE/ALTER statements with escapeLiteral to safely quote the password.
   const client = await db.connect();
   try {
-    for (const role of ["warehousd_dev", "warehousd_live"]) {
+    for (const role of ["warehousd_dev", "warehousd_live", "warehousd_dev_write", "warehousd_live_write"]) {
       // Check if role exists using parameterized query
       const existing = await client.query(
         `select 1 from pg_roles where rolname = $1`,
@@ -42,6 +42,9 @@ export async function ensureSchemasAndRoles(db: Pool, dataRolePassword: string):
     grant usage on schema data_synth to warehousd_dev;
     grant usage on schema data_live to warehousd_live;
     grant usage on schema app to warehousd_dev, warehousd_live;
+    grant usage on schema data_synth to warehousd_dev_write;
+    grant usage on schema data_live to warehousd_live_write;
+    grant usage on schema app to warehousd_dev_write, warehousd_live_write;
   `);
 }
 
