@@ -7,6 +7,7 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
   const rng = makeRng(seed);
   const idsByCollection: Record<string, string[]> = {};
   const order = topoSort(cfg);
+  const deferred: { collection: string; column: string; parent: string; pk: string }[] = [];
 
   for (const name of order) {
     const c = cfg.collections[name];
@@ -24,15 +25,30 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
       }
     }
     const ids: string[] = [];
+    // Find the primary key field
+    let pkField = "";
+    for (const [fname, f] of storedFields) {
+      if (f.pk) { pkField = fname; break; }
+    }
     for (let i = 0; i < n; i++) {
       const cols: string[] = [], vals: unknown[] = [];
       for (const [fname, f] of storedFields) {
         cols.push(`"${fname}"`);
-        if (f.pk) { const id = genValue(rng, "uuid", fname) as string; ids.push(id); vals.push(id); }
+        if (f.pk) { const id = genValue(rng, "uuid", fname, { i, project: cfg.project, gen: f.gen }) as string; ids.push(id); vals.push(id); }
         else if (f.fk) {
           const [parent] = f.fk.split("."); // "people.id"
-          const parentIds = (parent && idsByCollection[parent]) ?? [];
-          vals.push(parentIds[Math.floor(rng() * parentIds.length)] ?? null);
+          const parentExists = parent && Object.prototype.hasOwnProperty.call(idsByCollection, parent);
+          const parentIds = parentExists ? (idsByCollection[parent] ?? []) : [];
+          if (!parentIds.length && parent && !parentExists) {
+            // Parent hasn't been visited yet — defer this FK for backfill
+            const deferKey = `${name}:${fname}`;
+            if (!deferred.some((d) => `${d.collection}:${d.column}` === deferKey)) {
+              deferred.push({ collection: name, column: fname, parent, pk: pkField });
+            }
+            vals.push(null);
+          } else {
+            vals.push(parentIds[Math.floor(rng() * parentIds.length)] ?? null);
+          }
         } else if ((c.taxonomies ?? []).includes(fname)) {
           const termSlugs = termsByVocab.get(fname) ?? [];
           const vocab = cfg.taxonomies[fname];
@@ -54,12 +70,25 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
           }
         } else if (f.nullable && rng() < 0.05) vals.push(null);
         // type is guaranteed by CollectionSchema refinement for structured collections; file collections have types filled in by transform
-        else vals.push(genValue(rng, f.type!, fname, { min: f.min, max: f.max }));
+        else vals.push(genValue(rng, f.type!, fname, { min: f.min, max: f.max, gen: f.gen, i, project: cfg.project }));
       }
       const ph = vals.map((_, k) => `$${k + 1}`).join(",");
       await db.query(`insert into data_synth.${name} (${cols.join(",")}) values (${ph})`, vals);
     }
     idsByCollection[name] = ids;
+  }
+
+  // Second pass: backfill deferred FKs
+  for (const d of deferred) {
+    const parentIds = idsByCollection[d.parent] ?? [];
+    const rowIds = idsByCollection[d.collection] ?? [];
+    if (!parentIds.length || !rowIds.length) continue;
+    for (const rowId of rowIds) {
+      const pick = parentIds[Math.floor(rng() * parentIds.length)];
+      if (!pick || pick === rowId) continue; // nobody is their own manager/head
+      await db.query(
+        `update data_synth.${d.collection} set "${d.column}"=$1 where "${d.pk}"=$2`, [pick, rowId]);
+    }
   }
 }
 

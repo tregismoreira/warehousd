@@ -47,6 +47,7 @@ export const FieldSchema = z.object({
   nullable: z.boolean().optional(),
   min: z.number().optional(),
   max: z.number().optional(),
+  gen: z.string().optional(),
 });
 export type FieldConfig = z.infer<typeof FieldSchema>;
 

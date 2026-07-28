@@ -2,6 +2,10 @@ import firstNames from "../../wordlists/first-names.json" with { type: "json" };
 import lastNames from "../../wordlists/last-names.json" with { type: "json" };
 import streets from "../../wordlists/streets.json" with { type: "json" };
 import jobTitles from "../../wordlists/job-titles.json" with { type: "json" };
+import companies from "../../wordlists/companies.json" with { type: "json" };
+import industries from "../../wordlists/industries.json" with { type: "json" };
+import courts from "../../wordlists/courts.json" with { type: "json" };
+import legalNarratives from "../../wordlists/legal-narratives.json" with { type: "json" };
 
 // Mulberry32 — deterministic PRNG.
 export function makeRng(seed: number): () => number {
@@ -25,13 +29,45 @@ const departmentNames = [
   "Legal", "Operations", "Customer Support", "Product", "IT",
 ];
 
-export const wordlists = { firstNames, lastNames, streets, jobTitles };
+export const wordlists = { firstNames, lastNames, streets, jobTitles, companies, industries, courts, legalNarratives };
 
 export function genValue(
   rng: () => number, type: string, field: string,
-  opts: { min?: number; max?: number } = {},
+  opts: { min?: number; max?: number; gen?: string; i?: number; project?: string } = {},
 ): unknown {
   const f = field.toLowerCase();
+
+  // Dispatch on opts.gen first — explicit hints win over substring guessing
+  if (opts.gen) {
+    switch (opts.gen) {
+      case "client_number": {
+        const idx = (opts.i ?? 0) + 1;
+        return `C-${String(idx).padStart(4, "0")}`;
+      }
+      case "matter_number": {
+        const idx = (opts.i ?? 0) + 1;
+        return `M-2025-${String(idx).padStart(4, "0")}`;
+      }
+      case "invoice_number": {
+        const idx = (opts.i ?? 0) + 1;
+        return `INV-2025-${String(idx).padStart(4, "0")}`;
+      }
+      case "bar_number": {
+        const idx = (opts.i ?? 0) + 1;
+        return `BAR-${String(idx).padStart(6, "0")}`;
+      }
+      case "company_name": return pick(rng, wordlists.companies);
+      case "hourly_rate": {
+        const lo = opts.min ?? 150, hi = opts.max ?? 950;
+        const n = lo + rng() * (hi - lo);
+        return Math.round(n);
+      }
+      case "narrative": return pick(rng, wordlists.legalNarratives);
+      case "court_name": return pick(rng, wordlists.courts);
+      case "industry": return pick(rng, wordlists.industries);
+    }
+  }
+
   switch (type) {
     case "uuid": return uuidFrom(rng);
     case "numeric":
@@ -51,7 +87,7 @@ export function genValue(
     case "json": return { note: pick(rng, wordlists.firstNames) };
     default: { // text — shape by field name
       if (f.includes("email"))
-        return `${pick(rng, firstNames)}.${pick(rng, lastNames)}@meridian.example`.toLowerCase();
+        return `${pick(rng, firstNames)}.${pick(rng, lastNames)}@${opts.project ?? "example"}.example`.toLowerCase();
       if (f.includes("full_name")) return `${pick(rng, firstNames)} ${pick(rng, lastNames)}`;
       if (f === "name") return pick(rng, departmentNames);
       if (f.includes("name")) return `${pick(rng, firstNames)} ${pick(rng, lastNames)}`;
