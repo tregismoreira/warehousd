@@ -11,6 +11,12 @@ export default defineConfig({
   fullyParallel: false, // one database, one dev server
   workers: 1,
   retries: process.env.CI ? 1 : 0,
+  // `timeout` above is the per-test cap; this is the per-assertion one, which defaults to 5s.
+  // The GitHub runner is roughly 3x slower than a dev machine (11m vs 3.5m for this suite), so
+  // 5s there buys about 1.5s of local-equivalent budget — not enough for the grant tables,
+  // which re-render when their fetch lands. Raising it only affects how long a failing
+  // assertion waits before giving up; the 120s per-test cap still bounds the whole run.
+  expect: { timeout: 15_000 },
   use: {
     baseURL: "http://localhost:8722",
     trace: "retain-on-failure",
