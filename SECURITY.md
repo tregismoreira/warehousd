@@ -51,21 +51,16 @@ not vulnerabilities in warehousd:
 Deliberate gaps in the current implementation. None is a live exploit path in a
 deployment that follows the expectations above, but each is worth knowing:
 
-- **The `wh_env` cookie is not marked `Secure`** (`apps/web/app/api/env/route.ts`)
-  because the local demo runs on plain HTTP. It is `HttpOnly; SameSite=Lax` and
-  is not a privilege path — setting it to `live` without an approved live grant
-  still refuses with `no_grant` — but it should be conditional on HTTPS before a
-  real deployment.
-- **The two-tier deny is enforced at the API layer, not in the broker library.**
-  `/api/grants` validates requested fields against `grantableFields()`, so a
-  `posture: deny` field can never be requested or approved through the web UI or
-  HTTP API. `approveGrant`/`requestGrant` in `packages/broker` do not repeat that
-  check, so a future adapter calling them directly could create a grant the YAML
-  forbids. Defense in depth we have not yet added.
-- **Config merging is not prototype-safe.** `deepMerge` in
-  `packages/broker/src/config/load.ts` assigns keys from `warehousd.local.yml`
-  as computed properties, including `__proto__`. Reachable only by whoever can
-  write that file, which is already the person who decides the postures.
+- **`approveGrant` does not re-check the two-tier deny.** The request side is
+  enforced in the broker: `validateGrantRequest`
+  (`packages/broker/src/grants/manage.ts`) rejects any field outside
+  `grantableFields()`, and both callers that reach `app.grants` — the web route
+  and the MCP `request_access` tool — go through it. `approveGrant` still trusts
+  the `allowedFields` it is handed. The web approve path is safe because
+  `buildApproval` derives the field set from the YAML rather than the request
+  body, but that is a caller-side guarantee rather than one the broker enforces,
+  so a future adapter calling `approveGrant` directly could widen a grant beyond
+  what the config allows.
 - **No multi-tenancy.** One deployment is one organization. There is no boundary
   between tenants because there are no tenants.
 - **No write path through MCP.** Read and access-request only, by design. The

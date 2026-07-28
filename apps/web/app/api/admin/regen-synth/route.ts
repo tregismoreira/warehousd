@@ -1,9 +1,7 @@
 import { NextRequest } from "next/server";
-import { loadConfig, regenerateSynthetic } from "@warehousd/broker";
-import { getAppPool } from "../../../lib/broker";
+import { regenerateSynthetic } from "@warehousd/broker";
+import { getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
-
-const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 
 export async function POST(req: NextRequest) {
   const guard = await requireRole(req, "admin");
@@ -14,7 +12,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "invalid_seed" }, { status: 400 });
 
   const app = getAppPool();
-  const cfg = loadConfig(projectDir);
+  const cfg = getConfig();
   const { collections } = await regenerateSynthetic(app, cfg, seed ?? 42);
 
   // Destroying and rebuilding a whole environment is a governance event. Audited per

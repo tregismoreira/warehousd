@@ -7,7 +7,39 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Runs first and with no permissions: nothing is pushed anywhere until the ref is a tag
+  # and the tag matches the CLI package version exactly.
+  verify:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches package version
+        id: check
+        run: |
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "Error: Release must run from a tag, got ref '${{ github.ref }}'"
+            exit 1
+          fi
+          TAG_VERSION="${{ github.ref_name }}"
+          VERSION="$(node -p "require('./packages/cli/package.json').version")"
+          if [ "$TAG_VERSION" != "v$VERSION" ]; then
+            echo "Error: git tag '$TAG_VERSION' does not match package version 'v$VERSION'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # 1.2.3-rc.1 is a prerelease; it must not move :latest
+          case "$VERSION" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
   image:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,6 +57,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # The bare tag (no `v`) is the one the CLI pulls — see packages/cli/src/start.ts.
       - uses: docker/build-push-action@v5
         with:
           context: .
@@ -32,26 +65,18 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/warehousd/warehousd:${{ github.ref_name }}
-            ghcr.io/warehousd/warehousd:latest
+            ghcr.io/tregismoreira/warehousd:${{ needs.verify.outputs.version }}
+            ghcr.io/tregismoreira/warehousd:v${{ needs.verify.outputs.version }}
+            ${{ needs.verify.outputs.prerelease == 'false' && 'ghcr.io/tregismoreira/warehousd:latest' || '' }}
 
   npm:
-    needs: image
+    needs: [verify, image]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Verify version matches tag
-        run: |
-          TAG_VERSION="${{ github.ref_name }}"
-          PACKAGE_VERSION="v$(node -p "require('./packages/cli/package.json').version")"
-          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "Error: git tag '$TAG_VERSION' does not match package version '$PACKAGE_VERSION'"
-            exit 1
-          fi
 
       - uses: pnpm/action-setup@v4
         with:
@@ -66,8 +91,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter warehousd build
+      # Path filter, not name filter: `warehousd` also matches the private root package.
+      - run: pnpm --filter ./packages/cli build
 
-      - run: pnpm --filter warehousd publish --no-git-checks --access public
+      - run: pnpm --filter ./packages/cli publish --no-git-checks --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

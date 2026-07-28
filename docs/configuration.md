@@ -66,7 +66,8 @@ collections:
 ```
 
 A collection name may not contain `__` — that is reserved for file-collection
-storage tables.
+storage tables. Field names must match `[a-z_][a-z0-9_]*` (case-insensitive);
+anything else is rejected at config load rather than reaching DDL.
 
 ### Field options
 

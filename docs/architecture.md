@@ -117,7 +117,8 @@ type QueryIntent = {
 type BrokerResult =
   | { ok: true;  documents: Document[]; fieldsReturned: string[]; auditId: string }
   | { ok: false; reason: "no_grant" | "expired_grant" | "field_denied"
-               | "unknown_collection" | "unknown_field" | "invalid_intent";
+               | "unknown_collection" | "unknown_field" | "invalid_intent"
+               | "internal_error";
       auditId: string };       // reason codes only — never a denied value, never SQL
 
 broker.query(ctx, intent)
@@ -136,6 +137,11 @@ selecting only granted fields → execute → audit → return.
 
 Grants are loaded fresh on every request. Revocation and expiry take effect on
 the very next query; nothing about a grant is ever baked into a token.
+
+A driver error becomes `internal_error` and nothing else. Postgres messages name
+columns, tables, and values — precisely what invariant 4 forbids leaking — so the
+raw error goes to the server log and the caller gets a bare reason code. The
+audit row is still written: an unaudited probe would leave no trace.
 
 **Aggregation is permitted only over fields the caller could already read row by
 row.** That is deliberate: an aggregate can then never reveal anything new, so no
@@ -338,6 +344,11 @@ One OAuth-protected endpoint at `/mcp`, streamable HTTP.
 Refusals return a reason code plus a request-access hint — never a denied value,
 never SQL. Tool descriptions state the governance model plainly: the model
 reading them is the first consumer of the security posture.
+
+Clients find the authorization server through the standard discovery documents
+under `app/.well-known/`: `oauth-authorization-server` (RFC 8414) and
+`oauth-protected-resource` (RFC 9728). A connector needs only the `/mcp` URL —
+the rest is discovered.
 
 ## What the model is trusted with
 

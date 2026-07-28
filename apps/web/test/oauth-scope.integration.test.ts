@@ -93,6 +93,30 @@ describe("rule 2: env:live requires an approved, unexpired live grant", () => {
     const scope = await exchangeCodeForScope(client_id, client_secret, code!, verifier);
     expect(scope).toContain("env:live");
   });
+
+  it("live-allowed client + user WITH an approved live grant with NULL expires_at → env:live survives", async () => {
+    const reg = await db.auth.api.registerMcpClient({
+      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "Live Allowed Client 3" },
+      asResponse: true,
+    } as any);
+    const { client_id, client_secret } = await reg.json();
+    const app = getAppPool();
+    await upsertClientPolicy(app, client_id, "Live Allowed Client 3", ["env:dev", "env:live"]);
+    const grantId = await requestGrant(app, {
+      userId: "mia", collection: "col_r2_nullexp", env: "live",
+      purposeLabel: "permanent", allowedFields: ["id"],
+    });
+    // Approve with no expiry — expires_at will be NULL in the database
+    await approveGrant(app, grantId, "marcus", {});
+
+    const { verifier, challenge } = pkcePair();
+    const { code } = await authorizeAndGetCode(db.auth, {
+      clientId: client_id, scope: "env:live", cookie: miaCookie, challenge,
+    });
+    expect(code).toBeTruthy();
+    const scope = await exchangeCodeForScope(client_id, client_secret, code!, verifier);
+    expect(scope).toContain("env:live");
+  });
 });
 
 describe("rule 3: both env:dev and env:live survive → redirected to the env picker", () => {

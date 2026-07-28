@@ -14,8 +14,9 @@ change enforcement, the pull request must carry a test that fails without it.
 | `pnpm test` | Vitest: broker unit + integration, CLI, and web route/integration tests | Postgres |
 | `pnpm build` | Production build and full typecheck | — |
 | `pnpm e2e` | Playwright against a real browser: all eleven web surfaces | Postgres |
-| `pnpm test:e2e:cli` | The published CLI driving real Docker containers end to end | Docker |
+| `pnpm test:e2e:cli` | The built CLI driving real Docker containers end to end | Docker |
 | `pnpm test:e2e:sso` | A real OIDC and SAML round trip against Keycloak | Docker |
+| `pnpm test:e2e` | Both of the above, in sequence | Docker |
 
 Postgres comes from `pnpm test:up` (pgvector on `127.0.0.1:54330`, plus Keycloak
 for the SSO suite); `pnpm test:down` tears it down with its volume.
@@ -36,10 +37,23 @@ errors sit undetected while every test passes. `pnpm build` is what catches them
 
 The Keycloak suite is gated behind `WAREHOUSD_E2E_KEYCLOAK`, so a default
 `pnpm test` run never needs a container beyond Postgres. `pnpm test:e2e:cli`
-builds and runs real containers and takes several minutes; point it at a locally
+runs the *built* CLI against real containers and takes several minutes — run
+`pnpm --filter ./packages/cli build` first (a path filter, not a name filter:
+`warehousd` also matches the private root package), and point it at a locally
 built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 
-CI runs lint, `pnpm test`, `pnpm build`, then the CLI and SSO end-to-end suites.
+> ⚠️ **Free port 8722 before running `pnpm e2e`.** `playwright.config.ts` sets
+> `reuseExistingServer: !process.env.CI`, so if anything is already serving
+> `http://localhost:8722/login` — most easily a container left behind by
+> `warehousd start` or a previous `test:e2e:cli` run — Playwright silently reuses
+> it instead of starting the dev server under test. The suite then runs against
+> the wrong database and fails with `WARN [Better Auth]: User not found` and
+> sign-in timeouts that look like application bugs. Check with
+> `lsof -nP -iTCP:8722 -sTCP:LISTEN` before debugging anything else.
+
+CI runs lint, `pnpm test`, and `pnpm build`, then Playwright, a packaging
+smoke test that installs the CLI tarball outside the workspace, and the CLI and
+SSO end-to-end suites.
 
 ## What the enforcement tests assert
 
@@ -92,25 +106,13 @@ checked by hand, because they need credentials or a product UI no test can drive
 2. **A real IdP.** [configure-sso.md](configure-sso.md) against Okta, Entra ID,
    or Google Workspace rather than the Keycloak container the automated suite
    uses.
-3. **The login page's SSO-first states.** `apps/web/e2e/login.spec.ts` covers
-   local login, the demo shortcuts, sign-out, and the deep-link bounce, but
-   nothing exercises the page *with a provider registered*: the "Sign in with
-   your company account" button, the collapsed "Use a local account" disclosure,
-   the "No login method is configured" state, the `returnTo` OAuth continuation,
-   or the SAML branch. Registering a provider changes what every other login test
-   sees, which is why it is not in the suite today. With a provider registered,
-   check all four states by eye:
-
-   | Setup | Expected |
-   |---|---|
-   | No provider, local login on | Email/password form and demo buttons |
-   | Provider, local login on | SSO button primary, form collapsed under a disclosure |
-   | Provider, `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` | SSO button only |
-   | No provider, `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` | "No login method is configured" |
-
-   Then visit `/login?client_id=abc&response_type=code&scope=openid`, sign in,
-   and confirm you land on `/api/auth/mcp/authorize?…` carrying every original
-   query parameter — while a plain `/login` sign-in still lands on `/`.
+3. **The login page's SAML branch, and how any of it looks.**
+   `apps/web/e2e/login.spec.ts` now drives the page's states by mocking
+   `/api/sso/status` — SSO-first rendering with local login collapsed, the "No
+   login method is configured" state, and `returnTo` parameters surviving
+   sign-in through to the authorize endpoint. Two gaps remain: no test sends
+   `providerType: "saml"`, and no test asserts what the page *looks* like. Check
+   those by eye against a registered SAML provider.
 
 Re-run all three whenever the OAuth flow, the login page, or the env-scope rules
 change materially — they are the only checks that exercise the full chain the way

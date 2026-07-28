@@ -317,6 +317,7 @@ decision visible in the audit browser.
 | [docs/glossary.md](docs/glossary.md) | Collection, document, field — and the words we avoid |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Local setup, ground rules, what to run before a pull request |
 | [docs/testing.md](docs/testing.md) | The suites, what they assert, what is still manual |
+| [docs/releasing.md](docs/releasing.md) | Cutting a tagged release of the image and the CLI |
 
 ## Roadmap
 

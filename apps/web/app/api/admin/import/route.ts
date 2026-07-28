@@ -1,9 +1,8 @@
 import { NextRequest } from "next/server";
-import { loadConfig, importCollection } from "@warehousd/broker";
-import { getBroker } from "../../../lib/broker";
+import { importCollection } from "@warehousd/broker";
+import { getBroker, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
 
-const projectDir = process.env.WAREHOUSD_PROJECT_DIR!;
 const MAX_BYTES = 5 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
@@ -28,7 +27,7 @@ export async function POST(req: NextRequest) {
   // env is NOT read from the cookie here: import writes data_live by definition. There is no
   // parameter that could redirect it at data_synth, and none that could redirect it away.
   const result = await importCollection(
-    getBroker().pools, loadConfig(projectDir), guard.user.id, collection, { text, format });
+    getBroker().pools, getConfig(), guard.user.id, collection, { text, format });
 
   if (!result.ok) {
     const status = result.reason === "import_not_configured" ? 503 : 400;

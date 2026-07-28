@@ -30,9 +30,13 @@ export async function setAllowedScopes(
 }
 
 export async function hasApprovedLiveGrant(app: Pool, userId: string): Promise<boolean> {
+  // NULL expires_at means "no expiry", matching loadActiveGrant (grants/eval.ts).
+  // The two must agree: a grant the broker honors must also make the user
+  // eligible for the env:live scope, or live access silently half-works.
   const r = await app.query(
     `select 1 from app.grants
-     where user_id=$1 and env='live' and status='approved' and expires_at > now() limit 1`,
+     where user_id=$1 and env='live' and status='approved'
+       and (expires_at is null or expires_at > now()) limit 1`,
     [userId]);
   return (r.rowCount ?? 0) > 0;
 }

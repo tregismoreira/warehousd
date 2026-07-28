@@ -43,7 +43,7 @@ Idempotent — re-running picks up YAML changes.
 | `--verbose` | Log every Docker command. |
 
 The server image is resolved in this order: `server.image` in `warehousd.yml`,
-then `WAREHOUSD_IMAGE`, then `ghcr.io/warehousd/warehousd:<cli-version>`.
+then `WAREHOUSD_IMAGE`, then `ghcr.io/tregismoreira/warehousd:<cli-version>`.
 
 ```
 ═══════════════════════════════════════════════════════════

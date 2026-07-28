@@ -40,7 +40,9 @@ function interpolate(raw: string): string {
 function deepMerge<T>(base: T, over: Partial<T>): T {
   if (Array.isArray(base) || Array.isArray(over)) return (over ?? base) as T;
   if (typeof base !== "object" || base === null) return (over ?? base) as T;
-  const out: Record<string, unknown> = { ...(base as object) };
+  // Use Object.create(null) to avoid assigning to __proto__ as a computed key
+  const out: Record<string, unknown> = Object.create(null);
+  for (const [k, v] of Object.entries(base as object)) out[k] = v;
   for (const [k, v] of Object.entries(over as object)) {
     out[k] = k in (base as object) ? deepMerge((base as Record<string, unknown>)[k], v) : v;
   }

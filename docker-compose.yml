@@ -19,7 +19,7 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-    image: ghcr.io/warehousd/warehousd:dev
+    image: ghcr.io/tregismoreira/warehousd:dev
     ports:
       - "8722:8722"
     environment:

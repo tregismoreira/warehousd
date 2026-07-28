@@ -13,13 +13,14 @@ import {
 import { resolveProject, type Project } from "./project";
 import { ensureState, writeOutputs, type Outputs } from "./state";
 import { buildOutputs, formatOutputs } from "./outputs";
+import { IMAGE_REPO } from "./image";
 import { getDevClient } from "@warehousd/broker";
 
 // WAREHOUSD_CLI_VERSION is defined by tsup at build time; fallback to 'latest' in dev mode.
 declare const WAREHOUSD_CLI_VERSION: string | undefined;
 const DEFAULT_IMAGE =
   process.env.WAREHOUSD_IMAGE ||
-  `ghcr.io/warehousd/warehousd:${typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "latest"}`;
+  `${IMAGE_REPO}:${typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "latest"}`;
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_INTERVAL_MS = 1000;
 
