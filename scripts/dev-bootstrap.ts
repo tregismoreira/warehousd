@@ -2,7 +2,7 @@
 import { Pool } from "pg";
 import { execSync } from "child_process";
 import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, loadTaxonomyBindings, ensureSchemasAndRoles } from "@warehousd/broker";
-import { seedLive } from "../examples/meridian/seed/live";
+import { seedLive } from "../examples/harbor/seed/live";
 import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
 
