@@ -88,8 +88,10 @@ export async function POST(req: NextRequest) {
     });
     if (!built.ok) return Response.json({ error: built.error }, { status: 400 });
 
-    const approved = await approveGrant(app, body.id, by, built.opts);
-    if (!approved) return Response.json({ error: "unknown_grant" }, { status: 404 });
+    const approved = await approveGrant(app, cfg, body.id, by, { ...built.opts, verbs: body.verbs });
+    if (!approved.ok)
+      return Response.json({ error: approved.error },
+        { status: approved.error === "unknown_grant" ? 404 : 400 });
     return Response.json({ ok: true });
   }
   if (action === "deny") {

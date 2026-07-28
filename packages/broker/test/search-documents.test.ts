@@ -183,7 +183,7 @@ it("document_filter applies to search too (design test 3 over the search path)",
   );
   const grantId = grantRes.rows[0].id;
   const { approveGrant } = await import("../src/grants/manage");
-  await approveGrant(db, grantId, "admin", {
+  await approveGrant(db, docCfg, grantId, "admin", {
     documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
   });
 

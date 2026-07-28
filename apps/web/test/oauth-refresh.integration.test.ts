@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy, approveGrant, requestGrant, revokeGrant, setAllowedScopes } from "@warehousd/broker";
+import { upsertClientPolicy, approveGrant, requestGrant, revokeGrant, setAllowedScopes, loadConfig } from "@warehousd/broker";
+
+// approveGrant validates verbs against the collection's config, and these fixtures grant over
+// meridian collections — so that is the config the rules have to be checked against.
+const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -26,7 +31,7 @@ async function issueTokenWithLiveScope(collectionSuffix: string = "") {
   const grantId = await requestGrant(app, {
     userId: "mia", collection: `people${collectionSuffix}`, env: "live", purposeLabel: "t", allowedFields: ["id"],
   });
-  await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+  await approveGrant(app, meridianCfg, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
 
   const { verifier, challenge } = pkcePair();
   const { code } = await authorizeAndGetCode(db.auth, {

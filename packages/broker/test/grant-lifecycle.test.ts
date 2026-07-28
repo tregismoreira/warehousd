@@ -36,7 +36,7 @@ it("request→pending→approve(trim+expiry)→query ok→revoke→immediately n
   const id = await requestGrant(admin, { userId: "mia", collection: "people", orgId: "default", env: "dev",
     purposeLabel: "onboarding", allowedFields: ["id", "full_name", "email"] });
   // trim email off on approval, set future expiry
-  await approveGrant(admin, id, "marcus",
+  await approveGrant(admin, cfg, id, "marcus",
     { allowedFields: ["id", "full_name"], expiresAt: new Date(Date.parse("2099-01-01")).toISOString() });
 
   const ok = await broker.query(ctx, { collection: "people", limit: 2 });
@@ -56,14 +56,14 @@ it("request→pending→approve(trim+expiry)→query ok→revoke→immediately n
 
 it("approving a second grant for the same (user, collection, env) fails (design test 10)", async () => {
   const id1 = await requestGrant(admin, { userId: "u", collection: "people", orgId: "default", env: "dev", purposeLabel: "a", allowedFields: ["id"] });
-  await approveGrant(admin, id1, "marcus");
+  await approveGrant(admin, cfg, id1, "marcus");
   const id2 = await requestGrant(admin, { userId: "u", collection: "people", orgId: "default", env: "dev", purposeLabel: "b", allowedFields: ["id"] });
-  await expect(approveGrant(admin, id2, "marcus")).rejects.toThrow(/grants_one_active|duplicate key/);
+  await expect(approveGrant(admin, cfg, id2, "marcus")).rejects.toThrow(/grants_one_active|duplicate key/);
 });
 
 it("approveGrant persists documentFilter", async () => {
   const id = await requestGrant(admin, { userId: "u2", collection: "people", orgId: "default", env: "dev", purposeLabel: "p", allowedFields: ["title","content"] });
-  await approveGrant(admin, id, "marcus", { documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] } });
+  await approveGrant(admin, cfg, id, "marcus", { documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] } });
   const g = await loadActiveGrant(admin, "u2", "people", "dev", "default");
   expect(g?.documentFilter?.op).toBe("in");
 });
@@ -94,7 +94,7 @@ it("revokeGrant returns false for pending grant (not approved)", async () => {
 
 it("denyGrant returns false for approved grant", async () => {
   const id = await requestGrant(admin, { userId: "u5", collection: "people", orgId: "default", env: "dev", purposeLabel: "test", allowedFields: ["id"] });
-  await approveGrant(admin, id, "marcus");
+  await approveGrant(admin, cfg, id, "marcus");
   const denied = await denyGrant(admin, id, "marcus");
   expect(denied).toBe(false);
 });

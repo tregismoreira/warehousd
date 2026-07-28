@@ -24,7 +24,10 @@ export async function createAppSchema(db: Pool): Promise<void> {
       env text not null check (env in ('dev','live')),
       status text not null check (status in ('pending','approved','denied','revoked')),
       requested_at timestamptz default now(), decided_at timestamptz,
-      decided_by text, expires_at timestamptz);
+      decided_by text, expires_at timestamptz,
+      document_filter jsonb,
+      verbs text[] not null default '{read}',
+      mode text not null default 'direct' check (mode in ('direct','proposal_only')));
     create table if not exists app.audit_events (
       id uuid primary key default gen_random_uuid(),
       at timestamptz default now(), user_id text, env text, collection text,
@@ -37,6 +40,18 @@ export async function createAppSchema(db: Pool): Promise<void> {
   // deployment in v1, so it is not yet an isolation boundary there.
   for (const t of ["collections", "grants", "audit_events"]) await addOrgColumn(db, t);
   await db.query(`alter table app.grants add column if not exists document_filter jsonb`);
+  await db.query(`alter table app.grants add column if not exists verbs text[] not null default '{read}'`);
+  await db.query(`alter table app.grants add column if not exists mode text not null default 'direct'`);
+  // Backfill verbs to '{read}' for existing grants if they're still null (paranoia)
+  await db.query(`update app.grants set verbs='{read}' where verbs is null`);
+  // Enforce mode vocabulary
+  await db.query(`
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname = 'grants_mode_check') then
+        alter table app.grants add constraint grants_mode_check
+          check (mode in ('direct','proposal_only'));
+      end if;
+    end $$;`);
   await db.query(`drop index if exists grants_one_active`);
   await db.query(`create unique index if not exists grants_one_active
     on app.grants (org_id, user_id, collection, env) where status='approved'`);

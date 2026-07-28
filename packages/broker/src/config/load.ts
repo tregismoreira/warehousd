@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { ConfigSchema, type WarehousdConfig } from "./schema";
+import { ConfigSchema, readPosture, writePosture, type WarehousdConfig } from "./schema";
 
 // Split a line into (code, comment) at the first unquoted "#" preceded by
 // whitespace or start-of-line, per YAML comment syntax — so `${env:...}`
@@ -73,9 +73,24 @@ export function findCollection(
   return Object.hasOwn(cfg.collections, name) ? cfg.collections[name]! : null;
 }
 
-// The two-tier deny (§5.3): fields marked posture:deny can never be granted.
+// The two-tier deny (§5.3): fields with read:allow can be granted for reading.
 export function grantableFields(cfg: WarehousdConfig, collection: string): string[] {
   const c = findCollection(cfg, collection);
   if (!c) return [];
-  return Object.entries(c.fields).filter(([, f]) => f.posture === "allow").map(([n]) => n);
+  return Object.entries(c.fields).filter(([, f]) => readPosture(f) === "allow").map(([n]) => n);
+}
+
+// Fields that can be written to (write:allow).
+export function writableFields(cfg: WarehousdConfig, collection: string): string[] {
+  const c = findCollection(cfg, collection);
+  if (!c) return [];
+  return Object.entries(c.fields).filter(([, f]) => writePosture(f) === "allow").map(([n]) => n);
+}
+
+// Verbs this collection's structural type supports (if writable: true).
+export function supportedVerbs(cfg: WarehousdConfig, collection: string): ("create" | "update" | "delete")[] {
+  const c = findCollection(cfg, collection);
+  if (!c || !c.writable) return [];
+  if (c.type === "file") return ["create"];
+  return ["create", "update", "delete"];
 }

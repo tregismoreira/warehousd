@@ -40,6 +40,8 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     // 3. active grant
     const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env, ctx.orgId);
     if (!grant) return refuse(ctx, intent.collection, intent, "no_grant");
+    // No read verb → no_grant (not a new code; §4 comment on information leak)
+    if (!grant.verbs.includes("read")) return refuse(ctx, intent.collection, intent, "no_grant");
     // 4. every referenced field ∈ grant.allowedFields
     for (const f of referenced) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
@@ -78,6 +80,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!c) return refuse(ctx, name, null, "unknown_collection");
     const grant = await loadActiveGrant(app, ctx.userId, name, ctx.env, ctx.orgId);
     if (!grant) return refuse(ctx, name, null, "no_grant");
+    if (!grant.verbs.includes("read")) return refuse(ctx, name, null, "no_grant");
     const fields = Object.entries(c.fields)
       .filter(([n]) => grant.allowedFields.includes(n))
       // type is guaranteed by CollectionSchema refinement for structured collections; file collections have types filled in by transform
@@ -98,13 +101,23 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   async function searchDocuments(ctx: BrokerContext, intent: DocSearchIntent): Promise<BrokerResult> {
     const c = findCollection(cfg, intent.collection);
     if (!c) return refuse(ctx, intent.collection, intent, "unknown_collection");
-    if ((c.type ?? "dataset") !== "file" || typeof intent.q !== "string" || !intent.q.trim())
+    if (typeof intent.q !== "string" || !intent.q.trim())
       return refuse(ctx, intent.collection, intent, "invalid_intent");
+
+    // Check if searchable: file collections always support search (via tsv column);
+    // dataset collections need at least one searchable: true field
+    const isFile = c.type === "file";
+    const searchableFields = isFile ? [] : Object.entries(c.fields)
+      .filter(([, f]) => f.searchable === true).map(([n]) => n);
+    if (!isFile && searchableFields.length === 0)
+      return refuse(ctx, intent.collection, intent, "invalid_intent");
+
     const all = Object.keys(c.fields);
     for (const f of intent.fields ?? []) if (!all.includes(f))
       return refuse(ctx, intent.collection, intent, "unknown_field");
     const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env, ctx.orgId);
     if (!grant) return refuse(ctx, intent.collection, intent, "no_grant");
+    if (!grant.verbs.includes("read")) return refuse(ctx, intent.collection, intent, "no_grant");
     for (const f of intent.fields ?? []) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
     if (grant.documentFilter && !all.includes(grant.documentFilter.field))
@@ -114,7 +127,8 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     try {
       const { text, values } = buildSelect(ctx.env,
         { collection: intent.collection, fields: selectFields, limit: intent.limit, offset: intent.offset } as QueryIntent,
-        grant.allowedFields, { q: intent.q, documentFilter: grant.documentFilter });
+        grant.allowedFields,
+        { q: intent.q, documentFilter: grant.documentFilter, searchFields: searchableFields });
       const documents = await withOrg(dataPool(pools, ctx), ctx.orgId, async (client: PoolClient) => {
         return (await client.query(text, values)).rows;
       });

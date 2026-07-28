@@ -52,6 +52,14 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
   // Re-apply upgrade path for a newly bound taxonomy on a pre-existing table.
   // c.taxonomy is a config-validated vocabulary slug — identifier interpolation is safe.
   if (c.taxonomy) ddl += ` alter table ${schema}.${collection} add column if not exists "${c.taxonomy}" text;`;
+
+  // Add tsvector columns and indexes for searchable fields (dataset only)
+  for (const [name, f] of Object.entries(c.fields)) {
+    if (f.searchable) {
+      ddl += `\n      alter table ${schema}.${collection} add column if not exists "${name}_tsv" tsvector generated always as (to_tsvector('english', coalesce("${name}", ''))) stored;`;
+      ddl += `\n      create index if not exists "${collection}_${name}_tsv_idx" on ${schema}.${collection} using gin ("${name}_tsv");`;
+    }
+  }
   return ddl;
 }
 
@@ -89,6 +97,8 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
       selects.push(`${alias}."${jc}" as "${name}"`);
     } else {
       selects.push(`base."${name}"`);
+      // Include tsvector columns for searchable fields; they're not in the grantable set
+      if (f.searchable) selects.push(`base."${name}_tsv"`);
     }
   }
   return `create or replace view ${schema}.v_${collection} as

@@ -95,7 +95,7 @@ it("test 5 (scope clauses): full env-as-scope acceptance gate", async () => {
     // After promotion, next refresh yields env:live.
     await setAllowedScopes(app, client_id, ["env:dev", "env:live"], "ana");
     const grantId = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"] });
-    await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await approveGrant(app, cfg, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
     const refreshed = await web.auth.api.mcpOAuthToken({
       body: { grant_type: "refresh_token", refresh_token: t1.refresh_token, client_id, client_secret },
       asResponse: true,

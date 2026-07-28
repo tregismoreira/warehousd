@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy, approveGrant, requestGrant } from "@warehousd/broker";
+import { upsertClientPolicy, approveGrant, requestGrant, loadConfig } from "@warehousd/broker";
+
+// approveGrant validates verbs against the collection's config, and these fixtures grant over
+// meridian collections — so that is the config the rules have to be checked against.
+const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -83,7 +88,7 @@ describe("rule 2: env:live requires an approved, unexpired live grant", () => {
       userId: "mia", collection: "people", orgId: "default", env: "live",
       purposeLabel: "test", allowedFields: ["id"],
     });
-    await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await approveGrant(app, meridianCfg, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
 
     const { verifier, challenge } = pkcePair();
     const { code } = await authorizeAndGetCode(db.auth, {
@@ -107,7 +112,7 @@ describe("rule 2: env:live requires an approved, unexpired live grant", () => {
       purposeLabel: "permanent", allowedFields: ["id"],
     });
     // Approve with no expiry — expires_at will be NULL in the database
-    await approveGrant(app, grantId, "marcus", {});
+    await approveGrant(app, meridianCfg, grantId, "marcus", {});
 
     const { verifier, challenge } = pkcePair();
     const { code } = await authorizeAndGetCode(db.auth, {
@@ -131,7 +136,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const grantId = await requestGrant(app, {
       userId: "mia", collection: "col_r3_1", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"],
     });
-    await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await approveGrant(app, meridianCfg, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
 
     const { verifier, challenge } = pkcePair();
     const { res } = await authorizeAndGetCode(db.auth, {
@@ -153,7 +158,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const grantId = await requestGrant(app, {
       userId: "mia", collection: "col_r3_2", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"],
     });
-    await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await approveGrant(app, meridianCfg, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
 
     const { verifier, challenge } = pkcePair();
     const { code } = await authorizeAndGetCode(db.auth, {
@@ -177,7 +182,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const grantId = await requestGrant(app, {
       userId: "mia", collection: "col_r3_3", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"],
     });
-    await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await approveGrant(app, meridianCfg, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
 
     const { verifier, challenge } = pkcePair();
     const { res } = await authorizeAndGetCode(db.auth, {

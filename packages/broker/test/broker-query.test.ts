@@ -112,7 +112,7 @@ describe("document_filter on file collections", () => {
        values ('u3', 'policies', array['title','content'], 'dev', 'pending') returning id`);
     const grantId = grantRes.rows[0].id;
     const { approveGrant } = await import("../src/grants/manage");
-    await approveGrant(dbDoc, grantId, "admin", {
+    await approveGrant(dbDoc, docCfg, grantId, "admin", {
       documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
     });
 
@@ -168,7 +168,7 @@ describe("document_filter on file collections", () => {
        values ('u4', 'policies', array['title','content'], 'dev', 'pending') returning id`);
     const grantId = grantRes.rows[0].id;
     const { approveGrant } = await import("../src/grants/manage");
-    await approveGrant(dbDoc, grantId, "admin", {
+    await approveGrant(dbDoc, docCfg, grantId, "admin", {
       documentFilter: { field: "path", op: "in", value: [] },
     });
 

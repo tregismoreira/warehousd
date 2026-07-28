@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy, requestGrant, approveGrant } from "@warehousd/broker";
+import { upsertClientPolicy, requestGrant, approveGrant, loadConfig } from "@warehousd/broker";
+
+// approveGrant validates verbs against the collection's config, and these fixtures grant over
+// meridian collections — so that is the config the rules have to be checked against.
+const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -107,7 +112,7 @@ describe("/mcp endpoint", () => {
   it("describe_collection is grant-filtered", async () => {
     const app = getAppPool();
     const g = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "dev", purposeLabel: "t", allowedFields: ["id"] });
-    await approveGrant(app, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await approveGrant(app, meridianCfg, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
     const token = await mintAccessToken("env:dev");
     const { body } = await rpc(token, "tools/call", { name: "describe_collection", arguments: { name: "people" } });
     const out = JSON.parse(body.result.content[0].text);

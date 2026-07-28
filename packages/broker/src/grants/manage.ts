@@ -1,10 +1,51 @@
 import type { Pool } from "pg";
 import type { DocumentFilter } from "../types";
 import type { WarehousdConfig } from "../config/schema";
-import { findCollection, grantableFields } from "../config/load";
+import { findCollection, grantableFields, writableFields, supportedVerbs } from "../config/load";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
 
 export type GrantRequestError = "unknown_collection" | "purpose_required" | "field_not_grantable";
+
+export const GRANT_VERBS = ["read", "create", "update", "delete", "approve"] as const;
+export type GrantVerb = (typeof GRANT_VERBS)[number];
+const MUTATING_VERBS: readonly string[] = ["create", "update", "delete"];
+
+// One rule set for verbs, shared by every approval path — the web route, the MCP tool, and
+// anything later. A rule enforced in only one of them is not a rule.
+export function validateVerbs(
+  verbs: string[], cfg: WarehousdConfig, collection: string, allowedFields: string[],
+): { ok: true } | { ok: false; error: string } {
+  if (verbs.length === 0) return { ok: false, error: "grant must carry at least one verb" };
+  for (const v of verbs)
+    if (!(GRANT_VERBS as readonly string[]).includes(v))
+      return { ok: false, error: `unknown verb "${v}"` };
+
+  if (!findCollection(cfg, collection)) return { ok: false, error: "unknown collection" };
+
+  // Invariant: approve requires read. You cannot approve what you cannot see — without this,
+  // "approve, then read the diff" is a privilege-escalation path around field postures.
+  // Read is NOT required in general: an append-only ingestion grant (create, no read) is a
+  // legitimate shape and forcing read on it would widen access, not narrow it.
+  if (verbs.includes("approve") && !verbs.includes("read"))
+    return { ok: false, error: "the approve verb requires read" };
+
+  // Verb support is structural — it follows from the collection's type, so `update` on a file
+  // collection is refused here regardless of what an approver asks for.
+  const supported = supportedVerbs(cfg, collection);
+  for (const v of verbs)
+    if (MUTATING_VERBS.includes(v) && !supported.includes(v as "create" | "update" | "delete"))
+      return { ok: false, error: `collection does not support the ${v} verb` };
+
+  // A write verb over a field set containing nothing writable is a grant that can do nothing —
+  // more likely a mistake than an intent, and silently approving it hides the mistake.
+  if (verbs.some((v) => MUTATING_VERBS.includes(v))) {
+    const writable = writableFields(cfg, collection);
+    if (!allowedFields.some((f) => writable.includes(f)))
+      return { ok: false, error: "write verbs require at least one writable field in allowed_fields" };
+  }
+
+  return { ok: true };
+}
 
 // Validation lives here, not in the callers: the web route and the MCP request_access
 // tool both reach app.grants, and a rule enforced in only one of them is not a rule.
@@ -48,15 +89,39 @@ export async function requestGrant(app: Pool, i: {
   return r.rows[0].id;
 }
 
-export async function approveGrant(app: Pool, id: string, by: string,
-  opts: { allowedFields?: string[]; expiresAt?: string; documentFilter?: DocumentFilter } = {}): Promise<boolean> {
+export type ApproveGrantError = "unknown_grant" | "invalid_verbs";
+
+// cfg is required, not optional. Verb rules are only rules if every approval runs them, and
+// an optional config parameter is an opt-out of the approve-requires-read invariant that a
+// caller can take by accident.
+export async function approveGrant(
+  app: Pool, cfg: WarehousdConfig, id: string, by: string,
+  opts: { allowedFields?: string[]; expiresAt?: string; documentFilter?: DocumentFilter;
+          verbs?: string[]; mode?: "direct" | "proposal_only" } = {},
+): Promise<{ ok: true } | { ok: false; error: ApproveGrantError; detail?: string }> {
+  const grantRes = await app.query(
+    `select collection, allowed_fields, verbs, mode from app.grants where id=$1`, [id]);
+  if (grantRes.rowCount === 0) return { ok: false, error: "unknown_grant" };
+  const grant = grantRes.rows[0];
+
+  const collection = grant.collection;
+  const allowedFields = opts.allowedFields ?? grant.allowed_fields ?? [];
+  const verbs = opts.verbs ?? grant.verbs ?? ["read"];
+  const mode = opts.mode ?? grant.mode ?? "direct";
+
+  const v = validateVerbs(verbs, cfg, collection, allowedFields);
+  if (!v.ok) return { ok: false, error: "invalid_verbs", detail: v.error };
+
   const result = await app.query(
     `update app.grants set status='approved', decided_by=$2, decided_at=now(),
-       allowed_fields=coalesce($3, allowed_fields), expires_at=$4, document_filter=$5
+       allowed_fields=coalesce($3, allowed_fields), expires_at=$4, document_filter=$5,
+       verbs=$6, mode=$7
      where id=$1 and status='pending'`,
     [id, by, opts.allowedFields ?? null, opts.expiresAt ?? null,
-     opts.documentFilter ? JSON.stringify(opts.documentFilter) : null]);
-  return (result.rowCount ?? 0) > 0;
+     opts.documentFilter ? JSON.stringify(opts.documentFilter) : null,
+     verbs, mode]);
+  // Zero rows means the grant was not pending — already decided, or raced.
+  return (result.rowCount ?? 0) > 0 ? { ok: true } : { ok: false, error: "unknown_grant" };
 }
 
 export async function denyGrant(app: Pool, id: string, by: string): Promise<boolean> {

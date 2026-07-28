@@ -137,7 +137,7 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
       ["u_doc", "policies", ["title", "content"], "dev", "pending"]
     );
     const grantId = grantRes.rows[0].id;
-    await approveGrant(db2, grantId, "admin", {
+    await approveGrant(db2, docCfg, grantId, "admin", {
       documentFilter: { field: "path", op: "in", value: ["normal.md"] },
     });
 
