@@ -131,6 +131,22 @@ The interesting ones, and where they live:
   not exist; `$self` scopes it; `path` on a dataset is `invalid_intent`; a file's
   chunks are rejoined into one document rather than returning the first chunk;
   `org_id` and `_rev*` never appear; every outcome writes an audit row.
+- **Mutation refusals** (`mutate-refusals`) — one test per reason code, plus the
+  leak assertion: no refusal body contains a submitted field name, a submitted
+  value, or SQL, checked by stringifying the whole result and grepping.
+- **Dataset writes** (`mutate-dataset`) — create appends `_rev_seq=1` and is
+  readable through `query`; update appends a new revision, demotes the old, and
+  carries untouched columns forward; delete leaves a tombstone that is absent
+  from reads but present in the table; a stale `expect` is `conflict`; a `$self`
+  filter blocks editing someone else's document; the audit row names the fields
+  touched and never their values.
+- **File writes** (`mutate-file`) — create inserts a file row plus its chunks and
+  the result is immediately searchable; a duplicate `path` is `conflict`, decided
+  by the unique index rather than a pre-check the write role has no privilege to
+  make; `update`/`delete` are `verb_not_supported` even with those verbs granted.
+- **Write env isolation** (`mutate-env-isolation`) — a dev context reaches only
+  the dev write pool, and with no write pool configured `mutate` returns
+  `not_writable` rather than throwing.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
 - **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a

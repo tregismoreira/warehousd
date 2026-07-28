@@ -11,6 +11,7 @@ with real data, this is the document to read.
 - [Organizations and tenant isolation](#organizations-and-tenant-isolation)
 - [Postures, verbs, and writability](#postures-verbs-and-writability)
 - [Revisions, and immutability by privilege](#revisions-and-immutability-by-privilege)
+- [The write path: broker.mutate](#the-write-path-brokermutate)
 - [Full-document reads](#full-document-reads)
 - [Identity, OAuth, and env-as-scope](#identity-oauth-and-env-as-scope)
 - [File collections and search](#file-collections-and-search)
@@ -133,6 +134,7 @@ type BrokerResult =
 broker.query(ctx, intent)
 broker.searchDocuments(ctx, intent)     // file collections, and datasets with a searchable field
 broker.getDocument(ctx, { collection, id | path })   // one document, full granted field set
+broker.mutate(ctx, intent)              // create | update | delete, on a writable collection
 broker.describeCollection(ctx, name)    // only fields visible under the caller's grants
 broker.listCollections(ctx)             // names and descriptions only
 ```
@@ -460,6 +462,59 @@ precisely the case RLS exists for, since the write role bypasses the view.
 
 If `DEV_WRITE_DATABASE_URL` / `LIVE_WRITE_DATABASE_URL` are unset there is no
 mutation path at all, which is the safer default.
+
+## The write path: `broker.mutate`
+
+```ts
+type MutationIntent =
+  | { collection: string; op: "create"; values: Record<string, unknown> }
+  | { collection: string; op: "update"; id: string; expect?: string; values: Record<string, unknown> }
+  | { collection: string; op: "delete"; id: string; expect?: string };
+
+type MutationResult =
+  | { ok: true;  status: "applied"; documentId: string; rev: string; auditId: string }
+  | { ok: true;  status: "pending"; proposalId: string; auditId: string }
+  | { ok: false; reason: MutationRefusalReason; auditId: string };
+```
+
+`MutationRefusalReason` extends the read set with `verb_denied`,
+`verb_not_supported`, `field_not_writable`, `conflict`, `invalid_value` and
+`not_writable`.
+
+Validation order — fail fast, audit every outcome, mirroring `query`:
+
+collection exists → collection is writable → op supported for this collection
+type → active grant for `(org, user, collection, env)` → verb ∈ `grant.verbs` →
+every field exists → no field is `view_join` → every field write-allowed by
+posture → every field ∈ `grant.allowedFields` → coerce to declared types →
+target document passes the document filter → concurrency check → append revision
+→ promote → audit → return.
+
+**Identity is not content.** The declared pk (dataset) and `path` (file) address
+a document rather than describing it, so they are exempt from the write posture
+on `create` — a create must be able to name what it creates. Requiring
+`write: allow` on a pk would assert the opposite of what is true, namely that
+identity may later be changed. On `update` and `delete` they are refused
+outright: changing identity is not an edit.
+
+**The audit intent records the op and the field *names*, never the values.** A
+write payload can carry real personal data and an audit row is readable by every
+admin — a deliberate departure from `query`, whose intent is safe to store
+verbatim.
+
+Refusals carry a reason code and nothing else. `coerce()` is reused from the
+import path because its reasons already never echo the offending value; its
+granular type codes are collapsed to `invalid_value` at the broker boundary,
+since naming a type is itself a small disclosure.
+
+**Concurrency.** `expect` is the `_rev` the caller last saw; a mismatch is
+`conflict`. On promotion the old revision is demoted *before* the new one is
+inserted — both would otherwise be `_current` between the two statements and the
+partial unique index would reject the write.
+
+**`mode: proposal_only` is refused for now** with `verb_denied`. Treating it as
+`direct` would be a governance hole shipped for a phase; the pending path lands
+with proposals.
 
 ## Full-document reads
 

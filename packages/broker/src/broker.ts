@@ -1,17 +1,25 @@
+import { randomUUID, createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type {
   BrokerContext, QueryIntent, DocSearchIntent, BrokerResult, RefusalReason, VisibleSchema, Refusal,
-  GetDocumentIntent, GetDocumentResult, Document, Filter,
+  GetDocumentIntent, GetDocumentResult, Document, Filter, DocumentFilter,
+  MutationIntent, MutationResult, MutationRefusalReason,
 } from "./types";
 import { MAX_LIMIT } from "./types";
 import type { WarehousdConfig } from "./config/schema";
+import type { ActiveGrant } from "./grants/eval";
 import type { Pools } from "./db/pools";
-import { dataPool, withOrg } from "./db/pools";
+import { dataPool, withOrg, writePool } from "./db/pools";
 import { loadActiveGrant } from "./grants/eval";
 import { buildSelect } from "./sql/build";
 import { writeAudit } from "./audit/write";
-import { findCollection } from "./config/load";
-import { reassembleChunks } from "./indexing/chunk";
+import { findCollection, supportedVerbs } from "./config/load";
+import { reassembleChunks, chunkText } from "./indexing/chunk";
+import { writePosture } from "./config/schema";
+import { coerce } from "./import/validate";
+
+// The parsed shape of one collection, as CollectionSchema produces it.
+type CollectionConfig = WarehousdConfig["collections"][string];
 
 export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   const app = pools.app;
@@ -27,6 +35,31 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   function fieldsOf(collection: string): string[] | null {
     const c = findCollection(cfg, collection);
     return c ? Object.keys(c.fields) : null;
+  }
+
+  // A mutation's audit intent records the op and the field NAMES it touched — never the
+  // submitted values. This is a deliberate departure from query, whose intent is safe to store
+  // verbatim: a write payload can carry real personal data, and an audit row is readable by
+  // every admin in the UI.
+  const mutationIntent = (i: MutationIntent, fields: string[]) => ({
+    op: i.op, collection: i.collection, id: "id" in i ? i.id : undefined, fields,
+  });
+
+  function auditMutation(ctx: BrokerContext, i: MutationIntent, grantId: string | null, fields: string[]) {
+    return writeAudit(app, {
+      userId: ctx.userId, env: ctx.env, collection: i.collection, orgId: ctx.orgId,
+      intent: mutationIntent(i, fields) as never,
+      fieldsReturned: [], grantId, outcome: "allowed", reason: null });
+  }
+
+  async function refuseMutation(
+    ctx: BrokerContext, i: MutationIntent, grantId: string | null, reason: MutationRefusalReason,
+  ): Promise<MutationResult> {
+    const auditId = await writeAudit(app, {
+      userId: ctx.userId, env: ctx.env, collection: i.collection, orgId: ctx.orgId,
+      intent: mutationIntent(i, i.op === "delete" ? [] : Object.keys(i.values)) as never,
+      fieldsReturned: [], grantId, outcome: "refused", reason });
+    return { ok: false, reason, auditId };
   }
 
   async function query(ctx: BrokerContext, intent: QueryIntent): Promise<BrokerResult> {
@@ -221,7 +254,307 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       return refuse(ctx, intent.collection, null, "internal_error", grant.id);
     }
   }
-  return { query, describeCollection, listCollections, searchDocuments, getDocument };
+  async function mutate(ctx: BrokerContext, intent: MutationIntent): Promise<MutationResult> {
+    const values = intent.op !== "delete" ? intent.values : {};
+    const fieldNames = Object.keys(values);
+
+    // 1. intent shape
+    if (intent.op === "create" && !fieldNames.length && !intent.values)
+      return refuse(ctx, intent.collection, null, "invalid_intent");
+    if ((intent.op === "update" || intent.op === "delete") && !intent.id)
+      return refuse(ctx, intent.collection, null, "invalid_intent");
+
+    // 2. collection exists
+    const c = findCollection(cfg, intent.collection);
+    if (!c) return refuse(ctx, intent.collection, null, "unknown_collection");
+
+    // 3. collection is writable
+    if (!c.writable) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable" });
+      return { ok: false, reason: "not_writable", auditId };
+    }
+
+    // 4. op supported for this collection type
+    const supported = supportedVerbs(cfg, intent.collection);
+    if (!supported.includes(intent.op)) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "verb_not_supported" });
+      return { ok: false, reason: "verb_not_supported", auditId };
+    }
+
+    // 5. active grant
+    const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env, ctx.orgId);
+    if (!grant) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant" });
+      return { ok: false, reason: "no_grant", auditId };
+    }
+
+    // 6. verb ∈ grant.verbs
+    if (!grant.verbs.includes(intent.op)) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied" });
+      return { ok: false, reason: "verb_denied", auditId };
+    }
+
+    // Phase 5: proposal_only mode returns verb_denied
+    if (grant.mode === "proposal_only") {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied" });
+      return { ok: false, reason: "verb_denied", auditId };
+    }
+
+    // Write pool: env determines which pool; no pool configured → not_writable
+    const pool = writePool(pools, ctx);
+    if (!pool) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_writable" });
+      return { ok: false, reason: "not_writable", auditId };
+    }
+
+    // The field that ADDRESSES a document rather than describing it: the declared pk for a
+    // dataset, `path` for a file. It is exempt from the write posture on create, because a
+    // create has to be able to name what it is creating — and requiring `write: allow` on a pk
+    // would say the opposite of what is true, namely that identity may later be changed.
+    // On update and delete it is not accepted at all: changing identity is not an edit.
+    const identityField = c.type === "file"
+      ? "path"
+      : Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
+
+    const all = Object.keys(c.fields);
+    for (const f of fieldNames) {
+      if (!all.includes(f))
+        return refuseMutation(ctx, intent, grant.id, "unknown_field");
+      if (c.fields[f]!.view_join)
+        return refuseMutation(ctx, intent, grant.id, "field_not_writable");
+      if (f === identityField) {
+        if (intent.op !== "create")
+          return refuseMutation(ctx, intent, grant.id, "field_not_writable");
+        continue;   // identity on create: addressed above, and never posture-gated
+      }
+      if (writePosture(c.fields[f]!) !== "allow")
+        return refuseMutation(ctx, intent, grant.id, "field_not_writable");
+      if (!grant.allowedFields.includes(f))
+        return refuseMutation(ctx, intent, grant.id, "field_denied");
+    }
+
+    // File collection handling
+    if (c.type === "file") {
+      return mutateFile(ctx, intent, c, grant, pool);
+    }
+
+    // Dataset collection handling
+    return mutateDataset(ctx, intent, c, grant, pool);
+  }
+
+  // A file collection is a record of what was INGESTED, so it only ever grows: create appends
+  // a file row plus its derived chunks, and `path` being unique makes a repeat a conflict
+  // rather than a silent overwrite. Chunks are derived once here and never re-derived, which
+  // is why the "search still returns pre-edit text" bug class cannot occur for files.
+  async function mutateFile(
+    ctx: BrokerContext, intent: MutationIntent, c: CollectionConfig, grant: ActiveGrant, pool: Pool,
+  ): Promise<MutationResult> {
+    // Structural, and checked before anything else: no grant can make a file revisable.
+    if (intent.op !== "create") return refuseMutation(ctx, intent, grant.id, "verb_not_supported");
+
+    const values = intent.values;
+    const path = typeof values.path === "string" ? values.path.trim() : "";
+    const content = typeof values.content === "string" ? values.content : "";
+    if (!path || !content) return refuseMutation(ctx, intent, grant.id, "invalid_intent");
+
+    const coerced: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(values)) {
+      const r = coerce(value, c.fields[name]!);
+      if (!r.ok) return refuseMutation(ctx, intent, grant.id, "invalid_value");
+      coerced[name] = r.value;
+    }
+
+    // A term outside the bound vocabulary is a value error, exactly as it is on import.
+    if (c.taxonomy && c.taxonomy in values) {
+      const vocab = cfg.taxonomies[c.taxonomy];
+      const term = String(values[c.taxonomy] ?? "");
+      if (!vocab || !Object.hasOwn(vocab.terms, term))
+        return refuseMutation(ctx, intent, grant.id, "invalid_value");
+    }
+
+    const chunks = chunkText(content);
+    if (chunks.length === 0) return refuseMutation(ctx, intent, grant.id, "invalid_intent");
+
+    const schema = ctx.env === "live" ? "data_live" : "data_synth";
+    const files = `${schema}.${ident(`${intent.collection}__files`)}`;
+    const docs = `${schema}.${ident(`${intent.collection}__documents`)}`;
+    // The same checksum the indexer stores, so a file created through the API and one indexed
+    // from disk are indistinguishable downstream.
+    const checksum = createHash("sha256").update(content).digest("hex");
+
+    try {
+      return await withOrg(pool, ctx.orgId, async (client) => {
+        // No pre-check for an existing path: the write role holds INSERT and nothing else on
+        // file tables, keeping "write-only means write-only" true for them the way it is for
+        // the import role. The unique index on `path` is what answers, and a 23505 below
+        // becomes `conflict` — which also closes the race a pre-check would leave open.
+        const fileId = randomUUID();
+        const cols = ["id", "org_id", "path", "title", "owner", "checksum", "updated_at"];
+        const vals: unknown[] = [fileId, ctx.orgId, path,
+          coerced.title ?? null, coerced.owner ?? null, checksum,
+          coerced.updated_at ?? new Date()];
+        if (c.taxonomy) { cols.push(c.taxonomy); vals.push(coerced[c.taxonomy] ?? null); }
+        await client.query(
+          `insert into ${files} (${cols.map(ident).join(", ")})
+           values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
+
+        for (const [seq, chunk] of chunks.entries())
+          await client.query(
+            `insert into ${docs} (id, file_id, org_id, document_seq, content) values ($1,$2,$3,$4,$5)`,
+            [randomUUID(), fileId, ctx.orgId, seq, chunk]);
+
+        const auditId = await auditMutation(ctx, intent, grant.id, Object.keys(values));
+        // A file has no revisions, so its checksum is the closest thing to one: it identifies
+        // the content that was stored, and it is what a later If-Match would compare.
+        return { ok: true as const, status: "applied" as const, documentId: fileId, rev: checksum, auditId };
+      });
+    } catch (err) {
+      // 23505 on this table can only be the unique `path`: the caller is re-creating a
+      // document that already exists, which is a conflict rather than a server fault.
+      if ((err as { code?: string }).code === "23505")
+        return refuseMutation(ctx, intent, grant.id, "conflict");
+      console.error("[broker] mutateFile failed", { collection: intent.collection, err });
+      return refuseMutation(ctx, intent, grant.id, "internal_error");
+    }
+  }
+
+  async function mutateDataset(
+    ctx: BrokerContext, intent: MutationIntent, c: CollectionConfig, grant: ActiveGrant, pool: Pool,
+  ): Promise<MutationResult> {
+    const schema = ctx.env === "live" ? "data_live" : "data_synth";
+    const table = `${schema}.${ident(intent.collection)}`;
+    const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
+    // Without a declared pk a dataset has no document identity, so nothing can address it.
+    if (!pk) return refuseMutation(ctx, intent, grant.id, "invalid_intent");
+
+    const submitted = intent.op === "delete" ? {} : intent.values;
+    const coerced: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(submitted)) {
+      const r = coerce(value, c.fields[name]!);
+      // coerce's reasons name a type; the broker's name nothing. Collapse them.
+      if (!r.ok) return refuseMutation(ctx, intent, grant.id, "invalid_value");
+      coerced[name] = r.value;
+    }
+
+    // Storable columns, in one fixed order shared by every insert below.
+    const dataCols = Object.entries(c.fields).filter(([, f]) => !f.view_join).map(([n]) => n);
+    const REV_COLS = ["_rev", "_rev_seq", "_rev_at", "_rev_by", "_rev_op", "_rev_status",
+      "_rev_fields", "_rev_base", "_current", "org_id"];
+
+    const insertRevision = async (
+      client: PoolClient,
+      rev: { seq: number; op: string; fields: string[]; base: number | null; current: boolean },
+      row: Record<string, unknown>,
+    ): Promise<string> => {
+      const revId = randomUUID();
+      const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
+      const vals: unknown[] = [revId, rev.seq, new Date(), ctx.userId, rev.op, "approved",
+        rev.fields, rev.base, rev.current, ctx.orgId, ...dataCols.map((k) => row[k] ?? null)];
+      await client.query(
+        `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
+      return revId;
+    };
+
+    try {
+      return await withOrg(pool, ctx.orgId, async (client) => {
+        if (intent.op === "create") {
+          let docId = coerced[pk];
+          if (docId === undefined && c.fields[pk]!.type === "uuid") {
+            docId = randomUUID();
+            coerced[pk] = docId;
+          }
+          if (docId === undefined) return refuseMutation(ctx, intent, grant.id, "invalid_intent");
+
+          // Check first so the caller gets a reason code; the partial unique index is the
+          // backstop if two creates race.
+          const clash = await client.query(
+            `select 1 from ${table} where ${ident(pk)} = $1 and _current`, [docId]);
+          if ((clash.rowCount ?? 0) > 0) return refuseMutation(ctx, intent, grant.id, "conflict");
+
+          const revId = await insertRevision(client,
+            { seq: 1, op: "create", fields: Object.keys(coerced), base: null, current: true }, coerced);
+          const auditId = await auditMutation(ctx, intent, grant.id, Object.keys(coerced));
+          return { ok: true as const, status: "applied" as const, documentId: String(docId), rev: revId, auditId };
+        }
+
+        // update and delete both revise an existing document, and differ only in the op they
+        // record and whether they carry values.
+        const cur = await client.query(
+          `select * from ${table} where ${ident(pk)} = $1 and _current`, [intent.id]);
+        if (cur.rowCount === 0) return refuseMutation(ctx, intent, grant.id, "not_found");
+        const current = cur.rows[0]!;
+
+        // A document the grant's filter excludes is not_found, never a distinct refusal —
+        // the same rule as getDocument. $self is already bound by loadActiveGrant.
+        if (grant.documentFilter && !matchesFilter(current, grant.documentFilter))
+          return refuseMutation(ctx, intent, grant.id, "not_found");
+
+        // Optimistic concurrency: `expect` is the _rev the caller last saw.
+        if (intent.expect && intent.expect !== current._rev)
+          return refuseMutation(ctx, intent, grant.id, "conflict");
+
+        const isDelete = intent.op === "delete";
+        // Untouched columns carry forward, so a revision is a complete document, not a patch.
+        const next: Record<string, unknown> = {};
+        for (const f of dataCols) next[f] = f in coerced ? coerced[f] : current[f];
+
+        // Demote the old revision BEFORE promoting the new one: both are _current between the
+        // two statements otherwise, and the partial unique index would reject the insert.
+        await client.query(`update ${table} set _current = false where _rev = $1`, [current._rev]);
+        const revId = await insertRevision(client, {
+          seq: Number(current._rev_seq) + 1,
+          op: isDelete ? "delete" : "update",
+          fields: isDelete ? [] : Object.keys(coerced),
+          base: Number(current._rev_seq),
+          current: true,
+        }, next);
+
+        const auditId = await auditMutation(ctx, intent, grant.id, isDelete ? [] : Object.keys(coerced));
+        return { ok: true as const, status: "applied" as const, documentId: String(intent.id), rev: revId, auditId };
+      });
+    } catch (err) {
+      // Same discipline as query: a driver error names columns and values, so it goes to the
+      // log and the caller gets a bare reason code.
+      console.error("[broker] mutateDataset failed", { collection: intent.collection, err });
+      return refuseMutation(ctx, intent, grant.id, "internal_error");
+    }
+  }
+
+  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate };
+}
+
+// Identifier quoting for the write path. Column and collection names come from the loaded
+// config, which validates them at parse time, but the write path builds its own statements
+// rather than going through buildSelect — so it re-asserts the same rule rather than trusting
+// that. A bad identifier here means a broker bug, and throwing surfaces it as internal_error.
+const WRITE_IDENT = /^[a-z_][a-z0-9_]*$/i;
+function ident(id: string): string {
+  if (!WRITE_IDENT.test(id)) throw new Error(`unsafe identifier: ${id}`);
+  return `"${id}"`;
+}
+
+// The grant's document filter, evaluated against a row the write path already holds. Reading
+// the row and testing in JS avoids a second round trip; `$self` is bound by loadActiveGrant,
+// so by here the value is a plain literal.
+function matchesFilter(row: Record<string, unknown>, f: DocumentFilter): boolean {
+  const actual = row[f.field];
+  if (f.op === "in") {
+    const arr = Array.isArray(f.value) ? f.value : [f.value];
+    return arr.some((v: unknown) => String(v) === String(actual));
+  }
+  return String(f.value) === String(actual);
 }
 
 // Every field named anywhere in the intent (fields, filters, orderBy, aggregate, groupBy).

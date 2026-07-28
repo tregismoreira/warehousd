@@ -47,6 +47,21 @@ export type GetDocumentResult =
   | { ok: true; document: Document; fieldsReturned: string[]; auditId: string }
   | { ok: false; reason: RefusalReason; auditId: string };
 
+export type MutationIntent =
+  | { collection: string; op: "create"; values: Record<string, unknown> }
+  | { collection: string; op: "update"; id: string; expect?: string; values: Record<string, unknown> }
+  | { collection: string; op: "delete"; id: string; expect?: string };
+
+export type MutationRefusalReason =
+  | RefusalReason
+  | "verb_denied" | "verb_not_supported" | "field_not_writable"
+  | "conflict" | "invalid_value" | "not_writable";
+
+export type MutationResult =
+  | { ok: true; status: "applied"; documentId: string; rev: string; auditId: string }
+  | { ok: true; status: "pending"; proposalId: string; auditId: string }
+  | { ok: false; reason: MutationRefusalReason; auditId: string };
+
 export type VisibleField = { name: string; type: string; pk?: boolean };
 export type VisibleSchema = { collection: string; description: string; fields: VisibleField[] };
 export type Refusal = { ok: false; reason: RefusalReason; auditId: string };
