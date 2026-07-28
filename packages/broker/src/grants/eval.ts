@@ -15,9 +15,14 @@ export async function loadActiveGrant(
     [userId, collection, env]);
   if (r.rowCount === 0) return null;
   const df = r.rows[0].document_filter;
+  // document_filter is a DocumentFilter[]. A row holding the pre-Stage-2 object form is a
+  // database that predates this schema and must be rebuilt — coercing it to [] would silently
+  // widen a scoped grant to the whole collection, which is the one failure mode worth crashing on.
+  if (df !== null && df !== undefined && !Array.isArray(df))
+    throw new Error(`grant ${r.rows[0].id}: document_filter is not an array (rebuild the database)`);
   return {
     id: r.rows[0].id,
     allowedFields: r.rows[0].allowed_fields ?? [],
-    documentFilter: Array.isArray(df) ? df : [],
+    documentFilter: df ?? [],
   };
 }
