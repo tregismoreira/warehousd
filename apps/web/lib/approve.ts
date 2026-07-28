@@ -3,7 +3,7 @@ import { findCollection, grantableFields, type WarehousdConfig } from "@warehous
 export type ApproveOpts = {
   allowedFields?: string[];
   expiresAt?: string;
-  documentFilter?: { field: string; op: "in"; value: string[] };
+  documentFilters?: { field: string; op: "in"; value: string[] }[];
 };
 
 export type ApprovalInput = {
@@ -51,26 +51,29 @@ export function buildApproval(
     opts.expiresAt = new Date(t).toISOString();
   }
 
-  // Terms take precedence over paths: a term scope is the coarser, intentional choice, and
-  // approving with both selected would otherwise silently drop one of them.
-  // Stage 1: use the FIRST bound vocabulary with selected terms (Stage 2 will handle multiple filters).
+  // Build array of predicates: one per scoped vocabulary, plus path if specified.
+  // Vocabularies and paths can coexist now.
   const selectedTermsMap = (typeof input.selectedTerms === "object" && input.selectedTerms !== null)
     ? (input.selectedTerms as Record<string, unknown>)
     : {};
   const paths = strings(input.selectedPaths);
+  const filters: { field: string; op: "in"; value: string[] }[] = [];
 
-  // Find the first vocabulary with selected terms
-  for (const vocabSlug of c.taxonomies) {
+  // Emit one predicate per vocabulary with selected terms
+  for (const vocabSlug of c.taxonomies ?? []) {
     const vocabTerms = strings(selectedTermsMap[vocabSlug]);
     if (vocabTerms.length > 0) {
-      opts.documentFilter = { field: vocabSlug, op: "in", value: vocabTerms };
-      break; // Stage 2 will generalize to multiple filters
+      filters.push({ field: vocabSlug, op: "in", value: vocabTerms });
     }
   }
 
-  // Fall back to path-based filtering if no vocabulary was scoped
-  if (!opts.documentFilter && paths.length > 0 && c.type === "file") {
-    opts.documentFilter = { field: "path", op: "in", value: paths };
+  // Emit path predicate if specified
+  if (paths.length > 0 && c.type === "file") {
+    filters.push({ field: "path", op: "in", value: paths });
+  }
+
+  if (filters.length > 0) {
+    opts.documentFilters = filters;
   }
 
   return { ok: true, opts };

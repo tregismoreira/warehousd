@@ -91,7 +91,7 @@ async function main() {
       ('mia','people', array['id','full_name','email','department_name'],'dev','approved')`);
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,document_filter) values
       ('mia','policies', array['title','content','owner','updated_at','category'],'dev','approved',
-       '{"field":"category","op":"in","value":["hr","benefits"]}'::jsonb)`);
+       '[{"field":"category","op":"in","value":["hr","benefits"]}]'::jsonb)`);
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,purpose_label) values
       ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
   }

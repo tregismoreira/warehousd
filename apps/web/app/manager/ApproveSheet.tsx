@@ -171,7 +171,7 @@ export function ApproveSheet({
             </div>
           )}
 
-          {paths.length > 0 && !scopedTerms && (
+          {paths.length > 0 && (
             <div className="space-y-2">
               <Label>Files</Label>
               <div className="space-y-1.5 rounded-md border p-3">

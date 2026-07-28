@@ -129,7 +129,7 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
     await indexCollection(db2, "dev", "policies", tmpDir);
     fs.rmSync(tmpDir, { recursive: true });
 
-    // Approve grant with document_filter excluding the restricted document
+    // Approve grant with documentFilters excluding the restricted document
     const { approveGrant } = await import("../src/grants/manage");
     const grantRes = await db2.query(
       `insert into app.grants (user_id, collection, allowed_fields, env, status)
@@ -138,7 +138,7 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
     );
     const grantId = grantRes.rows[0].id;
     await approveGrant(db2, grantId, "admin", {
-      documentFilter: { field: "path", op: "in", value: ["normal.md"] },
+      documentFilters: [{ field: "path", op: "in", value: ["normal.md"] }],
     });
 
     pools2 = createPools({ app: p2.urls.admin, dev: p2.urls.dev, live: p2.urls.live });

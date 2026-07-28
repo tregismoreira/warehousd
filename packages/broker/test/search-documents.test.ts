@@ -175,7 +175,7 @@ it("document_filter applies to search too (design test 3 over the search path)",
   await indexCollection(db, "dev", "policies", tmpDir);
   rmSync(tmpDir, { recursive: true });
 
-  // Approve grant with document_filter limiting to hr/pto.md only for user u3
+  // Approve grant with documentFilters limiting to hr/pto.md only for user u3
   const grantRes = await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5) returning id`,
@@ -184,7 +184,7 @@ it("document_filter applies to search too (design test 3 over the search path)",
   const grantId = grantRes.rows[0].id;
   const { approveGrant } = await import("../src/grants/manage");
   await approveGrant(db, grantId, "admin", {
-    documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
+    documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md"] }],
   });
 
   // Search with the filtered grant

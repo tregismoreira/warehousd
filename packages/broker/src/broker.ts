@@ -43,17 +43,19 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     // 4. every referenced field ∈ grant.allowedFields
     for (const f of referenced) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
-    // document_filter is grant-author-supplied; its field is validated against the collection's
-    // full YAML field set (NOT allowedFields) so denied fields like `path` can gate documents.
-    if (grant.documentFilter && !all.includes(grant.documentFilter.field))
-      return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
+    // document_filter is grant-author-supplied; each predicate's field is validated against
+    // the collection's full YAML field set (NOT allowedFields) so denied fields like `path` can gate documents.
+    for (const f of grant.documentFilter) {
+      if (!all.includes(f.field))
+        return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
+    }
     // fields to select: explicit, else all granted fields present on the collection
     const selectFields = intent.fields && intent.fields.length
       ? intent.fields
       : grant.allowedFields.filter((f) => all.includes(f));
     // 5. build + execute on the env-scoped pool
     try {
-      const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { documentFilter: grant.documentFilter });
+      const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { documentFilters: grant.documentFilter });
       const documents = (await dataPool(pools, ctx).query(text, values)).rows;
       const fieldsReturned = intent.aggregate && intent.aggregate.length
         ? [...(intent.groupBy ?? []), ...intent.aggregate.map((a) => `${a.fn}_${a.field}`)]
@@ -105,14 +107,16 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!grant) return refuse(ctx, intent.collection, intent, "no_grant");
     for (const f of intent.fields ?? []) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
-    if (grant.documentFilter && !all.includes(grant.documentFilter.field))
-      return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
+    for (const f of grant.documentFilter) {
+      if (!all.includes(f.field))
+        return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
+    }
     const selectFields = intent.fields && intent.fields.length
       ? intent.fields : grant.allowedFields.filter((f) => all.includes(f));
     try {
       const { text, values } = buildSelect(ctx.env,
         { collection: intent.collection, fields: selectFields, limit: intent.limit, offset: intent.offset } as QueryIntent,
-        grant.allowedFields, { q: intent.q, documentFilter: grant.documentFilter });
+        grant.allowedFields, { q: intent.q, documentFilters: grant.documentFilter });
       const documents = (await dataPool(pools, ctx).query(text, values)).rows;
       const auditId = await writeAudit(app, { userId: ctx.userId, env: ctx.env,
         collection: intent.collection, intent, fieldsReturned: selectFields,

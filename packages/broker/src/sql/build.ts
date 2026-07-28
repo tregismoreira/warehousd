@@ -18,7 +18,7 @@ const q = (id: string) => {
 
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
-  opts: { documentFilter?: DocumentFilter | null; q?: string; isMultiValueField?: (field: string) => boolean } = {},
+  opts: { documentFilters?: DocumentFilter[]; q?: string; isMultiValueField?: (field: string) => boolean } = {},
 ): { text: string; values: unknown[] } {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const view = `${schema}.v_${intent.collection}`;
@@ -65,9 +65,8 @@ export function buildSelect(
       where.push(`${q(f.field)} ${OP_SQL[f.op]} ${param(f.value)}`);
     }
   }
-  // AND the grant-carried document filter
-  const rf = opts.documentFilter;
-  if (rf) {
+  // AND all grant-carried document filters
+  for (const rf of opts.documentFilters ?? []) {
     const isMulti = opts.isMultiValueField?.(rf.field) ?? false;
     if (rf.op === "in") {
       const arr = Array.isArray(rf.value) ? rf.value : [rf.value];

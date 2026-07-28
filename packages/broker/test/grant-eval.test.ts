@@ -33,14 +33,21 @@ it("returns the active approved grant and null for revoked/expired", async () =>
   expect(g2).toBeNull();
 });
 
-it("loadActiveGrant returns documentFilter when set, null otherwise", async () => {
+it("loadActiveGrant returns documentFilters as array when set, empty array otherwise", async () => {
   p = await provision("granteval2");
   db = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(db);
 
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at,document_filter)
-     values ('mia','policies', array['title'],'dev','approved', now() + interval '1 day', '{"field":"path","op":"in","value":["hr/pto.md"]}')`);
+     values ('mia','policies', array['title'],'dev','approved', now() + interval '1 day', '[{"field":"path","op":"in","value":["hr/pto.md"]}]')`);
   const g = await loadActiveGrant(db, "mia", "policies", "dev");
-  expect(g?.documentFilter).toEqual({ field: "path", op: "in", value: ["hr/pto.md"] });
+  expect(g?.documentFilter).toEqual([{ field: "path", op: "in", value: ["hr/pto.md"] }]);
+
+  // Check that grants without document_filter get empty array
+  await db.query(
+    `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
+     values ('mia2','policies', array['title'],'dev','approved', now() + interval '1 day')`);
+  const g2 = await loadActiveGrant(db, "mia2", "policies", "dev");
+  expect(g2?.documentFilter).toEqual([]);
 });

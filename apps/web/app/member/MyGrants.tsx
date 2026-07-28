@@ -11,7 +11,7 @@ export type MeGrant = {
   status: string; effectiveStatus: GrantStatus;
   allowed_fields: string[] | null; purpose_label: string | null;
   requested_at: string; expires_at: string | null;
-  document_filter: { field: string; op: string; value: unknown } | null;
+  document_filter: { field: string; op: string; value: unknown }[] | null;
 };
 
 const columns: ColumnDef<MeGrant, unknown>[] = [
@@ -29,9 +29,9 @@ const columns: ColumnDef<MeGrant, unknown>[] = [
     ) },
   { id: "scope", header: "Document scope",
     cell: ({ row }) => {
-      const f = row.original.document_filter;
-      if (!f) return <span className="text-xs text-muted-foreground">Whole collection</span>;
-      return <Mono>{`${f.field} ${f.op} ${JSON.stringify(f.value)}`}</Mono>;
+      const fs = row.original.document_filter;
+      if (!fs || fs.length === 0) return <span className="text-xs text-muted-foreground">Whole collection</span>;
+      return <Mono>{fs.map((f) => `${f.field} ${f.op} ${JSON.stringify(f.value)}`).join(" AND ")}</Mono>;
     } },
   { accessorKey: "expires_at", header: "Expires",
     cell: ({ row }) => (

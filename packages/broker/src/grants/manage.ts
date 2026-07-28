@@ -44,13 +44,13 @@ export async function requestGrant(app: Pool, i: {
 }
 
 export async function approveGrant(app: Pool, id: string, by: string,
-  opts: { allowedFields?: string[]; expiresAt?: string; documentFilter?: DocumentFilter } = {}): Promise<boolean> {
+  opts: { allowedFields?: string[]; expiresAt?: string; documentFilters?: DocumentFilter[] } = {}): Promise<boolean> {
   const result = await app.query(
     `update app.grants set status='approved', decided_by=$2, decided_at=now(),
        allowed_fields=coalesce($3, allowed_fields), expires_at=$4, document_filter=$5
      where id=$1 and status='pending'`,
     [id, by, opts.allowedFields ?? null, opts.expiresAt ?? null,
-     opts.documentFilter ? JSON.stringify(opts.documentFilter) : null]);
+     opts.documentFilters && opts.documentFilters.length ? JSON.stringify(opts.documentFilters) : null]);
   return (result.rowCount ?? 0) > 0;
 }
 
