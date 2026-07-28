@@ -31,5 +31,10 @@ export function readEnvCookie(req: Request): "dev" | "live" {
 export async function deriveContext(req: Request): Promise<BrokerContext | null> {
   const user = await getSessionUser(req);
   if (!user) return null;
-  return { userId: user.id, orgId: user.orgId ?? DEFAULT_ORG_ID, env: readEnvCookie(req) };
+  return {
+    userId: user.id,
+    orgId: user.orgId ?? DEFAULT_ORG_ID,
+    env: readEnvCookie(req),
+    via: "session",
+  };
 }

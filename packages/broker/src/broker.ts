@@ -28,7 +28,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     reason: RefusalReason, grantId: string | null = null): Promise<Refusal> {
     const auditId = await writeAudit(app, {
       userId: ctx.userId, env: ctx.env, collection, orgId: ctx.orgId, intent,
-      fieldsReturned: [], grantId, outcome: "refused", reason });
+      fieldsReturned: [], grantId, outcome: "refused", reason, via: ctx.via });
     return { ok: false, reason, auditId };
   }
 
@@ -49,7 +49,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     return writeAudit(app, {
       userId: ctx.userId, env: ctx.env, collection: i.collection, orgId: ctx.orgId,
       intent: mutationIntent(i, fields) as never,
-      fieldsReturned: [], grantId, outcome: "allowed", reason: null });
+      fieldsReturned: [], grantId, outcome: "allowed", reason: null, via: ctx.via });
   }
 
   async function refuseMutation(
@@ -58,7 +58,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     const auditId = await writeAudit(app, {
       userId: ctx.userId, env: ctx.env, collection: i.collection, orgId: ctx.orgId,
       intent: mutationIntent(i, i.op === "delete" ? [] : Object.keys(i.values)) as never,
-      fieldsReturned: [], grantId, outcome: "refused", reason });
+      fieldsReturned: [], grantId, outcome: "refused", reason, via: ctx.via });
     return { ok: false, reason, auditId };
   }
 
@@ -74,7 +74,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     for (const f of referenced) if (!all.includes(f))
       return refuse(ctx, intent.collection, intent, "unknown_field");
     // 3. active grant
-    const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env, ctx.orgId);
+    const grant = await loadActiveGrant(app, ctx, intent.collection);
     if (!grant) return refuse(ctx, intent.collection, intent, "no_grant");
     // No read verb → no_grant (not a new code; §4 comment on information leak)
     if (!grant.verbs.includes("read")) return refuse(ctx, intent.collection, intent, "no_grant");
@@ -100,7 +100,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         : selectFields;
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId, intent,
-        fieldsReturned, grantId: grant.id, outcome: "allowed", reason: null });
+        fieldsReturned, grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
       return { ok: true, documents, fieldsReturned, auditId };
     } catch (err) {
       // Never surface a raw driver error: Postgres messages name columns, tables and
@@ -114,7 +114,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   async function describeCollection(ctx: BrokerContext, name: string): Promise<VisibleSchema | Refusal> {
     const c = findCollection(cfg, name);
     if (!c) return refuse(ctx, name, null, "unknown_collection");
-    const grant = await loadActiveGrant(app, ctx.userId, name, ctx.env, ctx.orgId);
+    const grant = await loadActiveGrant(app, ctx, name);
     if (!grant) return refuse(ctx, name, null, "no_grant");
     if (!grant.verbs.includes("read")) return refuse(ctx, name, null, "no_grant");
     const fields = Object.entries(c.fields)
@@ -122,7 +122,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       // type is guaranteed by CollectionSchema refinement for structured collections; file collections have types filled in by transform
       .map(([n, f]) => ({ name: n, type: f.type!, pk: f.pk }));
     await writeAudit(app, { userId: ctx.userId, env: ctx.env, collection: name, orgId: ctx.orgId, intent: null,
-      fieldsReturned: fields.map((f) => f.name), grantId: grant.id, outcome: "allowed", reason: null });
+      fieldsReturned: fields.map((f) => f.name), grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
     return { collection: name, description: c.description, fields };
   }
 
@@ -130,7 +130,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     const collections = Object.entries(cfg.collections).map(([name, c]) => ({ name, description: c.description }));
     await writeAudit(app, {
       userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId, intent: null,
-      fieldsReturned: [], grantId: null, outcome: "allowed", reason: null });
+      fieldsReturned: [], grantId: null, outcome: "allowed", reason: null, via: ctx.via });
     return collections;
   }
 
@@ -151,7 +151,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     const all = Object.keys(c.fields);
     for (const f of intent.fields ?? []) if (!all.includes(f))
       return refuse(ctx, intent.collection, intent, "unknown_field");
-    const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env, ctx.orgId);
+    const grant = await loadActiveGrant(app, ctx, intent.collection);
     if (!grant) return refuse(ctx, intent.collection, intent, "no_grant");
     if (!grant.verbs.includes("read")) return refuse(ctx, intent.collection, intent, "no_grant");
     for (const f of intent.fields ?? []) if (!grant.allowedFields.includes(f))
@@ -170,7 +170,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       });
       const auditId = await writeAudit(app, { userId: ctx.userId, env: ctx.env,
         collection: intent.collection, orgId: ctx.orgId, intent, fieldsReturned: selectFields,
-        grantId: grant.id, outcome: "allowed", reason: null });
+        grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
       return { ok: true, documents, fieldsReturned: selectFields, auditId };
     } catch (err) {
       // Never surface a raw driver error: Postgres messages name columns, tables and
@@ -192,7 +192,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     // A path addresses a source file; a dataset has none.
     if (byPath && !isFile) return refuse(ctx, intent.collection, null, "invalid_intent");
 
-    const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env, ctx.orgId);
+    const grant = await loadActiveGrant(app, ctx, intent.collection);
     if (!grant) return refuse(ctx, intent.collection, null, "no_grant");
     if (!grant.verbs.includes("read")) return refuse(ctx, intent.collection, null, "no_grant");
 
@@ -235,7 +235,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       if (rows.length === 0) {
         const auditId = await writeAudit(app, {
           userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found" });
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found", via: ctx.via });
         return { ok: false, reason: "not_found", auditId };
       }
 
@@ -245,7 +245,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-        intent: null, fieldsReturned: selectFields, grantId: grant.id, outcome: "allowed", reason: null });
+        intent: null, fieldsReturned: selectFields, grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
       return { ok: true, document, fieldsReturned: selectFields, auditId };
     } catch (err) {
       // Same discipline as query: a driver error names columns and values, so it goes to the
@@ -272,7 +272,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!c.writable) {
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable" });
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable", via: ctx.via });
       return { ok: false, reason: "not_writable", auditId };
     }
 
@@ -281,16 +281,16 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!supported.includes(intent.op)) {
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "verb_not_supported" });
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "verb_not_supported", via: ctx.via });
       return { ok: false, reason: "verb_not_supported", auditId };
     }
 
     // 5. active grant
-    const grant = await loadActiveGrant(app, ctx.userId, intent.collection, ctx.env, ctx.orgId);
+    const grant = await loadActiveGrant(app, ctx, intent.collection);
     if (!grant) {
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant" });
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant", via: ctx.via });
       return { ok: false, reason: "no_grant", auditId };
     }
 
@@ -298,7 +298,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!grant.verbs.includes(intent.op)) {
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied" });
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied", via: ctx.via });
       return { ok: false, reason: "verb_denied", auditId };
     }
 
@@ -308,7 +308,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       if (c.type === "file") {
         const auditId = await writeAudit(app, {
           userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied" });
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied", via: ctx.via });
         return { ok: false, reason: "verb_denied", auditId };
       }
       return proposeDataset(ctx, intent, c, grant, pools, app);
@@ -319,7 +319,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!pool) {
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_writable" });
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_writable", via: ctx.via });
       return { ok: false, reason: "not_writable", auditId };
     }
 
@@ -637,7 +637,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!pool) {
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable" });
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable", via: ctx.via });
       return { ok: false, reason: "not_writable", auditId };
     }
 
@@ -661,7 +661,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         if (!proposal || !collectionName) {
           const auditId = await writeAudit(app, {
             userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
-            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_found" });
+            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_found", via: ctx.via });
           return { ok: false, reason: "not_found", auditId };
         }
 
@@ -669,16 +669,16 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         if (!c) {
           const auditId = await writeAudit(app, {
             userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "unknown_collection" });
+            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "unknown_collection", via: ctx.via });
           return { ok: false, reason: "unknown_collection", auditId };
         }
 
         // Load the approver's grant
-        const grant = await loadActiveGrant(app, ctx.userId, collectionName, ctx.env, ctx.orgId);
+        const grant = await loadActiveGrant(app, ctx, collectionName);
         if (!grant) {
           const auditId = await writeAudit(app, {
             userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant" });
+            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant", via: ctx.via });
           return { ok: false, reason: "no_grant", auditId };
         }
 
@@ -686,7 +686,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         if (!grant.verbs.includes("approve")) {
           const auditId = await writeAudit(app, {
             userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied" });
+            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied", via: ctx.via });
           return { ok: false, reason: "verb_denied", auditId };
         }
 
@@ -697,7 +697,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           if (!grant.allowedFields.includes(f)) {
             const auditId = await writeAudit(app, {
               userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "field_denied" });
+              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "field_denied", via: ctx.via });
             return { ok: false, reason: "field_denied", auditId };
           }
         }
@@ -707,7 +707,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         if (!pk) {
           const auditId = await writeAudit(app, {
             userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "invalid_intent" });
+            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "invalid_intent", via: ctx.via });
           return { ok: false, reason: "invalid_intent", auditId };
         }
 
@@ -726,7 +726,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
             if (!matchesFilter(tempDoc, grant.documentFilter)) {
               const auditId = await writeAudit(app, {
                 userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-                intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found" });
+                intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found", via: ctx.via });
               return { ok: false, reason: "not_found", auditId };
             }
           }
@@ -738,7 +738,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           if (!currentRev.rows || currentRev.rows.length === 0) {
             const auditId = await writeAudit(app, {
               userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found" });
+              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found", via: ctx.via });
             return { ok: false, reason: "not_found", auditId };
           }
           currentRev = currentRev.rows[0];
@@ -747,7 +747,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           if (grant.documentFilter && !matchesFilter(currentRev, grant.documentFilter)) {
             const auditId = await writeAudit(app, {
               userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found" });
+              intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found", via: ctx.via });
             return { ok: false, reason: "not_found", auditId };
           }
 
@@ -771,7 +771,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
             if (overlap) {
               const auditId = await writeAudit(app, {
                 userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-                intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "conflict" });
+                intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "conflict", via: ctx.via });
               return { ok: false, reason: "conflict", auditId };
             }
           }
@@ -836,7 +836,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
         const auditId = await writeAudit(app, {
           userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "allowed", reason: null });
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
 
         return { ok: true as const, documentId: docId, rev: newRevId, auditId };
       });
@@ -844,7 +844,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       console.error("[broker] approveProposal failed", { proposalId, err });
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error" });
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error", via: ctx.via });
       return { ok: false, reason: "internal_error", auditId };
     }
   }
@@ -856,7 +856,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!pool) {
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable" });
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_writable", via: ctx.via });
       return { ok: false, reason: "not_writable", auditId };
     }
 
@@ -879,15 +879,15 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         if (!proposal || !collectionName) {
           const auditId = await writeAudit(app, {
             userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
-            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_found" });
+            intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "not_found", via: ctx.via });
           return { ok: false, reason: "not_found", auditId };
         }
 
-        const grant = await loadActiveGrant(app, ctx.userId, collectionName, ctx.env, ctx.orgId);
+        const grant = await loadActiveGrant(app, ctx, collectionName);
         if (!grant || !grant.verbs.includes("approve")) {
           const auditId = await writeAudit(app, {
             userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-            intent: null, fieldsReturned: [], grantId: grant?.id ?? null, outcome: "refused", reason: "verb_denied" });
+            intent: null, fieldsReturned: [], grantId: grant?.id ?? null, outcome: "refused", reason: "verb_denied", via: ctx.via });
           return { ok: false, reason: "verb_denied", auditId };
         }
 
@@ -901,7 +901,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
         const auditId = await writeAudit(app, {
           userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
-          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "allowed", reason: null });
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
 
         return { ok: true as const, auditId };
       });
@@ -909,7 +909,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       console.error("[broker] rejectProposal failed", { proposalId, err });
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error" });
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error", via: ctx.via });
       return { ok: false, reason: "internal_error", auditId };
     }
   }
@@ -935,7 +935,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     const auditList = (outcome: "allowed" | "refused", reason: RefusalReason | null) =>
       writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: opts.collection ?? "*", orgId: ctx.orgId,
-        intent: null, fieldsReturned: [], grantId: null, outcome, reason });
+        intent: null, fieldsReturned: [], grantId: null, outcome, reason, via: ctx.via });
 
     const pool = writePool(pools, ctx);
     if (!pool) return { ok: false, reason: "internal_error", auditId: await auditList("refused", "internal_error") };
@@ -955,7 +955,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           // Fresh per collection, like every other grant check. No approve verb → this
           // collection is simply absent from the feed, not a refusal: a reviewer learning
           // which collections they cannot approve for is itself a disclosure.
-          const grant = await loadActiveGrant(app, ctx.userId, name, ctx.env, ctx.orgId);
+          const grant = await loadActiveGrant(app, ctx, name);
           if (!grant || !grant.verbs.includes("approve")) continue;
 
           // Bookkeeping columns only, plus the document-filter field when one is set. Selecting
@@ -1006,7 +1006,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       const collections = Object.keys(cfg.collections);
       const grantsByCollection = new Map<string, ActiveGrant | null>();
       for (const c of collections) {
-        const grant = await loadActiveGrant(app, ctx.userId, c, ctx.env, ctx.orgId);
+        const grant = await loadActiveGrant(app, ctx, c);
         // No grant or no read verb → no entries for this collection
         if (grant && grant.verbs.includes("read")) grantsByCollection.set(c, grant);
       }
@@ -1044,7 +1044,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId, intent: null,
-        fieldsReturned: [], grantId: null, outcome: "allowed", reason: null,
+        fieldsReturned: [], grantId: null, outcome: "allowed", reason: null, via: ctx.via,
       });
 
       return {
@@ -1065,7 +1065,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       console.error("[broker] changes failed", { err });
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId, intent: null,
-        fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error",
+        fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error", via: ctx.via,
       });
       return { ok: false, reason: "internal_error", auditId };
     }

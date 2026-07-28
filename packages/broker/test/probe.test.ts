@@ -46,7 +46,7 @@ afterAll(async () => { vi.restoreAllMocks(); await admin.end(); await pools.end(
 it("no probe leaks any denied canary; outcomes match expectations", async () => {
   const broker = makeBroker(pools, cfg);
   for (const probe of probes) {
-    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev" }, probe.intent);
+    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev", via: "session" }, probe.intent);
     const outcome = r.ok ? "allowed" : "refused";
     expect(outcome, `probe "${probe.name}"`).toBe(probe.expect);
     const payload = JSON.stringify(r);
@@ -71,9 +71,9 @@ it("collection names inherited from Object.prototype refuse cleanly and are audi
   const broker = makeBroker(pools, cfg);
   for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
     for (const r of [
-      await broker.query({ userId: "mia", orgId: "default", env: "dev" }, { collection: name, fields: ["id"] }),
-      await broker.describeCollection({ userId: "mia", orgId: "default", env: "dev" }, name),
-      await broker.searchDocuments({ userId: "mia", orgId: "default", env: "dev" }, { collection: name, q: "x" }),
+      await broker.query({ userId: "mia", orgId: "default", env: "dev", via: "session" }, { collection: name, fields: ["id"] }),
+      await broker.describeCollection({ userId: "mia", orgId: "default", env: "dev", via: "session" }, name),
+      await broker.searchDocuments({ userId: "mia", orgId: "default", env: "dev", via: "session" }, { collection: name, q: "x" }),
     ]) {
       expect("ok" in r && r.ok, name).toBe(false);
       const refusal = r as { reason: string; auditId: string };
@@ -174,8 +174,8 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
     for (const probe of newProbes) {
       const surface = probe.surface || "query";
       const r = surface === "searchDocuments"
-        ? await broker.searchDocuments({ userId: "u_doc", orgId: "default", env: "dev" }, probe.intent)
-        : await broker.query({ userId: "u_doc", orgId: "default", env: "dev" }, probe.intent);
+        ? await broker.searchDocuments({ userId: "u_doc", orgId: "default", env: "dev", via: "session" }, probe.intent)
+        : await broker.query({ userId: "u_doc", orgId: "default", env: "dev", via: "session" }, probe.intent);
       const outcome = r.ok ? "allowed" : "refused";
       expect(outcome, `probe "${probe.name}"`).toBe(probe.expect);
       const payload = JSON.stringify(r);
@@ -194,7 +194,7 @@ describe("unhandled Postgres errors are caught and audited (design §10 test 4)"
       collection: "people",
       filters: [{ field: "id", op: "gt", value: "x" }],
     };
-    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev" }, intent);
+    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev", via: "session" }, intent);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reason).toBe("internal_error");
@@ -219,7 +219,7 @@ describe("unhandled Postgres errors are caught and audited (design §10 test 4)"
       aggregate: [{ fn: "sum", field: "full_name" }],
       groupBy: ["department_name"],
     };
-    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev" }, intent);
+    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev", via: "session" }, intent);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reason).toBe("internal_error");
@@ -245,7 +245,7 @@ describe("unhandled Postgres errors are caught and audited (design §10 test 4)"
       groupBy: ["department_name"],
       orderBy: { field: "id", dir: "asc" },
     };
-    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev" }, intent);
+    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev", via: "session" }, intent);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reason).toBe("internal_error");

@@ -32,7 +32,7 @@ export async function importCollection(
       // Column names and counts only — never a cell value. An import file may carry real
       // personal data and the audit log is queryable by every admin.
       intent: { op: "import", format: payload.format, ...extra } as never,
-      fieldsReturned: [], grantId: null, outcome, reason,
+      fieldsReturned: [], grantId: null, outcome, reason, via: "session",
     });
 
   if (!pools.imp) {

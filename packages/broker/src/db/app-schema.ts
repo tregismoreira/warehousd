@@ -40,6 +40,7 @@ export const auditEvents = app.table("audit_events", {
   grantId: uuid("grant_id"),
   outcome: text("outcome"),                 // 'allowed' | 'refused'
   reason: text("reason"),
+  via: text("via"),                         // session | oauth | api_key:<id>
 });
 
 export const vocabularies = app.table("vocabularies", {
@@ -63,6 +64,33 @@ export const clientPolicies = app.table("client_policies", {
   allowedScopes: text("allowed_scopes").array().notNull().default(sql`'{env:dev}'`),
   promotedAt: timestamp("promoted_at", { withTimezone: true }),
   promotedBy: text("promoted_by"),
+  allowedCollections: text("allowed_collections").array(),  // null = no ceiling
+  mode: text("mode").notNull().default("delegated"),        // delegated | headless
+  robotUserId: text("robot_user_id"),                        // headless only
+  trustedIssuerId: uuid("trusted_issuer_id"),                // delegated only
+});
+
+export const clientSecrets = app.table("client_secrets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  clientId: text("client_id").notNull(),                    // FK enforced in DDL
+  orgId: text("org_id").notNull(),                          // FK enforced in DDL
+  prefix: text("prefix").notNull(),
+  secretHash: text("secret_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdBy: text("created_by").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});
+
+export const trustedIssuers = app.table("trusted_issuers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: text("org_id").notNull(),                          // FK enforced in DDL
+  issuer: text("issuer").notNull(),
+  jwksUri: text("jwks_uri").notNull(),
+  audience: text("audience").notNull(),
+  subjectClaim: text("subject_claim").notNull().default("sub"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const changeLog = app.table("change_log", {

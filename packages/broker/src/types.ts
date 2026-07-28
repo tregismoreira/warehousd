@@ -2,6 +2,8 @@ export interface BrokerContext {
   userId: string;
   orgId: string; // from token/persona or session, never from request body — see docs/architecture.md
   env: "dev" | "live"; // from token/persona, never from request body
+  allowedCollections?: string[] | null; // collection ceiling; null = no limit (carry on context from client policy)
+  via: string; // 'session' | 'oauth' | 'token_exchange' | 'api_key:<id>' — audit trail of which credential authenticated this
 }
 
 export type DocumentFilter = { field: string; op: "eq" | "in"; value: unknown };

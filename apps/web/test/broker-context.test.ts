@@ -51,7 +51,7 @@ describe("deriveTokenContext", () => {
     const ctx = await deriveTokenContext(new Request("http://localhost:8722/mcp", {
       headers: { authorization: `Bearer ${token}` },
     }));
-    expect(ctx).toEqual({ userId: "mia", orgId: "default", env: "live" });
+    expect(ctx).toEqual({ userId: "mia", orgId: "default", env: "live", allowedCollections: null, via: "oauth" });
   });
 
   it("token with no env scope → adapter resolves dev", async () => {
@@ -60,7 +60,7 @@ describe("deriveTokenContext", () => {
     const ctx = await deriveTokenContext(new Request("http://localhost:8722/mcp", {
       headers: { authorization: `Bearer ${token}` },
     }));
-    expect(ctx).toEqual({ userId: "mia", orgId: "default", env: "dev" });
+    expect(ctx).toEqual({ userId: "mia", orgId: "default", env: "dev", allowedCollections: null, via: "oauth" });
   });
 
   it("invalid/missing token → null", async () => {

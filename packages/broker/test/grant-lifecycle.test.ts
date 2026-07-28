@@ -28,7 +28,7 @@ beforeAll(async () => {
 afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
 
 it("request→pending→approve(trim+expiry)→query ok→revoke→immediately no_grant", async () => {
-  const ctx = { userId: "mia", orgId: "default", env: "dev" as const };
+  const ctx = { userId: "mia", orgId: "default", env: "dev", via: "session" as const };
   // before approval → no_grant
   const before = await broker.query(ctx, { collection: "people" });
   expect(before.ok).toBe(false);
@@ -64,7 +64,7 @@ it("approving a second grant for the same (user, collection, env) fails (design 
 it("approveGrant persists documentFilter", async () => {
   const id = await requestGrant(admin, { userId: "u2", collection: "people", orgId: "default", env: "dev", purposeLabel: "p", allowedFields: ["title","content"] });
   await approveGrant(admin, cfg, id, "marcus", { documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] } });
-  const g = await loadActiveGrant(admin, "u2", "people", "dev", "default");
+  const g = await loadActiveGrant(admin, { userId: "u2", env: "dev", orgId: "default" }, "people");
   expect(g?.documentFilter?.op).toBe("in");
 });
 

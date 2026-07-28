@@ -3,7 +3,7 @@ import type { QueryIntent, BrokerResult, BrokerContext } from "../src/types";
 
 describe("types", () => {
   it("intent and result shapes are usable", () => {
-    const ctx: BrokerContext = { userId: "u1", orgId: "default", env: "dev" };
+    const ctx: BrokerContext = { userId: "u1", orgId: "default", env: "dev", via: "session" };
     const intent: QueryIntent = {
       collection: "salaries",
       filters: [{ field: "job_title", op: "eq", value: "Senior Accountant" }],

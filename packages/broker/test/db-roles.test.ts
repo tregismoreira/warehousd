@@ -37,7 +37,7 @@ it("test 5 (partial): dev token cannot see live-only canary; direct role check",
   const broker = makeBroker(pools, cfg);
   await admin.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
     ('u','people', array['id','full_name','email'],'dev','approved')`);
-  const r = await broker.query({ userId: "u", orgId: "default", env: "dev" }, { collection: "people", limit: 500 });
+  const r = await broker.query({ userId: "u", orgId: "default", env: "dev", via: "session" }, { collection: "people", limit: 500 });
   expect(r.ok).toBe(true);
   if (r.ok) {
     const blob = JSON.stringify(r.documents);

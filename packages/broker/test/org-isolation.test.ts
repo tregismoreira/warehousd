@@ -81,7 +81,7 @@ describe("org isolation", () => {
 
   it("a grant belongs to one org: org C sees no grant at all", async () => {
     await admin.query(`insert into app.organizations (id, name) values ('org-c','C')`);
-    const r = await broker.query({ userId: "shared", orgId: "org-c", env: "dev" }, { collection: "people" });
+    const r = await broker.query({ userId: "shared", orgId: "org-c", env: "dev", via: "session" }, { collection: "people" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("no_grant");
   });

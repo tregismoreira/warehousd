@@ -83,6 +83,51 @@ export async function createAppSchema(db: Pool): Promise<void> {
       promoted_by text);
   `);
   await addOrgColumn(db, "client_policies");
+  // Phase 7: collection ceiling (allowed_collections), credential type (mode), and per-mode config
+  await db.query(`alter table app.client_policies add column if not exists allowed_collections text[]`);
+  await db.query(`alter table app.client_policies add column if not exists mode text not null default 'delegated'`);
+  await db.query(`alter table app.client_policies add column if not exists robot_user_id text`);
+  await db.query(`alter table app.client_policies add column if not exists trusted_issuer_id uuid`);
+  await db.query(`
+    do $$ begin
+      if not exists (select 1 from pg_constraint where conname = 'client_policies_mode_check') then
+        alter table app.client_policies add constraint client_policies_mode_check
+          check (mode in ('delegated','headless'));
+      end if;
+    end $$;`);
+  // API key secrets: hashed for storage, never stored plaintext.
+  await db.query(`
+    create table if not exists app.client_secrets (
+      id uuid primary key default gen_random_uuid(),
+      client_id text not null references app.client_policies(client_id) on delete cascade,
+      org_id text not null references app.organizations(id),
+      prefix text not null,
+      secret_hash text not null,
+      created_at timestamptz not null default now(),
+      created_by text not null,
+      expires_at timestamptz not null,
+      last_used_at timestamptz,
+      revoked_at timestamptz);
+    create index if not exists client_secrets_prefix_idx on app.client_secrets (prefix);
+  `);
+  // Trusted OIDC issuers for the delegated flow
+  await db.query(`
+    create table if not exists app.trusted_issuers (
+      id uuid primary key default gen_random_uuid(),
+      org_id text not null references app.organizations(id),
+      issuer text not null,
+      jwks_uri text not null,
+      audience text not null,
+      subject_claim text not null default 'sub',
+      created_at timestamptz not null default now(),
+      unique (org_id, issuer));
+  `);
+  // Phase 7: audit_events via column to record which credential/auth path was used
+  await db.query(`alter table app.audit_events add column if not exists via text`);
+  // Grant secret read on app.client_secrets read (needed to verify secrets), and trusted_issuers for issuer config
+  await db.query(`
+    grant select on app.client_secrets, app.trusted_issuers to warehousd_dev, warehousd_live;
+  `);
   // change_log tracks all mutations to data tables (§6); seq is a global monotonic cursor.
   // _rev_seq is per-document and unsuitable for a feed cursor — gaps would cause the feed
   // to skip revisions under even mild concurrency. This table exists because seq order is not

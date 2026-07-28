@@ -14,6 +14,7 @@ with real data, this is the document to read.
 - [The write path: broker.mutate](#the-write-path-brokermutate)
 - [Proposals](#proposals)
 - [The change feed](#the-change-feed)
+- [Client credentials and the collection ceiling](#client-credentials-and-the-collection-ceiling)
 - [Full-document reads](#full-document-reads)
 - [Identity, OAuth, and env-as-scope](#identity-oauth-and-env-as-scope)
 - [File collections and search](#file-collections-and-search)
@@ -113,6 +114,8 @@ interface BrokerContext {
   userId: string;
   orgId: string;              // from the token/session's user row, never from a request
   env: "dev" | "live";        // from the token, never from a request body
+  allowedCollections?: string[] | null;   // the client's ceiling; null = none. Only narrows.
+  via: string;                // session | oauth | token_exchange | api_key:<id>
 }
 
 type QueryIntent = {
@@ -629,6 +632,64 @@ bound on a writable collection. The eventual answer is a retention policy or
 partitioning on `_rev_at` / `at`; until then an operator should plan for growth
 rather than discover it.
 
+## Client credentials and the collection ceiling
+
+IT issues a key/secret pair per company app. The key authenticates the **app**; a
+subject token identifies the **user**. They compose:
+
+```
+effective access = grants(user) ∩ client_policy(app) ∩ env_scope(token)
+```
+
+This extends `app.client_policies` rather than introducing a parallel credential
+system — a parallel system is precisely how the two sets of rules drift apart.
+
+**Secret handling**, matching OpenAI/Anthropic/GitHub conventions:
+
+- **Prefixed and self-identifying** — `whd_live_…` / `whd_dev_…` with a checksum
+  suffix. A leaked key is greppable, its environment is visible on sight, and an
+  obviously-malformed key is rejected before any database work.
+- **Shown once at creation**, never retrievable. Only a salted scrypt hash is
+  stored, compared in constant time.
+- **Rotation without downtime** — a client may hold two live secrets at once, and
+  the old one is revoked *explicitly*. Revoking on rotation would make every
+  rotation an outage. A third unrevoked secret is refused.
+- **Mandatory expiry with a ceiling** (365 days). A never-expiring credential is
+  philosophically opposite to purpose-bound expiring grants.
+- `last_used_at`, `created_by`, `created_at` recorded per key.
+
+**The collection ceiling.** `client_policies.allowed_collections` lets IT declare
+*"the Marketing Dashboard may touch `campaigns` and `accounts`."* Even if a user
+personally holds a grant on `salaries`, that app cannot reach it as them. A
+ceiling **only ever narrows** — it can never widen a grant.
+
+It is carried on `BrokerContext` and enforced inside `loadActiveGrant`, which
+takes the whole context rather than spread arguments precisely so that no verb
+can forget it. A collection outside the ceiling returns null, so every verb
+refuses `no_grant` uniformly: a distinguishable code would tell an app exactly
+which collections it is missing.
+
+**Audit `via`.** Every audit row records which credential produced it —
+`session | oauth | token_exchange | api_key:<id>`. *"Which credential did this"*
+is a compliance question the previous audit row could not answer.
+
+### One implementation of the env rules
+
+The §6.1 scope rules were inline in the OAuth plugin. They are now a pure broker
+function, because **if a key can reach `env:live` by any path an OAuth token
+cannot, invariant 5 is dead** — and two implementations is how that happens.
+
+Issuance and refresh are deliberately *different questions* and have separate
+entry points:
+
+- `resolveEnvScopes` answers **"what may this request have"** — intersect with
+  the policy, drop `env:live` unless the user is eligible, and fall back to the
+  `env:dev` floor. A caller that requested no env scope at all is left untouched.
+- `recomputeEnvScope` answers **"what may this user have now"**, re-derived from
+  current policy and eligibility. Refresh must not narrow from the scopes the
+  token already holds: `env:live` was stripped at issuance, so an intersection
+  could never widen it back after a promotion.
+
 ## Full-document reads
 
 `broker.getDocument(ctx, { collection, id | path })` returns one document's full
@@ -686,7 +747,22 @@ create table app.client_policies (
   client_id text pk references oauth_client,
   display_name text, org_id text references organizations,
   allowed_scopes text[] not null default '{env:dev}',
+  allowed_collections text[],        -- the ceiling; null = none
+  mode text not null default 'delegated',   -- delegated | headless
+  robot_user_id text, trusted_issuer_id uuid,
   promoted_at timestamptz, promoted_by text
+);
+
+create table app.client_secrets (   -- only a hash; the secret is shown once, at creation
+  id uuid pk, client_id text references client_policies, org_id text,
+  prefix text, secret_hash text, created_at timestamptz, created_by text,
+  expires_at timestamptz not null,  -- mandatory, capped at 365 days
+  last_used_at timestamptz, revoked_at timestamptz
+);
+
+create table app.trusted_issuers (  -- registered IdPs for RFC 8693 token exchange
+  id uuid pk, org_id text, issuer text, jwks_uri text,
+  audience text, subject_claim text default 'sub', unique (org_id, issuer)
 );
 
 create table app.audit_events (

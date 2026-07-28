@@ -172,6 +172,22 @@ The interesting ones, and where they live:
   showing the revision and the feed row share one transaction; and two interleaved
   writers yield every committed revision exactly once across successive polls,
   showing the cursor is not lossy when `seq` order diverges from commit order.
+- **Client secrets** (`client-secrets`) — the plaintext is unrecoverable after
+  creation and appears in no query result; a revoked key fails the next verify with
+  no expiry wait; an expired key is refused; both secrets verify during a rotation
+  window and the retired one stops only on explicit revoke; a third unrevoked
+  secret is refused; creation beyond the lifetime ceiling is refused; a malformed
+  checksum is rejected with no database round trip.
+- **Collection ceiling** (`collection-ceiling`) — a user holding a grant on a
+  collection outside the client's ceiling is refused through that client and
+  allowed through another; the refusal is `no_grant`, indistinguishable from having
+  none; a ceiling can never widen access; a null ceiling behaves as before.
+- **Env-scope parity** (`env-scope-parity`) — table-driven over every combination of
+  requested scopes, policy and live eligibility, so the OAuth path and the key path
+  cannot answer differently. Covers the `env:dev` floor and the separate
+  refresh-time recompute that lets a promotion reach an existing token.
+- **Audit `via`** (`audit-via`) — allowed and refused outcomes both record which
+  credential produced them.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
 - **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a

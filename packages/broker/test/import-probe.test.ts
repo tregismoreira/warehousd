@@ -11,7 +11,7 @@ let p: Provisioned, admin: Pool, pools: Pools, broker: ReturnType<typeof makeBro
 const cfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
 const PERSON = "9a000001-0000-4000-8000-000000000001";
 const DEPT = "8b000001-0000-4000-8000-000000000001";
-const ctx = { userId: "mia", orgId: "default", env: "live" as const };
+const ctx = { userId: "mia", orgId: "default", env: "live", via: "session" as const };
 
 beforeAll(async () => {
   p = await provision("importprobe");
@@ -97,7 +97,7 @@ describe("imported live data is subject to the same enforcement as seeded data",
     await admin.query(
       `insert into app.grants (user_id,collection,env,status,allowed_fields)
        values ('mia','people','dev','approved', array['id','full_name','email'])`);
-    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev" }, { collection: "people" });
+    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev", via: "session" }, { collection: "people" });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("unreachable");
     const body = JSON.stringify(r.documents);
