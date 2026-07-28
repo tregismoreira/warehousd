@@ -25,12 +25,12 @@ describe("extractFile", () => {
     expect(d.title).toBe("q3-plan");
     expect(d.owner).toBeNull();
   });
-  it("parses the taxonomy term from frontmatter when termField given", () => {
+  it("parses the taxonomy term from frontmatter when termFields given", () => {
     const raw = "---\nowner: ana@meridian.demo\ncategory: hr\n---\n# T\n\nBody.";
-    const d = extractFile("a.md", raw, mtime, "category");
-    expect(d.term).toBe("hr");
-    expect(extractFile("a.md", raw, mtime).term).toBeNull();       // no termField → null
-    expect(extractFile("a.md", "# T\n\nBody.", mtime, "category").term).toBeNull(); // no frontmatter → null
+    const d = extractFile("a.md", raw, mtime, ["category"]);
+    expect(d.terms.category).toBe("hr");
+    expect(extractFile("a.md", raw, mtime).terms.category).toBeNull();       // no termFields → null
+    expect(extractFile("a.md", "# T\n\nBody.", mtime, ["category"]).terms.category).toBeNull(); // no frontmatter → null
   });
 });
 
@@ -94,21 +94,21 @@ describe("indexCollection (DB-backed)", () => {
     writeFileSync(join(dir, "sub/b.txt"), "bravo body");
     writeFileSync(join(dir, "c.png"), "ignored");
 
-    const r1 = await indexCollection(db, "dev", "policies", dir);
+    const r1 = await indexCollection(db, docCfg, "dev", "policies", dir);
     expect(r1).toEqual({ indexed: 2, skipped: 0, deleted: 0 });
 
-    const r2 = await indexCollection(db, "dev", "policies", dir);
+    const r2 = await indexCollection(db, docCfg, "dev", "policies", dir);
     expect(r2).toEqual({ indexed: 0, skipped: 2, deleted: 0 });
 
     writeFileSync(join(dir, "a.md"), "# A\n\nalpha body CHANGED");
-    const r3 = await indexCollection(db, "dev", "policies", dir);
+    const r3 = await indexCollection(db, docCfg, "dev", "policies", dir);
     expect(r3.indexed).toBe(1);
     const chunks = await db.query(`select content from data_synth."policies__documents" c
       join data_synth."policies__files" d on d.id=c.file_id where d.path='a.md'`);
     expect(chunks.rows.every((r: any) => r.content.includes("CHANGED"))).toBe(true);
 
     rmSync(join(dir, "sub/b.txt"));
-    const r4 = await indexCollection(db, "dev", "policies", dir);
+    const r4 = await indexCollection(db, docCfg, "dev", "policies", dir);
     expect(r4.deleted).toBe(1);
     const docs = await db.query(`select path from data_synth."policies__files"`);
     expect(docs.rows.map((r: any) => r.path)).toEqual(["a.md"]);
@@ -134,7 +134,6 @@ describe("indexCollection: taxonomy", () => {
   let db: Pool;
   let dir: string;
 
-  const tax = { field: "category", slugs: ["hr", "finance"] };
   const taxonomyCfg = {
     ...docCfg,
     taxonomies: {
@@ -143,7 +142,7 @@ describe("indexCollection: taxonomy", () => {
     collections: {
       policies: {
         ...docCfg.collections.policies,
-        taxonomy: "category",
+        taxonomies: ["category"],
       },
     },
   };
@@ -170,33 +169,33 @@ describe("indexCollection: taxonomy", () => {
 
   it("writes the term column from frontmatter", async () => {
     writeFileSync(join(dir, "a.md"), "---\ncategory: hr\n---\n# A\n\nAlpha body.");
-    await indexCollection(db, "dev", "policies", dir, { taxonomy: tax });
+    await indexCollection(db, taxonomyCfg, "dev", "policies", dir);
     const r = (await db.query(`select category from data_synth."policies__files" where path='a.md'`)).rows[0];
     expect(r.category).toBe("hr");
   });
 
   it("updates the term when frontmatter changes", async () => {
     writeFileSync(join(dir, "a.md"), "---\ncategory: finance\n---\n# A\n\nAlpha body v2.");
-    await indexCollection(db, "dev", "policies", dir, { taxonomy: tax });
+    await indexCollection(db, taxonomyCfg, "dev", "policies", dir);
     const r = (await db.query(`select category from data_synth."policies__files" where path='a.md'`)).rows[0];
     expect(r.category).toBe("finance");
   });
 
   it("rejects a file with missing term, naming the file", async () => {
     writeFileSync(join(dir, "b.md"), "# B\n\nNo frontmatter.");
-    await expect(indexCollection(db, "dev", "policies", dir, { taxonomy: tax }))
+    await expect(indexCollection(db, taxonomyCfg, "dev", "policies", dir))
       .rejects.toThrow(/b\.md.*missing required category/);
   });
 
   it("rejects a file with an unknown term, naming file and term", async () => {
     writeFileSync(join(dir, "b.md"), "---\ncategory: bogus\n---\n# B\n\nBody.");
-    await expect(indexCollection(db, "dev", "policies", dir, { taxonomy: tax }))
+    await expect(indexCollection(db, taxonomyCfg, "dev", "policies", dir))
       .rejects.toThrow(/b\.md.*unknown category term "bogus"/);
   });
 
   it("unbound collections index exactly as before", async () => {
     writeFileSync(join(dir, "a.md"), "# A\n\nalpha body");
-    const r = await indexCollection(db, "dev", "policies", dir);   // no opts
+    const r = await indexCollection(db, docCfg, "dev", "policies", dir);   // use docCfg without taxonomy
     expect(r.deleted + r.indexed + r.skipped).toBeGreaterThan(0);
   });
 });

@@ -59,7 +59,7 @@ export async function loadTaxonomyBindings(
 
   const bindings: TaxonomyBinding[] = [];
 
-  for (const vocabSlug of c.taxonomies) {
+  for (const vocabSlug of c.taxonomies ?? []) {
     const vocab = cfg.taxonomies[vocabSlug];
     if (!vocab) throw new Error(`Unknown vocabulary: ${vocabSlug}`);
 

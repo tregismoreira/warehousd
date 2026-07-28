@@ -52,7 +52,7 @@ describe("approve — document scoping actually persists", () => {
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["title", "content"],
-      selectedTerms: ["hr", "benefits"],
+      selectedTerms: { category: ["hr", "benefits"] },
     }, marcusCookie) as any);
     const g = await grantRow(id);
     expect(g.document_filter).toEqual({ field: "category", op: "in", value: ["hr", "benefits"] });
@@ -63,7 +63,7 @@ describe("approve — document scoping actually persists", () => {
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["title"],
-      selectedPaths: ["hr/pto.md"], selectedTerms: ["finance"],
+      selectedPaths: ["hr/pto.md"], selectedTerms: { category: ["finance"] },
     }, marcusCookie) as any);
     const g = await grantRow(id);
     expect(g.document_filter.field).toBe("category");
@@ -82,7 +82,7 @@ describe("approve — document scoping actually persists", () => {
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["content"],
-      selectedTerms: ["hr"],
+      selectedTerms: { category: ["hr"] },
       documentFilter: { field: "content", op: "in", value: ["anything"] }, // forged
     }, marcusCookie) as any);
     const g = await grantRow(id);

@@ -18,7 +18,7 @@ const q = (id: string) => {
 
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
-  opts: { documentFilter?: DocumentFilter | null; q?: string } = {},
+  opts: { documentFilter?: DocumentFilter | null; q?: string; isMultiValueField?: (field: string) => boolean } = {},
 ): { text: string; values: unknown[] } {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const view = `${schema}.v_${intent.collection}`;
@@ -48,9 +48,19 @@ export function buildSelect(
 
   const where: string[] = [];
   for (const f of intent.filters ?? []) {
+    const isMulti = opts.isMultiValueField?.(f.field) ?? false;
     if (f.op === "in") {
       const arr = Array.isArray(f.value) ? f.value : [f.value];
-      where.push(`${q(f.field)} in (${arr.map(param).join(", ")})`);
+      if (isMulti) {
+        // For multi-value columns, use overlap operator: "col" && $n::text[]
+        const arrParam = param(arr);
+        where.push(`${q(f.field)} && ${arrParam}::text[]`);
+      } else {
+        where.push(`${q(f.field)} in (${arr.map(param).join(", ")})`);
+      }
+    } else if (isMulti && f.op === "eq") {
+      // For multi-value columns with eq, use: $n = any("col")
+      where.push(`${param(f.value)} = any(${q(f.field)})`);
     } else {
       where.push(`${q(f.field)} ${OP_SQL[f.op]} ${param(f.value)}`);
     }
@@ -58,9 +68,19 @@ export function buildSelect(
   // AND the grant-carried document filter
   const rf = opts.documentFilter;
   if (rf) {
+    const isMulti = opts.isMultiValueField?.(rf.field) ?? false;
     if (rf.op === "in") {
       const arr = Array.isArray(rf.value) ? rf.value : [rf.value];
-      where.push(arr.length ? `${q(rf.field)} in (${arr.map(param).join(", ")})` : `false`);
+      if (isMulti) {
+        // For multi-value columns, use overlap operator: "col" && $n::text[]
+        const arrParam = param(arr);
+        where.push(arr.length ? `${q(rf.field)} && ${arrParam}::text[]` : `false`);
+      } else {
+        where.push(arr.length ? `${q(rf.field)} in (${arr.map(param).join(", ")})` : `false`);
+      }
+    } else if (isMulti) {
+      // For multi-value columns with eq, use: $n = any("col")
+      where.push(`${param(rf.value)} = any(${q(rf.field)})`);
     } else {
       where.push(`${q(rf.field)} = ${param(rf.value)}`);
     }

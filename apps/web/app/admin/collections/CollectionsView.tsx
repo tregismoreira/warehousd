@@ -23,7 +23,7 @@ interface Collection {
   name: string;
   description: string;
   type: "dataset" | "file";
-  taxonomy: string | null;
+  taxonomies: string[];
   status: ApplyStatus;
   appliedAt: string | null;
   fields: Field[];

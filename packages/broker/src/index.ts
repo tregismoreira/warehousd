@@ -11,7 +11,7 @@ export * from "./grants/manage";
 export * from "./oauth/client-policies";
 export * from "./db/bootstrap";
 export { indexCollection } from "./indexing";
-export type { IndexTaxonomy } from "./indexing/sync";
+export { syncDatasetTerms, loadTaxonomyBindings, slugify, type TaxonomyBinding } from "./taxonomy";
 export type { DocSearchIntent } from "./types";
 export { listDocumentPaths } from "./documents/paths";
 export { importCollection } from "./import/run";

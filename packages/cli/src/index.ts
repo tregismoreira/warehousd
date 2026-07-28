@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { Pool } from "pg";
 import { resolve } from "node:path";
 import {
-  loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection,
+  loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms,
 } from "@warehousd/broker";
 import { runInit } from "./init";
 import { runStart } from "./start";
@@ -46,12 +46,11 @@ export async function runIndex(
   // Invariant 5: the YAML `source` dir is DEV content. Live indexing must be explicit.
   const dir = env === "dev" ? (opts.source ?? c.source!) : (opts.source ?? c.source_live);
   if (!dir) throw new Error(`Indexing env=live requires \`source_live\` in warehousd.yml or --source`);
-  const taxonomy = c.taxonomy
-    ? { field: c.taxonomy, slugs: Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) }
-    : undefined;
   const db = new Pool({ connectionString: dbUrl });
   try {
-    return await indexCollection(db, env, collection, resolve(projectDir, dir), { taxonomy });
+    // Sync dataset-sourced vocabulary terms before indexing
+    await syncDatasetTerms(db, cfg, env);
+    return await indexCollection(db, cfg, env, collection, resolve(projectDir, dir));
   } finally { await db.end(); }
 }
 
@@ -134,15 +133,14 @@ program.command("regen-synth")
     try {
       // Seed truncates and generates synthetic data
       await runSeed(o.dir, db, Number(o.seed));
+      // Sync dataset-sourced vocabulary terms
+      await syncDatasetTerms(pool, cfg, "dev");
       // Re-index all file collections
       for (const [name, c] of Object.entries(cfg.collections)) {
         if (c.type === "file") {
           const env = "dev";
           const dir = c.source!;
-          const taxonomy = c.taxonomy
-            ? { field: c.taxonomy, slugs: Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) }
-            : undefined;
-          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomy });
+          await indexCollection(pool, cfg, env, name, resolve(o.dir, dir));
         }
       }
     } finally {

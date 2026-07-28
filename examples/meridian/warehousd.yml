@@ -20,7 +20,7 @@ taxonomies:
 collections:
   announcements:
     description: Company announcements
-    taxonomy: category
+    taxonomies: [category]
     fields:
       id:         { type: uuid, posture: allow, pk: true }
       title:      { type: text, posture: allow }
@@ -64,7 +64,7 @@ collections:
   policies:
     type: file
     description: Company policy documents (searchable)
-    taxonomy: category
+    taxonomies: [category]
     source: ./seed/docs-dev
     source_live: ./seed/docs-live
     fields:

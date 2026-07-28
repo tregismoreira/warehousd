@@ -7,7 +7,7 @@ import { provision, type Provisioned } from "./helpers/db";
 import { ConfigSchema } from "../src/config/schema";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
-import { indexCollection } from "../src/indexing";
+import { indexCollection, syncDatasetTerms } from "../src/indexing";
 import { makeBroker } from "../src/broker";
 import { createPools, type Pools } from "../src/db/pools";
 
@@ -19,10 +19,10 @@ const cfg = ConfigSchema.parse({
   taxonomies: { category: { label: "Category", terms: {
     hr: { label: "HR" }, finance: { label: "Finance" } } } },
   collections: {
-    notes: { description: "notes", taxonomy: "category", fields: {
+    notes: { description: "notes", taxonomies: ["category"], fields: {
       id: { type: "uuid", posture: "allow", pk: true },
       body: { type: "text", posture: "allow" } } },
-    briefs: { description: "briefs", type: "file", source: "./unused", taxonomy: "category", fields: {
+    briefs: { description: "briefs", type: "file", source: "./unused", taxonomies: ["category"], fields: {
       title: { posture: "allow" }, content: { posture: "allow" },
       path: { posture: "deny" }, category: { posture: "allow" } } },
   },
@@ -42,8 +42,8 @@ beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), "taxdocs-"));
   writeFileSync(join(dir, "handbook.md"), "---\ncategory: hr\n---\n# Handbook\n\nVacation policy paragraph.");
   writeFileSync(join(dir, "budget.md"), "---\ncategory: finance\n---\n# Budget\n\nVacation budget paragraph.");
-  await indexCollection(admin, "dev", "briefs", dir,
-    { taxonomy: { field: "category", slugs: ["hr", "finance"] } });
+  await syncDatasetTerms(admin, cfg, "dev");
+  await indexCollection(admin, cfg, "dev", "briefs", dir);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
 });

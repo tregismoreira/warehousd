@@ -86,8 +86,14 @@ export function validateImportRows(
   const storable = new Map<string, FieldConfig>(
     Object.entries(c.fields).filter(([, f]) => !f.view_join));
   const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null;
-  const termSlugs = c.taxonomy
-    ? new Set(Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {})) : null;
+  // Build a map of taxonomy field names to their valid slugs
+  const termSlugsMap = new Map<string, Set<string>>();
+  for (const vocabSlug of c.taxonomies ?? []) {
+    const vocab = cfg.taxonomies[vocabSlug];
+    if (vocab?.terms) {
+      termSlugsMap.set(vocabSlug, new Set(Object.keys(vocab.terms)));
+    }
+  }
 
   const first = rows[0]!;
   const columns = Object.keys(first);
@@ -125,8 +131,17 @@ export function validateImportRows(
         out.push(null);
         continue;
       }
-      if (termSlugs && col === c.taxonomy) {
-        if (!termSlugs.has(String(raw))) { push({ row: idx, column: col, reason: "unknown_term" }); out.push(null); continue; }
+      // Check if this column is a vocabulary field
+      const vocabTerms = termSlugsMap.get(col);
+      if (vocabTerms) {
+        // For single-value vocabularies, validate that the value is a valid term
+        // (multi-value columns would need semicolon-separated parsing, handled elsewhere)
+        const vocab = cfg.taxonomies[col];
+        if (!vocab?.multiple && !vocabTerms.has(String(raw))) {
+          push({ row: idx, column: col, reason: "unknown_term" });
+          out.push(null);
+          continue;
+        }
         out.push(String(raw));
         continue;
       }

@@ -9,7 +9,23 @@ export const TAXONOMY_RESERVED_SLUGS = new Set<string>([
 ]);
 
 export const TermSchema = z.object({ label: z.string() });
-export const VocabularySchema = z.object({ label: z.string(), terms: z.record(TermSchema) });
+export const VocabularySchema = z.object({
+  label: z.string(),
+  multiple: z.boolean().default(false),
+  terms: z.record(TermSchema).optional(),
+  source: z.object({
+    collection: z.string(),
+    slug: z.string(),
+    label: z.string(),
+  }).optional(),
+}).superRefine((v, ctx) => {
+  const hasTerms = !!v.terms;
+  const hasSource = !!v.source;
+  if (!hasTerms && !hasSource)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary must have either "terms" (YAML) or "source" (dataset), not both` });
+  if (hasTerms && hasSource)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary must have either "terms" (YAML) or "source" (dataset), not both` });
+});
 export type VocabularyConfig = z.infer<typeof VocabularySchema>;
 
 export const FieldSchema = z.object({
@@ -33,7 +49,7 @@ export const CollectionSchema = z.object({
   type: z.enum(["dataset", "file"]).default("dataset"),
   source: z.string().optional(),
   source_live: z.string().optional(),
-  taxonomy: z.string().optional(),      // vocabulary slug — validated against `taxonomies` at ConfigSchema level
+  taxonomies: z.array(z.string()).default([]),  // vocabulary slugs — validated against `taxonomies` at ConfigSchema level
   fields: z.record(FieldSchema),
 }).superRefine((c, ctx) => {
   const FIELD_NAME = /^[a-z_][a-z0-9_]*$/i;
@@ -41,29 +57,34 @@ export const CollectionSchema = z.object({
     if (!FIELD_NAME.test(name))
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field name "${name}" invalid (must match [a-z_][a-z0-9_]*)` });
 
-  const tf = c.taxonomy ? c.fields[c.taxonomy] : undefined;
-  if (tf) {
-    if (tf.type && tf.type !== "text")
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `taxonomy field "${c.taxonomy}" must be type text` });
-    if (tf.pk || tf.fk || tf.view_join)
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `taxonomy field "${c.taxonomy}" may not set pk/fk/view_join` });
+  // Validate each bound taxonomy field
+  for (const taxSlug of c.taxonomies) {
+    const tf = c.fields[taxSlug];
+    if (tf) {
+      if (tf.type && tf.type !== "text" && !tf.type.startsWith("text"))
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `taxonomy field "${taxSlug}" must be type text` });
+      if (tf.pk || tf.fk || tf.view_join)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `taxonomy field "${taxSlug}" may not set pk/fk/view_join` });
+    }
   }
   if (c.type === "file") {
     if (!c.source) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "file collection requires `source`" });
+    const allowedFieldNames = new Set([...FILE_FIELDS, ...c.taxonomies]);
     for (const k of Object.keys(c.fields))
-      if (!(FILE_FIELDS as readonly string[]).includes(k) && k !== c.taxonomy)
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${k}" not in fixed set ${FILE_FIELDS.join(",")}` });
+      if (!allowedFieldNames.has(k))
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${k}" not in fixed set ${[...FILE_FIELDS, ...c.taxonomies].join(",")}` });
   } else {
+    const taxonomySet = new Set(c.taxonomies);
     for (const [k, f] of Object.entries(c.fields))
-      if (!f.type && k !== c.taxonomy)
+      if (!f.type && !taxonomySet.has(k))
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${k}" requires a type` });
   }
 }).transform((c) => {
   const fields = { ...c.fields };
-  // Bound term field: auto-add as text/allow when omitted; fill type text when untyped.
-  if (c.taxonomy) {
-    const tf = fields[c.taxonomy];
-    fields[c.taxonomy] = tf ? { ...tf, type: tf.type ?? "text" } : { posture: "allow", type: "text" };
+  // Bound term fields: auto-add as text/allow when omitted; fill type text when untyped.
+  for (const taxSlug of c.taxonomies) {
+    const tf = fields[taxSlug];
+    fields[taxSlug] = tf ? { ...tf, type: tf.type ?? "text" } : { posture: "allow", type: "text" };
   }
   if (c.type !== "file") return { ...c, fields };
   const filled = Object.fromEntries(Object.entries(fields).map(([k, f]) =>
@@ -91,9 +112,11 @@ export const ConfigSchema = z.object({
     for (const [slug, v] of Object.entries(tx)) {
       if (!/^[a-z][a-z0-9_]*$/.test(slug) || slug.includes("__") || TAXONOMY_RESERVED_SLUGS.has(slug))
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary slug "${slug}" invalid (must match [a-z][a-z0-9_]*, no "__", not a reserved column name)` });
-      for (const t of Object.keys(v.terms))
-        if (!/^[a-z0-9][a-z0-9-]*$/.test(t))
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `term slug "${t}" in vocabulary "${slug}" must be lowercase kebab-case` });
+      if (v.terms) {
+        for (const t of Object.keys(v.terms))
+          if (!/^[a-z0-9][a-z0-9-]*$/.test(t))
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: `term slug "${t}" in vocabulary "${slug}" must be lowercase kebab-case` });
+      }
     }
   }),
   collections: z.record(CollectionSchema).superRefine((cols, ctx) => {
@@ -103,8 +126,25 @@ export const ConfigSchema = z.object({
   }),
   synthetic: z.object({ documents_per_collection: z.record(z.number()).default({}) }).default({ documents_per_collection: {} }),
 }).superRefine((cfg, ctx) => {
-  for (const [name, c] of Object.entries(cfg.collections))
-    if (c.taxonomy && !cfg.taxonomies[c.taxonomy])
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection "${name}" binds unknown vocabulary "${c.taxonomy}"` });
+  for (const [name, c] of Object.entries(cfg.collections)) {
+    // Validate that each bound taxonomy exists
+    for (const taxSlug of c.taxonomies) {
+      if (!cfg.taxonomies[taxSlug])
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection "${name}" binds unknown vocabulary "${taxSlug}"` });
+    }
+    // Validate dataset-sourced vocabularies reference valid collections and fields
+    for (const taxSlug of c.taxonomies) {
+      const vocab = cfg.taxonomies[taxSlug];
+      if (vocab?.source) {
+        const srcCol = cfg.collections[vocab.source.collection];
+        if (!srcCol)
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary "${taxSlug}" references unknown source collection "${vocab.source.collection}"` });
+        else if (srcCol.type !== "dataset")
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary "${taxSlug}" source collection "${vocab.source.collection}" must be type dataset` });
+        else if (!srcCol.fields[vocab.source.slug] || !srcCol.fields[vocab.source.label])
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary "${taxSlug}" source fields (slug: "${vocab.source.slug}", label: "${vocab.source.label}") not found in collection "${vocab.source.collection}"` });
+      }
+    }
+  }
 });
 export type WarehousdConfig = z.infer<typeof ConfigSchema>;

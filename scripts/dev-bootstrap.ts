@@ -1,7 +1,7 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
 import { execSync } from "child_process";
-import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, ensureSchemasAndRoles } from "@warehousd/broker";
+import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, ensureSchemasAndRoles } from "@warehousd/broker";
 import { seedLive } from "../examples/meridian/seed/live";
 import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
@@ -72,13 +72,14 @@ async function main() {
   await applyConfig(db, cfg);
   // truncate before regenerating so re-running bootstrap (e.g. container restart) is idempotent
   await regenerateSynthetic(db, cfg, 42);
+  // Sync dataset-sourced vocabulary terms for dev
+  await syncDatasetTerms(db, cfg, "dev");
   await seedLive(db);
+  // Sync dataset-sourced vocabulary terms for live
+  await syncDatasetTerms(db, cfg, "live");
   // Index policies collection from seed docs (dev and live environments)
-  const policiesTaxonomy = cfg.collections.policies?.taxonomy
-    ? { field: cfg.collections.policies.taxonomy, slugs: Object.keys(cfg.taxonomies[cfg.collections.policies.taxonomy]?.terms ?? {}) }
-    : undefined;
-  const devIndexed = await indexCollection(db, "dev", "policies", `${dir}/seed/docs-dev`, { taxonomy: policiesTaxonomy });
-  const liveIndexed = await indexCollection(db, "live", "policies", `${dir}/seed/docs-live`, { taxonomy: policiesTaxonomy });
+  const devIndexed = await indexCollection(db, cfg, "dev", "policies", `${dir}/seed/docs-dev`);
+  const liveIndexed = await indexCollection(db, cfg, "live", "policies", `${dir}/seed/docs-live`);
   // Mia's pending salaries request (Marcus's inbox) + her approved dev grants (§9) —
   // only seed if not already present, so re-running bootstrap doesn't duplicate grant rows.
   const existing = await db.query(`select 1 from app.grants where user_id='mia' limit 1`);

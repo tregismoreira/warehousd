@@ -108,9 +108,9 @@ describe("apply: taxonomy", () => {
     project: "t", server: { port: 1 },
     taxonomies: { category: { label: "Category", terms: { hr: { label: "HR" }, finance: { label: "Finance" } } } },
     collections: {
-      notes:  { description: "d", taxonomy: "category", fields: {
+      notes:  { description: "d", taxonomies: ["category"], fields: {
         id: { type: "uuid", posture: "allow", pk: true } } },
-      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomies: ["category"], fields: {
         title: { posture: "allow" }, content: { posture: "allow" } } },
     },
   };

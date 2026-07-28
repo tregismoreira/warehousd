@@ -8,6 +8,7 @@ import {
   applyConfig,
   generateSynthetic,
   indexCollection,
+  syncDatasetTerms,
   ensureDevClient,
   dataRoleUrl,
   grantableFields,
@@ -175,15 +176,16 @@ export async function bootstrap(): Promise<void> {
     }
     await generateSynthetic(db, cfg, Number(process.env.WAREHOUSD_SEED ?? 42));
 
+    // 8.5. Sync dataset-sourced vocabulary terms for dev
+    await syncDatasetTerms(db, cfg, "dev");
+
     // 9. Index file collections
     for (const [name, c] of Object.entries(cfg.collections)) {
       if (c.type !== "file") continue;
-      const taxonomy = c.taxonomy
-        ? { field: c.taxonomy, slugs: Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) }
-        : undefined;
-      await indexCollection(db, "dev", name, resolve(dir, c.source!), { taxonomy });
+      await indexCollection(db, cfg, "dev", name, resolve(dir, c.source!));
       if (c.source_live) {
-        await indexCollection(db, "live", name, resolve(dir, c.source_live), { taxonomy });
+        await syncDatasetTerms(db, cfg, "live");
+        await indexCollection(db, cfg, "live", name, resolve(dir, c.source_live));
       }
     }
 

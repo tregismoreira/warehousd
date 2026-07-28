@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   const enriched = (rows: typeof mine.rows) => rows.map((g) => ({
     ...g,
     collectionType: cfg.collections[g.collection]?.type || "dataset",
-    taxonomyField: cfg.collections[g.collection]?.taxonomy ?? null,
+    taxonomyFields: cfg.collections[g.collection]?.taxonomies ?? [],
   }));
 
   return Response.json({

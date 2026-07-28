@@ -53,11 +53,23 @@ export function buildApproval(
 
   // Terms take precedence over paths: a term scope is the coarser, intentional choice, and
   // approving with both selected would otherwise silently drop one of them.
-  const terms = strings(input.selectedTerms);
+  // Stage 1: use the FIRST bound vocabulary with selected terms (Stage 2 will handle multiple filters).
+  const selectedTermsMap = (typeof input.selectedTerms === "object" && input.selectedTerms !== null)
+    ? (input.selectedTerms as Record<string, unknown>)
+    : {};
   const paths = strings(input.selectedPaths);
-  if (terms.length > 0 && c.taxonomy) {
-    opts.documentFilter = { field: c.taxonomy, op: "in", value: terms };
-  } else if (paths.length > 0 && c.type === "file") {
+
+  // Find the first vocabulary with selected terms
+  for (const vocabSlug of c.taxonomies) {
+    const vocabTerms = strings(selectedTermsMap[vocabSlug]);
+    if (vocabTerms.length > 0) {
+      opts.documentFilter = { field: vocabSlug, op: "in", value: vocabTerms };
+      break; // Stage 2 will generalize to multiple filters
+    }
+  }
+
+  // Fall back to path-based filtering if no vocabulary was scoped
+  if (!opts.documentFilter && paths.length > 0 && c.type === "file") {
     opts.documentFilter = { field: "path", op: "in", value: paths };
   }
 

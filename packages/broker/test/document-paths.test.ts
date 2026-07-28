@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import {
-  createAppSchema, applyConfig, createPools, indexCollection, type Pools,
+  createAppSchema, applyConfig, createPools, indexCollection, syncDatasetTerms, type Pools,
 } from "../src/index";
 import { loadConfig } from "../src/config/load";
 import { listDocumentPaths } from "../src/documents/paths";
@@ -16,12 +16,10 @@ beforeAll(async () => {
   admin = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
-  await indexCollection(admin, "dev", "policies", `${meridian}/seed/docs-dev`, {
-    taxonomy: { field: "category", slugs: Object.keys(cfg.taxonomies.category?.terms ?? {}) },
-  });
-  await indexCollection(admin, "live", "policies", `${meridian}/seed/docs-live`, {
-    taxonomy: { field: "category", slugs: Object.keys(cfg.taxonomies.category?.terms ?? {}) },
-  });
+  await syncDatasetTerms(admin, cfg, "dev");
+  await indexCollection(admin, cfg, "dev", "policies", `${meridian}/seed/docs-dev`);
+  await syncDatasetTerms(admin, cfg, "live");
+  await indexCollection(admin, cfg, "live", "policies", `${meridian}/seed/docs-live`);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
 }, 60_000);
 

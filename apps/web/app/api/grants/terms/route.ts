@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
-import { findCollection } from "@warehousd/broker";
-import { getConfig } from "../../../lib/broker";
+import { findCollection, loadTaxonomyBindings } from "@warehousd/broker";
+import { getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
+import { readEnvCookie } from "../../../../lib/session";
 
 export async function GET(req: NextRequest) {
   const guard = await requireRole(req, "manager");
@@ -10,10 +11,23 @@ export async function GET(req: NextRequest) {
   const collection = req.nextUrl.searchParams.get("collection") ?? "";
   const cfg = getConfig();
   const c = findCollection(cfg, collection);
-  if (!c?.taxonomy) return Response.json({ field: null, terms: [] });
-  const vocab = cfg.taxonomies[c.taxonomy];
+  if (!c || c.taxonomies.length === 0) return Response.json({ vocabularies: [] });
+
+  const env = readEnvCookie(req) as "dev" | "live";
+  const db = getAppPool();
+  const bindings = await loadTaxonomyBindings(db, cfg, collection, env);
+
   return Response.json({
-    field: c.taxonomy,
-    terms: Object.entries(vocab?.terms ?? {}).map(([slug, t]) => ({ slug, label: t.label })),
+    vocabularies: bindings.map((b) => ({
+      field: b.field,
+      label: b.label,
+      multiple: b.multiple,
+      terms: b.slugs.map((slug) => {
+        // Look up label from the vocabulary config
+        const vocab = cfg.taxonomies[b.field];
+        const label = vocab?.terms?.[slug]?.label ?? slug;
+        return { slug, label };
+      }),
+    })),
   });
 }

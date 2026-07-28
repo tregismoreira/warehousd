@@ -132,7 +132,7 @@ describe("taxonomies", () => {
 
   it("parses and auto-adds the bound term field as text/allow (structured)", () => {
     const cfg = ConfigSchema.parse({ ...base, collections: {
-      notes: { description: "d", taxonomy: "category", fields: {
+      notes: { description: "d", taxonomies: ["category"], fields: {
         id: { type: "uuid", posture: "allow", pk: true } } } } });
     expect(cfg.collections.notes!.fields.category).toEqual({ posture: "allow", type: "text" });
     expect(cfg.taxonomies.category!.terms.hr!.label).toBe("HR");
@@ -140,22 +140,22 @@ describe("taxonomies", () => {
 
   it("accepts the vocabulary slug as an extra file field and fills type text", () => {
     const cfg = ConfigSchema.parse({ ...base, collections: {
-      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomies: ["category"], fields: {
         title: { posture: "allow" }, content: { posture: "allow" }, category: { posture: "deny" } } } } });
     expect(cfg.collections.briefs!.fields.category).toEqual({ posture: "deny", type: "text" });
   });
 
   it("auto-adds the term field on a bound file collection when omitted", () => {
     const cfg = ConfigSchema.parse({ ...base, collections: {
-      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomies: ["category"], fields: {
         title: { posture: "allow" }, content: { posture: "allow" } } } } });
     expect(cfg.collections.briefs!.fields.category).toEqual({ posture: "allow", type: "text" });
   });
 
   it("rejects binding an undeclared vocabulary", () => {
     expect(() => ConfigSchema.parse({ ...base, collections: {
-      notes: { description: "d", taxonomy: "nope", fields: {
-        id: { type: "uuid", posture: "allow", pk: true } } } } })).toThrow(/unknown vocabulary/);
+      notes: { description: "d", taxonomies: ["nope"], fields: {
+        id: { type: "uuid", posture: "allow", pk: true } } } } })).toThrow(/unknown vocabulary|binds unknown/);
   });
 
   it("rejects reserved and malformed vocabulary slugs", () => {
@@ -173,11 +173,11 @@ describe("taxonomies", () => {
 
   it("rejects a non-text bound field and pk/fk/view_join on it", () => {
     expect(() => ConfigSchema.parse({ ...base, collections: {
-      notes: { description: "d", taxonomy: "category", fields: {
+      notes: { description: "d", taxonomies: ["category"], fields: {
         id: { type: "uuid", posture: "allow", pk: true },
         category: { type: "int", posture: "allow" } } } } })).toThrow(/must be type text/);
     expect(() => ConfigSchema.parse({ ...base, collections: {
-      notes: { description: "d", taxonomy: "category", fields: {
+      notes: { description: "d", taxonomies: ["category"], fields: {
         id: { type: "uuid", posture: "allow", pk: true },
         category: { posture: "allow", view_join: "departments.name" } } } } }))
       .toThrow(/pk\/fk\/view_join/);
@@ -185,7 +185,7 @@ describe("taxonomies", () => {
 
   it("still rejects unknown extra file fields on bound collections", () => {
     expect(() => ConfigSchema.parse({ ...base, collections: {
-      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomies: ["category"], fields: {
         title: { posture: "allow" }, sneaky: { posture: "allow" } } } } })).toThrow(/not in fixed set/);
   });
 });

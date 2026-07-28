@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
         name,
         description: c.description,
         type: c.type ?? "dataset",
-        taxonomy: c.taxonomy ?? null,
+        taxonomies: c.taxonomies ?? [],
         status: applyStatus(c, row?.config ?? null),
         appliedAt: row?.updated_at ?? null,
         fields: Object.entries(c.fields).map(([fname, f]) => ({

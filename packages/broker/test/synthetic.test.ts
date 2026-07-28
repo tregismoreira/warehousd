@@ -58,7 +58,7 @@ describe("synthetic: taxonomy terms", () => {
       synthetic: { documents_per_collection: { notes: 30 } },
       taxonomies: { category: { label: "C", terms: {
         hr: { label: "HR" }, finance: { label: "Fin" }, legal: { label: "Legal" } } } },
-      collections: { notes: { description: "d", taxonomy: "category", fields: {
+      collections: { notes: { description: "d", taxonomies: ["category"], fields: {
         id: { type: "uuid", posture: "allow", pk: true } } } },
     });
     const p2 = await provision("synth2");

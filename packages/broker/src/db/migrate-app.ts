@@ -26,6 +26,7 @@ export async function createAppSchema(db: Pool): Promise<void> {
       on app.grants (user_id, collection, env) where status='approved';
   `);
   // Taxonomy: vocabularies (flat) + terms (single-level; parent_id reserved for hierarchy — §5.6-adjacent design 2026-07-22)
+  // Terms are env-scoped: 'all' for YAML vocabularies, 'dev'/'live' for dataset-sourced vocabularies.
   await db.query(`
     create table if not exists app.vocabularies (
       id uuid primary key default gen_random_uuid(),
@@ -34,10 +35,11 @@ export async function createAppSchema(db: Pool): Promise<void> {
     create table if not exists app.terms (
       id uuid primary key default gen_random_uuid(),
       vocabulary_id uuid not null references app.vocabularies(id) on delete cascade,
+      env text not null default 'all' check (env in ('all','dev','live')),
       slug text not null,
       label text not null,
       parent_id uuid references app.terms(id),
-      unique (vocabulary_id, slug));
+      unique (vocabulary_id, env, slug));
   `);
   // client_policies: per-OAuth-client env:live allow-list (§6.1). No FK to Better Auth's
   // oauth client table: createAppSchema runs BEFORE the `@better-auth/cli migrate` step in
