@@ -1,5 +1,6 @@
 export interface BrokerContext {
   userId: string;
+  orgId: string; // from token/persona or session, never from request body — see docs/architecture.md
   env: "dev" | "live"; // from token/persona, never from request body
 }
 

@@ -22,7 +22,7 @@ afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
 
 it("lists names + descriptions only, even with zero grants", async () => {
   const broker = makeBroker(pools, cfg);
-  const r = await broker.listCollections({ userId: "nobody", env: "dev" });
+  const r = await broker.listCollections({ userId: "nobody", orgId: "default", env: "dev" });
   expect(r).toEqual([
     { name: "people", description: "Employee directory" },
     { name: "salaries", description: "Comp" },
@@ -31,7 +31,7 @@ it("lists names + descriptions only, even with zero grants", async () => {
 
 it("writes an audit row with collection='*' and outcome='allowed'", async () => {
   const broker = makeBroker(pools, cfg);
-  await broker.listCollections({ userId: "alice", env: "live" });
+  await broker.listCollections({ userId: "alice", orgId: "default", env: "live" });
   const audit = await admin.query(
     `select user_id, env, collection, outcome, reason from app.audit_events
      where user_id='alice' and env='live' and collection='*' order by at desc limit 1`);

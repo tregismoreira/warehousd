@@ -1,4 +1,5 @@
 import type { BrokerContext } from "@warehousd/broker";
+import { DEFAULT_ORG_ID } from "@warehousd/broker";
 import { auth, type SessionUser } from "./auth";
 
 export async function getSessionUser(req: Request): Promise<SessionUser | null> {
@@ -16,11 +17,11 @@ export function readEnvCookie(req: Request): "dev" | "live" {
 }
 
 // The sole BrokerContext constructor for cookie/session (web console) paths. userId comes
-// from the verified session; env from the env cookie. Any env-like body param is ignored.
-// Token-authenticated (MCP/OAuth) paths use lib/broker-context.ts's deriveTokenContext
-// instead — two constructors, one per auth path, never a third.
+// from the verified session; env from the env cookie; orgId from the session user (Better Auth).
+// Any env-like body param is ignored. Token-authenticated (MCP/OAuth) paths use
+// lib/broker-context.ts's deriveTokenContext instead — two constructors, one per auth path, never a third.
 export async function deriveContext(req: Request): Promise<BrokerContext | null> {
   const user = await getSessionUser(req);
   if (!user) return null;
-  return { userId: user.id, env: readEnvCookie(req) };
+  return { userId: user.id, orgId: user.orgId ?? DEFAULT_ORG_ID, env: readEnvCookie(req) };
 }

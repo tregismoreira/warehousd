@@ -7,6 +7,7 @@ export const collections = app.table("collections", {
   name: text("name").primaryKey(),
   description: text("description"),
   config: jsonb("config"),
+  orgId: text("org_id").notNull().default("default"), // config-defined, global; always 'default' in v1
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -17,6 +18,7 @@ export const grants = app.table("grants", {
   purposeLabel: text("purpose_label"),
   purposeDetail: text("purpose_detail"),
   allowedFields: text("allowed_fields").array(),
+  orgId: text("org_id").notNull().default("default"),
   env: text("env").notNull(),               // check ('dev','live') added in DDL
   status: text("status").notNull(),         // pending|approved|denied|revoked
   requestedAt: timestamp("requested_at", { withTimezone: true }).defaultNow(),
@@ -32,6 +34,7 @@ export const auditEvents = app.table("audit_events", {
   userId: text("user_id"),
   env: text("env"),
   collection: text("collection"),
+  orgId: text("org_id").notNull().default("default"),
   intent: jsonb("intent"),
   fieldsReturned: text("fields_returned").array(),
   grantId: uuid("grant_id"),
@@ -56,6 +59,7 @@ export const terms = app.table("terms", {
 export const clientPolicies = app.table("client_policies", {
   clientId: text("client_id").primaryKey(),
   displayName: text("display_name"),
+  orgId: text("org_id").notNull().default("default"),
   allowedScopes: text("allowed_scopes").array().notNull().default(sql`'{env:dev}'`),
   promotedAt: timestamp("promoted_at", { withTimezone: true }),
   promotedBy: text("promoted_by"),

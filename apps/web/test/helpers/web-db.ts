@@ -44,6 +44,11 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean }
     env: { ...process.env, APP_DATABASE_URL: appUrl },
   });
 
+  // Same step the container entrypoint runs right after the Better Auth migration: push the
+  // org default onto the generated user.orgId column so direct SQL inserts below still work.
+  const { migrateUserOrg } = await import("@warehousd/broker");
+  await migrateUserOrg(db);
+
   if (seedPersonas) {
     const personas = [
       { id: "ana", email: "ana@meridian.demo", name: "Ana", role: "admin" },

@@ -33,7 +33,7 @@ afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
 it("avg over granted base_salary with groupBy + filter returns correct value", async () => {
   await admin.query(`insert into app.grants (user_id,collection,allowed_fields,env,status)
     values ('a','salaries', array['job_title','base_salary','effective_date'],'dev','approved')`);
-  const r = await broker.query({ userId: "a", env: "dev" }, {
+  const r = await broker.query({ userId: "a", orgId: "default", env: "dev" }, {
     collection: "salaries", aggregate: [{ fn: "avg", field: "base_salary" }],
     groupBy: ["job_title"], filters: [{ field: "job_title", op: "eq", value: "Senior Accountant" }],
   });
@@ -44,18 +44,18 @@ it("avg over granted base_salary with groupBy + filter returns correct value", a
 it("aggregate on a non-granted field → field_denied (aggregate/groupBy/filter positions)", async () => {
   await admin.query(`insert into app.grants (user_id,collection,allowed_fields,env,status)
     values ('b','salaries', array['job_title','id'],'dev','approved')`);
-  const inAgg = await broker.query({ userId: "b", env: "dev" },
+  const inAgg = await broker.query({ userId: "b", orgId: "default", env: "dev" },
     { collection: "salaries", aggregate: [{ fn: "avg", field: "base_salary" }], groupBy: ["job_title"] });
-  const inGroup = await broker.query({ userId: "b", env: "dev" },
+  const inGroup = await broker.query({ userId: "b", orgId: "default", env: "dev" },
     { collection: "salaries", aggregate: [{ fn: "count", field: "id" }], groupBy: ["base_salary"] });
-  const inFilter = await broker.query({ userId: "b", env: "dev" },
+  const inFilter = await broker.query({ userId: "b", orgId: "default", env: "dev" },
     { collection: "salaries", aggregate: [{ fn: "count", field: "id" }],
       filters: [{ field: "base_salary", op: "gt", value: 1 }] });
   for (const r of [inAgg, inGroup, inFilter]) { expect(r.ok).toBe(false); if (!r.ok) expect(r.reason).toBe("field_denied"); }
 });
 
 it("aggregate combined with fields → invalid_intent", async () => {
-  const r = await broker.query({ userId: "a", env: "dev" },
+  const r = await broker.query({ userId: "a", orgId: "default", env: "dev" },
     { collection: "salaries", fields: ["job_title"], aggregate: [{ fn: "avg", field: "base_salary" }] });
   expect(r.ok).toBe(false); if (!r.ok) expect(r.reason).toBe("invalid_intent");
 });

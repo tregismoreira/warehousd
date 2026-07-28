@@ -4,6 +4,7 @@ import { resolve } from "path";
 import {
   ensureSchemasAndRoles,
   createAppSchema,
+  migrateUserOrg,
   loadConfig,
   applyConfig,
   generateSynthetic,
@@ -155,6 +156,10 @@ export async function bootstrap(): Promise<void> {
         env: process.env,
       });
     }
+
+    // 4b. Push the org default down onto Better Auth's generated `user.orgId` column.
+    //     Must follow step 4 — the table does not exist before it.
+    await migrateUserOrg(db);
 
     // 5. YAML → data_synth/data_live tables + views + app.collections. Idempotent by design.
     const cfg = loadConfig(dir);

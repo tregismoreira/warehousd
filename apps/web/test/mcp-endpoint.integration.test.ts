@@ -106,7 +106,7 @@ describe("/mcp endpoint", () => {
 
   it("describe_collection is grant-filtered", async () => {
     const app = getAppPool();
-    const g = await requestGrant(app, { userId: "mia", collection: "people", env: "dev", purposeLabel: "t", allowedFields: ["id"] });
+    const g = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "dev", purposeLabel: "t", allowedFields: ["id"] });
     await approveGrant(app, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
     const token = await mintAccessToken("env:dev");
     const { body } = await rpc(token, "tools/call", { name: "describe_collection", arguments: { name: "people" } });

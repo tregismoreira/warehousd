@@ -96,9 +96,14 @@ describe("file collection apply", () => {
     const d = await db.query(`select id from data_synth."policies__files" limit 1`);
     await db.query(`insert into data_synth."policies__documents" (id,file_id,document_seq,content)
       values (gen_random_uuid(),$1,0,'remote work policy applies')`, [d.rows[0].id]);
-    const r = await db.query(
-      `select content from data_synth.v_policies where tsv @@ websearch_to_tsquery('english','remote work')`);
-    expect(r.rowCount).toBe(1);
+    const search = `select content from data_synth.v_policies
+      where tsv @@ websearch_to_tsquery('english','remote work')`;
+    // The view carries the org predicate, so reading it needs an org in scope — the setting
+    // withOrg() makes on the broker's behalf. Unset means no rows: the wall fails closed.
+    expect((await db.query(search)).rowCount).toBe(0);
+
+    await db.query(`select set_config('warehousd.org_id','default',false)`);
+    expect((await db.query(search)).rowCount).toBe(1);
     await db.end();
   });
 });

@@ -18,21 +18,26 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
     return `
       create table if not exists ${schema}."${collection}__files" (
         id uuid primary key,
+        org_id text not null default 'default',
         title text,
         path text not null unique,${termCol}
         owner text,
         checksum text not null,
-        updated_at timestamptz not null);${termAlter}
+        updated_at timestamptz not null);
+      alter table ${schema}."${collection}__files" add column if not exists org_id text not null default 'default';${termAlter}
       create table if not exists ${schema}."${collection}__documents" (
         id uuid primary key,
+        org_id text not null default 'default',
         file_id uuid not null references ${schema}."${collection}__files"(id) on delete cascade,
         document_seq int not null,
         content text not null,
         tsv tsvector generated always as (to_tsvector('english', content)) stored,
         embedding vector(1536),
         unique (file_id, document_seq));
+      alter table ${schema}."${collection}__documents" add column if not exists org_id text not null default 'default';
       create index if not exists "${collection}__documents_tsv_idx"
-        on ${schema}."${collection}__documents" using gin (tsv);`;
+        on ${schema}."${collection}__documents" using gin (tsv);
+    `;
   }
 
   const cols: string[] = [];
@@ -42,7 +47,8 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
     // type is guaranteed by CollectionSchema refinement for structured collections
     cols.push(`"${name}" ${PG_TYPE[f.type!]}${pk}`);
   }
-  let ddl = `create table if not exists ${schema}.${collection} (${cols.join(", ")});`;
+  let ddl = `create table if not exists ${schema}.${collection} (org_id text not null default 'default', ${cols.join(", ")});`;
+  ddl += ` alter table ${schema}.${collection} add column if not exists org_id text not null default 'default';`;
   // Re-apply upgrade path for a newly bound taxonomy on a pre-existing table.
   // c.taxonomy is a config-validated vocabulary slug — identifier interpolation is safe.
   if (c.taxonomy) ddl += ` alter table ${schema}.${collection} add column if not exists "${c.taxonomy}" text;`;
@@ -50,6 +56,8 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
 }
 
 // One flat view per collection/env. Joins resolve view_join columns.
+// Views filter by current_setting('warehousd.org_id') — the database enforces org isolation,
+// so broker-built SQL never carries an org predicate (see Phase 1 acceptance criterion).
 export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const c = cfg.collections[collection];
@@ -62,7 +70,8 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
       select c.id as document_id, c.document_seq, c.content, c.tsv,
              d.id as file_id, d.title, d.path, d.owner, d.updated_at${termSel}
       from ${schema}."${collection}__documents" c
-      join ${schema}."${collection}__files" d on d.id = c.file_id;`;
+      join ${schema}."${collection}__files" d on d.id = c.file_id and d.org_id = c.org_id
+      where d.org_id = current_setting('warehousd.org_id', true);`;
   }
 
   const selects: string[] = [];
@@ -83,13 +92,39 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
     }
   }
   return `create or replace view ${schema}.v_${collection} as
-    select ${selects.join(", ")} from ${schema}.${collection} base ${joins.join(" ")};`;
+    select ${selects.join(", ")} from ${schema}.${collection} base ${joins.join(" ")}
+    where base.org_id = current_setting('warehousd.org_id', true);`;
 }
 
 export function grantViewDDL(env: "dev" | "live", collection: string): string {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const role = env === "dev" ? "warehousd_dev" : "warehousd_live";
   return `grant select on ${schema}.v_${collection} to ${role};`;
+}
+
+// Org isolation has two walls, and neither is redundant. The read roles only ever see the
+// view, whose WHERE predicate is the wall for them. Roles that touch base tables directly —
+// warehousd_import today, the write roles later — bypass the view entirely, so RLS is their
+// wall. Both live in the database, so a broker bug cannot cross the tenant boundary either way.
+export function rlsDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
+  const schema = env === "dev" ? "data_synth" : "data_live";
+  const c = cfg.collections[collection];
+  if (!c) throw new Error(`Unknown collection: ${collection}`);
+
+  const tables: string[] = [];
+  if (c.type === "file") {
+    tables.push(`${schema}."${collection}__files"`, `${schema}."${collection}__documents"`);
+  } else {
+    tables.push(`${schema}.${collection}`);
+  }
+
+  return tables.map((t) => `
+    alter table ${t} enable row level security;
+    drop policy if exists org_isolation on ${t};
+    create policy org_isolation on ${t}
+      using (org_id = current_setting('warehousd.org_id', true))
+      with check (org_id = current_setting('warehousd.org_id', true));
+  `).join("");
 }
 
 // The import role writes live BASE tables (not views — a view insert would need rules) and

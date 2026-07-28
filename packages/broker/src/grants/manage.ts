@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { DocumentFilter } from "../types";
 import type { WarehousdConfig } from "../config/schema";
 import { findCollection, grantableFields } from "../config/load";
+import { DEFAULT_ORG_ID } from "../db/migrate-app";
 
 export type GrantRequestError = "unknown_collection" | "purpose_required" | "field_not_grantable";
 
@@ -32,14 +33,18 @@ export function validateGrantRequest(
   return { ok: true, fields: requested };
 }
 
+// orgId is optional so a single-org deployment — every deployment that existed before the
+// org dimension — keeps working: an omitted org lands in the implicit one rather than
+// failing the insert. Every real call site passes ctx.orgId.
 export async function requestGrant(app: Pool, i: {
-  userId: string; collection: string; env: "dev" | "live";
+  userId: string; collection: string; env: "dev" | "live"; orgId?: string;
   purposeLabel: string; purposeDetail?: string; allowedFields: string[];
 }): Promise<string> {
   const r = await app.query(
-    `insert into app.grants (user_id,collection,env,purpose_label,purpose_detail,allowed_fields,status)
-     values ($1,$2,$3,$4,$5,$6,'pending') returning id`,
-    [i.userId, i.collection, i.env, i.purposeLabel, i.purposeDetail ?? null, i.allowedFields]);
+    `insert into app.grants (user_id,collection,env,org_id,purpose_label,purpose_detail,allowed_fields,status)
+     values ($1,$2,$3,$4,$5,$6,$7,'pending') returning id`,
+    [i.userId, i.collection, i.env, i.orgId ?? DEFAULT_ORG_ID,
+     i.purposeLabel, i.purposeDetail ?? null, i.allowedFields]);
   return r.rows[0].id;
 }
 

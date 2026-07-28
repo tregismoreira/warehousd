@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import type { BrokerContext } from "../types";
 
 export type Pools = {
@@ -43,4 +43,25 @@ export function createPools(urls: { app: string; dev: string; live: string; imp?
 // The ONLY place env maps to a data pool. A dev ctx can never reach the live pool.
 export function dataPool(pools: Pools, ctx: BrokerContext): Pool {
   return ctx.env === "live" ? pools.live : pools.dev;
+}
+
+// Every data-plane statement runs inside a transaction whose warehousd.org_id is set
+// from ctx.orgId. `set_config(..., true)` is transaction-local, so a pooled connection
+// can never leak one org's setting into another's query.
+export async function withOrg<T>(
+  pool: Pool, orgId: string, fn: (c: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("select set_config('warehousd.org_id', $1, true)", [orgId]);
+    const result = await fn(client);
+    await client.query("commit");
+    return result;
+  } catch (err) {
+    await client.query("rollback").catch(() => {}); // suppress error if already rolled back
+    throw err;
+  } finally {
+    client.release();
+  }
 }

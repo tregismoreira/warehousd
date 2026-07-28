@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       collection,
       env: readEnvCookie(req),
+      orgId: user.orgId ?? "default",
       purposeLabel: (purposeLabel as string).trim(),
       purposeDetail: typeof purposeDetail === "string" ? purposeDetail.trim() : undefined,
       allowedFields: validation.fields,

@@ -22,7 +22,7 @@ async function mintAccessToken(scope: string) {
   const { client_id, client_secret } = await reg.json(); // snake_case — RFC 7591
   await upsertClientPolicy(app, client_id, "BC Client", ["env:dev", "env:live"]);
   if (scope.includes("env:live")) {
-    const g = await requestGrant(app, { userId: "mia", collection: "people", env: "live", purposeLabel: "t", allowedFields: ["id"] });
+    const g = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"] });
     await approveGrant(app, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
   }
   const { verifier, challenge } = pkcePair();
@@ -46,7 +46,7 @@ describe("deriveTokenContext", () => {
     const ctx = await deriveTokenContext(new Request("http://localhost:8722/mcp", {
       headers: { authorization: `Bearer ${token}` },
     }));
-    expect(ctx).toEqual({ userId: "mia", env: "live" });
+    expect(ctx).toEqual({ userId: "mia", orgId: "default", env: "live" });
   });
 
   it("token with no env scope → adapter resolves dev", async () => {
@@ -55,7 +55,7 @@ describe("deriveTokenContext", () => {
     const ctx = await deriveTokenContext(new Request("http://localhost:8722/mcp", {
       headers: { authorization: `Bearer ${token}` },
     }));
-    expect(ctx).toEqual({ userId: "mia", env: "dev" });
+    expect(ctx).toEqual({ userId: "mia", orgId: "default", env: "dev" });
   });
 
   it("invalid/missing token → null", async () => {

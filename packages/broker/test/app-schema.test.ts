@@ -14,7 +14,32 @@ describe("app schema", () => {
     const r = await db.query(
       `select table_name from information_schema.tables where table_schema='app' order by table_name`);
     await db.end();
-    expect(r.rows.map((x) => x.table_name)).toEqual(["audit_events", "client_policies", "collections", "grants", "terms", "vocabularies"]);
+    expect(r.rows.map((x) => x.table_name)).toEqual(["audit_events", "client_policies", "collections", "grants", "organizations", "terms", "vocabularies"]);
+  });
+
+  it("bootstraps exactly one implicit org, and stays at one across re-runs", async () => {
+    p = await provision("appschema");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await createAppSchema(db);
+    const r = await db.query(`select id from app.organizations`);
+    await db.end();
+    expect(r.rows.map((x) => x.id)).toEqual(["default"]);
+  });
+
+  it("org_id defaults to the implicit org on every governed table", async () => {
+    p = await provision("appschema");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await db.query(`insert into app.grants (user_id, collection, env, status) values ('u','people','dev','pending')`);
+    await db.query(`insert into app.audit_events (user_id, env, collection, outcome) values ('u','dev','people','allowed')`);
+    await db.query(`insert into app.collections (name, description) values ('people','People')`);
+    await db.query(`insert into app.client_policies (client_id) values ('c1')`);
+    for (const t of ["grants", "audit_events", "collections", "client_policies"]) {
+      const r = await db.query(`select org_id from app.${t}`);
+      expect(r.rows.every((x) => x.org_id === "default")).toBe(true);
+    }
+    await db.end();
   });
 });
 

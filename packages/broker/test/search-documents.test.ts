@@ -45,7 +45,7 @@ let ctx: ReturnType<typeof makeCtx>;
 let ctxNoGrant: ReturnType<typeof makeCtx>;
 
 function makeCtx(userId: string, env: "dev" | "live" = "dev") {
-  return { userId, env };
+  return { userId, orgId: "default", env };
 }
 
 async function countAudit(db: Pool): Promise<number> {

@@ -1,12 +1,12 @@
 export * from "./types";
 export { makeBroker } from "./broker";
-export { createPools, onPoolError, type Pools } from "./db/pools";
+export { createPools, onPoolError, type Pools, withOrg } from "./db/pools";
 export { loadConfig, grantableFields, findCollection } from "./config/load";
 export type { WarehousdConfig } from "./config/schema";
 export { applyConfig } from "./apply/apply";
 export { generateSynthetic } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
-export { createAppSchema } from "./db/migrate-app";
+export { createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-app";
 export * from "./grants/manage";
 export * from "./oauth/client-policies";
 export * from "./db/bootstrap";

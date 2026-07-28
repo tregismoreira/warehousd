@@ -80,7 +80,7 @@ describe("rule 2: env:live requires an approved, unexpired live grant", () => {
     const app = getAppPool();
     await upsertClientPolicy(app, client_id, "Live Allowed Client 2", ["env:dev", "env:live"]);
     const grantId = await requestGrant(app, {
-      userId: "mia", collection: "people", env: "live",
+      userId: "mia", collection: "people", orgId: "default", env: "live",
       purposeLabel: "test", allowedFields: ["id"],
     });
     await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
@@ -103,7 +103,7 @@ describe("rule 2: env:live requires an approved, unexpired live grant", () => {
     const app = getAppPool();
     await upsertClientPolicy(app, client_id, "Live Allowed Client 3", ["env:dev", "env:live"]);
     const grantId = await requestGrant(app, {
-      userId: "mia", collection: "col_r2_nullexp", env: "live",
+      userId: "mia", collection: "col_r2_nullexp", orgId: "default", env: "live",
       purposeLabel: "permanent", allowedFields: ["id"],
     });
     // Approve with no expiry — expires_at will be NULL in the database
@@ -129,7 +129,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const app = getAppPool();
     await upsertClientPolicy(app, client_id, "Both Envs Client", ["env:dev", "env:live"]);
     const grantId = await requestGrant(app, {
-      userId: "mia", collection: "col_r3_1", env: "live", purposeLabel: "t", allowedFields: ["id"],
+      userId: "mia", collection: "col_r3_1", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"],
     });
     await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
 
@@ -151,7 +151,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const app = getAppPool();
     await upsertClientPolicy(app, client_id, "Both Envs Client 2", ["env:dev", "env:live"]);
     const grantId = await requestGrant(app, {
-      userId: "mia", collection: "col_r3_2", env: "live", purposeLabel: "t", allowedFields: ["id"],
+      userId: "mia", collection: "col_r3_2", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"],
     });
     await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
 
@@ -175,7 +175,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const app = getAppPool();
     await upsertClientPolicy(app, client_id, "Both Envs Client 3", ["env:dev", "env:live"]);
     const grantId = await requestGrant(app, {
-      userId: "mia", collection: "col_r3_3", env: "live", purposeLabel: "t", allowedFields: ["id"],
+      userId: "mia", collection: "col_r3_3", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"],
     });
     await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
 
