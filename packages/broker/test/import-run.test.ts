@@ -6,7 +6,7 @@ import { importCollection } from "../src/import/run";
 import { loadConfig } from "../src/config/load";
 
 let p: Provisioned, admin: Pool, pools: Pools;
-const cfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+const cfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 const U = (n: number) => `0000000${n}-0000-4000-8000-000000000000`.slice(-36);
 
 beforeAll(async () => {

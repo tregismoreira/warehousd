@@ -1,5 +1,6 @@
 ---
-category: security
+department: corporate
+tags: [compliance, confidential]
 ---
 # Information Security Policy
 

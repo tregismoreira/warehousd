@@ -6,7 +6,7 @@ import { regenerateSynthetic } from "../src/synthetic/regenerate";
 import { loadConfig } from "../src/config/load";
 
 let p: Provisioned, admin: Pool;
-const meridian = new URL("../../../examples/meridian", import.meta.url).pathname;
+const meridian = new URL("../../../examples/harbor", import.meta.url).pathname;
 const cfg = loadConfig(meridian);
 
 beforeAll(async () => {

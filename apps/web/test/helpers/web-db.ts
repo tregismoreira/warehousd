@@ -29,7 +29,7 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean }
   process.env.BETTER_AUTH_SECRET ??= "test-secret-at-least-32-chars-long-000";
   process.env.BETTER_AUTH_URL ??= "http://localhost:8722";
   process.env.WAREHOUSD_TRUSTED_ORIGINS ??= "http://127.0.0.1:8791,http://127.0.0.1:8780";
-  process.env.WAREHOUSD_PROJECT_DIR = new URL("../../../../examples/meridian", import.meta.url).pathname;
+  process.env.WAREHOUSD_PROJECT_DIR = new URL("../../../../examples/harbor", import.meta.url).pathname;
 
   const { createAppSchema } = await import("@warehousd/broker");
   await createAppSchema(db);
@@ -83,8 +83,8 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean }
 export async function setupWebDbWithData(label: string) {
   const base = await setupWebDb(label);
   const { loadConfig, applyConfig, generateSynthetic, indexCollection, syncDatasetTerms, loadTaxonomyBindings } = await import("@warehousd/broker");
-  const meridianDir = new URL("../../../../examples/meridian", import.meta.url).pathname;
-  const { seedLive } = await import("../../../../examples/meridian/seed/live");
+  const meridianDir = new URL("../../../../examples/harbor", import.meta.url).pathname;
+  const { seedLive } = await import("../../../../examples/harbor/seed/live");
   const cfg = loadConfig(meridianDir);
 
   const db = new Pool({ connectionString: base.appUrl });

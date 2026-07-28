@@ -1,5 +1,6 @@
 ---
-category: compliance
+department: corporate
+tags: [compliance]
 ---
 # Compliance and Legal Obligations
 

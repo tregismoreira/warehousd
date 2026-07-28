@@ -1,5 +1,6 @@
 ---
-category: hr
+department: hr
+tags: [compliance]
 ---
 # Remote Work Policy
 

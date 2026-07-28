@@ -8,7 +8,7 @@ import { loadConfig } from "../src/config/load";
 import { listDocumentPaths } from "../src/documents/paths";
 
 let p: Provisioned, admin: Pool, pools: Pools;
-const meridian = new URL("../../../examples/meridian", import.meta.url).pathname;
+const meridian = new URL("../../../examples/harbor", import.meta.url).pathname;
 const cfg = loadConfig(meridian);
 
 beforeAll(async () => {

@@ -52,10 +52,10 @@ describe("approve — document scoping actually persists", () => {
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["title", "content"],
-      selectedTerms: { category: ["hr", "benefits"] },
+      selectedTerms: { department: ["hr", "finance"] },
     }, marcusCookie) as any);
     const g = await grantRow(id);
-    expect(g.document_filter).toEqual([{ field: "category", op: "in", value: ["hr", "benefits"] }]);
+    expect(g.document_filter).toEqual([{ field: "department", op: "in", value: ["hr", "finance"] }]);
   });
 
   it("terms and paths can coexist in the documentFilters array", async () => {
@@ -63,11 +63,11 @@ describe("approve — document scoping actually persists", () => {
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["title"],
-      selectedPaths: ["hr/pto.md"], selectedTerms: { category: ["finance"] },
+      selectedPaths: ["hr/pto.md"], selectedTerms: { department: ["finance"] },
     }, marcusCookie) as any);
     const g = await grantRow(id);
     expect(g.document_filter).toHaveLength(2);
-    expect(g.document_filter).toContainEqual({ field: "category", op: "in", value: ["finance"] });
+    expect(g.document_filter).toContainEqual({ field: "department", op: "in", value: ["finance"] });
     expect(g.document_filter).toContainEqual({ field: "path", op: "in", value: ["hr/pto.md"] });
   });
 
@@ -84,11 +84,11 @@ describe("approve — document scoping actually persists", () => {
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["content"],
-      selectedTerms: { category: ["hr"] },
+      selectedTerms: { department: ["hr"] },
       documentFilter: [{ field: "content", op: "in", value: ["anything"] }], // forged
     }, marcusCookie) as any);
     const g = await grantRow(id);
-    expect(g.document_filter[0].field).toBe("category");
+    expect(g.document_filter[0].field).toBe("department");
   });
 });
 

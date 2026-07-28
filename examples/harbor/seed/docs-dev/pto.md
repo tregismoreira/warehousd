@@ -1,5 +1,6 @@
 ---
-category: benefits
+department: hr
+tags: [compliance]
 ---
 # Paid Time Off (PTO) Policy
 

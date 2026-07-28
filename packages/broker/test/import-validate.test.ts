@@ -3,7 +3,7 @@ import { parseCsv, parseImportPayload } from "../src/import/csv";
 import { validateImportRows } from "../src/import/validate";
 import { loadConfig } from "../src/config/load";
 
-const cfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+const cfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 const UUID = "3f8b0e4a-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
 const UUID2 = "4a9c1f5b-2d3e-4f60-9b0c-1d2e3f4a5b6c";
 
@@ -172,15 +172,15 @@ describe("validateImportRows", () => {
 
   it("validates a taxonomy value against the bound vocabulary", () => {
     const bad = validateImportRows(cfg, "announcements", [
-      { id: UUID, title: "T", category: "not-a-term", summary: "s", owner: "o",
+      { id: UUID, title: "T", department: "not-a-term", summary: "s", owner: "o",
         updated_at: "2026-01-01T00:00:00Z" },
     ]);
     expect(bad.ok).toBe(false);
     if (bad.ok) throw new Error("unreachable");
-    expect(bad.errors[0]).toMatchObject({ column: "category", reason: "unknown_term" });
+    expect(bad.errors[0]).toMatchObject({ column: "department", reason: "unknown_term" });
 
     const good = validateImportRows(cfg, "announcements", [
-      { id: UUID, title: "T", category: "hr", summary: "s", owner: "o",
+      { id: UUID, title: "T", department: "hr", summary: "s", owner: "o",
         updated_at: "2026-01-01T00:00:00Z" },
     ]);
     expect(good.ok).toBe(true);

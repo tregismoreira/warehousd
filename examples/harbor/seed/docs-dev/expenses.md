@@ -1,5 +1,6 @@
 ---
-category: finance
+department: finance
+tags: [compliance]
 ---
 # Expense Reimbursement Policy
 

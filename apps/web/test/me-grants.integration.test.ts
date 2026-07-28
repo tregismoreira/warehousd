@@ -66,7 +66,8 @@ describe("GET /api/me/grants", () => {
     const body = await (await GET(req("/api/me/grants", miaCookie) as any)).json();
     const policies = body.grants.find((g: any) => g.collection === "policies");
     expect(policies.collectionType).toBe("file");
-    expect(policies.taxonomyFields).toContain("category");
+    expect(policies.taxonomyFields).toContain("department");
+    expect(policies.taxonomyFields).toContain("tags");
   });
 });
 

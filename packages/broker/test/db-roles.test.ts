@@ -7,14 +7,14 @@ import { generateSynthetic } from "../src/synthetic/generate";
 import { createPools, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import { loadConfig } from "../src/config/load";
-import { seedLive } from "../../../examples/meridian/seed/live";
+import { seedLive } from "../../../examples/harbor/seed/live";
 import { LIVE_ONLY_CANARY } from "./fixtures/canaries";
 import { join } from "node:path";
 import { setupWebDb, signIn } from "../../../apps/web/test/helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "../../../apps/web/test/helpers/oauth";
 import { upsertClientPolicy, requestGrant, approveGrant, revokeGrant, setAllowedScopes } from "../src";
 
-const cfg = loadConfig(join(__dirname, "../../../examples/meridian"));
+const cfg = loadConfig(join(__dirname, "../../../examples/harbor"));
 let p: Provisioned, admin: Pool, pools: Pools;
 beforeAll(async () => {
   p = await provision("dbroles"); admin = new Pool({ connectionString: p.urls.admin });

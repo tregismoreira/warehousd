@@ -9,7 +9,7 @@ afterAll(async () => { await p?.end(); });
 
 it("runApply then runSeed provisions and populates data_synth", async () => {
   p = await provision("cli");
-  const dir = join(__dirname, "../../../examples/meridian");
+  const dir = join(__dirname, "../../../examples/harbor");
   await runApply(dir, p.urls.admin);
   await runSeed(dir, p.urls.admin, 42);
   const db = new Pool({ connectionString: p.urls.admin });
