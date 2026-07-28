@@ -9,7 +9,13 @@ export type ExtractedFile = {
 export function extractFile(relPath: string, raw: string, mtime: Date, termFields?: string[]): ExtractedFile {
   let content = raw;
   let owner: string | null = null;
+  // Initialize requested term fields to null (contract: requested fields are always present in result)
   const terms: Record<string, string | string[] | null> = {};
+  if (termFields) {
+    for (const field of termFields) {
+      terms[field] = null;
+    }
+  }
   const fm = raw.match(/^---\n([\s\S]*?)\n---\n?/);
   if (fm) {
     const m = fm[1]!.match(/^owner:\s*(.+)$/m);
@@ -32,8 +38,6 @@ export function extractFile(relPath: string, raw: string, mtime: Date, termField
             // Single value
             terms[termField] = val;
           }
-        } else {
-          terms[termField] = null;
         }
       }
     }
