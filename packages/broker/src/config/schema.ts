@@ -28,10 +28,13 @@ export const VocabularySchema = z.object({
 });
 export type VocabularyConfig = z.infer<typeof VocabularySchema>;
 
+// Every part lands in a generated SQL identifier, so each is constrained to the same
+// identifier shape field names use. Nothing here may reach SQL unvalidated.
+const IDENT = /^[a-z_][a-z0-9_]*$/i;
 export const ViewJoinSchema = z.object({
-  table: z.string(),
-  column: z.string(),
-  on: z.string(),
+  table: z.string().regex(IDENT),
+  column: z.string().regex(IDENT),
+  on: z.string().regex(IDENT),
 });
 export type ViewJoinConfig = z.infer<typeof ViewJoinSchema>;
 
@@ -46,6 +49,11 @@ export const FieldSchema = z.object({
   max: z.number().optional(),
 });
 export type FieldConfig = z.infer<typeof FieldSchema>;
+
+// The types a file collection's extra (metadata) fields may take. `uuid` and `json` are
+// excluded deliberately: frontmatter is hand-written prose, not a serialisation format.
+export const FILE_METADATA_TYPES = ["text", "date", "timestamptz", "numeric", "int", "boolean"] as const;
+export type FileMetadataType = (typeof FILE_METADATA_TYPES)[number];
 
 export const FILE_FIELD_TYPES: Record<(typeof FILE_FIELDS)[number], FieldConfig["type"]> = {
   title: "text", content: "text", path: "text", owner: "text", updated_at: "timestamptz",
@@ -91,7 +99,7 @@ export const CollectionSchema = z.object({
   if (c.type === "file") {
     if (!c.source) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "file collection requires `source`" });
     const allowedFileFieldNames = new Set(FILE_FIELDS as readonly string[]);
-    const allowedMetadataFieldTypes = new Set(["text", "date", "timestamptz", "numeric", "int", "boolean"]);
+    const allowedMetadataFieldTypes = new Set<string>(FILE_METADATA_TYPES);
     for (const [k, f] of Object.entries(c.fields)) {
       if (allowedFileFieldNames.has(k)) continue; // fixed FILE_FIELDS are always allowed
       if (c.taxonomies.includes(k)) continue; // taxonomy fields are allowed
@@ -177,3 +185,16 @@ export const ConfigSchema = z.object({
   }
 });
 export type WarehousdConfig = z.infer<typeof ConfigSchema>;
+
+export type CollectionConfig = WarehousdConfig["collections"][string];
+
+// The typed extra fields a file collection declares beyond FILE_FIELDS and its bound
+// vocabularies. Single source of truth: the DDL, the indexer and the CLI must agree exactly
+// on this set, or a declared field ends up with a column and no value — or a value and no column.
+export function fileMetadataFields(c: CollectionConfig): { field: string; type: FileMetadataType }[] {
+  const fixed = new Set<string>([...FILE_FIELDS, ...(c.taxonomies ?? [])]);
+  const allowed = new Set<string>(FILE_METADATA_TYPES);
+  return Object.entries(c.fields)
+    .filter(([k, f]) => !fixed.has(k) && !!f.type && allowed.has(f.type))
+    .map(([k, f]) => ({ field: k, type: f.type as FileMetadataType }));
+}

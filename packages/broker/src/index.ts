@@ -3,6 +3,8 @@ export { makeBroker } from "./broker";
 export { createPools, onPoolError, type Pools } from "./db/pools";
 export { loadConfig, grantableFields, findCollection } from "./config/load";
 export type { WarehousdConfig } from "./config/schema";
+export { fileMetadataFields, FILE_METADATA_TYPES } from "./config/schema";
+export type { CollectionConfig, FileMetadataType } from "./config/schema";
 export { applyConfig } from "./apply/apply";
 export { generateSynthetic } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";

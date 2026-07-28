@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { resolve } from "node:path";
 import {
   loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms,
-  loadTaxonomyBindings,
+  loadTaxonomyBindings, fileMetadataFields,
 } from "@warehousd/broker";
 import { runInit } from "./init";
 import { runStart } from "./start";
@@ -57,12 +57,7 @@ export async function runIndex(
     // Sync dataset-sourced vocabulary terms before indexing
     await syncDatasetTerms(db, cfg, env);
     const taxonomies = await loadTaxonomyBindings(db, cfg, collection, env);
-    // Extract metadata fields (typed extra fields on file collections)
-    const allowedMetadataFieldTypes = new Set(["text", "date", "timestamptz", "numeric", "int", "boolean"]);
-    const metadata = Object.entries(c.fields)
-      .filter(([k]) => !k.startsWith("_") && !(c.taxonomies ?? []).includes(k) && k !== "title" && k !== "content" && k !== "path" && k !== "owner" && k !== "updated_at")
-      .filter(([, f]) => f.type && allowedMetadataFieldTypes.has(f.type))
-      .map(([k, f]) => ({ field: k, type: f.type as "text" | "date" | "timestamptz" | "numeric" | "int" | "boolean" }));
+    const metadata = fileMetadataFields(c);
     return await indexCollection(db, env, collection, resolve(projectDir, dir), { taxonomies, metadata });
   } finally { await db.end(); }
 }

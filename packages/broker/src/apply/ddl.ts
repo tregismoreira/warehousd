@@ -1,4 +1,5 @@
 import type { WarehousdConfig } from "../config/schema";
+import { fileMetadataFields } from "../config/schema";
 
 const PG_TYPE: Record<string, string> = {
   uuid: "uuid", text: "text", numeric: "numeric", int: "integer",
@@ -24,18 +25,13 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
         termAlters.push(`\n      create index if not exists "${collection}__files_${taxSlug}_idx"`
           + ` on ${schema}."${collection}__files" using gin ("${taxSlug}");`);
     }
-    // Add metadata field columns
-    const allowedMetadataFieldTypes = new Set(["text", "date", "timestamptz", "numeric", "int", "boolean"]);
+    // Extra typed metadata fields declared on the file collection.
     const metadataCols: string[] = [];
     const metadataAlters: string[] = [];
-    for (const [name, f] of Object.entries(c.fields)) {
-      if ((c.taxonomies ?? []).includes(name)) continue; // skip taxonomy fields
-      if (["title", "content", "path", "owner", "updated_at"].includes(name)) continue; // skip fixed fields
-      if (f.type && allowedMetadataFieldTypes.has(f.type)) {
-        const colType = PG_TYPE[f.type];
-        metadataCols.push(`\n        "${name}" ${colType}`);
-        metadataAlters.push(`\n      alter table ${schema}."${collection}__files" add column if not exists "${name}" ${colType};`);
-      }
+    for (const m of fileMetadataFields(c)) {
+      const colType = PG_TYPE[m.type];
+      metadataCols.push(`\n        "${m.field}" ${colType}`);
+      metadataAlters.push(`\n      alter table ${schema}."${collection}__files" add column if not exists "${m.field}" ${colType};`);
     }
     const termCol = termCols.length > 0 ? termCols.join(",") + "," : "";
     const metadataCol = metadataCols.length > 0 ? metadataCols.join(",") + "," : "";
@@ -92,11 +88,7 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
   if (c.type === "file") {
     // Each bound vocabulary and metadata field gets selected from the files table
     const termSels = (c.taxonomies ?? []).map(taxSlug => `, d."${taxSlug}"`).join("");
-    const allowedMetadataFieldTypes = new Set(["text", "date", "timestamptz", "numeric", "int", "boolean"]);
-    const metadataSels = Object.entries(c.fields)
-      .filter(([k]) => !k.startsWith("_") && !(c.taxonomies ?? []).includes(k) && k !== "title" && k !== "content" && k !== "path" && k !== "owner" && k !== "updated_at")
-      .filter(([, f]) => f.type && allowedMetadataFieldTypes.has(f.type))
-      .map(([k]) => `, d."${k}"`).join("");
+    const metadataSels = fileMetadataFields(c).map((m) => `, d."${m.field}"`).join("");
     return `create or replace view ${schema}.v_${collection} as
       select c.id as document_id, c.document_seq, c.content, c.tsv,
              d.id as file_id, d.title, d.path, d.owner, d.updated_at${termSels}${metadataSels}
@@ -110,7 +102,7 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
     if (f.view_join) {
       const { table: jt, column: jc, on: onField } = f.view_join;
       const alias = `j_${name}`;
-      joins.push(`left join ${schema}.${jt} ${alias} on ${alias}.id = base.${onField}`);
+      joins.push(`left join ${schema}."${jt}" ${alias} on ${alias}.id = base."${onField}"`);
       selects.push(`${alias}."${jc}" as "${name}"`);
     } else {
       selects.push(`base."${name}"`);

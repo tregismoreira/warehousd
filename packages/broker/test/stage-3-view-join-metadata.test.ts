@@ -127,26 +127,39 @@ it("view with three people joins (including self-join) creates distinct aliases"
   expect(charlie?.manager_name).toBe("Alice");
 });
 
-it("metadata fields like filed_date are extracted and returned from search_documents", async () => {
-  // First verify the data was indexed
-  const filesResult = await admin.query("select id, title, filed_date, case_number, matter_value from data_synth.case_files__files");
-  expect(filesResult.rows.length).toBeGreaterThan(0);
-  // Verify metadata was extracted
-  for (const row of filesResult.rows) {
-    expect(row.filed_date).toBeDefined();
-    expect(row.case_number).toBeDefined();
-    expect(row.matter_value).toBeDefined();
-  }
+const METADATA_FIELDS = ["title", "content", "filed_date", "case_number", "matter_value"];
 
-  // Query the view to verify metadata appears there (file view has document_id, title, filed_date, etc.)
-  const viewResult = await admin.query("select document_id, title, filed_date, case_number, matter_value from data_synth.v_case_files limit 1");
-  expect(viewResult.rows.length).toBeGreaterThan(0);
-  const firstDoc = viewResult.rows[0];
-  expect(firstDoc.filed_date).toBeDefined();
-  expect(firstDoc.case_number).toBeDefined();
-  expect(firstDoc.matter_value).toBeDefined();
-  // filed_date should be a valid date (Date object or string)
-  if (firstDoc.filed_date !== null) {
-    expect(firstDoc.filed_date instanceof Date || typeof firstDoc.filed_date === "string").toBe(true);
-  }
+async function grant(userId: string, documentFilters: unknown[] = []) {
+  await admin.query(
+    `insert into app.grants (user_id, collection, allowed_fields, env, status, document_filter)
+     values ($1,'case_files',$2,'dev','approved',$3)`,
+    [userId, METADATA_FIELDS, JSON.stringify(documentFilters)]);
+}
+
+it("metadata fields like filed_date come back from search_documents", async () => {
+  await grant("meta-reader");
+  const r = await broker.searchDocuments({ userId: "meta-reader", env: "dev" }, {
+    collection: "case_files", q: "case",
+  });
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(r.documents.length).toBeGreaterThan(0);
+  expect(r.fieldsReturned).toEqual(expect.arrayContaining(["filed_date", "case_number", "matter_value"]));
+  const doc = r.documents[0] as Record<string, unknown>;
+  // `filed_date` is a `date` column: pg hands back a Date, and it must carry the frontmatter
+  // day exactly — a timestamp coerced into a date column would shift across timezones.
+  expect(doc.filed_date).toBeInstanceOf(Date);
+  expect(String(doc.case_number)).toMatch(/^C-2024-00[12]$/);
+});
+
+it("a metadata field can gate documents through document_filter", async () => {
+  await grant("meta-scoped", [{ field: "case_number", op: "in", value: ["C-2024-001"] }]);
+  const r = await broker.searchDocuments({ userId: "meta-scoped", env: "dev" }, {
+    collection: "case_files", q: "case",
+  });
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(r.documents.length).toBeGreaterThan(0);
+  for (const d of r.documents as Record<string, unknown>[])
+    expect(d.case_number).toBe("C-2024-001");
 });

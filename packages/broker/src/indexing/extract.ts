@@ -57,7 +57,9 @@ function coerceMetadataValue(relPath: string, mf: MetadataField, raw: string): s
     case "timestamptz": {
       const t = Date.parse(trimmed);
       if (Number.isNaN(t)) throw new Error(`${relPath}: field "${mf.field}" expected date, got "${trimmed}"`);
-      return new Date(t).toISOString();
+      // A `date` column would silently truncate a timestamp; hand it the date part only.
+      const iso = new Date(t).toISOString();
+      return mf.type === "date" ? iso.slice(0, 10) : iso;
     }
   }
 }
