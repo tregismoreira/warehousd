@@ -231,19 +231,25 @@ describe("broker.changes() change feed", () => {
       const proposalId = (propResult as any).proposalId;
 
       const approverCtx: BrokerContext = { userId: "user6_approver", env: "dev", orgId: "default" };
+      // Take a cursor BEFORE approving. Other tests in this file also produce approved
+      // 'create' entries on `docs`, so reading from 0 and taking the last match is a race
+      // against them rather than an assertion about this approval.
+      const before = await broker.changes(approverCtx, { since: 0 });
+      if (!before.ok) throw new Error("changes failed");
+      const cursor = before.entries.length ? before.entries[before.entries.length - 1].seq : 0;
+
       const approveResult = await broker.approveProposal(approverCtx, proposalId);
       expect(approveResult.ok).toBe(true);
       if (!approveResult.ok) throw new Error("approval failed");
 
-      const feed = await broker.changes(approverCtx, { since: 0 });
+      const feed = await broker.changes(approverCtx, { since: cursor });
       expect(feed.ok).toBe(true);
       if (!feed.ok) throw new Error("changes failed");
 
-      const approvedEntries = feed.entries.filter((e) => e.collection === "docs" && e.op === "create" && e.status === "approved");
-      expect(approvedEntries.length).toBeGreaterThanOrEqual(1);
-      const entry = approvedEntries[approvedEntries.length - 1];
-      expect(entry.status).toBe("approved");
-      expect(entry.rev).toBe(approveResult.rev);
+      const approvedEntries = feed.entries.filter(
+        (e) => e.collection === "docs" && e.op === "create" && e.status === "approved");
+      expect(approvedEntries.length).toBe(1);
+      expect(approvedEntries[0].rev).toBe(approveResult.rev);
     });
   });
 

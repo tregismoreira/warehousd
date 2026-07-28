@@ -1,7 +1,22 @@
 import type { Pool, PoolClient } from "pg";
 
-// Arbitrary but fixed: any caller creating warehousd's roles must pick the same number.
-const ROLE_BOOTSTRAP_LOCK = 0x7748_0001;
+// Roles are cluster-global while databases are not, so two bootstraps running against
+// different databases on one cluster contend on the same pg_authid row and one of them fails
+// with "tuple concurrently updated" (XX000). An advisory lock cannot fix this: advisory locks
+// are DATABASE-scoped, so two connections to different databases never see each other's.
+// Retrying is what actually works — the conflict is transient by definition, since the loser
+// only has to wait for the winner's catalogue update to land.
+async function withRoleRetry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = (err as Error).message ?? "";
+      if (attempt >= 5 || !/tuple concurrently updated/i.test(msg)) throw err;
+      await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+    }
+  }
+}
 
 export async function ensureSchemasAndRoles(db: Pool, dataRolePassword: string): Promise<void> {
   // Create schemas
@@ -15,35 +30,20 @@ export async function ensureSchemasAndRoles(db: Pool, dataRolePassword: string):
   // then build CREATE/ALTER statements with escapeLiteral to safely quote the password.
   const client = await db.connect();
   try {
-    // Roles are cluster-global while databases are not, so two bootstraps against different
-    // databases on one cluster race here — `alter role` on the same row fails with "tuple
-    // concurrently updated". A session-level advisory lock is cluster-wide, which is exactly
-    // the scope of the thing being changed. The test suite provisions a database per file and
-    // hits this constantly; a real deployment bootstraps once, and pays nothing for the lock.
-    await client.query(`select pg_advisory_lock($1)`, [ROLE_BOOTSTRAP_LOCK]);
     for (const role of ["warehousd_dev", "warehousd_live", "warehousd_dev_write", "warehousd_live_write"]) {
-      // Check if role exists using parameterized query
-      const existing = await client.query(
-        `select 1 from pg_roles where rolname = $1`,
-        [role]
-      );
-
       const escapedPassword = client.escapeLiteral(dataRolePassword);
-
-      if (existing.rowCount === 0) {
-        // Create new role
-        await client.query(
-          `create role ${role} login password ${escapedPassword}`
-        );
-      } else {
-        // Rotate password on existing role
-        await client.query(
-          `alter role ${role} password ${escapedPassword}`
-        );
-      }
+      await withRoleRetry(async () => {
+        // Re-read existence inside the retry: a concurrent bootstrap may have created the
+        // role between our check and our write.
+        const existing = await client.query(`select 1 from pg_roles where rolname = $1`, [role]);
+        if (existing.rowCount === 0) {
+          await client.query(`create role ${role} login password ${escapedPassword}`);
+        } else {
+          await client.query(`alter role ${role} password ${escapedPassword}`);
+        }
+      });
     }
   } finally {
-    await client.query(`select pg_advisory_unlock($1)`, [ROLE_BOOTSTRAP_LOCK]).catch(() => {});
     client.release();
   }
 
