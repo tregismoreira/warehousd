@@ -1,4 +1,18 @@
+node_modules/
+dist/
+.next/
 .vite/
+coverage/
+*.tsbuildinfo
+
+.warehousd/
+warehousd.local.yml
+*.local.yml
+.env
+.env.local
+
+apps/web/test-results/
+apps/web/playwright-report/
 
 # Scratch review artifacts (browser screenshots taken during design/QA passes)
 .playwright-mcp/

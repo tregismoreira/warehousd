@@ -7,31 +7,6 @@ This runbook covers OIDC (generic — Okta, Entra ID, Google Workspace, Keycloak
 etc.) and SAML. Both are driven through the same admin API; the login page
 picks the right client-side flow automatically based on the provider's `type`.
 
-> ## ⚠️ Screenshots pending — outstanding human work
->
-> The **server-side** flows here are covered by automated tests, including a real
-> Keycloak OIDC **and** SAML round trip (`mvp/apps/web/test/sso-keycloak.integration.test.ts`,
-> run via `pnpm test:e2e:sso`): provider registration, the admin-only gate, JIT
-> provisioning, and the local-login kill switch.
->
-> **Step 3 is the exception.** The login page (`mvp/apps/web/app/login/page.tsx`)
-> has **no automated test coverage at all** — no component or browser test
-> exercises the SSO-first rendering, the collapsed local-login disclosure, the
-> "No login method is configured" state, the `returnTo` OAuth-continuation
-> redirect, or the SAML `providerType` branch. Only the `/api/sso/status`
-> endpoint it reads is tested. Verifying step 3 by eye is therefore the *only*
-> check on that code today.
->
-> - [ ] Capture the 3 screenshots marked `*(Screenshot: …)*` below, save them
->       under `docs/img/`, and replace each placeholder with a markdown image link.
-> - [ ] While you're there, sanity-check the admin UX by hand: register a
->       provider as `ana` (admin), confirm the same call returns `403` as `mia`
->       (member), and confirm `/login` visibly flips to SSO-first afterwards.
-> - [ ] Delete this banner once all boxes are ticked.
->
-> The companion runbook `docs/connect-claude.md` has a larger outstanding item —
-> it has never been executed end-to-end at all.
-
 ---
 
 ## Prerequisite: `WAREHOUSD_TRUSTED_ORIGINS`
@@ -51,27 +26,29 @@ to be listed here.
 
 ---
 
-## 1. Stand up an IdP (example: Keycloak, for local testing)
+## 1. Create the client on your IdP
 
-```bash
-docker compose -f mvp/docker-compose.test.yml up -d keycloak
-```
-
-This starts Keycloak on `http://127.0.0.1:8780` with a pre-imported realm
-(`warehousd-test`) containing an OIDC client and a SAML client — see
-`mvp/test/keycloak/warehousd-realm.json`. For a production IdP, create the
-client in your provider's admin console instead, with:
+In your provider's admin console (Okta, Entra ID, Google Workspace, Keycloak),
+create an application with:
 
 - Redirect URI (OIDC): `<your-app-origin>/api/auth/sso/callback/<providerId>`
 - ACS URL (SAML): `<your-app-origin>/api/auth/sso/saml2/sp/acs/<providerId>`
 
 `<providerId>` is whatever you choose when registering below (e.g. `okta-oidc`).
 
-*(Screenshot: Keycloak admin console → Clients → create client)*
+> **Working in this repository?** `docker compose -f docker-compose.test.yml up -d keycloak`
+> starts Keycloak on `http://127.0.0.1:8780` with a realm (`warehousd-test`)
+> already containing an OIDC and a SAML client — see
+> `test/keycloak/warehousd-realm.json`. That is the IdP the automated SSO suite
+> uses, and the source of the example values below.
 
-## 2. Register the IdP through the admin API
+## 2. Register the IdP
 
-As `admin`, sign in to warehousd, then call:
+Sign in as an `admin` and go to **Admin → SSO → Add provider**. The sheet has an
+OIDC tab and a SAML tab; it derives the discovery endpoint and the ACS callback
+URL for you.
+
+The same thing scripted, against the admin API:
 
 ```bash
 curl -X POST http://localhost:8722/api/sso/providers \
@@ -95,8 +72,6 @@ IdP routing when multiple providers are configured.
 Non-admins get `403`; this endpoint (and `GET`/`DELETE` on the same resource)
 is admin-only regardless of who registered the provider — any admin can list,
 inspect, or delete a provider another admin created.
-
-*(Screenshot: admin console → SSO providers → "New provider" form)*
 
 ### SAML variant
 
@@ -139,8 +114,6 @@ shows a primary **"Sign in with your company account"** button; if local
 login is still enabled, it collapses to a secondary "Use a local account"
 disclosure below it.
 
-*(Screenshot: login page, SSO button primary, local login collapsed)*
-
 ## 4. First SSO login lands as `member`
 
 Sign in through the button. The IdP handles authentication; warehousd never
@@ -151,9 +124,8 @@ are **not** demoted — provisioning only sets the role on brand-new accounts.
 
 ## 5. Promote the new member
 
-As `admin`, promote the newly-provisioned member the same way you would any
-other user (Admin → Clients/users role management, Phase 5 UI; or directly
-via the existing role-management API).
+As `admin`, promote the newly-provisioned member in **Admin → Users**, the same
+way you would any other account.
 
 ## 6. Local login kill switch (optional)
 
@@ -169,7 +141,7 @@ provider before enabling the kill switch.
 
 ---
 
-See [connect-claude.md](./connect-claude.md) for the end-to-end runbook of
-connecting Claude's MCP connector once SSO is configured — the `/mcp/authorize`
-step delegates to whichever IdP you registered here, the same way local login
-used to.
+Next: [connect-claude.md](./connect-claude.md). Once SSO is configured, the
+`/mcp/authorize` step delegates to whichever IdP you registered here — so
+connecting an assistant is "log in with your company account", never a new
+password.

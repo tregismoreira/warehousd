@@ -27,8 +27,8 @@ jobs:
 
       - uses: docker/build-push-action@v5
         with:
-          context: mvp
-          file: mvp/apps/web/Dockerfile
+          context: .
+          file: apps/web/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -45,7 +45,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Verify version matches tag
-        working-directory: mvp
         run: |
           TAG_VERSION="${{ github.ref_name }}"
           PACKAGE_VERSION="v$(node -p "require('./packages/cli/package.json').version")"
@@ -62,16 +61,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: mvp/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org/
 
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp
 
       - run: pnpm --filter warehousd build
-        working-directory: mvp
 
       - run: pnpm --filter warehousd publish --no-git-checks --access public
-        working-directory: mvp
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
