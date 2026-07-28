@@ -193,11 +193,7 @@ describe("Stage 2: multi-predicate document filters", () => {
     }
   });
 
-  it("forged documentFilter in approve request is ignored", async () => {
-    // Even if the frontend sends a forged documentFilter, buildApproval ignores it
-    // and only uses what it derives from config. This is covered by the existing
-    // grant-approve.integration.test.ts "client-supplied filter field is ignored" test.
-    // This is just a note that Stage 2 maintains that invariant with array-form filters.
-    expect(true).toBe(true);
-  });
 });
+// A forged `documentFilter`/`documentFilters` in the approve body is covered where it can
+// actually be exercised — apps/web/test/grant-approve.integration.test.ts, which drives
+// buildApproval directly. A placeholder here would only look like coverage.

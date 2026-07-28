@@ -147,7 +147,7 @@ export function ApproveSheet({
                   <Label>{vocab.label}</Label>
                   <p className="text-xs text-muted-foreground">
                     {vocab.multiple ? "Select one or more. " : "Select one. "}
-                    Overrides file selection.
+                    Combined with every other selection below by AND.
                   </p>
                   <div className="space-y-1.5 rounded-md border p-3">
                     {vocab.terms.map((t) => (
