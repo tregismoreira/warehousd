@@ -77,3 +77,76 @@ as-is but are worth a deliberate decision later:
   `ctx.context.adapter`. Verified by removing them and running `tsc`. The
   rationale now lives in a comment above the plugin. Revisit if Better Auth ever
   exports a per-endpoint context type.
+
+---
+
+# First public release — manual steps
+
+The release pipeline is fixed and verified offline (see `docs/RELEASING.md` for what each job
+does). Everything below requires an account, a visibility change, or a decision — none of it
+can be done by an agent. **Do these in order; 1–4 all gate the first `git push --tags`.**
+
+## Blocking
+
+- [ ] **1. Decide on the npm name, now.** `warehousd` is unclaimed on npm today (registry
+  returns 404). Unpublishing is only possible within 72h of publishing, so this is the one
+  genuinely hard-to-reverse choice here. If you want to hold the name before the repo goes
+  public, publish a `0.0.1` placeholder from the CLI package. Everything else on this list is
+  cheap to undo.
+
+- [ ] **2. Add a `LICENSE` file.** `mvp/packages/cli/package.json` declares `"license": "MIT"`
+  but there is no license text anywhere in the repo — GitHub reports `licenseInfo: null` and
+  `npm pack` produces a 3-file tarball (`dist/index.cjs`, `package.json`, `README.md`) with no
+  LICENSE. Shipping a package that claims MIT without the text is a real gap. Needs your name
+  and the copyright year; npm auto-includes a `LICENSE` sitting next to `package.json`, so no
+  `files` change is needed. *(Found during the audit — not in the original plan.)*
+
+- [ ] **3. Make the repo public.** Settings → General → Danger Zone → Change visibility.
+  `tregismoreira/warehousd` is currently private, and npm dropped provenance support for
+  private repos in July 2023 — `--provenance` will hard-fail otherwise. Do this only after
+  you're happy with the offline verification in `docs/SETUP.md` § "Test the CLI locally
+  without publishing".
+
+- [ ] **4. Create the npm account (if you don't have one) and add `NPM_TOKEN`.** npm →
+  Access Tokens → **Granular Access Token**, type *Automation*, permission *Read and write*.
+  Add it as a repo secret named `NPM_TOKEN` under Settings → Secrets and variables → Actions.
+  Automation tokens bypass 2FA, which is what makes CI publishing work.
+
+- [ ] **5. Cut the first release**, then **immediately make the GHCR package public.**
+  `github.com/users/tregismoreira/packages/container/warehousd/settings` → Change visibility →
+  Public. A package first pushed from a private repo is private by default, so consumers'
+  `npx warehousd start` dies at the image pull until you flip this. In the same screen, under
+  *Manage Actions access*, add the `warehousd` repo with **Write** so later releases can push.
+  ⚠️ Public is irreversible for that package, and older CLI versions keep pulling this exact
+  namespace forever — never delete it.
+
+## After the first successful release
+
+- [ ] **6. Verify as a real consumer**, from a machine or directory never logged into ghcr.io
+  and with no warehousd state: `mkdir /tmp/wd && cd /tmp/wd && npx warehousd init && npx
+  warehousd start`. A bare `docker pull ghcr.io/tregismoreira/warehousd:<version>` must also
+  succeed anonymously. Confirm the "Built and signed on GitHub Actions" provenance badge shows
+  on <https://www.npmjs.com/package/warehousd>.
+
+- [ ] **7. Switch to npm Trusted Publishing (OIDC) and delete `NPM_TOKEN`.** This can only be
+  configured once the package exists, which is why it can't happen before step 5.
+
+## Watch on the first run (not blocking, but likely to bite)
+
+- [ ] **Multi-arch image build time.** `release.yml` builds `linux/amd64,linux/arm64` via QEMU
+  on an amd64 runner. The arm64 half emulates a full Next.js production build and can take
+  well over 30 minutes. It won't fail — it'll just be slow. If it becomes painful, either drop
+  arm64 or move that leg to a native arm runner.
+
+- [ ] **npm dist-tag for prereleases.** `release.yml` correctly withholds the Docker `:latest`
+  tag for versions containing a `-`, but the npm side still publishes under the `latest`
+  dist-tag regardless. If you ever cut a `v0.3.0-rc.1`, add `--tag next` to the publish step
+  first or it will become the default `npm install warehousd`.
+
+- [ ] **`packages/cli/README.md` becomes the public npm landing page.** It's currently 28 lines
+  of bare command list. Worth a pass before the name is indexed — it's the first thing anyone
+  evaluating warehousd will read.
+
+- [ ] **Placeholder namespaces in the older docs.** `docs/SPECS.md:368` and
+  `docs/MVP-ROADMAP.md:291` still say `ghcr.io/<org>/warehousd`. Harmless as design-doc
+  placeholders; resolve them if you want the docs to be literally accurate.

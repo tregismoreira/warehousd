@@ -70,6 +70,44 @@ jobs:
       - run: pnpm test:down
         working-directory: mvp
 
+  # Packaging fidelity: installs the actual tarball outside the workspace, so a broken `bin`
+  # path, a missing shebang, a `files` omission, or an unresolvable external `pg` fails here
+  # rather than after publishing.
+  pack:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mvp/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: mvp
+
+      - run: pnpm --filter ./packages/cli build
+        working-directory: mvp
+
+      - name: Pack the CLI
+        working-directory: mvp/packages/cli
+        run: echo "tarball=$(npm pack --silent --pack-destination "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+
+      - name: Install the tarball and smoke-test it
+        working-directory: ${{ runner.temp }}
+        run: |
+          npm install -g "$RUNNER_TEMP/$tarball"
+          mkdir -p smoke && cd smoke
+          warehousd --version
+          warehousd init
+          test -f warehousd.yml
+
   e2e:
     needs: test
     runs-on: ubuntu-latest
@@ -96,7 +134,8 @@ jobs:
       - run: docker build -f apps/web/Dockerfile -t warehousd:ci .
         working-directory: mvp
 
-      - run: pnpm --filter warehousd build
+      # Path filter, not name filter: `warehousd` also matches the private root package.
+      - run: pnpm --filter ./packages/cli build
         working-directory: mvp
 
       - run: pnpm test:e2e:cli

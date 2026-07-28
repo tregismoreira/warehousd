@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" role="img"
+     aria-label="How warehousd works: a person asks a question in Claude, the MCP client proposes a query intent, the broker re-validates it against that person's grant and builds the SQL itself, returning either granted fields or a refusal — and every decision is audited.">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#5A5F66"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="560" rx="10" fill="#1A1A1A"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace">
+
+    <!-- ── person → mcp client → broker ─────────────────────────────────── -->
+
+    <text x="30" y="96" font-size="10" letter-spacing="1.6" fill="#7D8590">PERSON</text>
+    <rect x="30" y="108" width="190" height="102" rx="6" fill="#202226" stroke="#34373C"/>
+    <text x="46" y="144" font-size="13" fill="#E6E6E6">Mia — member</text>
+    <text x="46" y="167" font-size="13" fill="#E6E6E6">asks a question</text>
+    <text x="46" y="190" font-size="13" fill="#7D8590">in Claude</text>
+
+    <line x1="224" y1="159" x2="250" y2="159" stroke="#5A5F66" stroke-width="1.5" marker-end="url(#a)"/>
+
+    <text x="255" y="96" font-size="10" letter-spacing="1.6" fill="#7D8590">MCP CLIENT</text>
+    <rect x="255" y="108" width="190" height="102" rx="6" fill="#202226" stroke="#34373C"/>
+    <text x="271" y="144" font-size="13" fill="#E6E6E6">proposes a</text>
+    <text x="271" y="167" font-size="13" fill="#E6E6E6">query intent</text>
+    <text x="271" y="190" font-size="13" fill="#7D8590">never SQL</text>
+
+    <line x1="449" y1="159" x2="475" y2="159" stroke="#5A5F66" stroke-width="1.5" marker-end="url(#a)"/>
+
+    <!-- ── broker ───────────────────────────────────────────────────────── -->
+
+    <text x="480" y="96" font-size="10" letter-spacing="1.6" fill="#7D8590">BROKER</text>
+    <rect x="480" y="108" width="250" height="252" rx="6" fill="#202226" stroke="#1D9E75"/>
+    <text x="496" y="136" font-size="13" fill="#1D9E75">re-validates it all</text>
+    <line x1="496" y1="150" x2="714" y2="150" stroke="#34373C"/>
+    <g font-size="13" fill="#7D8590">
+      <text x="496" y="176">1</text>
+      <text x="496" y="199">2</text>
+      <text x="496" y="222">3</text>
+      <text x="496" y="245">4</text>
+      <text x="496" y="268">5</text>
+    </g>
+    <g font-size="13" fill="#E6E6E6">
+      <text x="518" y="176">collection exists?</text>
+      <text x="518" y="199">active grant?</text>
+      <text x="518" y="222">fields in grant?</text>
+      <text x="518" y="245">filters + sort too</text>
+      <text x="518" y="268">document / term</text>
+      <text x="518" y="291">scope applied</text>
+    </g>
+    <line x1="496" y1="308" x2="714" y2="308" stroke="#34373C"/>
+    <text x="496" y="334" font-size="13" fill="#7D8590">builds the SQL itself,</text>
+    <text x="496" y="352" font-size="13" fill="#7D8590">from a named view</text>
+
+    <!-- ── outcomes ─────────────────────────────────────────────────────── -->
+
+    <line x1="734" y1="170" x2="760" y2="170" stroke="#5A5F66" stroke-width="1.5" marker-end="url(#a)"/>
+    <text x="765" y="146" font-size="10" letter-spacing="1.6" fill="#1D9E75">ALLOWED</text>
+    <rect x="765" y="158" width="165" height="80" rx="6" fill="#202226" stroke="#1D9E75"/>
+    <text x="779" y="188" font-size="13" fill="#E6E6E6">rows, granted</text>
+    <text x="779" y="211" font-size="13" fill="#E6E6E6">fields only</text>
+
+    <line x1="734" y1="300" x2="760" y2="300" stroke="#5A5F66" stroke-width="1.5" marker-end="url(#a)"/>
+    <text x="765" y="276" font-size="10" letter-spacing="1.6" fill="#D97757">REFUSED</text>
+    <rect x="765" y="288" width="165" height="80" rx="6" fill="#202226" stroke="#D97757" stroke-dasharray="4 3"/>
+    <text x="779" y="318" font-size="13" fill="#E6E6E6">reason code,</text>
+    <text x="779" y="341" font-size="13" fill="#E6E6E6">no data</text>
+
+    <!-- ── what a grant is ──────────────────────────────────────────────── -->
+
+    <text x="30" y="248" font-size="10" letter-spacing="1.6" fill="#7D8590">WHAT A GRANT IS</text>
+    <rect x="30" y="260" width="415" height="212" rx="6" fill="#202226" stroke="#34373C"/>
+    <g font-size="13" fill="#7D8590">
+      <text x="46" y="292">user</text>
+      <text x="46" y="315">collection</text>
+      <text x="46" y="338">fields</text>
+      <text x="46" y="361">purpose</text>
+      <text x="46" y="384">environment</text>
+      <text x="46" y="407">expires</text>
+    </g>
+    <g font-size="13" fill="#E6E6E6">
+      <text x="152" y="292">Mia</text>
+      <text x="152" y="315">salaries</text>
+      <text x="152" y="338">job_title, base_salary</text>
+      <text x="152" y="361">comp benchmarking</text>
+      <text x="152" y="384">dev</text>
+      <text x="152" y="407">2026-09-30</text>
+    </g>
+    <line x1="46" y1="424" x2="429" y2="424" stroke="#34373C"/>
+    <text x="46" y="448" font-size="13" fill="#7D8590">approved by a manager, read fresh</text>
+    <text x="46" y="466" font-size="13" fill="#7D8590">on every request — revoking is instant</text>
+
+    <!-- ── data ─────────────────────────────────────────────────────────── -->
+
+    <line x1="605" y1="364" x2="605" y2="394" stroke="#5A5F66" stroke-width="1.5" marker-end="url(#a)"/>
+    <rect x="480" y="398" width="250" height="74" rx="6" fill="#202226" stroke="#34373C"/>
+    <text x="496" y="426" font-size="13" fill="#E6E6E6">data_synth</text>
+    <text x="496" y="449" font-size="13" fill="#E6E6E6">data_live</text>
+    <text x="600" y="426" font-size="13" fill="#7D8590">(dev)</text>
+    <text x="600" y="449" font-size="13" fill="#7D8590">(live)</text>
+    <text x="746" y="426" font-size="11" fill="#7D8590">two roles,</text>
+    <text x="746" y="444" font-size="11" fill="#7D8590">two pools,</text>
+    <text x="746" y="462" font-size="11" fill="#7D8590">never both</text>
+
+    <!-- ── audit ────────────────────────────────────────────────────────── -->
+
+    <rect x="30" y="498" width="900" height="42" rx="6" fill="#1F2A26" stroke="#1D9E75"/>
+    <text x="46" y="524" font-size="13" fill="#1D9E75">AUDIT</text>
+    <text x="112" y="524" font-size="13" fill="#E6E6E6">every decision — allowed or refused — written before the response</text>
+
+  </g>
+</svg>

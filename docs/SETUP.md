@@ -37,7 +37,7 @@ The contributor path seeds additional data beyond what the consumer path does:
 
 ## Prerequisites
 
-- Node.js 20+, pnpm 9+
+- Node.js 22+ (the CLI's `engines` field requires it), pnpm 9+
 - Docker (for Postgres)
 - An Anthropic API key
 
@@ -155,3 +155,41 @@ cd mvp
 pnpm test:up   # start test postgres (port 54330)
 WAREHOUSD_PROJECT_DIR=examples/meridian pnpm test
 ```
+
+## Test the CLI locally without publishing
+
+Three levels of fidelity, none of which touch npm or GHCR. Each one proves strictly more than
+the last.
+
+| Level | What it proves | How |
+|---|---|---|
+| 1. Run the bundle | CLI logic, Docker orchestration | `pnpm --filter ./packages/cli build`, then `node packages/cli/dist/index.cjs start` |
+| 2. Local image | Server image + entrypoint bootstrap | `docker build -f apps/web/Dockerfile -t warehousd:dev .`, then set `WAREHOUSD_IMAGE=warehousd:dev` |
+| 3. Tarball install | *Packaging* — `files`, `bin`, the shebang, and the external `pg` | `npm pack` → `npm i -g ./warehousd-<version>.tgz` → `warehousd --version` |
+
+Level 3 is the one that catches publish-only bugs: `pg` is the single dependency tsup leaves
+external (see `packages/cli/tsup.config.ts`), so it has to resolve from a real install rather
+than from the workspace `node_modules`. CI runs this as the `pack` job.
+
+The full offline consumer path, end to end:
+
+```bash
+cd mvp
+docker build -f apps/web/Dockerfile -t warehousd:dev .
+pnpm --filter ./packages/cli build
+
+cd packages/cli && npm pack --pack-destination /tmp && cd -
+npm i -g /tmp/warehousd-0.1.0.tgz
+
+mkdir -p /tmp/wd-smoke && cd /tmp/wd-smoke
+warehousd --version
+warehousd init
+WAREHOUSD_IMAGE=warehousd:dev warehousd start
+warehousd status   # apiUrl, mcpUrl, adminUrl, databaseUrl, env, devClient
+warehousd stop --destroy --yes
+```
+
+Use `--filter ./packages/cli`, not `--filter warehousd`: the latter is ambiguous — it also
+matches the private root package, which would rebuild Next.js for nothing.
+
+See [`docs/RELEASING.md`](RELEASING.md) for what happens once you actually cut a tag.

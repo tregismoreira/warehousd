@@ -1,190 +1,109 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { PERSONAS, signIn, signOut } from "./helpers/auth";
 
-async function signIn(page: Page, email: string) {
-  await page.goto("/login");
-  await page.getByPlaceholder("email").fill(email);
-  await page.getByPlaceholder("password").fill("demo");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((u) => !u.pathname.startsWith("/login"));
-}
-
-test("login page shows local login form when SSO not configured", async ({ page }) => {
-  await page.goto("/login");
-
-  // With WAREHOUSD_DEMO=true and no SSO providers, should show local login form
-  const emailInput = page.getByPlaceholder("email");
-  const passwordInput = page.getByPlaceholder("password");
-  const signInButton = page.getByRole("button", { name: "Sign in" });
-
-  await expect(emailInput).toBeVisible();
-  await expect(passwordInput).toBeVisible();
-  await expect(signInButton).toBeVisible();
-
-  // Demo credentials should be shown
-  const demoList = page.getByRole("list");
-  await expect(demoList).toBeVisible();
-  await expect(page.getByText("ana@demo.local")).toBeVisible();
-  await expect(page.getByText("marcus@demo.local")).toBeVisible();
-  await expect(page.getByText("mia@demo.local")).toBeVisible();
-});
-
-test("demo credentials button pre-fills the login form", async ({ page }) => {
-  await page.goto("/login");
-
-  // Click the demo credential button for mia
-  await page.getByRole("button", { name: "mia@demo.local" }).click();
-
-  // Email and password should be pre-filled
-  const emailInput = page.getByPlaceholder("email");
-  const passwordInput = page.getByPlaceholder("password");
-
-  await expect(emailInput).toHaveValue("mia@demo.local");
-  await expect(passwordInput).toHaveValue("demo");
-});
-
-test("successful login redirects to home page", async ({ page }) => {
-  await signIn(page, "mia@demo.local");
-
-  // Should be redirected from /login
-  await expect(page).not.toHaveURL(/\/login/);
-  // Should end up somewhere inside the app (e.g., /)
-  expect(page.url()).not.toMatch(/\/login/);
-});
-
-test("returnTo parameter is preserved through login flow", async ({ page }) => {
-  // Use returnTo query parameters that simulate OAuth continuation
-  const returnToParams = new URLSearchParams({
-    client_id: "test-client",
-    response_type: "code",
-    redirect_uri: "http://localhost:8722/callback",
+test.describe("login", () => {
+  test("a wrong password keeps you on /login and reports the failure", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByPlaceholder("email").fill(PERSONAS.member);
+    await page.getByPlaceholder("password").fill("not-the-password");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page).toHaveURL(/\/login/);
   });
 
-  await page.goto(`/login?${returnToParams.toString()}`);
+  test("the demo credential shortcuts fill the form", async ({ page }) => {
+    // WAREHOUSD_DEMO=true is set for the e2e web server, so the hints render.
+    await page.goto("/login");
+    await page.getByRole("button", { name: "ana@demo.local" }).click();
+    await expect(page.getByPlaceholder("email")).toHaveValue("ana@demo.local");
+    await expect(page.getByPlaceholder("password")).toHaveValue("demo");
+  });
 
-  // Fill in the login form
-  await page.getByPlaceholder("email").fill("ana@demo.local");
-  await page.getByPlaceholder("password").fill("demo");
+  test("signing out clears the session for every surface", async ({ page }) => {
+    await signIn(page, PERSONAS.member);
+    await expect(page).toHaveURL(/\/member$/);
+    await signOut(page);
+    await page.goto("/member");
+    await expect(page).toHaveURL(/\/login/);
+  });
 
-  // Assert on the request to the authorize endpoint rather than on the final URL.
-  // What this test is about is the handoff: that the login page carries the OAuth
-  // params through sign-in instead of dropping them and landing on `/`. Where
-  // authorize *ends up* is a different question — `test-client` is deliberately not
-  // a registered client here, so authorize legitimately answers invalid_client and
-  // the browser settles on /api/auth/error. Waiting for the final URL would be
-  // asserting on client registration, not on returnTo.
-  const authorizeRequest = page.waitForRequest((r) =>
-    r.url().includes("/api/auth/mcp/authorize"),
-  );
-  await page.getByRole("button", { name: "Sign in" }).click();
+  test("an unauthenticated deep link bounces to login, then lands on the role home", async ({
+    page,
+    context,
+  }) => {
+    await context.clearCookies();
+    await page.goto("/admin/users");
+    await expect(page).toHaveURL(/\/login/);
+    // The login form always returns to "/", which redirects by role — the deep link is not
+    // preserved. Asserting the current behaviour, not the ideal one.
+    await page.getByPlaceholder("email").fill(PERSONAS.admin);
+    await page.getByPlaceholder("password").fill("demo");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(/\/admin$/);
+  });
 
-  const authorizeUrl = new URL((await authorizeRequest).url());
-  expect(authorizeUrl.searchParams.get("client_id")).toBe("test-client");
-  expect(authorizeUrl.searchParams.get("response_type")).toBe("code");
-  expect(authorizeUrl.searchParams.get("redirect_uri")).toBe("http://localhost:8722/callback");
-});
+  // The three states below are driven by mocking /api/sso/status, because registering a real
+  // provider would leak into every other spec sharing this database. They cover the branches
+  // in LoginForm.tsx that depend on `providers.length` and `localLoginEnabled`.
+  test("renders SSO-first and collapses local login when a provider exists", async ({ page }) => {
+    await page.route("**/api/sso/status", (route) =>
+      route.fulfill({
+        json: {
+          providers: [{ providerId: "okta", domain: "acme.com", type: "oidc" }],
+          localLoginEnabled: true,
+        },
+      }),
+    );
+    await page.goto("/login");
 
-test("loading state is shown during sso status fetch", async ({ page }) => {
-  // Start navigation to login page without waiting for network requests to complete
-  const navigationPromise = page.goto("/login", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("button", { name: /sign in with your company account/i }),
+    ).toBeVisible();
 
-  // Check that "Loading..." text appears during page load
-  // (The page shows this while fetching /api/sso/status)
-  const loadingElements = page.getByText("Loading...");
-  const visible = await loadingElements.isVisible().catch(() => false);
+    // Local login is still reachable, but only behind the collapsed disclosure.
+    const details = page.locator("details");
+    await expect(details.locator("summary")).toContainText("Use a local account");
+    await expect(page.getByPlaceholder("email")).not.toBeVisible();
+    await details.locator("summary").click();
+    await expect(page.getByPlaceholder("email")).toBeVisible();
+  });
 
-  // Wait for navigation to complete and for the form to be loaded
-  await navigationPromise;
-  await page.waitForLoadState("networkidle");
+  test("says so when no login method is configured", async ({ page }) => {
+    await page.route("**/api/sso/status", (route) =>
+      route.fulfill({ json: { providers: [], localLoginEnabled: false } }),
+    );
+    await page.goto("/login");
 
-  // After loading completes, the login form should be visible
-  await expect(page.getByPlaceholder("email")).toBeVisible();
-});
+    await expect(page.getByText("No login method is configured")).toBeVisible();
+    await expect(page.getByPlaceholder("email")).not.toBeVisible();
+    await expect(page.getByRole("button", { name: /sign in/i })).not.toBeVisible();
+  });
 
-test("form submission with invalid credentials shows error", async ({ page }) => {
-  await page.goto("/login");
+  test("returnTo parameters survive sign-in and reach the authorize endpoint", async ({ page }) => {
+    const returnToParams = new URLSearchParams({
+      client_id: "test-client",
+      response_type: "code",
+      redirect_uri: "http://localhost:8722/callback",
+    });
+    await page.goto(`/login?${returnToParams.toString()}`);
+    await page.getByPlaceholder("email").fill(PERSONAS.admin);
+    await page.getByPlaceholder("password").fill("demo");
 
-  await page.getByPlaceholder("email").fill("invalid@example.com");
-  await page.getByPlaceholder("password").fill("wrongpassword");
+    // Assert on the request to the authorize endpoint rather than on the final URL. What this
+    // test is about is the handoff: that the login page carries the OAuth params through
+    // sign-in instead of dropping them and landing on `/`. Where authorize *ends up* is a
+    // different question — `test-client` is deliberately not a registered client here, so
+    // authorize legitimately answers invalid_client and the browser settles on
+    // /api/auth/error. Waiting for the final URL would assert client registration, not
+    // returnTo.
+    const authorizeRequest = page.waitForRequest((r) =>
+      r.url().includes("/api/auth/mcp/authorize"),
+    );
+    await page.getByRole("button", { name: "Sign in" }).click();
 
-  const signInButton = page.getByRole("button", { name: "Sign in" });
-  await signInButton.click();
-
-  // Should show error message (stays on login page)
-  const errorMessage = page.getByRole("alert");
-  await expect(errorMessage).toBeVisible();
-});
-
-test("SSO-first render when a provider is configured", async ({ page }) => {
-  // Mock /api/sso/status to return an SSO provider
-  await page.route("**/api/sso/status", (route) =>
-    route.fulfill({
-      json: {
-        providers: [{ providerId: "okta", domain: "acme.com", type: "oidc" }],
-        localLoginEnabled: true,
-      },
-    })
-  );
-
-  await page.goto("/login");
-
-  // Should show SSO button instead of email/password
-  await expect(page.getByRole("button", { name: /sign in with your company account/i })).toBeVisible();
-
-  // Local login should be hidden in a collapsed <details> element
-  const detailsElement = page.locator("details");
-  await expect(detailsElement).toBeVisible();
-
-  // Email input should not be visible (hidden inside collapsed details)
-  await expect(page.getByPlaceholder("email")).not.toBeVisible();
-});
-
-test("collapsed local login section when both SSO and local login configured", async ({ page }) => {
-  // Mock /api/sso/status to return both SSO provider and local login enabled
-  await page.route("**/api/sso/status", (route) =>
-    route.fulfill({
-      json: {
-        providers: [{ providerId: "okta", domain: "acme.com", type: "oidc" }],
-        localLoginEnabled: true,
-      },
-    })
-  );
-
-  await page.goto("/login");
-
-  // The <details> element should exist and be collapsed by default
-  const details = page.locator("details");
-  await expect(details).toBeVisible();
-
-  // Summary should contain the expand text
-  const summary = details.locator("summary");
-  await expect(summary).toContainText("Use a local account");
-
-  // Local login form should be hidden initially
-  const emailInput = page.getByPlaceholder("email");
-  await expect(emailInput).not.toBeVisible();
-
-  // Click to expand and verify form becomes visible
-  await summary.click();
-  await expect(emailInput).toBeVisible();
-});
-
-test("no login method is configured state", async ({ page }) => {
-  // Mock /api/sso/status to return no providers and local login disabled
-  await page.route("**/api/sso/status", (route) =>
-    route.fulfill({
-      json: {
-        providers: [],
-        localLoginEnabled: false,
-      },
-    })
-  );
-
-  await page.goto("/login");
-
-  // Should show the "No login method is configured" message
-  await expect(page.getByText("No login method is configured")).toBeVisible();
-
-  // Should not show any login form
-  await expect(page.getByPlaceholder("email")).not.toBeVisible();
-  await expect(page.getByRole("button", { name: /sign in/i })).not.toBeVisible();
+    const authorizeUrl = new URL((await authorizeRequest).url());
+    expect(authorizeUrl.searchParams.get("client_id")).toBe("test-client");
+    expect(authorizeUrl.searchParams.get("response_type")).toBe("code");
+    expect(authorizeUrl.searchParams.get("redirect_uri")).toBe("http://localhost:8722/callback");
+  });
 });

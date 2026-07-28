@@ -10,7 +10,7 @@ import { pkcePair, signInViaHttp, authorizeAndGetCode, exchangeCodeForToken } fr
 import { getClientPolicy } from "@warehousd/broker";
 import { resolveProject, type Project } from "../../src/project";
 
-const WAREHOUSD_IMAGE = process.env.WAREHOUSD_IMAGE ?? "ghcr.io/warehousd/warehousd:dev";
+const WAREHOUSD_IMAGE = process.env.WAREHOUSD_IMAGE ?? "ghcr.io/tregismoreira/warehousd:dev";
 const CLI_DIST = new URL("../../dist/index.cjs", import.meta.url).pathname;
 
 // Ports are probed per run, never hardcoded. A container leaked by an earlier run holds
