@@ -20,7 +20,6 @@ jobs:
 
       - name: Verify tag matches package version
         id: check
-        working-directory: mvp
         run: |
           if [ "${{ github.ref_type }}" != "tag" ]; then
             echo "Error: Release must run from a tag, got ref '${{ github.ref }}'"
@@ -61,8 +60,8 @@ jobs:
       # The bare tag (no `v`) is the one the CLI pulls — see packages/cli/src/start.ts.
       - uses: docker/build-push-action@v5
         with:
-          context: mvp
-          file: mvp/apps/web/Dockerfile
+          context: .
+          file: apps/web/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -87,17 +86,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: mvp/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org/
 
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp
 
       # Path filter, not name filter: `warehousd` also matches the private root package.
       - run: pnpm --filter ./packages/cli build
-        working-directory: mvp
 
       - run: pnpm --filter ./packages/cli publish --no-git-checks --access public --provenance
-        working-directory: mvp
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

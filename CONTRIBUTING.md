@@ -1,0 +1,146 @@
+# Contributing to warehousd
+
+Thanks for wanting to help. This file is for people changing warehousd itself.
+If you only want to *use* warehousd in your own project, you never need to
+clone this repo — see the [CLI reference](docs/cli.md).
+
+## Ground rules
+
+- **The broker is the trust boundary.** `packages/broker` must stay free of
+  HTTP, MCP, UI, and LLM imports (an ESLint rule enforces this). No code outside
+  the broker may read collection tables.
+- **Every security invariant has a test.** If you touch enforcement — postures,
+  grants, env isolation, SQL construction, audit — the pull request must carry a
+  test that fails without your change. See
+  [docs/architecture.md](docs/architecture.md) for the invariants.
+- **Denied means absent.** A denied field must never appear in a response, an
+  error message, or a log line. When in doubt, add a canary to the fixtures and
+  grep for it.
+
+## Prerequisites
+
+- Node.js 22+
+- pnpm 10+ (`corepack enable`)
+- Docker (for Postgres, and for the CLI end-to-end tests)
+- An Anthropic API key — only if you want to exercise the built-in chat console
+  at `/console`; nothing else needs it
+
+## 1. Install
+
+```bash
+pnpm install
+```
+
+## 2. Start Postgres
+
+There is no separate dev database — reuse the test container:
+
+```bash
+pnpm test:up   # pgvector/pgvector:pg16 on 127.0.0.1:54330
+```
+
+Or run your own Postgres 16 with the `pgvector` extension available.
+
+## 3. Configure the web app
+
+Create `apps/web/.env.local`:
+
+```bash
+# The app schema: users, sessions, grants, collections, audit
+APP_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:54330/warehousd
+
+# Per-env data roles — broker queries run through exactly one of these
+DEV_DATABASE_URL=postgres://warehousd_dev:pw@127.0.0.1:54330/warehousd
+LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:54330/warehousd
+
+# The admin import path's write role — INSERT-only on data_live. Optional: if unset,
+# POST /api/admin/import refuses with `import_not_configured` and there is no write
+# path into data_live at all.
+IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:54330/warehousd
+
+# Better Auth
+BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long
+BETTER_AUTH_URL=http://localhost:8722
+
+# Comma-separated origins trusted as OIDC/SAML issuers. Required for any
+# loopback/private-network IdP — see docs/configure-sso.md. Leave unset otherwise.
+WAREHOUSD_TRUSTED_ORIGINS=
+
+# Only needed for the /console chat page
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Seeds the three demo personas and shows their buttons on the login screen
+WAREHOUSD_DEMO=true
+
+# Kill switch — uncomment to disable local login entirely (SSO only)
+# WAREHOUSD_DISABLE_LOCAL_LOGIN=true
+```
+
+`NEXT_PUBLIC_*` variants are derived from these in `next.config.mjs`; you don't
+set them yourself.
+
+## 4. Bootstrap the database
+
+Run once against a fresh database. It is idempotent — safe to re-run.
+
+```bash
+APP_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:54330/warehousd \
+DEV_DATABASE_URL=postgres://warehousd_dev:pw@127.0.0.1:54330/warehousd \
+LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:54330/warehousd \
+IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:54330/warehousd \
+BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long \
+BETTER_AUTH_URL=http://localhost:8722 \
+WAREHOUSD_PROJECT_DIR=examples/meridian \
+npx tsx scripts/dev-bootstrap.ts
+```
+
+This seeds schemas and roles, synthetic data, the demo documents, the three demo
+personas, and Mia's pending grant request — the state the demo arc starts from.
+The container entrypoint (`apps/web/scripts/entrypoint.ts`) does most of the same
+work for consumers; `dev-bootstrap.ts` adds the pending request and a populated
+live environment for testing.
+
+## 5. Run the app
+
+```bash
+WAREHOUSD_DEMO=true \
+WAREHOUSD_PROJECT_DIR=examples/meridian \
+pnpm --filter @warehousd/web dev
+```
+
+http://localhost:8722 — sign in as `ana@demo.local` (admin),
+`marcus@demo.local` (manager), or `mia@demo.local` (member), password `demo`.
+
+## Before you open a pull request
+
+```bash
+pnpm lint
+WAREHOUSD_PROJECT_DIR=examples/meridian pnpm test   # unit + integration
+pnpm build                                          # production build + typecheck
+pnpm e2e                                            # Playwright, real browser
+```
+
+All four must be clean. `pnpm test` does not typecheck — `pnpm build` is what
+catches type errors. Details and the slower suites (CLI end-to-end, Keycloak SSO)
+are in [docs/testing.md](docs/testing.md).
+
+Then:
+
+- One focused change per pull request; describe what invariant or behavior it
+  affects.
+- Use the terminology in [docs/glossary.md](docs/glossary.md) — collection,
+  document, field. Not table, row, item.
+- Do not report security vulnerabilities through a pull request or issue. See
+  [SECURITY.md](SECURITY.md).
+
+## Repository layout
+
+```
+apps/web/          Next.js — UI, MCP adapter, auth routes; published as the Docker image
+packages/broker/   the core: grants, query validation, synthetic data, indexing, YAML loader
+packages/cli/      the published `warehousd` npm CLI
+examples/meridian/ a complete consuming project (the demo company)
+scripts/           contributor bootstrap and e2e setup
+test/              shared fixtures (Keycloak realm for the SSO suite)
+docs/              user and contributor documentation
+```

@@ -19,24 +19,19 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: mvp/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp
 
       - run: pnpm test:up
-        working-directory: mvp
 
       - run: pnpm lint
-        working-directory: mvp
 
       - run: pnpm test
-        working-directory: mvp
         env:
           WAREHOUSD_PROJECT_DIR: examples/meridian
 
       - run: pnpm build
-        working-directory: mvp
 
   playwright:
     needs: test
@@ -53,22 +48,17 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: mvp/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp
 
       - run: pnpm test:up
-        working-directory: mvp
 
       - run: pnpm --filter @warehousd/web exec playwright install --with-deps chromium
-        working-directory: mvp
 
       - run: pnpm e2e
-        working-directory: mvp
 
       - run: pnpm test:down
-        working-directory: mvp
 
   # Packaging fidelity: installs the actual tarball outside the workspace, so a broken `bin`
   # path, a missing shebang, a `files` omission, or an unresolvable external `pg` fails here
@@ -87,16 +77,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: mvp/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp
 
       - run: pnpm --filter ./packages/cli build
-        working-directory: mvp
 
       - name: Pack the CLI
-        working-directory: mvp/packages/cli
+        working-directory: packages/cli
         run: echo "tarball=$(npm pack --silent --pack-destination "$RUNNER_TEMP")" >> "$GITHUB_ENV"
 
       - name: Install the tarball and smoke-test it
@@ -123,25 +111,19 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: mvp/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp
 
       - run: pnpm test:up
-        working-directory: mvp
 
       - run: docker build -f apps/web/Dockerfile -t warehousd:ci .
-        working-directory: mvp
 
       # Path filter, not name filter: `warehousd` also matches the private root package.
       - run: pnpm --filter ./packages/cli build
-        working-directory: mvp
 
       - run: pnpm test:e2e:cli
-        working-directory: mvp
         env:
           WAREHOUSD_IMAGE: warehousd:ci
 
       - run: pnpm test:e2e:sso
-        working-directory: mvp
