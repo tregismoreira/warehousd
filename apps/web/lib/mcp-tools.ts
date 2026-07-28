@@ -1,4 +1,4 @@
-import type { BrokerContext, QueryIntent, DocSearchIntent } from "@warehousd/broker";
+import type { BrokerContext, QueryIntent, DocSearchIntent, GetDocumentIntent, MutationIntent } from "@warehousd/broker";
 import { requestGrant, validateGrantRequest } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../app/lib/broker";
 
@@ -14,7 +14,9 @@ export type ToolDef = {
 // query_collection and search_documents are the two tools whose ok:true result means a
 // collection was actually queried — the chat route's fabrication guard keys off this list
 // instead of a hardcoded name check, so the guard can never drift from the tool set below.
-export const DATA_TOOL_NAMES = ["query_collection", "search_documents"] as const;
+// get_document joins this list because it returns real field data. The write tools do not:
+// create/update/delete return a proposal or applied status only, no field values to check.
+export const DATA_TOOL_NAMES = ["query_collection", "search_documents", "get_document"] as const;
 
 const REQUEST_ACCESS_HINT =
   "Refused. If this was no_grant or field_denied, call request_access with the collection, a " +
@@ -125,6 +127,110 @@ export const TOOLS: ToolDef[] = [
     },
     handler: async (ctx, input) =>
       withHint(await getBroker().broker.searchDocuments(ctx, input as unknown as DocSearchIntent)),
+  },
+  {
+    name: "get_document",
+    description:
+      "Fetch a single document by id or path (file collections). Governance is deny-by-default " +
+      "and field-scoped: returned fields are restricted to your active grant. Refusal includes " +
+      "a request_access hint.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        collection: { type: "string", description: "Collection name." },
+        id: { type: "string", description: "Document id (pk for datasets, file_id for files). Mutually exclusive with path." },
+        path: { type: "string", description: "Source file path (file collections only). Mutually exclusive with id." },
+      },
+      required: ["collection"],
+    },
+    handler: async (ctx, input) => {
+      const id = input.id as string | undefined;
+      const path = input.path as string | undefined;
+      if (!id && !path) return withHint({ ok: false, reason: "invalid_intent" });
+      const intent: GetDocumentIntent = id ? { collection: input.collection as string, id } : { collection: input.collection as string, path: path! };
+      return withHint(await getBroker().broker.getDocument(ctx, intent));
+    },
+  },
+  // Approve and reject are deliberately NOT MCP tools — the untrusted model may propose,
+  // but only an authenticated human may approve. Approval happens only through an authenticated
+  // human surface. A future contributor should not add these as MCP tools.
+  {
+    name: "create_document",
+    description:
+      "Create a document in a writable collection. Governance is deny-by-default: the " +
+      "operation requires an active create grant. A write may return status:pending (invisible " +
+      "to everyone until a human approves it); the model cannot approve its own proposal. " +
+      "Refusals include a request_access hint.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        collection: { type: "string" },
+        values: { type: "object", description: "Field values for the new document." },
+      },
+      required: ["collection", "values"],
+    },
+    handler: async (ctx, input) => {
+      const intent: MutationIntent = {
+        op: "create",
+        collection: input.collection as string,
+        values: input.values as Record<string, unknown>,
+      };
+      return withHint(await getBroker().broker.mutate(ctx, intent));
+    },
+  },
+  {
+    name: "update_document",
+    description:
+      "Update an existing document. Governance is deny-by-default: the operation requires an " +
+      "active update grant. A write may return status:pending (invisible to everyone until a " +
+      "human approves it); the model cannot approve its own proposal. Refusals include a " +
+      "request_access hint.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        collection: { type: "string" },
+        id: { type: "string", description: "Document id (pk)." },
+        values: { type: "object", description: "Fields to update." },
+        expect: { type: "string", description: "Optional revision to enforce optimistic concurrency." },
+      },
+      required: ["collection", "id", "values"],
+    },
+    handler: async (ctx, input) => {
+      const intent: MutationIntent = {
+        op: "update",
+        collection: input.collection as string,
+        id: input.id as string,
+        values: input.values as Record<string, unknown>,
+        expect: input.expect as string | undefined,
+      };
+      return withHint(await getBroker().broker.mutate(ctx, intent));
+    },
+  },
+  {
+    name: "delete_document",
+    description:
+      "Delete a document. Governance is deny-by-default: the operation requires an active " +
+      "delete grant. A write may return status:pending (invisible to everyone until a human " +
+      "approves it); the model cannot approve its own proposal. Refusals include a " +
+      "request_access hint.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        collection: { type: "string" },
+        id: { type: "string", description: "Document id (pk)." },
+        expect: { type: "string", description: "Optional revision to enforce optimistic concurrency." },
+      },
+      required: ["collection", "id"],
+    },
+    handler: async (ctx, input) => {
+      const intent: MutationIntent = {
+        op: "delete",
+        collection: input.collection as string,
+        id: input.id as string,
+        expect: input.expect as string | undefined,
+      };
+      return withHint(await getBroker().broker.mutate(ctx, intent));
+    },
   },
   {
     name: "request_access",

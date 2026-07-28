@@ -69,9 +69,9 @@ describe("mcp-tools: search_documents", () => {
 });
 
 describe("DATA_TOOL_NAMES", () => {
-  it("matches the query/search tool names", async () => {
+  it("includes data-returning tools: query, search, and get", async () => {
     const { DATA_TOOL_NAMES } = await import("../lib/mcp-tools");
-    expect(DATA_TOOL_NAMES).toEqual(["query_collection", "search_documents"]);
+    expect(DATA_TOOL_NAMES).toEqual(["query_collection", "search_documents", "get_document"]);
   });
 });
 
