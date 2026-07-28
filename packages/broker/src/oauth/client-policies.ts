@@ -4,12 +4,38 @@ import { DEFAULT_ORG_ID } from "../db/migrate-app";
 
 export const DEV_CLIENT_NAME = "warehousd dev client";
 
-export type ClientPolicy = { clientId: string; allowedScopes: string[] };
+export type ClientPolicy = {
+  clientId: string;
+  allowedScopes: string[];
+  allowedCollections: string[] | null;
+  mode: "delegated" | "headless";
+  robotUserId: string | null;
+  trustedIssuerId: string | null;
+};
 
 export async function getClientPolicy(app: Pool, clientId: string): Promise<ClientPolicy> {
-  const r = await app.query(`select allowed_scopes from app.client_policies where client_id=$1`, [clientId]);
-  if (r.rowCount === 0) return { clientId, allowedScopes: ["env:dev"] };
-  return { clientId, allowedScopes: r.rows[0].allowed_scopes };
+  const r = await app.query(
+    `select allowed_scopes, allowed_collections, mode, robot_user_id, trusted_issuer_id
+     from app.client_policies where client_id=$1`, [clientId]);
+  if (r.rowCount === 0) {
+    return {
+      clientId,
+      allowedScopes: ["env:dev"],
+      allowedCollections: null,
+      mode: "delegated",
+      robotUserId: null,
+      trustedIssuerId: null,
+    };
+  }
+  const row = r.rows[0];
+  return {
+    clientId,
+    allowedScopes: row.allowed_scopes,
+    allowedCollections: row.allowed_collections,
+    mode: row.mode || "delegated",
+    robotUserId: row.robot_user_id,
+    trustedIssuerId: row.trusted_issuer_id,
+  };
 }
 
 export async function upsertClientPolicy(

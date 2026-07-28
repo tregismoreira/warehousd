@@ -243,10 +243,33 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       if (isFile && selectFields.includes("content"))
         document.content = reassembleChunks(rows.map((r) => String(r.content ?? "")));
 
+      // _rev only exists on writable collections (dataset type with revisions tracking).
+      // Fetch it separately because it's a system field, not a granted field, and it's needed
+      // for concurrency control (ETag/If-Match). It identifies the document's current state
+      // for the caller, which is not a field-value disclosure — like MutationResult.rev.
+      // Fetch through writePool (read role cannot see base tables, only views which exclude _rev).
+      // Like listRevisions and listProposals, this gracefully degrades if no write pool exists.
+      let rev: string | undefined;
+      if (c.writable && !isFile) {
+        const pool = writePool(pools, ctx);
+        if (pool) {
+          const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
+          if (pk) {
+            const schema = ctx.env === "live" ? "data_live" : "data_synth";
+            const revQuery = await withOrg(pool, ctx.orgId,
+              async (client: PoolClient) => {
+                const r = await client.query(`select _rev from ${schema}.${ident(intent.collection)} where ${ident(pk)} = $1 and _current`, [(intent as { id: string }).id]);
+                return r.rows[0]?._rev;
+              });
+            rev = revQuery;
+          }
+        }
+      }
+
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: intent.collection, orgId: ctx.orgId,
         intent: null, fieldsReturned: selectFields, grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
-      return { ok: true, document, fieldsReturned: selectFields, auditId };
+      return { ok: true, document, fieldsReturned: selectFields, rev, auditId };
     } catch (err) {
       // Same discipline as query: a driver error names columns and values, so it goes to the
       // log and the caller gets a bare reason code. The audit row is written either way.
@@ -1071,7 +1094,125 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     }
   }
 
-  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate, approveProposal, rejectProposal, listProposals, changes };
+  type RevisionMetadata = {
+    rev: string; seq: number; at: string; by: string; op: string; status: string; fields: string[];
+  };
+
+  async function listRevisions(
+    ctx: BrokerContext, opts: { collection: string; id: string },
+  ): Promise<
+    { ok: true; revisions: RevisionMetadata[]; auditId: string }
+    | { ok: false; reason: RefusalReason; auditId: string }
+  > {
+    const c = findCollection(cfg, opts.collection);
+    if (!c) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "unknown_collection", via: ctx.via });
+      return { ok: false, reason: "unknown_collection", auditId };
+    }
+    if (!c.writable) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "invalid_intent", via: ctx.via });
+      return { ok: false, reason: "invalid_intent", auditId };
+    }
+
+    const pool = writePool(pools, ctx);
+    if (!pool) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "internal_error", via: ctx.via });
+      return { ok: false, reason: "internal_error", auditId };
+    }
+
+    const grant = await loadActiveGrant(app, ctx, opts.collection);
+    if (!grant) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant", via: ctx.via });
+      return { ok: false, reason: "no_grant", auditId };
+    }
+    if (!grant.verbs.includes("read")) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant", via: ctx.via });
+      return { ok: false, reason: "no_grant", auditId };
+    }
+
+    const all = Object.keys(c.fields);
+    if (grant.documentFilter && !all.includes(grant.documentFilter.field)) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "invalid_intent", via: ctx.via });
+      return { ok: false, reason: "invalid_intent", auditId };
+    }
+
+    const schema = ctx.env === "live" ? "data_live" : "data_synth";
+    const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
+    if (!pk) {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "invalid_intent", via: ctx.via });
+      return { ok: false, reason: "invalid_intent", auditId };
+    }
+
+    const cols = ["_rev", "_rev_seq", "_rev_at", "_rev_by", "_rev_op", "_rev_status", "_rev_fields"];
+    const filterField = grant.documentFilter?.field;
+    if (filterField && Object.hasOwn(c.fields, filterField)) cols.push(filterField);
+
+    try {
+      const revisions = await withOrg(pool, ctx.orgId, async (client) => {
+        // Fetch current row to apply document filter against
+        const currentQ = await client.query(
+          `select ${cols.map(ident).join(", ")} from ${schema}.${ident(opts.collection)}
+           where org_id=$1 and ${ident(pk)}=$2 and _current`, [ctx.orgId, opts.id]);
+
+        if (currentQ.rows.length === 0) {
+          return null; // Document not found or filtered out
+        }
+        const currentRow = currentQ.rows[0];
+        if (grant.documentFilter && !matchesFilter(currentRow, grant.documentFilter)) {
+          return null; // Document filtered out
+        }
+
+        // Fetch all revisions for this document, ordered by seq
+        const q = await client.query(
+          `select ${cols.map(ident).join(", ")} from ${schema}.${ident(opts.collection)}
+           where org_id=$1 and ${ident(pk)}=$2 order by _rev_seq asc`, [ctx.orgId, opts.id]);
+
+        return q.rows.map((row) => ({
+          rev: String(row._rev),
+          seq: Number(row._rev_seq),
+          at: new Date(row._rev_at).toISOString(),
+          by: String(row._rev_by),
+          op: String(row._rev_op),
+          status: String(row._rev_status),
+          fields: row._rev_fields ?? [],
+        }));
+      });
+
+      if (!revisions) {
+        const auditId = await writeAudit(app, {
+          userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+          intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found", via: ctx.via });
+        return { ok: false, reason: "not_found", auditId };
+      }
+
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
+      return { ok: true, revisions, auditId };
+    } catch (err) {
+      console.error("[broker] listRevisions failed", { collection: opts.collection, id: opts.id, err });
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "internal_error", via: ctx.via });
+      return { ok: false, reason: "internal_error", auditId };
+    }
+  }
+
+  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate, approveProposal, rejectProposal, listProposals, changes, listRevisions };
 }
 
 // Identifier quoting for the write path. Column and collection names come from the loaded

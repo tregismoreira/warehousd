@@ -20,3 +20,4 @@ export { importCollection } from "./import/run";
 export { validateImportRows, type ImportError } from "./import/validate";
 export { parseImportPayload, parseCsv } from "./import/csv";
 export * from "./credentials/keys";
+export { createTrustedIssuer, listTrustedIssuers, getTrustedIssuer, type TrustedIssuer } from "./credentials/issuers";

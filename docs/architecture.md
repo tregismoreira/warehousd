@@ -35,7 +35,8 @@ A modular monolith: one deployable, one Postgres, one hard internal boundary.
 │  Adapters (thin, replaceable):                  │
 │  ├── MCP server  (streamable HTTP, OAuth 2.1)   │
 │  ├── Web UI      (admin / manager / member)     │
-│  └── [future]    REST, CMS delivery, apps       │
+│  ├── REST (/v1)  (token-authenticated HTTP)     │
+│  └── [future]    CMS delivery, apps             │
 │                    │                            │
 │         ▼ all calls go through ▼                │
 │  ┌───────────────────────────────────────────┐  │
@@ -835,6 +836,14 @@ scheduled export:
    refusal, return the reason code — never a denied value, never SQL.
 4. Do not query `data_live` or `data_synth`. The role you are given cannot
    anyway, and that is the point.
+
+The REST adapter (`/v1`) follows this pattern exactly. It derives context in
+`lib/rest-context.ts` with `deriveRestContext()` — extracting the token scope
+for env, looking up orgId from the user row, loading the client policy to
+determine `via` (how the client authenticated), and applying the collection
+ceiling — then translates HTTP requests into broker intents and returns reason
+codes on refusal. See `apps/web/lib/rest-context.ts` and `apps/web/app/v1/`
+for the reference implementation.
 
 `broker.query` is read-only. Naming is deliberately kept open for an additive
 `broker.mutate` with its own validation and audit; the audit outcome column is

@@ -3,10 +3,11 @@ import { DEFAULT_ORG_ID } from "@warehousd/broker";
 import { auth } from "./auth";
 import { getAppPool } from "../app/lib/broker";
 
-// The ONLY place BrokerContext is constructed for token-authenticated (MCP/OAuth) paths.
-// lib/session.ts's deriveContext remains the sole constructor for cookie/session paths — see
-// the note there. Tokens carry only sub/client/env scope (§6.1); any env-like value in the
-// request body/params is ignored and never read here.
+// The ONLY place BrokerContext is constructed for MCP/OAuth token-authenticated paths.
+// lib/session.ts's deriveContext is for cookie/session paths; lib/rest-context.ts's
+// deriveRestContext is for REST API (`/v1/*`) token paths — three constructors, one per
+// auth protocol boundary. Tokens carry only sub/client/env scope (§6.1); any env-like value
+// in the request body/params is ignored and never read here.
 //
 // orgId obeys the identical rule as env: it is read from the token subject's user row, never
 // from the request. A token cannot name its own tenant any more than it can name its own

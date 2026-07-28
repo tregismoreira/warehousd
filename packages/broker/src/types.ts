@@ -46,7 +46,7 @@ export type BrokerResult =
   | { ok: false; reason: RefusalReason; auditId: string };
 
 export type GetDocumentResult =
-  | { ok: true; document: Document; fieldsReturned: string[]; auditId: string }
+  | { ok: true; document: Document; fieldsReturned: string[]; rev?: string; auditId: string }
   | { ok: false; reason: RefusalReason; auditId: string };
 
 export type MutationIntent =

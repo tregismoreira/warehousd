@@ -3,8 +3,8 @@ import { Pool } from "pg";
 const ADMIN = "postgres://postgres:postgres@127.0.0.1:54330/postgres";
 const BASE = "postgres://postgres:postgres@127.0.0.1:54330";
 
-export async function setupWebDb(label: string, opts: { seedPersonas?: boolean } = {}) {
-  const { seedPersonas = true } = opts;
+export async function setupWebDb(label: string, opts: { seedPersonas?: boolean; projectDir?: string } = {}) {
+  const { seedPersonas = true, projectDir } = opts;
   const dbName = `wh_web_${label}_${process.pid}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
   const admin = new Pool({ connectionString: ADMIN });
   await admin.query(`drop database if exists ${dbName} with (force)`);
@@ -29,7 +29,7 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean }
   process.env.BETTER_AUTH_SECRET ??= "test-secret-at-least-32-chars-long-000";
   process.env.BETTER_AUTH_URL ??= "http://localhost:8722";
   process.env.WAREHOUSD_TRUSTED_ORIGINS ??= "http://127.0.0.1:8791,http://127.0.0.1:8780";
-  process.env.WAREHOUSD_PROJECT_DIR = new URL("../../../../examples/meridian", import.meta.url).pathname;
+  process.env.WAREHOUSD_PROJECT_DIR = projectDir ?? new URL("../../../../examples/meridian", import.meta.url).pathname;
 
   const { createAppSchema } = await import("@warehousd/broker");
   await createAppSchema(db);
@@ -108,6 +108,30 @@ export async function setupWebDbWithData(label: string) {
   process.env.IMPORT_DATABASE_URL = `postgres://warehousd_import:pw@127.0.0.1:54330/${base.dbName}`;
 
   return base;
+}
+
+// Generic variant of setupWebDbWithData for a caller-supplied project dir instead of the
+// hardcoded meridian one. Applies the config's DDL (creating writable/file collection tables
+// and granting the dev/dev_write/live/live_write roles) and wires DEV_DATABASE_URL et al. at
+// the roles setupWebDb already created — without meridian's seedLive/indexCollection steps,
+// which assume meridian's specific seed layout. Callers that need file-collection content
+// insert rows directly via SQL/indexCollection themselves.
+export async function setupWebDbWithConfig(label: string, projectDir: string) {
+  const base = await setupWebDb(label, { projectDir });
+  const { loadConfig, applyConfig } = await import("@warehousd/broker");
+  const cfg = loadConfig(projectDir);
+
+  const db = new Pool({ connectionString: base.appUrl });
+  await applyConfig(db, cfg);
+  await db.end();
+
+  process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${base.dbName}`;
+  process.env.LIVE_DATABASE_URL = `postgres://warehousd_live:pw@127.0.0.1:54330/${base.dbName}`;
+  process.env.DEV_WRITE_DATABASE_URL = `postgres://warehousd_dev_write:pw@127.0.0.1:54330/${base.dbName}`;
+  process.env.LIVE_WRITE_DATABASE_URL = `postgres://warehousd_live_write:pw@127.0.0.1:54330/${base.dbName}`;
+  process.env.IMPORT_DATABASE_URL = `postgres://warehousd_import:pw@127.0.0.1:54330/${base.dbName}`;
+
+  return { ...base, cfg };
 }
 
 // Sign in and return the Set-Cookie value as a Cookie header for subsequent requests.

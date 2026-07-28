@@ -17,6 +17,15 @@ const cfg: WarehousdConfig = {
       status: { type: "text", posture: "allow" },
       owner: { type: "text", posture: "allow" },
     }},
+    articles: {
+      writable: true as const,
+      description: "writable dataset",
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        title: { type: "text", posture: "allow", write: "allow" as const },
+        content: { type: "text", posture: "allow", write: "allow" as const },
+      },
+    },
     sources: {
       type: "file" as const,
       description: "d",
@@ -280,6 +289,35 @@ describe("broker.getDocument", () => {
       const auditRow = await app.query(`select * from app.audit_events where id = $1`, [refusedResult.auditId]);
       expect(auditRow.rowCount).toBe(1);
       expect(auditRow.rows[0].outcome).toBe("refused");
+    }
+  });
+
+  it("writable dataset collections return rev as a truthy string", async () => {
+    const userId = "user_writable_rev_test";
+    const ctxTest: BrokerContext = { userId, env: "live", orgId: "default" };
+    const grantId = await requestGrant(app, {
+      userId, collection: "articles", env: "live", orgId: "default",
+      purposeLabel: "test", allowedFields: ["id", "title", "content"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: ["read"] });
+
+    // Insert writable collection document via SQL (simulating a created document)
+    const id = (await app.query(
+      `insert into data_live.articles (org_id, id, title, content, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _rev_base, _current)
+       values ('default', gen_random_uuid(), 'Test Article', 'Content here', gen_random_uuid(), 1, now(), $1, 'create', 'approved', ARRAY['title', 'content'], null, true)
+       returning id`,
+      [userId],
+    )).rows[0].id;
+
+    const broker = makeBroker(pools, cfg);
+    const result = await broker.getDocument(ctxTest, { collection: "articles", id: id.toString() });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // rev should be present and be a non-empty string (the _rev UUID)
+      expect(result.rev).toBeTruthy();
+      expect(typeof result.rev).toBe("string");
+      expect(result.rev).toMatch(/^[0-9a-f-]{36}$/);
     }
   });
 });
