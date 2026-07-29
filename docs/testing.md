@@ -51,6 +51,14 @@ built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 > sign-in timeouts that look like application bugs. Check with
 > `lsof -nP -iTCP:8722 -sTCP:LISTEN` before debugging anything else.
 
+> ⚠️ **Recreate Keycloak after editing `test/keycloak/warehousd-realm.json`.** The
+> realm is imported at container start, so `pnpm test:up` leaves an already-running
+> container serving the old one. `pnpm test:e2e:sso` then fails inside Keycloak's
+> login form — `expected 200 to be greater than or equal to 300`, or `Could not
+> find SAMLResponse in form` — because the user the test signs in as does not exist
+> in the realm actually loaded. Run
+> `docker compose -f docker-compose.test.yml up -d --force-recreate keycloak`.
+
 CI runs lint, `pnpm test`, and `pnpm build`, then Playwright, a packaging
 smoke test that installs the CLI tarball outside the workspace, and the CLI and
 SSO end-to-end suites.
