@@ -6,6 +6,7 @@ import companies from "../../wordlists/companies.json" with { type: "json" };
 import industries from "../../wordlists/industries.json" with { type: "json" };
 import courts from "../../wordlists/courts.json" with { type: "json" };
 import legalNarratives from "../../wordlists/legal-narratives.json" with { type: "json" };
+import lawDepartments from "../../wordlists/law-departments.json" with { type: "json" };
 
 // Mulberry32 — deterministic PRNG.
 export function makeRng(seed: number): () => number {
@@ -29,7 +30,10 @@ const departmentNames = [
   "Legal", "Operations", "Customer Support", "Product", "IT",
 ];
 
-export const wordlists = { firstNames, lastNames, streets, jobTitles, companies, industries, courts, legalNarratives };
+export const wordlists = {
+  firstNames, lastNames, streets, jobTitles, companies, industries, courts, legalNarratives,
+  lawDepartments,
+};
 
 export function genValue(
   rng: () => number, type: string, field: string,
@@ -65,6 +69,7 @@ export function genValue(
       case "narrative": return pick(rng, wordlists.legalNarratives);
       case "court_name": return pick(rng, wordlists.courts);
       case "industry": return pick(rng, wordlists.industries);
+      case "department_name": return pick(rng, wordlists.lawDepartments);
     }
   }
 

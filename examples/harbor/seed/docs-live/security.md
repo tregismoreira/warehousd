@@ -1,6 +1,7 @@
 ---
 department: corporate
 tags: [compliance, confidential]
+review_date: 2025-07-01
 ---
 # Information Security Policy
 

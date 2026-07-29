@@ -43,7 +43,9 @@ collections:
     description: Firm departments
     fields:
       id:       { type: uuid, posture: allow, pk: true }
-      name:     { type: text, posture: allow }
+      # Without the hint the generic `name` heuristic applies, which draws generic corporate
+      # department names ("Engineering", "Sales") that read wrong for a law firm.
+      name:     { type: text, posture: allow, gen: department_name }
       kind:     { type: text, posture: allow, nullable: true }
       head_id:  { type: uuid, posture: allow, fk: people.id, nullable: true }
       head_name: { type: text, posture: allow, view_join: { table: people, column: full_name, on: head_id } }
