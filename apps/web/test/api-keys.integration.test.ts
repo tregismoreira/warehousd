@@ -437,4 +437,24 @@ describe("Control-plane API routes", () => {
       expect(res.status).toBe(401);
     });
   });
+
+  // The two reads the review queue depends on. Both delegate authorization to the broker, so
+  // the contract to hold here is that an unauthenticated caller never reaches it at all.
+  describe("GET /api/proposals/[id]", () => {
+    it("requires session auth", async () => {
+      const { GET } = await import("../app/api/proposals/[id]/route");
+      const req = apiRequest("/api/proposals/fake-id", {});
+      const res = await GET(req as any, { params: Promise.resolve({ id: "fake-id" }) } as any);
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("GET /api/documents/[c]/[id]", () => {
+    it("requires session auth", async () => {
+      const { GET } = await import("../app/api/documents/[c]/[id]/route");
+      const req = apiRequest("/api/documents/people/fake-id", {});
+      const res = await GET(req as any, { params: Promise.resolve({ c: "people", id: "fake-id" }) } as any);
+      expect(res.status).toBe(401);
+    });
+  });
 });

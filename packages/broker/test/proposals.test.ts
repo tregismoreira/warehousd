@@ -12,6 +12,18 @@ let p: Provisioned, app: Pool, pools: any;
 const cfg: WarehousdConfig = ConfigSchema.parse({
   project: "test",
   collections: {
+    // Deliberately NOT writable, so it carries no _rev column, and deliberately declared
+    // FIRST: approve/reject locate a proposal by scanning collections and stop at the match,
+    // so a non-revisable collection listed after the writable one is never reached and proves
+    // nothing. In this order every approve/reject below queries it before finding the
+    // proposal — which is exactly how a `column "_rev" does not exist` failure shipped once.
+    departments: {
+      description: "Departments",
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        name: { type: "text", posture: "allow" },
+      },
+    },
     people: {
       description: "People",
       writable: true,
