@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getAppPool } from "../../lib/broker";
 import { requireSession } from "../../../lib/authz";
 import { atLeast } from "../../../lib/authz";
+import { orgOf } from "../../../lib/session";
 
 const MAX_LIMIT = 200;
 
@@ -14,6 +15,11 @@ export async function GET(req: NextRequest) {
   const where: string[] = [];
   const values: unknown[] = [];
   const add = (sql: string, v: unknown) => { values.push(v); where.push(sql.replace("$?", `$${values.length}`)); };
+
+  // Org first, and unconditionally: the audit trail names users, collections and purposes, so
+  // an admin browsing it must never see another tenant's. This is the one filter no query
+  // parameter can widen.
+  add("org_id = $?", orgOf(guard.user));
 
   // Non-admins see their own trail and nothing else — a ?user= from them is ignored, not
   // honoured and not rejected, so the filter UI can stay identical across roles.
@@ -44,6 +50,9 @@ export async function GET(req: NextRequest) {
   const reason = q.get("reason");
   if (reason) add("reason = $?", reason);
 
+  const via = q.get("via");
+  if (via) add("via = $?", via);
+
   const limit = Math.min(Math.max(Number(q.get("limit") ?? 50) || 50, 1), MAX_LIMIT);
   const offset = Math.max(Number(q.get("offset") ?? 0) || 0, 0);
   const clause = where.length ? `where ${where.join(" and ")}` : "";
@@ -51,7 +60,7 @@ export async function GET(req: NextRequest) {
 
   const [rows, total] = await Promise.all([
     app.query(
-      `select id, at, user_id, env, collection, intent, fields_returned, grant_id, outcome, reason
+      `select id, at, user_id, env, collection, intent, fields_returned, grant_id, outcome, reason, via
        from app.audit_events ${clause} order by at desc limit $${values.length + 1} offset $${values.length + 2}`,
       [...values, limit, offset]),
     app.query(`select count(*)::int as n from app.audit_events ${clause}`, values),

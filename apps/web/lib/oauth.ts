@@ -2,7 +2,7 @@ import { mcp } from "better-auth/plugins";
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { Pool } from "pg";
-import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy } from "@warehousd/broker";
+import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy, DEFAULT_ORG_ID, resolveEnvScopes, recomputeEnvScope, pickEnvScope } from "@warehousd/broker";
 
 const ENV_SCOPES = ["env:dev", "env:live"] as const;
 
@@ -23,11 +23,10 @@ export const mcpPlugin = mcp({
   },
 });
 
-// §6.1 rules 1-4. Intersects the requested scope with the client's allow-list (rule 1) and
-// the user's live-grant eligibility (rule 2) BEFORE Better Auth's own authorize handler runs,
-// by rewriting ctx.query.scope in place — so escalation is impossible by construction, not by
-// after-the-fact validation. Rules 3 (env picker) and 4 (refresh re-evaluation) are added in
-// Tasks 6 and 7 respectively, in the same hook bodies below.
+// §6.1 rules 1-4: delegate to resolveEnvScopes (packages/broker/src/oauth/env-scope.ts).
+// Rules 1-2 narrow env scopes based on client policy and user's live grant eligibility.
+// Rule 3 ensures exactly-one-env (via env-picker if needed).
+// Rule 4 re-evaluates on token refresh.
 //
 // The three hook handlers below take `ctx: any` deliberately. The context type that
 // createAuthMiddleware infers for its callback does not describe the fields these handlers
@@ -59,35 +58,28 @@ export function envScopePlugin(app: Pool) {
 
             const clientId = String(ctx.query?.client_id ?? "");
             const requested = String(ctx.query?.scope ?? "").split(" ").filter(Boolean);
-            const requestedEnv = requested.filter((s) => (ENV_SCOPES as readonly string[]).includes(s));
+            const requestedEnv = requested.filter((s) => ["env:dev", "env:live"].includes(s));
             if (requestedEnv.length === 0) return;
 
             const policy = await getClientPolicy(app, clientId);
-            let survivors = requestedEnv.filter((s) => policy.allowedScopes.includes(s));
+            const userId = session?.user?.id;
+            const orgId = session?.user?.orgId ?? DEFAULT_ORG_ID;
+            const liveEligible = userId ? await hasApprovedLiveGrant(app, userId, orgId) : false;
 
-            if (survivors.includes("env:live")) {
-              const userId = session?.user?.id;
-              const eligible = userId ? await hasApprovedLiveGrant(app, userId) : false;
-              if (!eligible) survivors = survivors.filter((s) => s !== "env:live");
-            }
+            // Resolve env scopes using rules 1-2
+            let survivors = resolveEnvScopes({
+              requested: requestedEnv,
+              policy,
+              liveEligible,
+            });
 
-            // env:dev is the floor once a client engages with env scopes at all (requestedEnv
-            // was non-empty): a client that ends up ineligible for env:live — or never
-            // explicitly asked for env:dev — still receives env:dev if its policy allows it.
-            // "A client whose policy lacks env:live can request anything it wants — it will
-            // only ever receive env:dev" (env-as-scope rule 1, docs/architecture.md), not nothing. Gated on NOT already
-            // having env:live so it never fires on the dual-survivor path rule 3 handles below.
-            if (!survivors.includes("env:live") && !survivors.includes("env:dev") && policy.allowedScopes.includes("env:dev")) {
-              survivors = ["env:dev"];
-            }
-
-            // Rule 3: exactly-one-env picker. When both env:dev and env:live survive rules 1-2,
+            // Rule 3: exactly-one-env picker. When both env:dev and env:live survive,
             // redirect to the picker unless wh_env is set to a valid value.
             if (survivors.includes("env:dev") && survivors.includes("env:live")) {
               const picked = ctx.query?.wh_env;
-              if (picked === "dev" || picked === "live") {
-                survivors = [`env:${picked}`];
-              } else {
+              survivors = pickEnvScope(survivors, picked);
+              if (survivors.length === 2) {
+                // Still both; redirect to picker
                 const params = new URLSearchParams(
                   Object.entries(ctx.query ?? {}).map(([k, v]) => [k, String(v)]),
                 );
@@ -100,7 +92,7 @@ export function envScopePlugin(app: Pool) {
             // once this hook does another await after the reassignment site's first tick;
             // Better Auth's dispatch holds a reference to the original query object, and only
             // in-place mutation of that object is guaranteed visible downstream.
-            const others = requested.filter((s) => !(ENV_SCOPES as readonly string[]).includes(s));
+            const others = requested.filter((s) => !["env:dev", "env:live"].includes(s));
             ctx.query.scope = [...others, ...survivors].join(" ");
           }),
         },
@@ -121,7 +113,7 @@ export function envScopePlugin(app: Pool) {
             if (!row) return;
 
             const current: string[] = String(row.scopes ?? "").split(" ").filter(Boolean);
-            const currentEnv = current.filter((s) => (ENV_SCOPES as readonly string[]).includes(s));
+            const currentEnv = current.filter((s) => ["env:dev", "env:live"].includes(s));
             if (currentEnv.length === 0) return;
 
             // Re-derive from the CURRENT policy/grant state rather than narrowing from
@@ -131,15 +123,15 @@ export function envScopePlugin(app: Pool) {
             // only gate: it preserves "never touch a token that never engaged with env scopes
             // at all," matching the before-hook's requestedEnv.length===0 gate.
             const policy = await getClientPolicy(app, row.clientId);
-            let liveEligible = policy.allowedScopes.includes("env:live");
-            if (liveEligible) {
-              const eligible = await hasApprovedLiveGrant(app, row.userId);
-              if (!eligible) liveEligible = false;
-            }
-            const devEligible = policy.allowedScopes.includes("env:dev");
-            const allowed = liveEligible ? ["env:live"] : devEligible ? ["env:dev"] : [];
+            const u = await app.query(`select "orgId" from app."user" where id=$1`, [row.userId]);
+            const orgId = u.rows[0]?.orgId ?? DEFAULT_ORG_ID;
+            const liveEligible = await hasApprovedLiveGrant(app, row.userId, orgId);
 
-            const recomputed = [...current.filter((s) => !(ENV_SCOPES as readonly string[]).includes(s)), ...allowed].join(" ");
+            // Re-derive rather than narrow — see recomputeEnvScope. Passing currentEnv as
+            // `requested` would make a promotion permanently invisible to an existing token.
+            const allowed = recomputeEnvScope({ policy, liveEligible });
+
+            const recomputed = [...current.filter((s) => !["env:dev", "env:live"].includes(s)), ...allowed].join(" ");
             if (recomputed === row.scopes) return;
 
             await ctx.context.adapter.update({

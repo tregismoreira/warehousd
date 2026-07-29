@@ -42,11 +42,16 @@ function ensureConfigAndBroker(dir: string): CachedState {
 
   if (!cached) {
     // First call: create pools (expensive, reused forever)
+    // The write URLs are optional: a deployment that sets neither has no mutation path at
+    // all, which is the safer default. broker.mutate reports that as not_writable rather
+    // than failing at connect time.
     const pools = createPools({
       app:  process.env.APP_DATABASE_URL!,
       dev:  process.env.DEV_DATABASE_URL!,
       live: process.env.LIVE_DATABASE_URL!,
       imp:  process.env.IMPORT_DATABASE_URL,
+      devWrite:  process.env.DEV_WRITE_DATABASE_URL,
+      liveWrite: process.env.LIVE_WRITE_DATABASE_URL,
     });
     cached = { pools, broker: makeBroker(pools, cfg), cfg, baselineMtime: mtimes.base, localMtime: mtimes.local };
   } else {

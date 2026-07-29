@@ -17,7 +17,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 //
 // Errors carry a reason code and never the value: an import file may hold real personal
 // data, and an error body is still a response body (invariant 4's discipline).
-function coerce(v: unknown, f: FieldConfig): { ok: true; value: unknown } | { ok: false; reason: string } {
+export function coerce(v: unknown, f: FieldConfig): { ok: true; value: unknown } | { ok: false; reason: string } {
   switch (f.type) {
     case "uuid":
       return typeof v === "string" && UUID_RE.test(v)

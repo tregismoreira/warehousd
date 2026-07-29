@@ -4,7 +4,12 @@ import { setupWebDb, signIn } from "./helpers/web-db";
 import { ssoSignIn } from "./helpers/sso";
 import { startFakeIdp } from "./helpers/fake-idp";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy, approveGrant, requestGrant } from "@warehousd/broker";
+import { upsertClientPolicy, approveGrant, requestGrant, loadConfig } from "@warehousd/broker";
+
+// approveGrant validates verbs against the collection's config, and these fixtures grant over
+// meridian collections — so that is the config the rules have to be checked against.
+const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -326,7 +331,7 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
       purposeLabel: "test",
       allowedFields: ["id"],
     });
-    await approveGrant(appPool, grantId, "ana", {
+    await approveGrant(appPool, meridianCfg, grantId, "ana", {
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
     });
 

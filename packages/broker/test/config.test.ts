@@ -3,6 +3,7 @@ import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadConfig } from "../src/config/load";
+import { readPosture } from "../src/config/schema";
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), "wh-cfg-")); });
@@ -26,7 +27,7 @@ it("parses base config", () => {
   writeFileSync(join(dir, "warehousd.yml"), base);
   const cfg = loadConfig(dir);
   expect(cfg.project).toBe("cortex");
-  expect(cfg.collections.people.fields.home_address.posture).toBe("deny");
+  expect(readPosture(cfg.collections.people.fields.home_address)).toBe("deny");
   expect(cfg.collections.people.fields.id.pk).toBe(true);
 });
 
@@ -134,7 +135,7 @@ describe("taxonomies", () => {
     const cfg = ConfigSchema.parse({ ...base, collections: {
       notes: { description: "d", taxonomy: "category", fields: {
         id: { type: "uuid", posture: "allow", pk: true } } } } });
-    expect(cfg.collections.notes!.fields.category).toEqual({ posture: "allow", type: "text" });
+    expect(cfg.collections.notes!.fields.category).toEqual({ posture: { read: "allow", write: "deny" }, type: "text" });
     expect(cfg.taxonomies.category!.terms.hr!.label).toBe("HR");
   });
 
@@ -142,14 +143,14 @@ describe("taxonomies", () => {
     const cfg = ConfigSchema.parse({ ...base, collections: {
       briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
         title: { posture: "allow" }, content: { posture: "allow" }, category: { posture: "deny" } } } } });
-    expect(cfg.collections.briefs!.fields.category).toEqual({ posture: "deny", type: "text" });
+    expect(cfg.collections.briefs!.fields.category).toEqual({ posture: { read: "deny", write: "deny" }, type: "text" });
   });
 
   it("auto-adds the term field on a bound file collection when omitted", () => {
     const cfg = ConfigSchema.parse({ ...base, collections: {
       briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
         title: { posture: "allow" }, content: { posture: "allow" } } } } });
-    expect(cfg.collections.briefs!.fields.category).toEqual({ posture: "allow", type: "text" });
+    expect(cfg.collections.briefs!.fields.category).toEqual({ posture: { read: "allow", write: "deny" }, type: "text" });
   });
 
   it("rejects binding an undeclared vocabulary", () => {

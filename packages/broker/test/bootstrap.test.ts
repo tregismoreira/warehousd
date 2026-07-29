@@ -64,17 +64,25 @@ describe("bootstrap", () => {
 
   it("password with special chars (single quote and backslash) round-trips", async () => {
     const specialPassword = "p\\w'w";
-    await ensureSchemasAndRoles(db, specialPassword);
+    try {
+      await ensureSchemasAndRoles(db, specialPassword);
 
-    const devDb = new Pool({
-      connectionString: `postgres://warehousd_dev:${encodeURIComponent(specialPassword)}@127.0.0.1:54330/${provisioned.dbName}`,
-    });
+      const devDb = new Pool({
+        connectionString: `postgres://warehousd_dev:${encodeURIComponent(specialPassword)}@127.0.0.1:54330/${provisioned.dbName}`,
+      });
 
-    // Should be able to connect and query
-    const result = await devDb.query("select 1 as ok");
-    expect(result.rows[0].ok).toBe(1);
+      // Should be able to connect and query
+      const result = await devDb.query("select 1 as ok");
+      expect(result.rows[0].ok).toBe(1);
 
-    await devDb.end();
+      await devDb.end();
+    } finally {
+      // Roles — and their passwords — are cluster-global, while the databases the rest of the
+      // suite provisions are not. Leaving this rotation in place makes other suites' pools
+      // fail to authenticate partway through a run, surfacing as unrelated feature tests
+      // failing with "password authentication failed". Put it back.
+      await ensureSchemasAndRoles(db, "pw");
+    }
   });
 
   it("dataRoleUrl preserves host/port/database and replaces user/password", () => {

@@ -5,7 +5,7 @@ import { getAppPool } from "../app/lib/broker";
 import { looksFabricated, collectQueriedOk } from "../lib/chat-fabrication";
 
 let db: Awaited<ReturnType<typeof setupWebDbWithData>>;
-const ctx = { userId: "mia", env: "dev" as const };
+const ctx = { userId: "mia", orgId: "default", env: "dev" as const };
 
 beforeAll(async () => {
   db = await setupWebDbWithData("chatfab");

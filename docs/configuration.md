@@ -73,25 +73,62 @@ anything else is rejected at config load rather than reaching DDL.
 
 | Key | Meaning |
 |---|---|
-| `posture` | **Required.** `allow` or `deny`. |
+| `posture` | **Required.** `allow` / `deny`, or `{ read: …, write: … }`. |
 | `type` | Required on dataset collections: `uuid`, `text`, `numeric`, `int`, `timestamptz`, `date`, `boolean`, `json`. Inferred for file collections. |
-| `pk` | Marks the primary key. |
+| `pk` | Marks the primary key. On a `writable` dataset this is *document* identity, not row identity. |
 | `fk` | `collection.field` — honored by the synthetic generator so references resolve. |
-| `view_join` | `collection.field` — pre-joined into `v_<collection>` so the queryable surface stays flat. |
+| `view_join` | `collection.field` — pre-joined into `v_<collection>` so the queryable surface stays flat. Always write-deny. |
 | `nullable` | Lets the generator produce nulls. |
 | `min` / `max` | Range for generated numerics. |
+| `searchable` | Dataset text fields only. Generates a `tsv` column and GIN index so `search_documents` reaches this collection. |
 
-### Postures are two-tier
+### Postures are two-tier, on two axes
 
-- `posture: deny` — the field can **never** be granted. It cannot be requested,
-  cannot be approved, and is never selected. Changing that requires editing this
-  file.
-- `posture: allow` — the field is *grantable*. It is still denied for every user
-  until a manager approves a grant covering it.
-- A field with no posture is denied. There is no third state.
+A posture governs reading and writing separately:
+
+```yaml
+email:       { type: text,    posture: allow }                        # read allow, write deny
+base_salary: { type: numeric, posture: { read: deny, write: allow } }
+```
+
+- `deny` on an axis — the field can **never** be granted for it. It cannot be
+  requested, cannot be approved, and is never selected. Changing that requires
+  editing this file.
+- `allow` on an axis — the field is *grantable* for it. It is still denied for
+  every user until a manager approves a grant covering it.
+- A field with no posture is denied on both. There is no third state.
+- **A bare `allow` or `deny` sets the read axis and leaves write denied.** That
+  is what keeps every configuration written before the write path existed valid,
+  and stops any field becoming writable by accident.
+- `view_join` fields are always write-deny. Asking for `write: allow` on one is a
+  config error, not a silent override.
 
 Denied fields are still useful: a denied `path` on a file collection can gate
 which documents a grant reaches without ever being readable.
+
+### Writable collections
+
+```yaml
+collections:
+  pages:
+    description: Authored knowledge
+    writable: true            # opt in; default false
+    fields:
+      id:    { type: uuid, posture: allow, pk: true }
+      title: { type: text, posture: { read: allow, write: allow } }
+      body:  { type: text, posture: { read: allow, write: allow }, searchable: true }
+```
+
+Which verbs the flag unlocks is **structural**, decided by the collection's type:
+
+| | File collections | Dataset collections |
+|---|---|---|
+| Verbs | `create` only | `create`, `update`, `delete` |
+| Editing an existing document | Never — it would falsify the ingestion record | Yes, as a new revision |
+
+A collection without `writable: true` is physically untouched — no extra columns,
+no extra view predicate, no read cost. `writable: true` with no `write: allow`
+field is a config error.
 
 ## File collections
 
@@ -140,6 +177,9 @@ collections:
 - Vocabulary slugs match `[a-z][a-z0-9_]*`, may not contain `__`, and may not
   collide with a reserved column name (`title`, `content`, `path`, `owner`,
   `updated_at`, `id`, `checksum`, `file_id`, `document_seq`, `tsv`, `_rank`).
+  A `searchable` field also generates a sibling `<field>_tsv` column, so a
+  declared field by that name is rejected at config load rather than colliding
+  at DDL time.
 - Term slugs are lowercase kebab-case.
 - The bound field is added automatically as `text`/`allow` if you don't declare
   it. Declaring it lets you set a different posture; it may not set `pk`, `fk`,
@@ -169,6 +209,7 @@ Set on the container or the dev process, not in YAML:
 | `APP_DATABASE_URL` | The `app` schema: users, sessions, grants, collections, audit. |
 | `DEV_DATABASE_URL` / `LIVE_DATABASE_URL` | The two role-scoped data pools. |
 | `IMPORT_DATABASE_URL` | The admin import role — `INSERT`-only on `data_live`. Unset means no write path at all. |
+| `DEV_WRITE_DATABASE_URL` / `LIVE_WRITE_DATABASE_URL` | The per-env write roles behind `broker.mutate`. They hold `INSERT`, `SELECT`, and `UPDATE` on the two revision-bookkeeping columns only — never on a data column, and never `DELETE`. Unset means no mutation path for that env. |
 | `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` | Session and token signing; the app's public origin. |
 | `WAREHOUSD_PROJECT_DIR` | Where `warehousd.yml` lives (`/project` in the container). |
 | `WAREHOUSD_TRUSTED_ORIGINS` | Comma-separated origins allowed as OIDC/SAML issuers. Required for loopback or private-network IdPs — see [configure-sso.md](configure-sso.md). |

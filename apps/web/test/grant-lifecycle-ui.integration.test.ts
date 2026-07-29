@@ -27,7 +27,7 @@ describe("grant lifecycle through the UI/API layer", () => {
   it("request → pending → approve trimmed with expiry → query works → revoke → immediate no_grant", async () => {
     const { POST, GET } = await import("../app/api/grants/route");
     const { broker } = getBroker();
-    const ctx = { userId: "mia", env: "dev" as const };
+    const ctx = { userId: "mia", orgId: "default", env: "dev" as const };
 
     // 0. deny by default
     const before = await broker.query(ctx, { collection: "departments", fields: ["id", "name"] });
@@ -81,7 +81,7 @@ describe("grant lifecycle through the UI/API layer", () => {
   it("an expired grant behaves exactly like a revoked one", async () => {
     const { POST } = await import("../app/api/grants/route");
     const { broker } = getBroker();
-    const ctx = { userId: "mia", env: "dev" as const };
+    const ctx = { userId: "mia", orgId: "default", env: "dev" as const };
 
     const { requestId } = await (await POST(post({
       action: "request", collection: "metrics", purposeLabel: "kpi", fields: ["id", "date"],

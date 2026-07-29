@@ -4,7 +4,7 @@ import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
-import { createPools, type Pools } from "../src/db/pools";
+import { createPools, withOrg, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import { loadConfig } from "../src/config/load";
 import { seedLive } from "../../../examples/meridian/seed/live";
@@ -37,7 +37,7 @@ it("test 5 (partial): dev token cannot see live-only canary; direct role check",
   const broker = makeBroker(pools, cfg);
   await admin.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
     ('u','people', array['id','full_name','email'],'dev','approved')`);
-  const r = await broker.query({ userId: "u", env: "dev" }, { collection: "people", limit: 500 });
+  const r = await broker.query({ userId: "u", orgId: "default", env: "dev", via: "session" }, { collection: "people", limit: 500 });
   expect(r.ok).toBe(true);
   if (r.ok) {
     const blob = JSON.stringify(r.documents);
@@ -94,8 +94,8 @@ it("test 5 (scope clauses): full env-as-scope acceptance gate", async () => {
 
     // After promotion, next refresh yields env:live.
     await setAllowedScopes(app, client_id, ["env:dev", "env:live"], "ana");
-    const grantId = await requestGrant(app, { userId: "mia", collection: "people", env: "live", purposeLabel: "t", allowedFields: ["id"] });
-    await approveGrant(app, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    const grantId = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"] });
+    await approveGrant(app, cfg, grantId, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
     const refreshed = await web.auth.api.mcpOAuthToken({
       body: { grant_type: "refresh_token", refresh_token: t1.refresh_token, client_id, client_secret },
       asResponse: true,
@@ -182,9 +182,10 @@ describe("env role grants (design §8 test 7)", () => {
     await db.query(`insert into data_synth."policies__documents" (id,file_id,document_seq,content)
       values (gen_random_uuid(),$1,0,'policy content')`, [d.rows[0].id]);
 
-    // Test with dev role
+    // Test with dev role. The view's org predicate means the read needs an org in scope —
+    // withOrg() is how the broker supplies it; here the setting is made directly.
     const dev = new Pool({ connectionString: p2.urls.dev });
-    const ok = await dev.query(`select title from data_synth.v_policies`);
+    const ok = await withOrg(dev, "default", (c) => c.query(`select title from data_synth.v_policies`));
     expect(ok.rowCount).toBeGreaterThan(0);
     await expect(dev.query(`select * from data_synth."policies__files"`)).rejects.toThrow(/permission denied/);
     await expect(dev.query(`select * from data_synth."policies__documents"`)).rejects.toThrow(/permission denied/);

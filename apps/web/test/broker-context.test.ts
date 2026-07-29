@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy, requestGrant, approveGrant } from "@warehousd/broker";
+import { upsertClientPolicy, requestGrant, approveGrant, loadConfig } from "@warehousd/broker";
+
+// approveGrant validates verbs against the collection's config, and these fixtures grant over
+// meridian collections — so that is the config the rules have to be checked against.
+const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -22,8 +27,8 @@ async function mintAccessToken(scope: string) {
   const { client_id, client_secret } = await reg.json(); // snake_case — RFC 7591
   await upsertClientPolicy(app, client_id, "BC Client", ["env:dev", "env:live"]);
   if (scope.includes("env:live")) {
-    const g = await requestGrant(app, { userId: "mia", collection: "people", env: "live", purposeLabel: "t", allowedFields: ["id"] });
-    await approveGrant(app, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    const g = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "live", purposeLabel: "t", allowedFields: ["id"] });
+    await approveGrant(app, meridianCfg, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
   }
   const { verifier, challenge } = pkcePair();
   const { code } = await authorizeAndGetCode(db.auth, {
@@ -46,7 +51,7 @@ describe("deriveTokenContext", () => {
     const ctx = await deriveTokenContext(new Request("http://localhost:8722/mcp", {
       headers: { authorization: `Bearer ${token}` },
     }));
-    expect(ctx).toEqual({ userId: "mia", env: "live" });
+    expect(ctx).toEqual({ userId: "mia", orgId: "default", env: "live", allowedCollections: null, via: "oauth" });
   });
 
   it("token with no env scope → adapter resolves dev", async () => {
@@ -55,7 +60,7 @@ describe("deriveTokenContext", () => {
     const ctx = await deriveTokenContext(new Request("http://localhost:8722/mcp", {
       headers: { authorization: `Bearer ${token}` },
     }));
-    expect(ctx).toEqual({ userId: "mia", env: "dev" });
+    expect(ctx).toEqual({ userId: "mia", orgId: "default", env: "dev", allowedCollections: null, via: "oauth" });
   });
 
   it("invalid/missing token → null", async () => {

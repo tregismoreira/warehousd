@@ -62,7 +62,7 @@ describe("term-scoped grants: structured", () => {
   it("document_filter on the term restricts documents; excluded documents silently absent", async () => {
     await grant("u1", "notes", ["id", "body", "category"],
       { field: "category", op: "in", value: ["hr"] });
-    const r = await broker.query({ userId: "u1", env: "dev" }, { collection: "notes" });
+    const r = await broker.query({ userId: "u1", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.documents.length).toBe(2);
@@ -72,7 +72,7 @@ describe("term-scoped grants: structured", () => {
 
   it("client filters AND with the term scope — no widening", async () => {
     await grant("u1", "notes", ["id", "body", "category"], { field: "category", op: "in", value: ["hr"] });
-    const r = await broker.query({ userId: "u1", env: "dev" },
+    const r = await broker.query({ userId: "u1", orgId: "default", env: "dev", via: "session" },
       { collection: "notes", filters: [{ field: "category", op: "eq", value: "finance" }] });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents.length).toBe(0);
@@ -80,13 +80,13 @@ describe("term-scoped grants: structured", () => {
 
   it("term field can gate rows without being readable (deny-style)", async () => {
     await grant("u2", "notes", ["id", "body"], { field: "category", op: "in", value: ["hr"] });
-    const r = await broker.query({ userId: "u2", env: "dev" }, { collection: "notes" });
+    const r = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.documents.length).toBe(2);
       for (const row of r.documents) expect("category" in row).toBe(false);  // absent, not null
     }
-    const denied = await broker.query({ userId: "u2", env: "dev" },
+    const denied = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" },
       { collection: "notes", fields: ["category"] });
     expect(denied.ok).toBe(false);
     if (!denied.ok) expect(denied.reason).toBe("field_denied");
@@ -94,7 +94,7 @@ describe("term-scoped grants: structured", () => {
 
   it("empty in-list denies all rows", async () => {
     await grant("u3", "notes", ["id", "body"], { field: "category", op: "in", value: [] });
-    const r = await broker.query({ userId: "u3", env: "dev" }, { collection: "notes" });
+    const r = await broker.query({ userId: "u3", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents.length).toBe(0);
   });
@@ -105,7 +105,7 @@ describe("term-scoped grants: file search", () => {
     await grant("u4", "briefs", ["title", "content", "category"],
       { field: "category", op: "in", value: ["hr"] });
     // "vacation" matches a document in BOTH files — only the hr one may return
-    const r = await broker.searchDocuments({ userId: "u4", env: "dev" },
+    const r = await broker.searchDocuments({ userId: "u4", orgId: "default", env: "dev", via: "session" },
       { collection: "briefs", q: "vacation" });
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -119,7 +119,7 @@ describe("term-scoped grants: file search", () => {
 
   it("broker.query on the bound file collection filters by term too", async () => {
     await grant("u4", "briefs", ["title", "content", "category"], { field: "category", op: "in", value: ["hr"] });
-    const r = await broker.query({ userId: "u4", env: "dev" }, { collection: "briefs" });
+    const r = await broker.query({ userId: "u4", orgId: "default", env: "dev", via: "session" }, { collection: "briefs" });
     expect(r.ok).toBe(true);
     if (r.ok) for (const row of r.documents) expect(row.category).toBe("hr");
   });

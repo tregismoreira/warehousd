@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy, requestGrant, approveGrant } from "@warehousd/broker";
+import { upsertClientPolicy, requestGrant, approveGrant, loadConfig } from "@warehousd/broker";
+
+// approveGrant validates verbs against the collection's config, and these fixtures grant over
+// meridian collections — so that is the config the rules have to be checked against.
+const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -106,8 +111,8 @@ describe("/mcp endpoint", () => {
 
   it("describe_collection is grant-filtered", async () => {
     const app = getAppPool();
-    const g = await requestGrant(app, { userId: "mia", collection: "people", env: "dev", purposeLabel: "t", allowedFields: ["id"] });
-    await approveGrant(app, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    const g = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "dev", purposeLabel: "t", allowedFields: ["id"] });
+    await approveGrant(app, meridianCfg, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
     const token = await mintAccessToken("env:dev");
     const { body } = await rpc(token, "tools/call", { name: "describe_collection", arguments: { name: "people" } });
     const out = JSON.parse(body.result.content[0].text);
@@ -158,12 +163,13 @@ describe("/mcp endpoint", () => {
     expect(row.rows[0].status).toBe("pending");
   });
 
-  it("tools/list returns all five tools", async () => {
+  it("tools/list returns all nine tools", async () => {
     const token = await mintAccessToken("env:dev");
     const { body } = await rpc(token, "tools/list");
     const names = body.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
-      "describe_collection", "list_collections", "query_collection", "request_access", "search_documents",
+      "create_document", "delete_document", "describe_collection", "get_document",
+      "list_collections", "query_collection", "request_access", "search_documents", "update_document",
     ]);
   });
 });

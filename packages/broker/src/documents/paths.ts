@@ -1,6 +1,7 @@
 import type { WarehousdConfig } from "../config/schema";
+import { DEFAULT_ORG_ID } from "../db/migrate-app";
 import { findCollection } from "../config/load";
-import { dataPool, type Pools } from "../db/pools";
+import { dataPool, type Pools, withOrg } from "../db/pools";
 
 // The approver's path picker needs the set of indexed files for a collection. It reads
 // through the env-scoped pool like every other data read — a route must never query a data
@@ -18,7 +19,7 @@ export async function listDocumentPaths(
   const schema = env === "dev" ? "data_synth" : "data_live";
   // `collection` is validated against the loaded config above, so this identifier
   // interpolation is safe — SQL identifiers cannot be parameterized.
-  const r = await dataPool(pools, { userId: "", env }).query(
-    `select path from ${schema}.v_${collection} group by path order by path`);
+  const r = await withOrg(dataPool(pools, { userId: "", orgId: DEFAULT_ORG_ID, env, via: "session" }), DEFAULT_ORG_ID,
+    (c) => c.query(`select path from ${schema}.v_${collection} group by path order by path`));
   return r.rows.map((x) => x.path as string);
 }

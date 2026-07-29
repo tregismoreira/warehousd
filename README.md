@@ -113,9 +113,11 @@ synthetic:
   documents_per_collection: { people: 40 }
 ```
 
-Postures are two-tier. `posture: deny` means the field can *never* be granted
-without editing the file. `posture: allow` only makes a field **grantable** —
-it stays denied per user until a manager approves a grant covering it.
+Postures are two-tier and have two axes. `posture: deny` means the field can
+*never* be granted without editing the file. `posture: allow` only makes a field
+**grantable** — it stays denied per user until a manager approves a grant
+covering it. A bare value governs *reading* and leaves writing denied; the long
+form `posture: { read: allow, write: allow }` opts a field into the write path.
 
 Every key: [configuration.md](docs/configuration.md).
 
@@ -183,8 +185,9 @@ adapter in front of the broker: [architecture.md](docs/architecture.md).
 │                                                 │
 │  Adapters (thin, replaceable):                  │
 │  ├── MCP server  (streamable HTTP, OAuth 2.1)   │
+│  ├── REST API    (/v1, RFC 8693 token exchange) │
 │  ├── Web UI      (admin / manager / member)     │
-│  └── [future]    REST, CMS delivery, apps       │
+│  └── [future]    CMS delivery, apps             │
 │                    │                            │
 │         ▼ all calls go through ▼                │
 │  ┌───────────────────────────────────────────┐  │
@@ -214,7 +217,7 @@ examples/meridian/ a complete consuming project (the demo company)
 
 ## MCP surface
 
-One OAuth-protected endpoint at `/mcp`, streamable HTTP, five tools:
+One OAuth-protected endpoint at `/mcp`, streamable HTTP, nine tools:
 
 | Tool | Behavior |
 |---|---|
@@ -222,10 +225,27 @@ One OAuth-protected endpoint at `/mcp`, streamable HTTP, five tools:
 | `describe_collection` | Only the fields visible under the caller's grants. |
 | `query_collection` | Filters, ordering, limits, aggregation — re-validated, then executed. |
 | `search_documents` | Ranked full-text search over a file collection, grant-filtered. |
+| `get_document` | A single document, reduced to the fields the grant allows. |
+| `create_document` | Writes, or opens a proposal under a `proposal_only` grant. |
+| `update_document` | As above, on an existing document. |
+| `delete_document` | As above; a delete is a revision, never a physical removal. |
 | `request_access` | Opens a pending grant request for a manager to approve. |
+
+**There is deliberately no `approve` or `reject` tool.** The untrusted model may
+propose; only an authenticated human may approve. A write under a `proposal_only`
+grant returns `pending`, and pending content is invisible to everyone — including
+its own author — until a human approves it.
 
 Refusals return reason codes (`no_grant`, `field_denied`, …) plus a
 request-access hint — never a denied value, never SQL.
+
+## REST surface
+
+The same broker, the same grants, over `/v1` for clients that are not MCP —
+see [docs/rest-api.md](docs/rest-api.md). Machine callers authenticate with an
+API key (`client_credentials`) or by exchanging an IdP-issued JWT for a warehousd
+token at `POST /v1/token` (RFC 8693), so the acting user stays the subject of the
+grant check rather than a shared service account.
 
 ## CLI
 
@@ -259,6 +279,9 @@ yet built:
 | Taxonomies and term-scoped grants | **real** | |
 | OAuth 2.1 provider, env-as-scope, dynamic client registration | **real** | 15-min access tokens; scope rules re-run on refresh. |
 | MCP endpoint (streamable HTTP) | **real** | |
+| REST API (`/v1`) | **real** | Same broker and grants as MCP; one status-code table, no per-route invention. |
+| API keys, rotation, revocation, collection ceiling | **real** | Hashed at rest; revocation takes effect on the next call — grants load fresh per request. |
+| RFC 8693 token exchange | **real** | Trusted OIDC issuers; the acting user, not a service account, is the subject of the grant check. |
 | SSO — OIDC and SAML | **real** | Better Auth SSO plugin; automated OIDC and SAML round trips against Keycloak. Connecting a hosted IdP is a [documented manual runbook](docs/configure-sso.md). |
 | Admin / manager / member web UI | **real** | |
 | Audit log | **real** | Insert-only for the app role. |
@@ -266,11 +289,12 @@ yet built:
 | App-schema migrations | *simplified* | Create-if-not-exists; versioned migrations are planned. |
 | Semantic / vector search | *stubbed* | `vector(1536)` column and pgvector are reserved but not populated. |
 | `warehousd deploy` | *not built* | Planned; deploy by running the published image yourself for now. |
-| Write path through MCP | *not built* | Read and access-request only, by design. |
+| Write path (MCP, REST, and review queue) | **real** | Append-only revisions; `proposal_only` grants hold writes pending until a human approves. Approve/reject are never MCP tools. |
 | Masking / transform postures | *not built* | Fields are allow or deny — nothing in between. |
 | Connect-in-place to external databases | *not built* | Collections live in warehousd's Postgres. |
 | PDF/DOCX extraction, upload UI | *not built* | Indexing reads local directories. |
-| Multi-tenancy, SCIM, compliance exports, IdP group→role mapping | *not built* | One deployment = one organization; JIT provisioning creates a `member`. |
+| Multi-tenancy (`org_id`) | *partial* | Every grant, audit event and document carries an org, isolated by a view predicate and RLS. A single implicit org is created at bootstrap; there is no UI for creating or switching orgs yet. |
+| SCIM, compliance exports, IdP group→role mapping | *not built* | JIT provisioning creates a `member`. |
 
 ## Contributing
 

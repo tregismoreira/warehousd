@@ -61,6 +61,15 @@ collections:
       revenue:          { type: numeric, posture: allow, min: 10000, max: 90000 }
       active_customers: { type: int, posture: allow, min: 100, max: 5000 }
       region:           { type: text, posture: allow }
+  tasks:
+    description: Team tasks (writable — governed write path)
+    writable: true
+    fields:
+      id:         { type: uuid, posture: allow, pk: true }
+      title:      { type: text, posture: { read: allow, write: allow } }
+      notes:      { type: text, posture: { read: allow, write: allow } }
+      assignee:   { type: text, posture: { read: allow, write: allow } }
+      created_at: { type: timestamptz, posture: allow }
   policies:
     type: file
     description: Company policy documents (searchable)

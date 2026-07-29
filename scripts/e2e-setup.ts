@@ -1,11 +1,15 @@
-// Provisions `warehousd_e2e` from scratch: schemas, the four roles, YAML apply, synthetic
+// Provisions the e2e database from scratch: schemas, the four roles, YAML apply, synthetic
 // data, indexed policies, and the three personas. Idempotent — drops and recreates.
 import { Pool } from "pg";
 import { execSync } from "node:child_process";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 
 const ADMIN = "postgres://postgres:postgres@127.0.0.1:54330/postgres";
-const DB = "warehousd_e2e";
+// Sibling checkouts share one Postgres container, so a fixed database name means two
+// concurrent `pnpm e2e` runs drop and recreate each other's data mid-suite. Scope the name to
+// the workspace directory. `apps/web/playwright.config.ts` derives the same slug.
+const SLUG = basename(resolve(__dirname, "..")).toLowerCase().replace(/[^a-z0-9_]/g, "_");
+const DB = process.env.WAREHOUSD_E2E_DB ?? `warehousd_e2e_${SLUG}`;
 
 async function main() {
   const a = new Pool({ connectionString: ADMIN });
@@ -50,6 +54,42 @@ async function main() {
       await db.query(`delete from app."user" where id=$1`, [tempId]);
     }
   }
+
+  // Seed grants for E2E tests: proposal flow (write-path.spec.ts)
+  const { requestGrant, approveGrant, loadConfig } = await import("../packages/broker/src/index");
+  const { getAppPool } = await import("../apps/web/app/lib/broker");
+  const app = getAppPool();
+  const cfg = loadConfig(process.env.WAREHOUSD_PROJECT_DIR!);
+
+  const fields = ["id", "title", "notes", "assignee", "created_at"];
+
+  // Marcus: direct-mode grant with read+create+approve on tasks
+  const marcusGrant = await requestGrant(app, {
+    userId: "marcus",
+    collection: "tasks",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "manager",
+    allowedFields: fields,
+  });
+  await approveGrant(app, cfg, marcusGrant, "marcus", {
+    verbs: ["read", "create", "approve"],
+    mode: "direct",
+  });
+
+  // Mia: proposal_only-mode grant with read+create on tasks
+  const miaGrant = await requestGrant(app, {
+    userId: "mia",
+    collection: "tasks",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "member",
+    allowedFields: fields,
+  });
+  await approveGrant(app, cfg, miaGrant, "marcus", {
+    verbs: ["read", "create"],
+    mode: "proposal_only",
+  });
 
   await db.end();
   console.log(`e2e database ready: ${DB}`);

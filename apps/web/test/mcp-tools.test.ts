@@ -3,7 +3,7 @@ import { TOOLS, toolByName } from "../lib/mcp-tools";
 import { setupWebDb } from "./helpers/web-db";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
-const ctx = { userId: "mia", env: "dev" as const };
+const ctx = { userId: "mia", orgId: "default", env: "dev" as const };
 
 beforeAll(async () => {
   db = await setupWebDb("mcptools");
@@ -69,9 +69,9 @@ describe("mcp-tools: search_documents", () => {
 });
 
 describe("DATA_TOOL_NAMES", () => {
-  it("matches the query/search tool names", async () => {
+  it("includes data-returning tools: query, search, and get", async () => {
     const { DATA_TOOL_NAMES } = await import("../lib/mcp-tools");
-    expect(DATA_TOOL_NAMES).toEqual(["query_collection", "search_documents"]);
+    expect(DATA_TOOL_NAMES).toEqual(["query_collection", "search_documents", "get_document"]);
   });
 });
 
@@ -91,11 +91,11 @@ describe("mcp-tools: request_access", () => {
 
     const { getAppPool } = await import("../app/lib/broker");
     const row = await getAppPool().query(
-      `select status, user_id, collection, env, allowed_fields from app.grants where id = $1`,
+      `select status, user_id, collection, env, org_id, allowed_fields from app.grants where id = $1`,
       [out.requestId],
     );
     expect(row.rows[0]).toMatchObject({
-      status: "pending", user_id: "mia", collection: "people", env: "dev",
+      status: "pending", user_id: "mia", collection: "people", org_id: "default", env: "dev",
       allowed_fields: ["id", "department_name"],
     });
   });

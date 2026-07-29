@@ -8,7 +8,10 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Mono } from "@/components/common/Mono";
 
 type ApplyStatus = "not_applied" | "applied" | "drifted";
-type Posture = "allow" | "deny";
+// Config always normalizes posture to this canonical {read,write} shape (see
+// packages/broker/src/config/schema.ts normalizePosture) — a bare `posture: allow` in YAML
+// becomes {read:"allow", write:"deny"} by the time it reaches this API.
+type Posture = { read: "allow" | "deny"; write: "allow" | "deny" };
 
 interface Field {
   name: string;
@@ -31,11 +34,18 @@ interface Collection {
 
 function PostureBadge({ posture }: { posture: Posture }) {
   return (
-    <Badge variant="outline" className={cn("gap-1.5 font-mono text-xs",
-      posture === "allow" ? "text-allow" : "text-deny")}>
-      <span aria-hidden>{posture === "allow" ? "✓" : "✗"}</span>
-      {posture}
-    </Badge>
+    <div className="flex gap-1.5">
+      <Badge variant="outline" className={cn("gap-1.5 font-mono text-xs",
+        posture.read === "allow" ? "text-allow" : "text-deny")}>
+        <span aria-hidden>{posture.read === "allow" ? "✓" : "✗"}</span>
+        {posture.read}
+      </Badge>
+      {posture.write === "allow" && (
+        <Badge variant="outline" className="gap-1.5 font-mono text-xs text-allow">
+          <span aria-hidden>✓</span>write
+        </Badge>
+      )}
+    </div>
   );
 }
 

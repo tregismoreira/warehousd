@@ -31,6 +31,7 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       role: { type: "string", defaultValue: "member", input: false },
+      orgId: { type: "string", defaultValue: "default", input: false },
     },
   },
   trustedOrigins: trustedOrigins(),
@@ -42,4 +43,5 @@ export type SessionUser = {
   email: string;
   name: string;
   role: "admin" | "manager" | "member";
+  orgId?: string;
 };
