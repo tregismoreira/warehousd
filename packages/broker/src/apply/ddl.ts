@@ -57,14 +57,31 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
         on ${schema}."${collection}__documents" using gin (tsv);`;
   }
 
+  // CollectionSchema's transform materialises every bound vocabulary as a text field, so the
+  // taxonomy slugs are already in `c.fields`. The vocabulary loop below owns their columns —
+  // it is the only place that knows a `multiple` vocabulary needs text[] — so they are taken
+  // from there rather than from the field's declared type.
+  const boundVocabs = new Set(c.taxonomies ?? []);
   const cols: string[] = [];
+  const fieldAlters: string[] = [];
   for (const [name, f] of Object.entries(c.fields)) {
     if (f.view_join) continue; // join columns are not stored on the base table
     const pk = f.pk ? " primary key" : "";
     // type is guaranteed by CollectionSchema refinement for structured collections
-    cols.push(`"${name}" ${PG_TYPE[f.type!]}${pk}`);
+    const colType = boundVocabs.has(name)
+      ? (cfg.taxonomies[name]?.multiple ? "text[]" : "text") : PG_TYPE[f.type!];
+    cols.push(`"${name}" ${colType}${pk}`);
+    // Upgrade path for a field added to an already-created collection, mirroring what the
+    // file branch does for its metadata fields — without this, `create table if not exists`
+    // silently leaves the new column off an existing table. Field names are IDENT-validated
+    // by CollectionSchema, so interpolation is as safe as the vocabulary loop below.
+    // The pk is skipped: `add column` cannot add one, and a pk only exists on a table this
+    // statement is creating for the first time.
+    if (!f.pk && !boundVocabs.has(name))
+      fieldAlters.push(` alter table ${schema}.${collection} add column if not exists "${name}" ${PG_TYPE[f.type!]};`);
   }
   let ddl = `create table if not exists ${schema}.${collection} (${cols.join(", ")});`;
+  ddl += fieldAlters.join("");
   // Re-apply upgrade path for newly bound vocabularies on a pre-existing table.
   // Each vocabulary slug is config-validated, so identifier interpolation is safe.
   for (const taxSlug of c.taxonomies ?? []) {
@@ -80,16 +97,24 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
 }
 
 // One flat view per collection/env. Joins resolve view_join columns.
+//
+// Dropped and recreated rather than `create or replace`d: replace may only append columns,
+// so a field added anywhere but the end of the YAML fails with `cannot change name of view
+// column`. Two statements in one query string run in a single implicit transaction, so the
+// view is never briefly absent, and applyConfig re-issues grantViewDDL straight afterwards —
+// which is the only thing that grants on these views.
 export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
+  const recreate = `drop view if exists ${schema}.v_${collection};
+    create view ${schema}.v_${collection} as`;
 
   if (c.type === "file") {
     // Each bound vocabulary and metadata field gets selected from the files table
     const termSels = (c.taxonomies ?? []).map(taxSlug => `, d."${taxSlug}"`).join("");
     const metadataSels = fileMetadataFields(c).map((m) => `, d."${m.field}"`).join("");
-    return `create or replace view ${schema}.v_${collection} as
+    return `${recreate}
       select c.id as document_id, c.document_seq, c.content, c.tsv,
              d.id as file_id, d.title, d.path, d.owner, d.updated_at${termSels}${metadataSels}
       from ${schema}."${collection}__documents" c
@@ -108,7 +133,7 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
       selects.push(`base."${name}"`);
     }
   }
-  return `create or replace view ${schema}.v_${collection} as
+  return `${recreate}
     select ${selects.join(", ")} from ${schema}.${collection} base ${joins.join(" ")};`;
 }
 
