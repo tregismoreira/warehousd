@@ -7,8 +7,8 @@ let miaCookie: string, marcusCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDbWithData("megrants");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
-  marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
+  marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
   const app = getAppPool();
   await app.query(
     `insert into app.grants (user_id,collection,env,status,allowed_fields,purpose_label)

@@ -30,9 +30,9 @@ async function main() {
   const { auth } = await import("../apps/web/lib/auth");
 
   const personas = [
-    { id: "ana", email: "ana@meridian.demo", name: "Ana" },
-    { id: "marcus", email: "marcus@meridian.demo", name: "Marcus" },
-    { id: "mia", email: "mia@meridian.demo", name: "Mia" },
+    { id: "ana", email: "ana@harbor.demo", name: "Ana" },
+    { id: "marcus", email: "marcus@harbor.demo", name: "Marcus" },
+    { id: "mia", email: "mia@harbor.demo", name: "Mia" },
   ];
 
   for (const p of personas) {

@@ -8,9 +8,9 @@ const U = (n: number) => `1000000${n}-0000-4000-8000-000000000000`.slice(-36);
 
 beforeAll(async () => {
   db = await setupWebDbWithData("adminimport");
-  anaCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
-  marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+  anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
+  marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
 afterAll(async () => { await db?.end(); });
 

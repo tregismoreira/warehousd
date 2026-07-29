@@ -122,10 +122,10 @@
   },
   "users": [
     {
-      "username": "sso-user@meridian.demo",
+      "username": "sso-user@harbor.demo",
       "enabled": true,
       "emailVerified": true,
-      "email": "sso-user@meridian.demo",
+      "email": "sso-user@harbor.demo",
       "firstName": "SSO",
       "lastName": "User",
       "credentials": [
@@ -140,10 +140,10 @@
       ]
     },
     {
-      "username": "sso-saml-user@meridian.demo",
+      "username": "sso-saml-user@harbor.demo",
       "enabled": true,
       "emailVerified": true,
-      "email": "sso-saml-user@meridian.demo",
+      "email": "sso-saml-user@harbor.demo",
       "firstName": "SAML",
       "lastName": "User",
       "credentials": [

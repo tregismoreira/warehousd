@@ -58,7 +58,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
     expect(authorizeLocation).toContain("scope=env%3Alive");
 
     // Step 2: POST /sign-in/email normally (no special cookie forwarding).
-    const sessionCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    const sessionCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
     expect(sessionCookie).toBeTruthy();
 
     // Step 3: GET /mcp/authorize AGAIN, same original query params, WITH the session cookie.
@@ -126,7 +126,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
     expect(authorizeLocation).toContain("env%3Alive");
 
     // Step 2: POST /sign-in/email normally (no special cookie forwarding).
-    const sessionCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    const sessionCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
     expect(sessionCookie).toBeTruthy();
 
     // Step 3: GET /mcp/authorize AGAIN, same original query params, WITH the session cookie.
@@ -184,7 +184,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
     expect(authorizeLocation).toContain("client_id=" + client_id);
 
     // Step 2: POST /sign-in/email normally (no special cookie forwarding).
-    const sessionCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
+    const sessionCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
     expect(sessionCookie).toBeTruthy();
 
     // Step 3: GET /mcp/authorize AGAIN, same original query params, WITH the session cookie.

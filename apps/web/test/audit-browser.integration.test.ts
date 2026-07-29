@@ -7,8 +7,8 @@ let anaCookie: string, miaCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDbWithData("auditbrowser");
-  anaCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+  anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
   const app = getAppPool();
   await app.query(`
     insert into app.audit_events (user_id, env, collection, outcome, reason, fields_returned) values

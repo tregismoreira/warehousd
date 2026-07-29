@@ -164,7 +164,7 @@ describe("validateImportRows", () => {
     const ok = validateImportRows(cfg, "people", [
       { id: UUID, full_name: "A", email: "" },
     ]);
-    // `email` has no `nullable: true` in the Meridian YAML, so an empty value is an error.
+    // `email` has no `nullable: true` in the Harbor YAML, so an empty value is an error.
     expect(ok.ok).toBe(false);
     if (ok.ok) throw new Error("unreachable");
     expect(ok.errors[0].reason).toBe("missing_required");

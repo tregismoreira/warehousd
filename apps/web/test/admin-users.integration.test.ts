@@ -7,9 +7,9 @@ let anaCookie: string, marcusCookie: string, miaCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDb("adminusers");
-  anaCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
-  marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+  anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
+  marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
 afterAll(async () => { await db?.end(); });
 
@@ -84,7 +84,7 @@ describe("PATCH /api/admin/users/[userId]", () => {
     // Promote Mia so there are two admins, demote Ana (allowed), then try to demote Mia.
     const { PATCH } = await import("../app/api/admin/users/[userId]/route");
     await PATCH(req("/api/admin/users/mia", { method: "PATCH", cookie: anaCookie, body: { role: "admin" } }) as any, params("mia"));
-    const miaAdminCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    const miaAdminCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
     await PATCH(req("/api/admin/users/ana", { method: "PATCH", cookie: miaAdminCookie, body: { role: "member" } }) as any, params("ana"));
     expect(await roleOf("ana")).toBe("member");
 
@@ -97,7 +97,7 @@ describe("PATCH /api/admin/users/[userId]", () => {
 
   it("404s on an unknown user", async () => {
     const { PATCH } = await import("../app/api/admin/users/[userId]/route");
-    const miaAdminCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    const miaAdminCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
     const res = await PATCH(
       req("/api/admin/users/nobody", { method: "PATCH", cookie: miaAdminCookie, body: { role: "member" } }) as any,
       params("nobody"));

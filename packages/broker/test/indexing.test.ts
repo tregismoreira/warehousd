@@ -14,10 +14,10 @@ import { applyConfig } from "../src/apply/apply";
 describe("extractFile", () => {
   const mtime = new Date("2026-07-01T00:00:00Z");
   it("title from first # heading, owner from frontmatter, checksum stable", () => {
-    const raw = "---\nowner: ana@meridian.demo\n---\n# PTO Policy\n\nBody text.";
+    const raw = "---\nowner: ana@harbor.demo\n---\n# PTO Policy\n\nBody text.";
     const d = extractFile("hr/pto.md", raw, mtime);
     expect(d.title).toBe("PTO Policy");
-    expect(d.owner).toBe("ana@meridian.demo");
+    expect(d.owner).toBe("ana@harbor.demo");
     expect(d.content).not.toContain("owner:");        // frontmatter stripped
     expect(d.checksum).toBe(extractFile("hr/pto.md", raw, mtime).checksum);
   });
@@ -27,7 +27,7 @@ describe("extractFile", () => {
     expect(d.owner).toBeNull();
   });
   it("parses the taxonomy term from frontmatter when termFields given", () => {
-    const raw = "---\nowner: ana@meridian.demo\ncategory: hr\n---\n# T\n\nBody.";
+    const raw = "---\nowner: ana@harbor.demo\ncategory: hr\n---\n# T\n\nBody.";
     const d = extractFile("a.md", raw, mtime, [{ field: "category" }]);
     expect(d.terms.category).toBe("hr");
     // not requested → no key at all; requested but absent → an explicit null

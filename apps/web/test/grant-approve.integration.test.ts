@@ -7,8 +7,8 @@ let marcusCookie: string, miaCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDbWithData("grantapprove");
-  marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+  marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
 afterAll(async () => { await db?.end(); });
 

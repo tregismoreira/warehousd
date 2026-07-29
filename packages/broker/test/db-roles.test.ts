@@ -52,7 +52,7 @@ it("test 5 (partial): dev token cannot see live-only canary; direct role check",
 it("test 5 (scope clauses): full env-as-scope acceptance gate", async () => {
   const web = await setupWebDb("acceptance5");
   try {
-    const miaCookie = await signIn(web.auth, "mia@meridian.demo", "demo");
+    const miaCookie = await signIn(web.auth, "mia@harbor.demo", "demo");
     const { getAppPool } = await import("../../../apps/web/app/lib/broker");
     const app = getAppPool();
 

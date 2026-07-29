@@ -46,9 +46,9 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean }
 
   if (seedPersonas) {
     const personas = [
-      { id: "ana", email: "ana@meridian.demo", name: "Ana", role: "admin" },
-      { id: "marcus", email: "marcus@meridian.demo", name: "Marcus", role: "manager" },
-      { id: "mia", email: "mia@meridian.demo", name: "Mia", role: "member" },
+      { id: "ana", email: "ana@harbor.demo", name: "Ana", role: "admin" },
+      { id: "marcus", email: "marcus@harbor.demo", name: "Marcus", role: "manager" },
+      { id: "mia", email: "mia@harbor.demo", name: "Mia", role: "member" },
     ];
     for (const p of personas) {
       const res = await auth.api.signUpEmail({ body: { email: p.email, password: "demo", name: p.name } });
