@@ -145,7 +145,9 @@ describe("apply: additive field on an existing dataset collection", () => {
       const cols = await db.query(
         `select column_name from information_schema.columns
          where table_schema=$1 and table_name='people' order by column_name`, [schema]);
-      expect(cols.rows.map((r) => r.column_name)).toEqual(["email", "hire_date", "id", "role"]);
+      // `org_id` is on every base table for tenant isolation; it is not a declared field, so
+      // it appears here and deliberately not on the view below.
+      expect(cols.rows.map((r) => r.column_name)).toEqual(["email", "hire_date", "id", "org_id", "role"]);
       // The view has to carry them too, or the broker can never read them.
       const view = await db.query(
         `select column_name from information_schema.columns

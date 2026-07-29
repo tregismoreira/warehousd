@@ -55,7 +55,12 @@ describe("two-axis postures", () => {
           description: "People",
           fields: {
             id: { type: "uuid", posture: "allow", pk: true },
-            dept_name: { type: "text", posture: { read: "allow", write: "allow" }, view_join: "departments.name" },
+            // The fk sibling is required by the view_join shape check. Without it the parse
+            // would fail on that instead, and this test would pass without ever reaching the
+            // write:allow rule it exists to cover.
+            dept_id: { type: "uuid", posture: "allow", fk: "departments.id" },
+            dept_name: { type: "text", posture: { read: "allow", write: "allow" },
+              view_join: { table: "departments", column: "name", on: "dept_id" } },
           },
         },
       },

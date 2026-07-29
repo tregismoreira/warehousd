@@ -20,7 +20,7 @@ collections:
   documents:
     type: file
     description: Test documents
-    taxonomy: category
+    taxonomies: [category]
     source: ./seed/docs-dev
     source_live: ./seed/docs-live
     fields:

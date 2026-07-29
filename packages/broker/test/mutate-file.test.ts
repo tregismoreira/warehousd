@@ -26,7 +26,7 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
       description: "Documentation",
       source: "./docs",
       writable: true,
-      taxonomy: "category",
+      taxonomies: ["category"],
       fields: {
         title: { posture: { read: "allow", write: "allow" } },
         content: { posture: { read: "allow", write: "allow" } },

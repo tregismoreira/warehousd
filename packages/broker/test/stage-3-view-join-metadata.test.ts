@@ -1,10 +1,10 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema } from "../src/db/migrate-app";
+import { createAppSchema, DEFAULT_ORG_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { tableDDL, viewDDL } from "../src/apply/ddl";
-import { createPools, type Pools } from "../src/db/pools";
+import { createPools, withOrg, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import { indexCollection, loadTaxonomyBindings } from "../src/indexing";
 import { writeFileSync, mkdtempSync } from "fs";
@@ -105,12 +105,14 @@ afterAll(async () => {
 });
 
 it("view with three people joins (including self-join) creates distinct aliases", async () => {
-  // Query the view to verify all three joins work and produce distinct aliases
-  const result = await admin.query(`
+  // Query the view to verify all three joins work and produce distinct aliases.
+  // The view filters on current_setting('warehousd.org_id'), so a raw pool sees nothing — the
+  // isolation wall fails closed. withOrg is how every other caller reads a view.
+  const result = await withOrg(admin, DEFAULT_ORG_ID, (c) => c.query(`
     select id, full_name, manager_name, direct_report_1_name, direct_report_2_name
     from data_synth.v_people
     order by full_name
-  `);
+  `));
 
   expect(result.rows.length).toBe(3);
   // Alice is manager of Bob and Charlie
