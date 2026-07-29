@@ -246,3 +246,80 @@ describe("trusted issuers", () => {
     expect(fromWrongOrg).toBeNull();
   });
 });
+
+describe("getProposal", () => {
+  // A create is the case that motivates this method: the document is not in any view until
+  // it is approved, so getDocument cannot show a reviewer what they are about to approve.
+  async function proposeAs(userId: string, verbs: string[], allowedFields: string[]) {
+    const grantId = await requestGrant(app, {
+      userId, collection: "people", env: "live", orgId: "default",
+      purposeLabel: "test", allowedFields,
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: verbs as any, mode: "proposal_only" });
+  }
+
+  const ctx = (userId: string): BrokerContext =>
+    ({ userId, orgId: "default", env: "live", via: "session" });
+
+  it("returns the proposed values of a pending create", async () => {
+    await proposeAs("gp_author", ["read", "create"], ["id", "email", "owner", "status"]);
+    const created = await broker.mutate(ctx("gp_author"), {
+      collection: "people", op: "create",
+      values: { email: "proposed@example.com", owner: "gp_author", status: "new" },
+    });
+    expect(created.ok).toBe(true);
+    const proposalId = (created as { proposalId: string }).proposalId;
+
+    await proposeAs("gp_approver", ["read", "approve"], ["id", "email", "owner", "status"]);
+    const got = await broker.getProposal(ctx("gp_approver"), proposalId);
+
+    expect(got.ok).toBe(true);
+    if (!got.ok) return;
+    expect(got.op).toBe("create");
+    expect(got.values.email).toBe("proposed@example.com");
+    expect(got.fieldsReturned).toContain("email");
+  });
+
+  it("omits values for fields outside the reviewer's grant", async () => {
+    await proposeAs("gp_author2", ["read", "create"], ["id", "email", "owner", "status"]);
+    const created = await broker.mutate(ctx("gp_author2"), {
+      collection: "people", op: "create",
+      values: { email: "secret@example.com", owner: "gp_author2", status: "new" },
+    });
+    const proposalId = (created as { proposalId: string }).proposalId;
+
+    // This reviewer may not read `email`, so the proposed value must not reach them.
+    await proposeAs("gp_narrow", ["read", "approve"], ["id", "owner"]);
+    const got = await broker.getProposal(ctx("gp_narrow"), proposalId);
+
+    expect(got.ok).toBe(true);
+    if (!got.ok) return;
+    expect(got.fieldsReturned).not.toContain("email");
+    expect(got.values.email).toBeUndefined();
+    expect(got.values.owner).toBe("gp_author2");
+  });
+
+  it("refuses a reader who does not hold approve", async () => {
+    await proposeAs("gp_author3", ["read", "create"], ["id", "email", "owner", "status"]);
+    const created = await broker.mutate(ctx("gp_author3"), {
+      collection: "people", op: "create",
+      values: { email: "x@example.com", owner: "gp_author3", status: "new" },
+    });
+    const proposalId = (created as { proposalId: string }).proposalId;
+
+    await proposeAs("gp_readonly", ["read"], ["id", "email", "owner"]);
+    const got = await broker.getProposal(ctx("gp_readonly"), proposalId);
+
+    expect(got.ok).toBe(false);
+    if (got.ok) return;
+    expect(got.reason).toBe("no_grant");
+  });
+
+  it("refuses an unknown proposal id", async () => {
+    await proposeAs("gp_seeker", ["read", "approve"], ["id", "email"]);
+    const got = await broker.getProposal(ctx("gp_seeker"), "f47ac10b-58cc-4372-a567-0e02b2c3d4ff");
+    expect(got.ok).toBe(false);
+    if (got.ok) return;
+    expect(got.reason).toBe("not_found");
+  });
+});

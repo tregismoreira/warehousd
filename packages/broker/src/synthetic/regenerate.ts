@@ -13,8 +13,9 @@ export async function regenerateSynthetic(
   const regenerated: string[] = [];
   for (const name of Object.keys(cfg.collections)) {
     const c = cfg.collections[name];
-    // File collections are populated by indexCollection, not the generator.
-    if (!c || c.type === "file") continue;
+    // File collections are populated by indexCollection, not the generator; writable
+    // collections hold real writes/proposals that a synthetic regen must not truncate.
+    if (!c || c.type === "file" || c.writable) continue;
     await db.query(`truncate data_synth.${name} cascade`);
     regenerated.push(name);
   }

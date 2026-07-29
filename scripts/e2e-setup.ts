@@ -51,6 +51,42 @@ async function main() {
     }
   }
 
+  // Seed grants for E2E tests: proposal flow (write-path.spec.ts)
+  const { requestGrant, approveGrant, loadConfig } = await import("../packages/broker/src/index");
+  const { getAppPool } = await import("../apps/web/app/lib/broker");
+  const app = getAppPool();
+  const cfg = loadConfig(process.env.WAREHOUSD_PROJECT_DIR!);
+
+  const fields = ["id", "title", "notes", "assignee", "created_at"];
+
+  // Marcus: direct-mode grant with read+create+approve on tasks
+  const marcusGrant = await requestGrant(app, {
+    userId: "marcus",
+    collection: "tasks",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "manager",
+    allowedFields: fields,
+  });
+  await approveGrant(app, cfg, marcusGrant, "marcus", {
+    verbs: ["read", "create", "approve"],
+    mode: "direct",
+  });
+
+  // Mia: proposal_only-mode grant with read+create on tasks
+  const miaGrant = await requestGrant(app, {
+    userId: "mia",
+    collection: "tasks",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "member",
+    allowedFields: fields,
+  });
+  await approveGrant(app, cfg, miaGrant, "marcus", {
+    verbs: ["read", "create"],
+    mode: "proposal_only",
+  });
+
   await db.end();
   console.log(`e2e database ready: ${DB}`);
 }

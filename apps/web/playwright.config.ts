@@ -37,6 +37,8 @@ export default defineConfig({
       APP_DATABASE_URL: DB,
       DEV_DATABASE_URL: "postgres://warehousd_dev:pw@127.0.0.1:54330/warehousd_e2e",
       LIVE_DATABASE_URL: "postgres://warehousd_live:pw@127.0.0.1:54330/warehousd_e2e",
+      DEV_WRITE_DATABASE_URL: "postgres://warehousd_dev_write:pw@127.0.0.1:54330/warehousd_e2e",
+      LIVE_WRITE_DATABASE_URL: "postgres://warehousd_live_write:pw@127.0.0.1:54330/warehousd_e2e",
       IMPORT_DATABASE_URL: "postgres://warehousd_import:pw@127.0.0.1:54330/warehousd_e2e",
       WAREHOUSD_PROJECT_DIR: resolve(__dirname, "../../examples/meridian"),
       WAREHOUSD_DEMO: "true",

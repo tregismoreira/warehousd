@@ -666,8 +666,9 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
     try {
       return await withOrg(pool, ctx.orgId, async (client) => {
-        // Scan collections to find the proposal
-        const collections = Object.keys(cfg.collections);
+        // Scan collections to find the proposal. Only revisable collections have a _rev
+        // column at all — scanning the rest throws `column "_rev" does not exist`.
+        const collections = revisableCollections(cfg);
         let proposal: any = null;
         let collectionName: string | null = null;
 
@@ -885,7 +886,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
     try {
       return await withOrg(pool, ctx.orgId, async (client) => {
-        const collections = Object.keys(cfg.collections);
+        const collections = revisableCollections(cfg);
         let proposal: any = null;
         let collectionName: string | null = null;
 
@@ -939,7 +940,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
   type ProposalSummary = {
     proposalId: string; collection: string; op: string; fields: string[];
-    proposedBy: string; proposedAt: string;
+    proposedBy: string; proposedAt: string; documentId: string;
   };
 
   // What a reviewer may see BEFORE deciding: metadata and the names of the fields a proposal
@@ -984,7 +985,9 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           // Bookkeeping columns only, plus the document-filter field when one is set. Selecting
           // `*` would pull ungranted values into memory even if they were never returned, and
           // "denied means absent" means never fetched, not filtered afterwards.
+          const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
           const cols = ["_rev", "_rev_op", "_rev_fields", "_rev_by", "_rev_at"];
+          if (pk) cols.push(pk);
           const filterField = grant.documentFilter?.field;
           if (filterField && Object.hasOwn(c.fields, filterField)) cols.push(filterField);
 
@@ -1001,6 +1004,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
               fields: row._rev_fields ?? [],
               proposedBy: row._rev_by,
               proposedAt: row._rev_at,
+              documentId: String(pk ? row[pk] : ""),
             });
           }
         }
@@ -1212,7 +1216,98 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     }
   }
 
-  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate, approveProposal, rejectProposal, listProposals, changes, listRevisions };
+  // The proposed values of a pending revision, reduced to the fields the reviewer may read.
+  //
+  // listProposals deliberately returns changed field NAMES and no values, and getDocument
+  // cannot help for a `create`: the document is not in any view until it is approved, so a
+  // reviewer would be asked to approve content they cannot see. This reads the pending
+  // revision itself, through the same grant and posture gates as any other read — a reviewer
+  // sees a proposed value only where their own grant would have let them read that field.
+  async function getProposal(
+    ctx: BrokerContext, proposalId: string,
+  ): Promise<
+    { ok: true; collection: string; op: string; documentId: string; proposedBy: string;
+      proposedAt: string; fields: string[]; values: Document; fieldsReturned: string[]; auditId: string }
+    | { ok: false; reason: RefusalReason; auditId: string }
+  > {
+    const refuse = async (reason: RefusalReason, collection: string, grantId: string | null) => {
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection, orgId: ctx.orgId,
+        intent: null, fieldsReturned: [], grantId, outcome: "refused", reason, via: ctx.via });
+      return { ok: false as const, reason, auditId };
+    };
+
+    const pool = writePool(pools, ctx);
+    if (!pool) return refuse("internal_error", "*", null);
+
+    const schema = ctx.env === "live" ? "data_live" : "data_synth";
+
+    try {
+      const found = await withOrg(pool, ctx.orgId, async (client) => {
+        for (const coll of revisableCollections(cfg)) {
+          const q = await client.query(
+            `select * from ${schema}.${ident(coll)} where _rev = $1 and _rev_status = 'pending'`,
+            [proposalId]);
+          if (q.rowCount && q.rowCount > 0) return { coll, row: q.rows[0] };
+        }
+        return null;
+      });
+
+      if (!found) return refuse("not_found", "*", null);
+
+      const c = findCollection(cfg, found.coll);
+      if (!c) return refuse("unknown_collection", found.coll, null);
+
+      const grant = await loadActiveGrant(app, ctx, found.coll);
+      // Approving is the act this read exists to inform, so it is gated on `approve`, not
+      // merely `read` — matching approveProposal's own requirement.
+      if (!grant || !grant.verbs.includes("read") || !grant.verbs.includes("approve"))
+        return refuse("no_grant", found.coll, grant?.id ?? null);
+
+      if (grant.documentFilter && !matchesFilter(found.row, grant.documentFilter))
+        return refuse("not_found", found.coll, grant.id);
+
+      const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
+      if (!pk) return refuse("invalid_intent", found.coll, grant.id);
+
+      // Same rule as every other read: a field is visible only if the grant carries it.
+      const readable = grant.allowedFields.filter((f) => Object.hasOwn(c.fields, f));
+      const values: Document = {};
+      for (const f of readable) values[f] = found.row[f];
+
+      const auditId = await writeAudit(app, {
+        userId: ctx.userId, env: ctx.env, collection: found.coll, orgId: ctx.orgId,
+        intent: null, fieldsReturned: readable, grantId: grant.id, outcome: "allowed", reason: null, via: ctx.via });
+
+      return {
+        ok: true,
+        collection: found.coll,
+        op: String(found.row._rev_op),
+        documentId: String(found.row[pk]),
+        proposedBy: String(found.row._rev_by),
+        proposedAt: new Date(found.row._rev_at).toISOString(),
+        fields: found.row._rev_fields ?? [],
+        values,
+        fieldsReturned: readable,
+        auditId,
+      };
+    } catch (err) {
+      console.error("[broker] getProposal failed", { proposalId, err });
+      return refuse("internal_error", "*", null);
+    }
+  }
+
+  return { query, describeCollection, listCollections, searchDocuments, getDocument, mutate, approveProposal, rejectProposal, listProposals, changes, listRevisions, getProposal };
+}
+
+// Collections that carry revision columns. A proposal only ever lives in one of these, and
+// the _rev/_rev_status columns exist nowhere else — see tableDDL, which emits them only for
+// writable non-file datasets. Approve/reject scan for a proposal by id across collections,
+// so they must scan this set rather than every configured collection.
+function revisableCollections(cfg: WarehousdConfig): string[] {
+  return Object.entries(cfg.collections)
+    .filter(([, c]) => c.writable && c.type !== "file")
+    .map(([name]) => name);
 }
 
 // Identifier quoting for the write path. Column and collection names come from the loaded

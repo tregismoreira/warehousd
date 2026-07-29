@@ -15,9 +15,9 @@ test.describe("admin overview", () => {
 
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
-    // meridian defines six collections; the count renders once the fetch settles.
+    // meridian defines seven collections; the count renders once the fetch settles.
     const collections = card("Collections").getByText(/^\d+$/).first();
-    await expect(collections).toHaveText("6");
+    await expect(collections).toHaveText("7");
 
     await expect(card("Users by Role")).toContainText(/\d+ admin, \d+ manager, \d+ member/);
     await expect(card("Pending Grants").getByText(/^\d+$/).first()).toBeVisible();

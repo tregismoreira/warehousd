@@ -13,6 +13,10 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
     if (!c) throw new Error(`Unknown collection: ${name}`);
     // Skip file collections — they are populated via indexCollection, not synthetic generation
     if (c.type === "file") continue;
+    // Skip writable collections — their base table has NOT NULL revision columns
+    // (_rev_seq, _rev_by, _rev_op, ...) that a plain synthetic insert doesn't populate;
+    // content comes from real writes/proposals, not synthetic filler.
+    if (c.writable) continue;
     const n = cfg.synthetic.documents_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
     const termSlugs = c.taxonomy ? Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) : null;

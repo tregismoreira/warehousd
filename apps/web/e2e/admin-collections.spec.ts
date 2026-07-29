@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { as } from "./helpers/auth";
 
-const MERIDIAN = ["announcements", "departments", "people", "salaries", "metrics", "policies"];
+const MERIDIAN = ["announcements", "departments", "people", "salaries", "metrics", "tasks", "policies"];
 
 test.describe("collections", () => {
   test.beforeEach(async ({ page }) => {

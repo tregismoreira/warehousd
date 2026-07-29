@@ -13,7 +13,7 @@ change enforcement, the pull request must carry a test that fails without it.
 | `pnpm lint` | ESLint, including the rule that keeps `packages/broker` free of HTTP/MCP/UI/LLM imports | — |
 | `pnpm test` | Vitest: broker unit + integration, CLI, and web route/integration tests | Postgres |
 | `pnpm build` | Production build and full typecheck | — |
-| `pnpm e2e` | Playwright against a real browser: all eleven web surfaces | Postgres |
+| `pnpm e2e` | Playwright against a real browser: all thirteen web surfaces | Postgres |
 | `pnpm test:e2e:cli` | The built CLI driving real Docker containers end to end | Docker |
 | `pnpm test:e2e:sso` | A real OIDC and SAML round trip against Keycloak | Docker |
 | `pnpm test:e2e` | Both of the above, in sequence | Docker |
@@ -50,6 +50,21 @@ built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 > the wrong database and fails with `WARN [Better Auth]: User not found` and
 > sign-in timeouts that look like application bugs. Check with
 > `lsof -nP -iTCP:8722 -sTCP:LISTEN` before debugging anything else.
+
+> ⚠️ **The write path needs its own two database URLs.** `DEV_WRITE_DATABASE_URL`
+> and `LIVE_WRITE_DATABASE_URL` point at the `*_write` roles, which are the only
+> ones holding `INSERT`/`UPDATE` on the base tables — the read roles see just the
+> views. Omit them and `writePool` is null, so every mutation refuses with
+> `not_writable` and the write specs fail in a way that looks like a grant
+> problem. They are set in `playwright.config.ts` alongside the read URLs; any
+> harness that starts the app itself must set them too.
+
+> ⚠️ **Do not run two suites against one Postgres.** Sibling conductor workspaces
+> share `127.0.0.1:54330` — whichever one ran `pnpm test:up` first owns the
+> container. Concurrent runs create and drop each other's databases, which
+> surfaces as tests that hang far past their own timeout rather than as a clean
+> failure. `ps aux | grep vitest` catches orphaned workers, which outlive a
+> `pkill` aimed at their parent shell.
 
 CI runs lint, `pnpm test`, and `pnpm build`, then Playwright, a packaging
 smoke test that installs the CLI tarball outside the workspace, and the CLI and

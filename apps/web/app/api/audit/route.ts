@@ -50,6 +50,9 @@ export async function GET(req: NextRequest) {
   const reason = q.get("reason");
   if (reason) add("reason = $?", reason);
 
+  const via = q.get("via");
+  if (via) add("via = $?", via);
+
   const limit = Math.min(Math.max(Number(q.get("limit") ?? 50) || 50, 1), MAX_LIMIT);
   const offset = Math.max(Number(q.get("offset") ?? 0) || 0, 0);
   const clause = where.length ? `where ${where.join(" and ")}` : "";
@@ -57,7 +60,7 @@ export async function GET(req: NextRequest) {
 
   const [rows, total] = await Promise.all([
     app.query(
-      `select id, at, user_id, env, collection, intent, fields_returned, grant_id, outcome, reason
+      `select id, at, user_id, env, collection, intent, fields_returned, grant_id, outcome, reason, via
        from app.audit_events ${clause} order by at desc limit $${values.length + 1} offset $${values.length + 2}`,
       [...values, limit, offset]),
     app.query(`select count(*)::int as n from app.audit_events ${clause}`, values),
