@@ -78,9 +78,23 @@ storage tables. Anything else is rejected at config load rather than reaching DD
 | `pk` | Marks the primary key. |
 | `fk` | `collection.field` — honored by the synthetic generator so references resolve. |
 | `view_join` | `{ table, column, on }` — pre-joined into `v_<collection>` so the queryable surface stays flat. See below. |
-| `nullable` | Lets the generator produce nulls, and makes the column optional on import. |
+| `nullable` | Lets the generator produce nulls, and makes the column optional on import. Not a database constraint — every column is nullable in Postgres either way (see below). |
 | `min` / `max` | Range for generated numerics. |
 | `gen` | Names a synthetic generator for this field, overriding the field-name heuristics. See below. |
+
+#### `nullable`
+
+`nullable` governs two things and only two: whether the synthetic generator emits
+the occasional NULL, and whether import treats a missing value as
+`missing_required`. It never becomes a `not null` constraint — every column on a
+dataset collection is nullable in Postgres, `nullable: true` or not.
+
+It cannot become one. Cyclic and self-referential foreign keys are inserted NULL
+and back-filled in a second pass, so `people.department_id` is genuinely NULL
+between the two — a `not null` column would make the generator impossible to run.
+
+Read the flag as "this field is optional in the data I expect", not as a
+guarantee the database enforces.
 
 #### `view_join`
 
@@ -214,6 +228,17 @@ collections:
   is: `applyConfig` → generate/seed → `syncDatasetTerms(dev)` → `seedLive` →
   `syncDatasetTerms(live)` → `indexCollection`. It is also re-run after an admin
   import, so a newly imported client becomes available as a term.
+- **A dataset collection may bind one too.** The generator cannot fill such a column
+  on the first pass — the terms are distinct values of rows it is still writing — so
+  it syncs the dev terms and back-fills the column afterwards, from the same seeded
+  RNG. `matters` scoped by `client` therefore generates with real client slugs, not
+  NULLs.
+- **Import validates against the live term set.** An import naming a
+  dataset-sourced term is checked against `app.terms` for `live`, resolved before
+  validation runs; an unrecognised value is `unknown_term`. A vocabulary that
+  cannot be resolved at all is `unvalidatable_term` and refuses the file — the
+  default is closed, because a term no grant can match is worse than a rejected
+  import.
 - The bound field is added automatically as `text`/`allow` if you don't declare it.
   Declaring it lets you override the posture; it may not set `pk`, `fk`, or `view_join`.
 

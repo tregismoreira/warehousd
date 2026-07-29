@@ -339,6 +339,15 @@ Drizzle manages the `app` schema. `warehousd apply` owns everything in
 `app.collections.config`. Broker data queries and view DDL are raw SQL through
 `pg` with the two role-scoped pools.
 
+What re-applying will and will not migrate: every table is `create table if not
+exists`, and every non-primary-key column — plain field, bound vocabulary, file
+metadata — is followed by `add column if not exists`. Views are dropped and
+recreated rather than replaced, since `create or replace view` can only append
+columns. So adding a field to a collection that already exists, or binding a new
+vocabulary to it, lands on both the table and the view no matter where in the
+YAML it goes. Changing a field's type, renaming it, or removing it does not: the
+old column stays as it was. Those are the cases versioned migrations are for.
+
 ## The MCP surface
 
 One OAuth-protected endpoint at `/mcp`, streamable HTTP.

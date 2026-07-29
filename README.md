@@ -292,7 +292,7 @@ yet built:
 | Admin / manager / member web UI | **real** | |
 | Audit log | **real** | Insert-only for the app role. |
 | Real-data import | *simplified* | Admin-only CSV/JSON append into `data_live` through an `INSERT`-only role. No update or delete path. |
-| App-schema migrations | *simplified* | Create-if-not-exists; versioned migrations are planned. |
+| App-schema migrations | *simplified* | Create-if-not-exists plus add-column-if-not-exists, so adding a field or binding a vocabulary lands on an existing collection. Type changes, renames and drops are not applied; versioned migrations are planned. |
 | Semantic / vector search | *stubbed* | `vector(1536)` column and pgvector are reserved but not populated. |
 | `warehousd deploy` | *not built* | Planned; deploy by running the published image yourself for now. |
 | Write path through MCP | *not built* | Read and access-request only, by design. |
