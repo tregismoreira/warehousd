@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
@@ -72,7 +73,8 @@ beforeAll(async () => {
   ctxNoGrant = makeCtx("u_no_grant");
 
   // Seed 3 fixture documents with "remote work" text in at least one
-  const tmpDir = mkdtempSync("search-docs-");
+  // Absolute prefix: a bare one resolves against the CWD and leaks into the repo root.
+  const tmpDir = mkdtempSync(join(tmpdir(), "search-docs-"));
   writeFileSync(join(tmpDir, "remote-policy.md"), "# Remote Work Policy\n\nEmployees can work remotely.");
   writeFileSync(join(tmpDir, "office-policy.md"), "# Office Policy\n\nOffice hours are 9-5.");
   writeFileSync(join(tmpDir, "benefits.md"), "# Benefits\n\nHealth insurance and remote work stipends.");
@@ -163,7 +165,7 @@ it("every search writes an audit event (design test 11)", async () => {
 it("document_filter applies to search too (design test 3 over the search path)", async () => {
   // Seed 2 docs with shared search term in different locations
   const fs = await import("node:fs");
-  const tmpDir = mkdtempSync("search-rf-");
+  const tmpDir = mkdtempSync(join(tmpdir(), "search-rf-"));
 
   // Create temp subdirs first
   fs.mkdirSync(join(tmpDir, "hr"), { recursive: true });

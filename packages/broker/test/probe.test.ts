@@ -1,6 +1,7 @@
 import { it, expect, beforeAll, afterAll, vi, describe } from "vitest";
 import { Pool } from "pg";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
@@ -119,7 +120,9 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
 
     // Seed 2 fixture docs: normal one + restricted one with canary
     const { mkdtempSync } = await import("node:fs");
-    const tmpDir = mkdtempSync("probe-doc-");
+    // Absolute prefix: a bare one resolves against the CWD, so a run that dies before the
+    // rmSync below leaves the fixture directory sitting in the repo root.
+    const tmpDir = mkdtempSync(join(tmpdir(), "probe-doc-"));
     const fs = await import("node:fs");
     fs.mkdirSync(`${tmpDir}/restricted`, { recursive: true });
     fs.writeFileSync(`${tmpDir}/normal.md`, "# Normal Policy\n\nThis is a work policy.");
