@@ -18,8 +18,10 @@ describe("web bootstrap against a virgin database", () => {
   }, 120_000);
 
   afterAll(async () => {
-    await db.end();
-    await provisioned.end();
+    // Guarded: if beforeAll fails, an unguarded teardown throws over the top of it and the
+    // real cause is the second error in the report rather than the first.
+    await db?.end();
+    await provisioned?.end();
   });
 
   it("creates the schemas and the data roles", async () => {

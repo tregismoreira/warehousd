@@ -93,6 +93,19 @@ async function storedFingerprint(name: string): Promise<string | null> {
 // Build `kind`'s template database once, then leave it in place. Keeping it across runs is what
 // makes a repeat `pnpm test` skip the bootstrap entirely; the fingerprint is what stops that
 // from serving a stale schema.
+// Any session still attached to a template blocks `create database ... template`. The templates
+// belong to the harness alone, so such a session is always a leftover rather than someone's real
+// work — building the web template imports lib/auth, and that module opens a pool at load which
+// nothing ever closes. Evict them inside the lock instead of waiting for them to drain.
+async function createFromTemplate(client: PoolClient, name: string, template: string) {
+  await client.query(
+    `select pg_terminate_backend(pid) from pg_stat_activity
+      where datname = $1 and pid <> pg_backend_pid()`,
+    [template],
+  );
+  await client.query(`create database ${name} template ${template}`);
+}
+
 // `from` layers this template on top of another one, so the web-with-data template only has to
 // run the harbor recipe rather than the whole bootstrap a second time.
 export async function ensureTemplate(
@@ -109,9 +122,8 @@ export async function ensureTemplate(
 
   await withTemplateLock(async (client) => {
     await client.query(`drop database if exists ${name} with (force)`);
-    await client.query(
-      opts.from ? `create database ${name} template ${templateName(opts.from)}` : `create database ${name}`,
-    );
+    if (opts.from) await createFromTemplate(client, name, templateName(opts.from));
+    else await client.query(`create database ${name}`);
   });
 
   await build(`${BASE}/${name}`);
@@ -134,7 +146,7 @@ export async function cloneTemplate(kind: string, dbName: string): Promise<void>
     try {
       await withTemplateLock(async (client) => {
         await client.query(`drop database if exists ${dbName} with (force)`);
-        await client.query(`create database ${dbName} template ${template}`);
+        await createFromTemplate(client, dbName, template);
       });
       return;
     } catch (err) {

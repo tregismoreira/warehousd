@@ -1,10 +1,18 @@
 import { defineConfig } from "vitest/config";
 
-// Suites that mutate cluster-global state and so cannot share a Postgres with anything running
-// concurrently. bootstrap.test.ts rotates the warehousd_dev password to prove the escaping
-// round-trips; roles are cluster-global, so a parallel worker's pool would hit that window and
-// fail to authenticate. These run alone in a second pass — see vitest.serial.config.ts.
-export const SERIAL_TESTS = ["**/test/bootstrap.test.ts"];
+// Suites that depend on cluster-global state and so cannot share a Postgres with anything
+// running concurrently. They run alone in a second pass — see vitest.serial.config.ts.
+//
+// - bootstrap.test.ts rotates the warehousd_dev password to prove the escaping round-trips.
+//   Roles are cluster-global, so a parallel worker's pool hits that window and fails to
+//   authenticate.
+// - change-feed.test.ts asserts that an entry is visible immediately after the write. The feed
+//   withholds rows until `pg_snapshot_xmin` passes their `xmin` (broker.ts:1087) so that `seq`
+//   can never be handed out non-monotonically. Transaction ids are cluster-global, so an
+//   in-flight transaction in *any other database* on this server holds that watermark down and
+//   the entry is — correctly — not yet returned. The feed is right; the assertion needs a quiet
+//   cluster.
+export const SERIAL_TESTS = ["**/test/bootstrap.test.ts", "**/test/change-feed.test.ts"];
 
 export default defineConfig({
   test: {

@@ -64,10 +64,25 @@ Because nothing else drives the bootstrap against an empty database any more,
 likewise provisions a bare database rather than a copy of the template.
 
 `pnpm test` runs in two passes: `test:parallel` (every file, four workers) then `test:serial`.
-The serial pass exists for `bootstrap.test.ts`, which rotates the cluster-global
-`warehousd_dev` password mid-test; a parallel worker's pool would hit that window and fail to
-authenticate with `password authentication failed`. `WAREHOUSD_TEST_WORKERS` changes the
-worker count — it defaults to 4 because sibling workspaces share this machine.
+`WAREHOUSD_TEST_WORKERS` changes the worker count — it defaults to 4 because sibling
+workspaces share this machine.
+
+Two suites are in the serial pass, both because they assert on state that is global to the
+Postgres *cluster* rather than to their own database:
+
+- `bootstrap.test.ts` rotates the `warehousd_dev` password to prove the escaping round-trips.
+  Roles are cluster-global, so a parallel worker's pool hits that window and fails with
+  `password authentication failed`.
+- `change-feed.test.ts` expects an entry to be readable immediately after the write. The feed
+  holds a row back until `pg_snapshot_xmin` passes its `xmin`, which is what stops `seq` from
+  being handed out non-monotonically (see the comment at `broker.ts:1087`). Transaction ids are
+  cluster-global, so an open transaction in *any other database on the same server* keeps that
+  watermark below the new row and the feed correctly returns nothing yet. Worth knowing beyond
+  the tests: change-feed latency depends on the busiest writer in the cluster, not just on this
+  application.
+
+Adding a suite that asserts on roles, transaction ids, or anything else outside its own
+database means adding it to `SERIAL_TESTS` in `vitest.config.ts`.
 
 **`pnpm test` does not typecheck.** Vitest transpiles without checking, so type
 errors sit undetected while every test passes. `pnpm build` is what catches them;
