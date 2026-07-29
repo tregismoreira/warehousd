@@ -190,6 +190,41 @@ a role with `INSERT` and nothing else — no update, no delete. If that variable
 unset, the import endpoint refuses with `import_not_configured` and there is no
 write path at all.
 
+An import either lands whole or not at all. Every outcome that reaches the broker
+is audited through the app pool — the writer of the data is deliberately not the
+writer of its own audit trail. The three request-shape rejections below are
+refused by the route before the broker sees them, and `import_not_configured`
+returns before anything is attempted, so those four carry no audit row.
+
+A refusal carries a `reason`, and the admin UI shows it verbatim, so these are
+the codes to look up:
+
+| `reason` | HTTP | Meaning |
+|---|---|---|
+| `unsupported_format` | 400 | Not `csv` or `json`. |
+| `no_file` | 400 | No file part, or an empty one. |
+| `file_too_large` | 413 | Over 5 MB. |
+| `parse_failed` | 400 | Malformed CSV or JSON. |
+| `validation_failed` | 400 | The payload was checked against the config and rejected. Carries a per-row `errors` list — see below. |
+| `constraint_violation` | 400 | Postgres refused a row (`23xxx`): duplicate key, missing FK, failed check. Nothing was written. |
+| `write_failed` | 400 | Any other database error during the insert. |
+| `import_not_configured` | 503 | `IMPORT_DATABASE_URL` is unset, so there is no write path at all. |
+| `taxonomy_unavailable` | 503 | A bound vocabulary's terms could not be read. Distinct from the config being wrong: the file may be fine and worth retrying. |
+
+The two 503s mean the stack cannot serve the request; the file itself may be
+perfectly good. That distinction is the point — an admin should never be sent to
+fix a vocabulary that was never broken. Note that `write_failed` is also a stack
+fault but is still returned as 400, which is a rough edge rather than a decision.
+
+Inside `validation_failed`, each entry names a row and column: `unknown_column`,
+`derived_column` (a `view_join` field, which has no stored column),
+`missing_required`, `ragged_rows`, `duplicate_pk`, `unknown_term`,
+`unvalidatable_term` (a vocabulary this stack never applied), the `invalid_*`
+type-coercion codes, and the whole-payload codes `unknown_collection`,
+`file_collection` (files are ingested by the indexer), `no_rows` and
+`too_many_rows`. Reasons never carry the offending value: an import file may hold
+real personal data and an error body is still a response body.
+
 ## Identity, OAuth, and env-as-scope
 
 Authentication is [Better Auth](https://better-auth.com): sessions, OIDC and SAML
