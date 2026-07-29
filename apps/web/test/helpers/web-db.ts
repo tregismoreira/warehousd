@@ -1,18 +1,31 @@
 import { Pool } from "pg";
+import { ADMIN, BASE, cloneTemplate } from "../../../../packages/broker/test/helpers/templates";
 
-const ADMIN = "postgres://postgres:postgres@127.0.0.1:54330/postgres";
-const BASE = "postgres://postgres:postgres@127.0.0.1:54330";
+export const PERSONAS = [
+  { id: "ana", email: "ana@harbor.demo", name: "Ana", role: "admin" },
+  { id: "marcus", email: "marcus@harbor.demo", name: "Marcus", role: "manager" },
+  { id: "mia", email: "mia@harbor.demo", name: "Mia", role: "member" },
+];
 
-export async function setupWebDb(label: string, opts: { seedPersonas?: boolean; projectDir?: string } = {}) {
-  const { seedPersonas = true, projectDir } = opts;
-  const dbName = `wh_web_${label}_${process.pid}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
-  const admin = new Pool({ connectionString: ADMIN });
-  await admin.query(`drop database if exists ${dbName} with (force)`);
-  await admin.query(`create database ${dbName}`);
-  await admin.end();
+// Point auth at `appUrl` BEFORE anything imports lib/auth — it reads APP_DATABASE_URL at
+// module load.
+function setAuthEnv(appUrl: string, projectDir?: string) {
+  process.env.APP_DATABASE_URL = appUrl;
+  process.env.BETTER_AUTH_SECRET ??= "test-secret-at-least-32-chars-long-000";
+  process.env.BETTER_AUTH_URL ??= "http://localhost:8722";
+  // Keycloak only. The fake IdP binds an ephemeral port and appends its own origin in
+  // startFakeIdp, which every caller runs before this.
+  process.env.WAREHOUSD_TRUSTED_ORIGINS ??= "http://127.0.0.1:8780";
+  process.env.WAREHOUSD_PROJECT_DIR = projectDir ?? new URL("../../../../examples/harbor", import.meta.url).pathname;
+}
 
-  const appUrl = `${BASE}/${dbName}`;
-  const db = new Pool({ connectionString: appUrl });
+// The full bootstrap, run against an empty database. globalSetup calls it once to build the
+// template every other test clones, and entrypoint-bootstrap.integration.test.ts calls it
+// against a virgin database — so the recipe stays exercised end to end and the two callers
+// cannot drift apart.
+export async function bootstrapWebDb(appUrl: string): Promise<void> {
+  const db = new Pool({ connectionString: appUrl, max: 4 });
+
   // Exercise the same schema/role bootstrap the container entrypoint uses, so tests catch
   // drift in it. It provisions dev/live only; warehousd_import is Phase 5's INSERT-only
   // role for the admin import path and has to be created alongside.
@@ -24,18 +37,16 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean; 
     end $$;
     grant usage on schema data_live to warehousd_import;`);
 
-  // Point auth at this DB BEFORE importing lib/auth (it reads APP_DATABASE_URL at module load).
-  process.env.APP_DATABASE_URL = appUrl;
-  process.env.BETTER_AUTH_SECRET ??= "test-secret-at-least-32-chars-long-000";
-  process.env.BETTER_AUTH_URL ??= "http://localhost:8722";
-  process.env.WAREHOUSD_TRUSTED_ORIGINS ??= "http://127.0.0.1:8791,http://127.0.0.1:8780";
-  process.env.WAREHOUSD_PROJECT_DIR = projectDir ?? new URL("../../../../examples/harbor", import.meta.url).pathname;
+  setAuthEnv(appUrl);
 
   const { createAppSchema } = await import("@warehousd/broker");
   await createAppSchema(db);
 
   const { auth } = await import("../../lib/auth");
-  // Run Better Auth migration via CLI.
+  // Run Better Auth migration via CLI. This is the slowest step in the bootstrap, which is
+  // why it now runs once per template rather than once per test database — npx's resolution
+  // overhead no longer matters at that frequency, and `pnpm exec` cannot reach the binary
+  // from here anyway (it is linked as `better-auth` under apps/web, not at this cwd).
   const { execSync } = await import("node:child_process");
   const mvpDir = new URL("../../../../", import.meta.url).pathname;
   execSync(`npx @better-auth/cli migrate --config apps/web/lib/auth.ts -y`, {
@@ -49,50 +60,72 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean; 
   const { migrateUserOrg } = await import("@warehousd/broker");
   await migrateUserOrg(db);
 
-  if (seedPersonas) {
-    const personas = [
-      { id: "ana", email: "ana@harbor.demo", name: "Ana", role: "admin" },
-      { id: "marcus", email: "marcus@harbor.demo", name: "Marcus", role: "manager" },
-      { id: "mia", email: "mia@harbor.demo", name: "Mia", role: "member" },
-    ];
-    for (const p of personas) {
-      const res = await auth.api.signUpEmail({ body: { email: p.email, password: "demo", name: p.name } });
-      const gen = res.user.id;
-      // Disable foreign key constraints to allow user ID updates
-      await db.query(`set session_replication_role = replica`);
-      await db.query(`update app."user" set id=$1, role=$2 where id=$3`, [p.id, p.role, gen]);
-      await db.query(`update app."account" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
-      await db.query(`update app."session" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
-      await db.query(`set session_replication_role = default`);
-    }
+  for (const p of PERSONAS) {
+    const res = await auth.api.signUpEmail({ body: { email: p.email, password: "demo", name: p.name } });
+    const gen = res.user.id;
+    // Disable foreign key constraints to allow user ID updates
+    await db.query(`set session_replication_role = replica`);
+    await db.query(`update app."user" set id=$1, role=$2 where id=$3`, [p.id, p.role, gen]);
+    await db.query(`update app."account" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
+    await db.query(`update app."session" set "userId"=$1 where "userId"=$2`, [p.id, gen]);
+    await db.query(`set session_replication_role = default`);
   }
 
-  return {
+  await db.end();
+}
+
+async function cloneAndOpen(kind: string, label: string, projectDir?: string) {
+  const dbName = `wh_web_${label}_${process.pid}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  await cloneTemplate(kind, dbName);
+
+  const appUrl = `${BASE}/${dbName}`;
+  const db = new Pool({ connectionString: appUrl, max: 4 });
+  setAuthEnv(appUrl, projectDir);
+  const { auth } = await import("../../lib/auth");
+
+  const handle = {
     dbName,
     appUrl,
     auth,
     async end() {
       await db.end();
-      const a = new Pool({ connectionString: ADMIN });
+      const a = new Pool({ connectionString: ADMIN, max: 1 });
       await a.query(`drop database if exists ${dbName} with (force)`);
       await a.end();
     },
   };
+  return { handle, db };
 }
 
-// Full-data variant of setupWebDb: applies the harbor YAML, generates synthetic data,
-// seeds live data, and indexes the file collections for both envs — same recipe as
-// scripts/dev-bootstrap.ts, scoped to a disposable test database. Also points
-// DEV_DATABASE_URL/LIVE_DATABASE_URL at the warehousd_dev/warehousd_live roles setupWebDb
-// already creates on this database, so apps/web's getBroker() can serve real dev/live queries.
-export async function setupWebDbWithData(label: string) {
-  const base = await setupWebDb(label);
+export async function setupWebDb(label: string, opts: { seedPersonas?: boolean; projectDir?: string } = {}) {
+  const { seedPersonas = true, projectDir } = opts;
+  const { handle, db } = await cloneAndOpen("web", label, projectDir);
+
+  if (!seedPersonas) {
+    // The template always carries them, so a caller testing a cluster with no local
+    // credentials has to have them taken back out. Children first — the Better Auth tables
+    // reference app."user" without ON DELETE CASCADE.
+    const ids = PERSONAS.map((p) => p.id);
+    await db.query(`delete from app."session" where "userId" = any($1)`, [ids]);
+    await db.query(`delete from app."account" where "userId" = any($1)`, [ids]);
+    await db.query(`delete from app."user" where id = any($1)`, [ids]);
+  }
+
+  return handle;
+}
+
+// Applies the harbor YAML, generates synthetic data, seeds live data, and indexes the file
+// collections for both envs — same recipe as scripts/dev-bootstrap.ts. Layered on top of an
+// already-bootstrapped database (globalSetup builds the web-with-data template from the web
+// one), so it must not re-enter bootstrapWebDb: lib/auth caches APP_DATABASE_URL at module
+// load, and a second bootstrap in the same process would seed personas into the first database.
+export async function applyHarborData(appUrl: string): Promise<void> {
   const { loadConfig, applyConfig, generateSynthetic, indexCollection, syncDatasetTerms, loadTaxonomyBindings, fileMetadataFields } = await import("@warehousd/broker");
   const harborDir = new URL("../../../../examples/harbor", import.meta.url).pathname;
   const { seedLive } = await import("../../../../examples/harbor/seed/live");
   const cfg = loadConfig(harborDir);
 
-  const db = new Pool({ connectionString: base.appUrl });
+  const db = new Pool({ connectionString: appUrl, max: 4 });
   await applyConfig(db, cfg);
   await generateSynthetic(db, cfg, 42);
   await syncDatasetTerms(db, cfg, "dev");
@@ -109,12 +142,19 @@ export async function setupWebDbWithData(label: string) {
     }
   }
   await db.end();
+}
 
-  process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${base.dbName}`;
-  process.env.LIVE_DATABASE_URL = `postgres://warehousd_live:pw@127.0.0.1:54330/${base.dbName}`;
-  process.env.IMPORT_DATABASE_URL = `postgres://warehousd_import:pw@127.0.0.1:54330/${base.dbName}`;
+// Full-data variant of setupWebDb. Points DEV_DATABASE_URL/LIVE_DATABASE_URL at the
+// warehousd_dev/warehousd_live roles the bootstrap creates on this database, so apps/web's
+// getBroker() can serve real dev/live queries.
+export async function setupWebDbWithData(label: string) {
+  const { handle } = await cloneAndOpen("web_data", label);
 
-  return base;
+  process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${handle.dbName}`;
+  process.env.LIVE_DATABASE_URL = `postgres://warehousd_live:pw@127.0.0.1:54330/${handle.dbName}`;
+  process.env.IMPORT_DATABASE_URL = `postgres://warehousd_import:pw@127.0.0.1:54330/${handle.dbName}`;
+
+  return handle;
 }
 
 // Generic variant of setupWebDbWithData for a caller-supplied project dir instead of the
@@ -128,7 +168,7 @@ export async function setupWebDbWithConfig(label: string, projectDir: string) {
   const { loadConfig, applyConfig } = await import("@warehousd/broker");
   const cfg = loadConfig(projectDir);
 
-  const db = new Pool({ connectionString: base.appUrl });
+  const db = new Pool({ connectionString: base.appUrl, max: 4 });
   await applyConfig(db, cfg);
   await db.end();
 

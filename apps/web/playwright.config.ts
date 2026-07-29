@@ -17,7 +17,7 @@ const url = (role: string, pw: string) => `postgres://${role}:${pw}@127.0.0.1:54
 // corrupts state, but a shared port makes this run *test the other checkout's application* and
 // report the result as ours. So the port is derived too, rather than left to a flag someone has
 // to remember. FNV-1a over the slug lands in 8800-8899, clear of 8722 (`pnpm dev`), 8723
-// (`warehousd start`'s database), 8780 (Keycloak) and 8791 (the fake IdP).
+// (`warehousd start`'s database) and 8780 (Keycloak).
 function derivePort(slug: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < slug.length; i++) {
