@@ -18,7 +18,7 @@ collections:
       owner:      { type: text,        posture: allow }
       updated_at: { type: timestamptz, posture: allow }
 
-# ── More examples, from the Meridian demo project ────────────────────────────
+# ── More examples ─────────────────────────────────────────────────────────────
 # posture: deny is the hard tier — such a field can NEVER be granted; changing it
 # requires editing this file. posture: allow still means deny-by-default per user
 # until a manager approves a grant covering the field.
@@ -35,8 +35,8 @@ collections:
 #  policies:                        # a file collection: markdown indexed for search
 #    type: file
 #    description: Policy documents
+#    taxonomies: [category]         # bind the category vocabulary to this collection
 #    source: ./docs                 # DEV content; live indexing needs \`source_live\`
-#    taxonomy: category
 #    fields:
 #      title:   { posture: allow }
 #      content: { posture: allow }
@@ -45,6 +45,7 @@ collections:
 # taxonomies:
 #   category:
 #     label: Category
+#     multiple: true
 #     terms:
 #       hr:       { label: HR }
 #       benefits: { label: Benefits }
