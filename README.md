@@ -284,7 +284,8 @@ yet built:
 | Dev/live isolation | **real** | Two Postgres roles, two pools, selected by token scope. |
 | Synthetic data generation | **real** | From the schema only; deterministic by seed; FK-consistent. |
 | File collections + full-text search | **real** | `.md`/`.txt`; `tsvector` + GIN, `ts_rank_cd` ordering. |
-| Taxonomies and term-scoped grants | **real** | |
+| Taxonomies and term-scoped grants | **real** | Several vocabularies per collection; single- or multi-value; terms from YAML or from a dataset collection's rows. |
+| Multi-predicate grant scoping | **real** | A grant's document filter is a list of predicates, ANDed — across vocabularies, paths, and plain metadata fields. |
 | OAuth 2.1 provider, env-as-scope, dynamic client registration | **real** | 15-min access tokens; scope rules re-run on refresh. |
 | MCP endpoint (streamable HTTP) | **real** | |
 | SSO — OIDC and SAML | **real** | Better Auth SSO plugin; automated OIDC and SAML round trips against Keycloak. Connecting a hosted IdP is a [documented manual runbook](docs/configure-sso.md). |

@@ -55,7 +55,7 @@ collections:
   people:
     description: Employee directory        # required — this is what `list_collections` returns
     type: dataset                          # dataset (default) | file
-    taxonomy: category                     # optional — bind a vocabulary
+    taxonomies: [department]               # optional — bind one or more vocabularies
     fields:
       id:              { type: uuid, posture: allow, pk: true }
       full_name:       { type: text, posture: allow }
@@ -65,9 +65,9 @@ collections:
       home_address:    { type: text, posture: deny }
 ```
 
-A collection name may not contain `__` — that is reserved for file-collection
-storage tables. Field names must match `[a-z_][a-z0-9_]*` (case-insensitive);
-anything else is rejected at config load rather than reaching DDL.
+Collection and field names must both match `[a-z_][a-z0-9_]*` (case-insensitive),
+and a collection name may not contain `__` — that is reserved for file-collection
+storage tables. Anything else is rejected at config load rather than reaching DDL.
 
 ### Field options
 
@@ -77,9 +77,44 @@ anything else is rejected at config load rather than reaching DDL.
 | `type` | Required on dataset collections: `uuid`, `text`, `numeric`, `int`, `timestamptz`, `date`, `boolean`, `json`. Inferred for file collections. |
 | `pk` | Marks the primary key. |
 | `fk` | `collection.field` — honored by the synthetic generator so references resolve. |
-| `view_join` | `collection.field` — pre-joined into `v_<collection>` so the queryable surface stays flat. |
-| `nullable` | Lets the generator produce nulls. |
+| `view_join` | `{ table, column, on }` — pre-joined into `v_<collection>` so the queryable surface stays flat. See below. |
+| `nullable` | Lets the generator produce nulls, and makes the column optional on import. |
 | `min` / `max` | Range for generated numerics. |
+| `gen` | Names a synthetic generator for this field, overriding the field-name heuristics. See below. |
+
+#### `view_join`
+
+```yaml
+responsible_attorney_id:   { type: uuid, posture: allow, fk: people.id }
+responsible_attorney_name: { type: text, posture: allow,
+                             view_join: { table: people, column: full_name, on: responsible_attorney_id } }
+```
+
+`on` must name a sibling field declared `fk: <table>.id` pointing at the same
+table; all three conditions are checked at config load. Each join gets its own
+alias (`j_<field_name>`), so one collection may join the same table several
+times — two attorneys on a matter, or `people.manager_id` back to `people`.
+
+The column is derived, so it exists only on the view: it is never stored, and an
+import naming it is rejected as a `derived_column`.
+
+#### `gen`
+
+Field-name heuristics cover the generic cases (`*_email`, `*_name`, `*_address`).
+`gen` is for the ones they cannot tell apart — `matter_number`, `bar_number`,
+`client_number` and `invoice_number` are all `*number*`:
+
+```yaml
+client_number: { type: text, posture: allow, gen: client_number }
+```
+
+Available: `client_number`, `matter_number`, `invoice_number`, `bar_number`
+(dense deterministic sequences derived from the row index — `C-0001`, `C-0002`, …),
+`company_name`, `industry`, `court_name`, `narrative`, `hourly_rate`.
+
+The sequence hints are dense and stable for a given row count, which is what lets
+committed seed documents reference a generated row by slug. Shrinking a
+collection's row count below a slug a document names breaks indexing loudly.
 
 ### Postures are two-tier
 
@@ -144,7 +179,8 @@ taxonomies:
       confidential: { label: Confidential }
   client:
     label: Client
-    source: { collection: clients, slug: client_id, label: company_name }
+    # `clients` must be a dataset collection declaring both named fields.
+    source: { collection: clients, slug: client_number, label: name }
 
 collections:
   policies:
@@ -158,18 +194,35 @@ collections:
   collide with a reserved column name (`title`, `content`, `path`, `owner`,
   `updated_at`, `id`, `checksum`, `file_id`, `document_seq`, `tsv`, `_rank`).
 - A vocabulary has **either** `terms` (inline YAML) **or** `source` (dataset), not both.
-- `multiple: true` allows a document to carry multiple terms; grants scope using
-  Postgres array overlap semantics (all specified terms must match at least one document term).
-- **Dataset sourcing** (`source:`) pulls vocabulary terms from a dataset collection.
-  The `source` object specifies the collection, the field to use as the term slug,
-  and the field to use as the human-readable label. Terms are scoped per environment
-  (fetched when `warehousd apply` or `warehousd start` runs); **you must run
-  `syncDatasetTerms()` after loading data and before indexing file collections**.
+- `multiple: true` makes the column `text[]` (with a GIN index) so a document can
+  carry several terms. A grant scoped to such a field uses Postgres array
+  **overlap**: the document matches if it carries **at least one** of the granted
+  terms. `describe_collection` reports the field as `text[]`, and only `eq` and
+  `in` are accepted against it — `gt`, `like` and friends are refused as
+  `invalid_intent`.
+- **Dataset sourcing** (`source:`) pulls vocabulary terms from a dataset collection —
+  the only way to bind a document to a row, since file collections have no foreign
+  keys. The `source` object names the collection, the field to use as the term slug,
+  and the field to use as the human-readable label. Slugs are slugified and
+  lowercased (`C-0042` becomes `c-0042`), so frontmatter must use the lowercase
+  form. Two source values that slugify identically are an error rather than a
+  silent merge, since merging would widen every grant scoped to that term.
+- **Dataset-sourced terms are scoped per environment.** `data_synth` and `data_live`
+  hold different rows, so they yield different term sets. `syncDatasetTerms()` must
+  run **after** the data exists and **before** any file collection bound to that
+  vocabulary is indexed, or indexing fails on an unknown term. The bootstrap order
+  is: `applyConfig` → generate/seed → `syncDatasetTerms(dev)` → `seedLive` →
+  `syncDatasetTerms(live)` → `indexCollection`. It is also re-run after an admin
+  import, so a newly imported client becomes available as a term.
 - The bound field is added automatically as `text`/`allow` if you don't declare it.
   Declaring it lets you override the posture; it may not set `pk`, `fk`, or `view_join`.
 
 A grant can be scoped to terms. One limited to `hr` silently excludes `finance`
-documents — the user never learns they exist.
+documents — the user never learns they exist. Grants may carry several predicates,
+ANDed together, and they may name any field on the collection — including a
+`posture: deny` one, and including a plain metadata field. So a grant can be
+scoped to `client = c-0042 AND tags overlapping {litigation, discovery}`, or gated
+on a `confidentiality` metadata field that the user can never read.
 
 ## Synthetic data
 

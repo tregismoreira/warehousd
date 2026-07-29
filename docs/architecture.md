@@ -273,14 +273,18 @@ reserved `_rank` and `document_seq` keys that are never part of `fieldsReturned`
 for free.
 
 **Document-level scoping.** A grant may carry a `document_filter` —
-`{ field, op: "eq" | "in", value }` — restricting which documents it reaches. Its
-field is validated against the collection's *YAML field set*, not the user's
-allowed fields: that is what lets a denied field like `path` gate documents
-without ever being readable. It is author-supplied at approval time, never
-client-supplied. It is ANDed into the same parameterized WHERE machinery as
-client filters, an empty `in` list compiles to constant-false rather than a SQL
-error, and excluded documents are silently absent rather than a distinguishable
-refusal. A partial unique index guarantees at most one approved grant per
+a **list** of `{ field, op: "eq" | "in", value }` predicates, ANDed — restricting
+which documents it reaches. Every predicate's field is validated against the
+collection's *YAML field set*, not the user's allowed fields: that is what lets a
+denied field like `path` gate documents without ever being readable, and equally
+what lets a plain metadata field like `confidentiality` gate them. The list is
+author-supplied at approval time, never client-supplied — the approver picks
+values, the server decides which column those values gate. Because predicates AND
+rather than take precedence over one another, one grant can be scoped across two
+vocabularies and a path at once. They compile into the same parameterized WHERE
+machinery as client filters, an empty `in` list compiles to constant-false rather
+than a SQL error, and excluded documents are silently absent rather than a
+distinguishable refusal. A partial unique index guarantees at most one approved grant per
 `(user, collection, env)`, so a second, broader grant can never silently override
 the restriction.
 
