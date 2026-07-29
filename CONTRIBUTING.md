@@ -90,7 +90,7 @@ LIVE_DATABASE_URL=postgres://warehousd_live:pw@127.0.0.1:54330/warehousd \
 IMPORT_DATABASE_URL=postgres://warehousd_import:pw@127.0.0.1:54330/warehousd \
 BETTER_AUTH_SECRET=any-random-string-at-least-32-chars-long \
 BETTER_AUTH_URL=http://localhost:8722 \
-WAREHOUSD_PROJECT_DIR=examples/meridian \
+WAREHOUSD_PROJECT_DIR=examples/harbor \
 npx tsx scripts/dev-bootstrap.ts
 ```
 
@@ -104,7 +104,7 @@ live environment for testing.
 
 ```bash
 WAREHOUSD_DEMO=true \
-WAREHOUSD_PROJECT_DIR=examples/meridian \
+WAREHOUSD_PROJECT_DIR=examples/harbor \
 pnpm --filter @warehousd/web dev
 ```
 
@@ -115,7 +115,7 @@ http://localhost:8722 — sign in as `ana@demo.local` (admin),
 
 ```bash
 pnpm lint
-WAREHOUSD_PROJECT_DIR=examples/meridian pnpm test   # unit + integration
+WAREHOUSD_PROJECT_DIR=examples/harbor pnpm test   # unit + integration
 pnpm build                                          # production build + typecheck
 pnpm e2e                                            # Playwright, real browser
 ```
@@ -139,7 +139,7 @@ Then:
 apps/web/          Next.js — UI, MCP adapter, auth routes; published as the Docker image
 packages/broker/   the core: grants, query validation, synthetic data, indexing, YAML loader
 packages/cli/      the published `warehousd` npm CLI
-examples/meridian/ a complete consuming project (the demo company)
+examples/harbor/ a complete consuming project (the demo company)
 scripts/           contributor bootstrap and e2e setup
 test/              shared fixtures (Keycloak realm for the SSO suite)
 docs/              user and contributor documentation

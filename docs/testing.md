@@ -24,7 +24,7 @@ for the SSO suite); `pnpm test:down` tears it down with its volume.
 ```bash
 pnpm test:up
 pnpm lint
-WAREHOUSD_PROJECT_DIR=examples/meridian pnpm test
+WAREHOUSD_PROJECT_DIR=examples/harbor pnpm test
 pnpm build
 pnpm e2e
 pnpm test:down
@@ -88,7 +88,8 @@ The interesting ones, and where they live:
   and `fields` are combined.
 - **Document and term scoping** (`document-paths`, `taxonomy-grants`) — scoped
   documents are silently absent, bypass probes leak nothing, an empty `in` list
-  denies everything, and a second approved grant is refused by the unique index.
+  denies everything, multi-value vocabularies use array-overlap (`&&`) semantics,
+  and a second approved grant is refused by the unique index.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
 - **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a

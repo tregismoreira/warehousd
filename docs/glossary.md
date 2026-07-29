@@ -10,14 +10,14 @@ is one sentence: **a Collection holds Documents; each Document has Fields.**
 | **Field** | A document's governed attribute. Postures and grants operate on fields. |
 | **File** | An ingested source (`.md`/`.txt`) parsed into one or more documents. A file is not a document; it *contains* them. |
 | **Posture** | A field's declared setting in `warehousd.yml`: `allow` (grantable) or `deny` (never grantable). Absent means denied. |
-| **Grant** | `(user, collection, purpose, allowed fields, environment, expiry)`, optionally narrowed to documents or taxonomy terms. Requested, approved, evaluated fresh on every query. |
+| **Grant** | `(user, collection, purpose, allowed fields, environment, expiry)`, optionally narrowed via document filter (array of predicates on any field, including metadata fields). Requested, approved, evaluated fresh on every query. |
 | **Purpose** | The short label and free text a user states when requesting access. Stored on the grant and stamped on every audit event it produces. |
 | **Environment** | `dev` (synthetic data) or `live` (real data). Carried as an OAuth scope, never as a request parameter. |
 | **Intent** | A structured query *proposal* from a client. The broker re-validates it and builds the SQL itself. |
 | **Refusal** | A denial carrying a reason code (`no_grant`, `field_denied`, …) and nothing else — no denied value, no SQL. |
 | **Broker** | The library that turns `(identity, grants, intent)` into documents or a refusal. The only thing that reads collection data. |
 | **Adapter** | A thin protocol translator in front of the broker — the MCP server, the web UI, anything future. |
-| **Taxonomy / vocabulary** | A named set of **terms** bound to a collection, so grants can be scoped to a subset of documents. |
+| **Taxonomy / vocabulary** | A named set of **terms** bound to a collection, so grants can be scoped to a subset of documents. Supports single or multiple terms per document; may be defined inline (YAML) or sourced from a dataset collection. |
 | **Row** | Internal only: the SQL tuple the broker materializes, 1:1 with a document. It lives in the query-builder and DDL layers and never appears in a public contract. |
 
 ## Words we don't use

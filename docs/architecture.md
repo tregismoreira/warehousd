@@ -161,8 +161,9 @@ expressive enough that the assistant can ask real questions.
 
 For each collection and environment there is a Postgres view
 `data_{env}.v_{collection}` defining the queryable surface. Views may pre-join —
-`v_people` joins `departments` for a flat `department_name` — so the MCP surface
-stays flat. The broker only ever selects from views, never base tables, and the
+`v_people` joins `departments` for a flat `department_name`, and `v_matters` joins
+`clients` and `people` twice (for responsible and originating attorney), so the MCP
+surface stays flat. The broker only ever selects from views, never base tables, and the
 env roles hold `SELECT` on the view only.
 
 Views are intentionally *flat*: every field appears regardless of posture. Access
@@ -240,9 +241,10 @@ const ctx: BrokerContext = { userId: token.sub, env };
 ## File collections and search
 
 A `type: file` collection points at a directory of `.md`/`.txt` files. Its
-grantable schema is fixed — `title`, `content`, `path`, `owner`, `updated_at`
-(plus a bound taxonomy field) — and the YAML `fields` block only sets postures on
-those.
+grantable schema includes five fixed fields — `title`, `content`, `path`, `owner`,
+`updated_at` (plus any bound taxonomy fields) — and additional metadata fields
+declared in the YAML `fields` block. Metadata fields are populated from frontmatter
+in the source files.
 
 **Storage.** Per environment and collection: a `{collection}__files` table (one
 row per source file, `path` unique as the upsert key, `checksum` for idempotent
@@ -285,12 +287,16 @@ the restriction.
 ## Taxonomies
 
 A vocabulary is declared once under `taxonomies` and bound to a collection with
-`taxonomy: <slug>`. The bound field is a normal text field on the collection —
+`taxonomies: [<slug>, ...]`. The bound field is a normal text field on the collection —
 auto-added as `allow` if the YAML omits it — and terms are validated against the
-vocabulary. A grant scoped to `hr` compiles to a document filter over that field,
-so `finance` documents are silently absent: the user never learns they exist.
-Vocabulary slugs may not collide with the fixed file fields or the structural
-columns (`id`, `checksum`, `file_id`, `document_seq`, `tsv`, `_rank`).
+vocabulary. A vocabulary may allow multiple terms per document with `multiple: true`;
+grants scoped to multiple terms use Postgres array overlap (`&&`) semantics. A grant
+scoped to `hr` compiles to a document filter over that field, so `finance` documents
+are silently absent: the user never learns they exist. Vocabulary slugs may not
+collide with the fixed file fields or the structural columns (`id`, `checksum`,
+`file_id`, `document_seq`, `tsv`, `_rank`). Vocabularies may be dataset-sourced
+(pulling terms from another collection) instead of inline; the ordering requirement
+is that `syncDatasetTerms()` must run after data is loaded but before `indexCollection()`.
 
 ## The app schema
 

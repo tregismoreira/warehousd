@@ -8,8 +8,8 @@ import { loadConfig } from "../src/config/load";
 import { listDocumentPaths } from "../src/documents/paths";
 
 let p: Provisioned, admin: Pool, pools: Pools;
-const meridian = new URL("../../../examples/harbor", import.meta.url).pathname;
-const cfg = loadConfig(meridian);
+const harborDir = new URL("../../../examples/harbor", import.meta.url).pathname;
+const cfg = loadConfig(harborDir);
 
 beforeAll(async () => {
   p = await provision("docpaths");
@@ -17,10 +17,10 @@ beforeAll(async () => {
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   await syncDatasetTerms(admin, cfg, "dev");
-  await indexCollection(admin, "dev", "policies", `${meridian}/seed/docs-dev`,
+  await indexCollection(admin, "dev", "policies", `${harborDir}/seed/docs-dev`,
     { taxonomies: await loadTaxonomyBindings(admin, cfg, "policies", "dev") });
   await syncDatasetTerms(admin, cfg, "live");
-  await indexCollection(admin, "live", "policies", `${meridian}/seed/docs-live`,
+  await indexCollection(admin, "live", "policies", `${harborDir}/seed/docs-live`,
     { taxonomies: await loadTaxonomyBindings(admin, cfg, "policies", "live") });
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
 }, 60_000);

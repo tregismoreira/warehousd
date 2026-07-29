@@ -61,7 +61,7 @@ collections:
       full_name:       { type: text, posture: allow }
       email:           { type: text, posture: allow }
       department_id:   { type: uuid, posture: allow, fk: departments.id }
-      department_name: { type: text, posture: allow, view_join: departments.name }
+      department_name: { type: text, posture: allow, view_join: { table: departments, column: name, on: department_id } }
       home_address:    { type: text, posture: deny }
 ```
 
@@ -97,24 +97,27 @@ which documents a grant reaches without ever being readable.
 
 ```yaml
 collections:
-  policies:
+  case_files:
     type: file
-    description: Company policy documents
-    source: ./seed/docs-dev        # required — DEV content, committed sample files
-    source_live: ./seed/docs-live  # optional — real content, indexed only with --env live
-    taxonomy: category
+    description: Client case files
+    source: ./seed/case-files-dev        # required — DEV content, committed sample files
+    source_live: ./seed/case-files-live  # optional — real content, indexed only with --env live
+    taxonomies: [client, tags]           # list of vocabulary slugs
     fields:
-      title:      { posture: allow }
-      content:    { posture: allow }
-      owner:      { posture: allow }
-      updated_at: { posture: allow }
-      path:       { posture: deny }   # gates documents, never readable
+      title:           { posture: allow }
+      content:         { posture: allow }
+      owner:           { posture: allow }
+      updated_at:      { posture: allow }
+      path:            { posture: deny }   # gates documents, never readable
+      matter_number:   { type: text, posture: allow }
+      filed_date:      { type: date, posture: allow }
 ```
 
-The schema is fixed: only `title`, `content`, `path`, `owner`, `updated_at` (plus
-the bound taxonomy field) may appear, and the `fields` block only sets their
-postures. `.md` and `.txt` are parsed; the title comes from the first heading or
-the filename, `owner` from frontmatter, `updated_at` from the file mtime.
+The file collection schema includes five fixed fields (`title`, `content`, `path`,
+`owner`, `updated_at`) plus any additional metadata fields you declare. `.md` and
+`.txt` are parsed; the title comes from the first heading or the filename, `owner`
+from frontmatter, `updated_at` from the file mtime. Additional metadata fields are
+populated from frontmatter (YAML at the top of the file).
 
 **`source` is dev content by definition.** Point it at committed sample files,
 never at real corporate documents. Live content is indexed only by an explicit
@@ -123,27 +126,47 @@ explicit `--source`.
 
 ## Taxonomies
 
+Vocabularies are declared at the top level and bound to collections:
+
 ```yaml
 taxonomies:
-  category:
-    label: Category
+  department:
+    label: Department
     terms:
       hr:       { label: HR }
       finance:  { label: Finance }
       security: { label: Security }
+  tags:
+    label: Tags
+    multiple: true
+    terms:
+      urgent:      { label: Urgent }
+      confidential: { label: Confidential }
+  client:
+    label: Client
+    source: { collection: clients, slug: client_id, label: company_name }
 
 collections:
   policies:
-    taxonomy: category    # binds the vocabulary; adds a `category` text field
+    taxonomies: [department, tags]    # list of vocabulary slugs
+    fields:
+      department:  { posture: allow }  # added automatically; allows restricting posture
+      tags:        { posture: allow }
 ```
 
 - Vocabulary slugs match `[a-z][a-z0-9_]*`, may not contain `__`, and may not
   collide with a reserved column name (`title`, `content`, `path`, `owner`,
   `updated_at`, `id`, `checksum`, `file_id`, `document_seq`, `tsv`, `_rank`).
-- Term slugs are lowercase kebab-case.
-- The bound field is added automatically as `text`/`allow` if you don't declare
-  it. Declaring it lets you set a different posture; it may not set `pk`, `fk`,
-  or `view_join`.
+- A vocabulary has **either** `terms` (inline YAML) **or** `source` (dataset), not both.
+- `multiple: true` allows a document to carry multiple terms; grants scope using
+  Postgres array overlap semantics (all specified terms must match at least one document term).
+- **Dataset sourcing** (`source:`) pulls vocabulary terms from a dataset collection.
+  The `source` object specifies the collection, the field to use as the term slug,
+  and the field to use as the human-readable label. Terms are scoped per environment
+  (fetched when `warehousd apply` or `warehousd start` runs); **you must run
+  `syncDatasetTerms()` after loading data and before indexing file collections**.
+- The bound field is added automatically as `text`/`allow` if you don't declare it.
+  Declaring it lets you override the posture; it may not set `pk`, `fk`, or `view_join`.
 
 A grant can be scoped to terms. One limited to `hr` silently excludes `finance`
 documents — the user never learns they exist.
@@ -179,7 +202,7 @@ Set on the container or the dev process, not in YAML:
 
 ## A complete example
 
-[`examples/meridian/warehousd.yml`](../examples/meridian/warehousd.yml) is a
-working configuration for the demo company: six collections including a
-relational pair, a sensitive one, a time series, and a file collection with a
-bound taxonomy.
+[`examples/harbor/warehousd.yml`](../examples/harbor/warehousd.yml) is a
+working configuration for the demo company: nineteen collections including
+relational data, sensitive compensation records, a time series, three file
+collections with bound taxonomies, and dataset-sourced vocabulary terms.

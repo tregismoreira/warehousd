@@ -30,7 +30,7 @@ services:
       WAREHOUSD_DATA_ROLE_PASSWORD: datapassword123
       BETTER_AUTH_SECRET: development-secret-key-for-testing-only
     volumes:
-      - ./examples/meridian:/project
+      - ./examples/harbor:/project
     depends_on:
       db:
         condition: service_healthy

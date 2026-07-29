@@ -152,18 +152,44 @@ Postgres you bring yourself, which must be reachable.
 [configuration.md](configuration.md). Minimal version:
 
 ```yaml
-project: my-project
+project: acme
 server: { port: 8722 }
 
+taxonomies:
+  department:
+    label: Department
+    terms:
+      hr:      { label: HR }
+      finance: { label: Finance }
+  tags:
+    label: Tags
+    multiple: true
+    terms:
+      urgent: { label: Urgent }
+
 collections:
-  announcements:
-    description: Company announcements
+  people:
+    description: Employee directory
     fields:
-      id:    { type: uuid, posture: allow, pk: true }
-      title: { type: text, posture: allow }
+      id:               { type: uuid, posture: allow, pk: true }
+      full_name:        { type: text, posture: allow }
+      department_id:    { type: uuid, posture: allow, fk: departments.id }
+      department_name:  { type: text, posture: allow, view_join: { table: departments, column: name, on: department_id } }
+
+  policies:
+    type: file
+    description: Policy documents
+    source: ./seed/docs-dev
+    source_live: ./seed/docs-live
+    taxonomies: [department, tags]
+    fields:
+      title:       { posture: allow }
+      content:     { posture: allow }
+      path:        { posture: deny }
+      review_date: { type: date, posture: allow }
 
 synthetic:
-  documents_per_collection: { announcements: 10 }
+  documents_per_collection: { people: 40 }
 ```
 
 ## Troubleshooting

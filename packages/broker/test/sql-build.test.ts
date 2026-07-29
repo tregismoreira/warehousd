@@ -54,3 +54,39 @@ it("empty in-list compiles to constant false, not a SQL error (design test 8)", 
   expect(text).toContain("false");
   expect(text).not.toContain("in ()");
 });
+
+it("multi-value `in` becomes array overlap, single-value stays `in`", () => {
+  const multi = buildSelect("dev", { collection: "case_files", fields: ["title"] },
+    ["title"], {
+      documentFilters: [{ field: "tags", op: "in", value: ["litigation", "discovery"] }],
+      isMultiValueField: (f) => f === "tags",
+    });
+  expect(multi.text).toContain(`"tags" && $1::text[]`);
+  expect(multi.text).not.toContain(`"tags" in (`);
+  expect(multi.values).toEqual([["litigation", "discovery"]]);
+
+  // same predicate, non-multi field: the scalar `in` form, one param per value
+  const single = buildSelect("dev", { collection: "case_files", fields: ["title"] },
+    ["title"], { documentFilters: [{ field: "tags", op: "in", value: ["litigation", "discovery"] }] });
+  expect(single.text).toContain(`"tags" in ($1, $2)`);
+});
+
+it("multi-value `eq` asks whether the value is any() of the column", () => {
+  const { text, values } = buildSelect("dev", { collection: "case_files", fields: ["title"] },
+    ["title"], {
+      documentFilters: [{ field: "tags", op: "eq", value: "privileged" }],
+      isMultiValueField: (f) => f === "tags",
+    });
+  expect(text).toContain(`= any("tags")`);
+  expect(values).toEqual(["privileged"]);
+});
+
+it("an empty multi-value in-list still denies everything (no overlap against empty)", () => {
+  const { text } = buildSelect("dev", { collection: "case_files", fields: ["title"] },
+    ["title"], {
+      documentFilters: [{ field: "tags", op: "in", value: [] }],
+      isMultiValueField: (f) => f === "tags",
+    });
+  expect(text).toContain("false");
+  expect(text).not.toContain("&&");
+});

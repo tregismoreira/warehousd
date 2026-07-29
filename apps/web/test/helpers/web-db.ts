@@ -75,17 +75,17 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean }
   };
 }
 
-// Full-data variant of setupWebDb: applies the meridian YAML, generates synthetic data,
-// seeds live data, and indexes the policies collection for both envs — same recipe as
+// Full-data variant of setupWebDb: applies the harbor YAML, generates synthetic data,
+// seeds live data, and indexes the file collections for both envs — same recipe as
 // scripts/dev-bootstrap.ts, scoped to a disposable test database. Also points
 // DEV_DATABASE_URL/LIVE_DATABASE_URL at the warehousd_dev/warehousd_live roles setupWebDb
 // already creates on this database, so apps/web's getBroker() can serve real dev/live queries.
 export async function setupWebDbWithData(label: string) {
   const base = await setupWebDb(label);
-  const { loadConfig, applyConfig, generateSynthetic, indexCollection, syncDatasetTerms, loadTaxonomyBindings } = await import("@warehousd/broker");
-  const meridianDir = new URL("../../../../examples/harbor", import.meta.url).pathname;
+  const { loadConfig, applyConfig, generateSynthetic, indexCollection, syncDatasetTerms, loadTaxonomyBindings, fileMetadataFields } = await import("@warehousd/broker");
+  const harborDir = new URL("../../../../examples/harbor", import.meta.url).pathname;
   const { seedLive } = await import("../../../../examples/harbor/seed/live");
-  const cfg = loadConfig(meridianDir);
+  const cfg = loadConfig(harborDir);
 
   const db = new Pool({ connectionString: base.appUrl });
   await applyConfig(db, cfg);
@@ -93,10 +93,16 @@ export async function setupWebDbWithData(label: string) {
   await syncDatasetTerms(db, cfg, "dev");
   await seedLive(db);
   await syncDatasetTerms(db, cfg, "live");
-  await indexCollection(db, "dev", "policies", `${meridianDir}/seed/docs-dev`,
-    { taxonomies: await loadTaxonomyBindings(db, cfg, "policies", "dev") });
-  await indexCollection(db, "live", "policies", `${meridianDir}/seed/docs-live`,
-    { taxonomies: await loadTaxonomyBindings(db, cfg, "policies", "live") });
+  for (const [name, c] of Object.entries(cfg.collections)) {
+    if (c.type !== "file") continue;
+    const metadata = fileMetadataFields(c);
+    const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
+    await indexCollection(db, "dev", name, `${harborDir}/${c.source}`, { taxonomies: devTaxonomies, metadata });
+    if (c.source_live) {
+      const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
+      await indexCollection(db, "live", name, `${harborDir}/${c.source_live}`, { taxonomies: liveTaxonomies, metadata });
+    }
+  }
   await db.end();
 
   process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${base.dbName}`;
