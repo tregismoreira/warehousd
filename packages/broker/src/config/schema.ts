@@ -8,29 +8,31 @@ export const TAXONOMY_RESERVED_SLUGS = new Set<string>([
   ...FILE_FIELDS, "id", "checksum", "file_id", "document_seq", "tsv", "_rank",
 ]);
 
+// Every part lands in a generated SQL identifier, so each is constrained to the same
+// identifier shape field names use. Nothing here may reach SQL unvalidated.
+const IDENT = /^[a-z_][a-z0-9_]*$/i;
+
 export const TermSchema = z.object({ label: z.string() });
 export const VocabularySchema = z.object({
   label: z.string(),
   multiple: z.boolean().default(false),
   terms: z.record(TermSchema).optional(),
+  // syncDatasetTerms interpolates all three into a select. The cross-reference check in
+  // ConfigSchema proves they name something real; these prove they are safe to quote.
   source: z.object({
-    collection: z.string(),
-    slug: z.string(),
-    label: z.string(),
+    collection: z.string().regex(IDENT),
+    slug: z.string().regex(IDENT),
+    label: z.string().regex(IDENT),
   }).optional(),
 }).superRefine((v, ctx) => {
   const hasTerms = !!v.terms;
   const hasSource = !!v.source;
   if (!hasTerms && !hasSource)
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary must have either "terms" (YAML) or "source" (dataset), not both` });
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary must declare either "terms" (YAML) or "source" (dataset)` });
   if (hasTerms && hasSource)
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary must have either "terms" (YAML) or "source" (dataset), not both` });
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary must declare either "terms" (YAML) or "source" (dataset), not both` });
 });
 export type VocabularyConfig = z.infer<typeof VocabularySchema>;
-
-// Every part lands in a generated SQL identifier, so each is constrained to the same
-// identifier shape field names use. Nothing here may reach SQL unvalidated.
-const IDENT = /^[a-z_][a-z0-9_]*$/i;
 export const ViewJoinSchema = z.object({
   table: z.string().regex(IDENT),
   column: z.string().regex(IDENT),
@@ -158,9 +160,14 @@ export const ConfigSchema = z.object({
     }
   }),
   collections: z.record(CollectionSchema).superRefine((cols, ctx) => {
-    for (const name of Object.keys(cols))
+    for (const name of Object.keys(cols)) {
       if (name.includes("__"))
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection name "${name}" must not contain "__" (reserved)` });
+      // A collection name becomes a table name, and apply/ddl.ts interpolates some of those
+      // unquoted. Field names have always been held to this shape; collection names were not.
+      if (!IDENT.test(name))
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection name "${name}" invalid (must match [a-z_][a-z0-9_]*)` });
+    }
   }),
   synthetic: z.object({ documents_per_collection: z.record(z.number()).default({}) }).default({ documents_per_collection: {} }),
 }).superRefine((cfg, ctx) => {

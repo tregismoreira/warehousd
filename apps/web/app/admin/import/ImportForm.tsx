@@ -46,6 +46,7 @@ const ERROR_LABELS: Record<string, string> = {
   invalid_uuid: "not a UUID",
   missing_required: "required value missing",
   unknown_term: "not a term in the bound vocabulary",
+  unvalidatable_term: "bound to a dataset-sourced vocabulary — import its source collection instead",
   duplicate_pk: "duplicate primary key in this file",
   constraint_violation: "conflicts with data already in the collection",
 };

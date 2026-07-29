@@ -16,7 +16,11 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
     if (c.type === "file") continue;
     const n = cfg.synthetic.documents_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
-    // Build term slug sets for each bound vocabulary
+    // Build term slug sets for each bound vocabulary. Only YAML vocabularies have terms to
+    // draw from: a dataset-sourced one is populated by syncDatasetTerms, which by construction
+    // runs *after* this — the rows it reads are the ones being generated here. Such a column
+    // is left NULL, and stays NULL, since nothing back-fills it. Harbor binds `client` only to
+    // a file collection (skipped above), so this is a latent shape rather than a live one.
     const termsByVocab = new Map<string, string[]>();
     for (const taxSlug of c.taxonomies ?? []) {
       const vocab = cfg.taxonomies[taxSlug];
@@ -43,6 +47,10 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
             // Parent hasn't been visited yet — defer this FK for backfill
             const deferKey = `${name}:${fname}`;
             if (!deferred.some((d) => `${d.collection}:${d.column}` === deferKey)) {
+              // The backfill addresses rows by primary key, so without one it would emit
+              // `where ""=$2`. Fail here, naming the collection, rather than at query time.
+              if (!pkField)
+                throw new Error(`collection "${name}" needs a pk to back-fill the deferred fk "${fname}"`);
               deferred.push({ collection: name, column: fname, parent, pk: pkField });
             }
             vals.push(null);
@@ -53,14 +61,16 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
           const termSlugs = termsByVocab.get(fname) ?? [];
           const vocab = cfg.taxonomies[fname];
           if (vocab?.multiple && termSlugs.length) {
-            // For multi-value vocabularies, pick 1-3 random terms
+            // 1-3 distinct terms. Draw the fixed number of times either way so the rng stream
+            // stays identical for a given seed, and drop repeats rather than re-rolling —
+            // `{litigation, litigation}` is a legal array but a nonsense tag set.
             const count = Math.floor(rng() * 3) + 1;
-            const selected: string[] = [];
+            const selected = new Set<string>();
             for (let j = 0; j < count; j++) {
               const idx = Math.floor(rng() * termSlugs.length);
-              selected.push(termSlugs[idx]!);
+              selected.add(termSlugs[idx]!);
             }
-            vals.push(selected);
+            vals.push([...selected]);
           } else if (termSlugs.length) {
             // Single-value vocabulary
             const idx = Math.floor(rng() * termSlugs.length);

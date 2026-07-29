@@ -139,17 +139,19 @@ program.command("regen-synth")
     const cfg = loadConfig(o.dir);
     const pool = new Pool({ connectionString: db });
     try {
-      // Seed truncates and generates synthetic data
+      // Seed truncates, generates synthetic data, and syncs the dev term set from those rows.
       await runSeed(o.dir, db, Number(o.seed));
-      // Sync dataset-sourced vocabulary terms
-      await syncDatasetTerms(pool, cfg, "dev");
-      // Re-index all file collections
+      // Re-index all file collections. `metadata` is not optional in practice: every other
+      // index call site passes it, and omitting it here would re-index a changed file with
+      // its declared metadata columns left null — the exact drift fileMetadataFields exists
+      // to prevent.
       for (const [name, c] of Object.entries(cfg.collections)) {
         if (c.type === "file") {
           const env = "dev";
           const dir = c.source!;
           const taxonomies = await loadTaxonomyBindings(pool, cfg, name, env);
-          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomies });
+          const metadata = fileMetadataFields(c);
+          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomies, metadata });
         }
       }
     } finally {

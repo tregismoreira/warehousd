@@ -86,13 +86,19 @@ export function validateImportRows(
   const storable = new Map<string, FieldConfig>(
     Object.entries(c.fields).filter(([, f]) => !f.view_join));
   const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null;
-  // Build a map of taxonomy field names to their valid slugs
+  // Build a map of taxonomy field names to their valid slugs.
+  //
+  // Only YAML vocabularies can be checked here: a dataset-sourced one keeps its terms in
+  // env-scoped `app.terms`, and this function is synchronous with no database handle. Waving
+  // such a column through would let an import write a term no grant can ever match — and worse,
+  // one no reviewer would notice was unvalidated. Refuse the import instead; see
+  // `unvalidatable_term` below.
   const termSlugsMap = new Map<string, Set<string>>();
+  const datasetSourcedFields = new Set<string>();
   for (const vocabSlug of c.taxonomies ?? []) {
-    const vocab = cfg.taxonomies[vocabSlug];
-    if (vocab?.terms) {
-      termSlugsMap.set(vocabSlug, new Set(Object.keys(vocab.terms)));
-    }
+    const vocab = cfg.taxonomies?.[vocabSlug];
+    if (vocab?.terms) termSlugsMap.set(vocabSlug, new Set(Object.keys(vocab.terms)));
+    else if (vocab?.source) datasetSourcedFields.add(vocabSlug);
   }
 
   const first = rows[0]!;
@@ -101,6 +107,7 @@ export function validateImportRows(
     const f = c.fields[col];
     if (!f) { push({ row: 0, column: col, reason: "unknown_column" }); continue; }
     if (f.view_join) push({ row: 0, column: col, reason: "derived_column" });
+    if (datasetSourcedFields.has(col)) push({ row: 0, column: col, reason: "unvalidatable_term" });
   }
   if (errors.length) return { ok: false, errors };
 

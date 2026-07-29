@@ -117,6 +117,11 @@ describe("file collection config", () => {
     expect(() => ConfigSchema.parse({ ...baseSchema, collections: { "people__docs": {
       description: "d", fields: { id: { type: "uuid", posture: "allow" } } } } })).toThrow(/__/);
   });
+  it("rejects a collection name that is not a bare SQL identifier", () => {
+    // The name becomes a table name, and apply/ddl.ts interpolates some of those unquoted.
+    expect(() => ConfigSchema.parse({ ...baseSchema, collections: { 'pe"ople': {
+      description: "d", fields: { id: { type: "uuid", posture: "allow" } } } } })).toThrow(/invalid/);
+  });
   it("rejects a structured field with no type", () => {
     expect(() => ConfigSchema.parse({ ...baseSchema, collections: { people: {
       description: "d", fields: { name: { posture: "allow" } } } } })).toThrow();
