@@ -3,7 +3,7 @@ import type { Pools } from "../db/pools";
 import { writeAudit } from "../audit/write";
 import { parseImportPayload } from "./csv";
 import { validateImportRows, type ImportError } from "./validate";
-import { syncDatasetTerms } from "../taxonomy";
+import { loadTaxonomyBindings, syncDatasetTerms } from "../taxonomy";
 
 export type ImportResult =
   | { ok: true; imported: number; columns: string[]; auditId: string }
@@ -45,7 +45,21 @@ export async function importCollection(
     return { ok: false, reason: "parse_failed", auditId };
   }
 
-  const v = validateImportRows(cfg, collection, rows);
+  // Resolve the bound vocabularies here so that validation — which is synchronous and holds no
+  // database handle — can check a dataset-sourced column instead of refusing it outright.
+  // `live` is not a choice: an import writes data_live only, and the live term set is what a
+  // grant on this data will be matched against.
+  let taxonomies;
+  try {
+    taxonomies = await loadTaxonomyBindings(pools.app, cfg, collection, "live");
+  } catch {
+    // Unknown collection, or a vocabulary this stack never applied. Leave the bindings absent
+    // and let validateImportRows report it — an unresolvable vocabulary must not read as an
+    // empty term set, which would silently reject every row for the wrong reason.
+    taxonomies = undefined;
+  }
+
+  const v = validateImportRows(cfg, collection, rows, { taxonomies });
   if (!v.ok) {
     const auditId = await audit("refused", "validation_failed", { rows: rows.length });
     return { ok: false, reason: "validation_failed", errors: v.errors, auditId };

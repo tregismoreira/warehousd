@@ -46,7 +46,9 @@ const ERROR_LABELS: Record<string, string> = {
   invalid_uuid: "not a UUID",
   missing_required: "required value missing",
   unknown_term: "not a term in the bound vocabulary",
-  unvalidatable_term: "bound to a dataset-sourced vocabulary — import its source collection instead",
+  // The admin path always resolves bindings before validating, so this only surfaces when the
+  // vocabulary itself could not be read — apply it, or import its source collection first.
+  unvalidatable_term: "its vocabulary's terms could not be resolved for this collection",
   duplicate_pk: "duplicate primary key in this file",
   constraint_violation: "conflicts with data already in the collection",
 };

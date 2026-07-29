@@ -1,5 +1,6 @@
 import type { WarehousdConfig, FieldConfig } from "../config/schema";
 import { findCollection } from "../config/load";
+import type { TaxonomyBinding } from "../taxonomy";
 
 export type ImportError = { row: number; column: string | null; reason: string };
 
@@ -56,11 +57,18 @@ function coerce(v: unknown, f: FieldConfig): { ok: true; value: unknown } | { ok
   }
 }
 
+/**
+ * @param opts.taxonomies Bindings already resolved from the database by the caller. A
+ * dataset-sourced vocabulary keeps its terms in env-scoped `app.terms`, which this function
+ * cannot reach — it is synchronous and pure so that the unit tests need no database. Supply
+ * the bindings and such a column is validated against `slugs` exactly like a YAML one; omit
+ * them and it is refused as `unvalidatable_term`. The default stays closed.
+ */
 export function validateImportRows(
   cfg: WarehousdConfig,
   collection: string,
   rows: Record<string, unknown>[],
-  opts: { maxRows?: number } = {},
+  opts: { maxRows?: number; taxonomies?: TaxonomyBinding[] } = {},
 ): ImportValidation {
   const c = findCollection(cfg, collection);
   if (!c) return { ok: false, errors: [{ row: -1, column: null, reason: "unknown_collection" }] };
@@ -88,17 +96,23 @@ export function validateImportRows(
   const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null;
   // Build a map of taxonomy field names to their valid slugs.
   //
-  // Only YAML vocabularies can be checked here: a dataset-sourced one keeps its terms in
-  // env-scoped `app.terms`, and this function is synchronous with no database handle. Waving
-  // such a column through would let an import write a term no grant can ever match — and worse,
-  // one no reviewer would notice was unvalidated. Refuse the import instead; see
-  // `unvalidatable_term` below.
+  // A YAML vocabulary carries its terms in the config. A dataset-sourced one keeps them in
+  // env-scoped `app.terms`, which only the caller can read; it supplies them via
+  // `opts.taxonomies`. Without them the column stays unvalidatable, and waving it through
+  // would let an import write a term no grant can ever match — and worse, one no reviewer
+  // would notice was unvalidated. Refuse instead; see `unvalidatable_term` below.
+  const suppliedSlugs = new Map<string, string[]>(
+    (opts.taxonomies ?? []).map((b) => [b.field, b.slugs]));
   const termSlugsMap = new Map<string, Set<string>>();
   const datasetSourcedFields = new Set<string>();
   for (const vocabSlug of c.taxonomies ?? []) {
     const vocab = cfg.taxonomies?.[vocabSlug];
     if (vocab?.terms) termSlugsMap.set(vocabSlug, new Set(Object.keys(vocab.terms)));
-    else if (vocab?.source) datasetSourcedFields.add(vocabSlug);
+    else if (vocab?.source) {
+      const slugs = suppliedSlugs.get(vocabSlug);
+      if (slugs) termSlugsMap.set(vocabSlug, new Set(slugs));
+      else datasetSourcedFields.add(vocabSlug);
+    }
   }
 
   const first = rows[0]!;

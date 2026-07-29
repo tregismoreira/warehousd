@@ -4,6 +4,7 @@ import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, type Pools } from "../src/index";
 import { importCollection } from "../src/import/run";
 import { loadConfig } from "../src/config/load";
+import { ConfigSchema } from "../src/config/schema";
 
 let p: Provisioned, admin: Pool, pools: Pools;
 const cfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
@@ -151,5 +152,66 @@ describe("importCollection", () => {
     expect(r.ok).toBe(true);
     const stored = await admin.query(`select home_address from data_live.people where id=$1`, [U(10)]);
     expect(stored.rows[0].home_address).toBe("1 Main St");
+  });
+});
+
+describe("importCollection: dataset-sourced vocabulary", () => {
+  // Harbor binds `client` to a file collection, which import refuses outright. The capability
+  // this exercises — scoping a dataset collection by a dataset-sourced vocabulary — needs its
+  // own config and its own database.
+  const dsCfg = ConfigSchema.parse({
+    project: "t", server: { port: 1 },
+    taxonomies: {
+      client: { label: "Client", source: { collection: "clients", slug: "client_number", label: "name" } },
+    },
+    collections: {
+      clients: { description: "d", fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        client_number: { type: "text", posture: "allow" },
+        name: { type: "text", posture: "allow" },
+      }},
+      matters: { description: "d", taxonomies: ["client"], fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        matter_number: { type: "text", posture: "allow" },
+      }},
+    },
+  });
+
+  let dp: Provisioned, dAdmin: Pool, dPools: Pools;
+  beforeAll(async () => {
+    dp = await provision("importrun_dsvocab");
+    dAdmin = new Pool({ connectionString: dp.urls.admin });
+    await createAppSchema(dAdmin);
+    await applyConfig(dAdmin, dsCfg);
+    dPools = createPools({ app: dp.urls.admin, dev: dp.urls.dev, live: dp.urls.live, imp: dp.urls.imp });
+    // The live term set comes from live rows, so the source collection is imported first —
+    // importCollection syncs terms on commit.
+    const r = await importCollection(dPools, dsCfg, "ana", "clients", {
+      format: "csv",
+      text: `id,client_number,name\n${U(1)},C-0001,Acme\n${U(2)},C-0002,Globex`,
+    });
+    expect(r.ok).toBe(true);
+  }, 60_000);
+  afterAll(async () => { await dAdmin.end(); await dPools.end(); await dp.end(); });
+
+  it("accepts a row naming a client that exists live", async () => {
+    const r = await importCollection(dPools, dsCfg, "ana", "matters", {
+      format: "csv", text: `id,matter_number,client\n${U(11)},M-1,c-0001`,
+    });
+    expect(r.ok).toBe(true);
+    const stored = await dAdmin.query(`select client from data_live.matters where id=$1`, [U(11)]);
+    expect(stored.rows[0].client).toBe("c-0001");
+  });
+
+  it("rejects a row naming a client that does not — unknown_term, not unvalidatable_term", async () => {
+    const r = await importCollection(dPools, dsCfg, "ana", "matters", {
+      format: "csv", text: `id,matter_number,client\n${U(12)},M-2,c-9999`,
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.reason).toBe("validation_failed");
+    expect(r.errors?.[0]).toMatchObject({ column: "client", reason: "unknown_term" });
+    const stored = await dAdmin.query(`select 1 from data_live.matters where id=$1`, [U(12)]);
+    expect(stored.rowCount).toBe(0);
   });
 });
