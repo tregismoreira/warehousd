@@ -123,8 +123,10 @@ async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
       [user]
     );
     if (existing.rowCount === 0) {
-      for (const [collName, coll] of Object.entries(cfg.collections)) {
-        if (coll.type === "file") continue; // File collections are indexed, not granted like data
+      for (const collName of Object.keys(cfg.collections)) {
+        // File collections are granted too. Indexing puts documents in the database; it does not
+        // make them reachable — search_documents refuses without a grant like anything else.
+        // Skipping them left the demo's own admin unable to search a single document.
         const fields = grantableFields(cfg, collName);
         if (fields.length > 0) {
           await db.query(
@@ -184,8 +186,11 @@ export async function bootstrap(): Promise<void> {
     }
     await generateSynthetic(db, cfg, Number(process.env.WAREHOUSD_SEED ?? 42));
 
-    // 8.5. Sync dataset-sourced vocabulary terms for dev
+    // 8.5. Sync dataset-sourced vocabulary terms. Both envs, once — the term set is a property
+    // of the data, not of the collection being indexed. `live` legitimately yields nothing on a
+    // fresh deployment: data_live is populated by admin import, not by this script.
     await syncDatasetTerms(db, cfg, "dev");
+    await syncDatasetTerms(db, cfg, "live");
 
     // 9. Index file collections
     for (const [name, c] of Object.entries(cfg.collections)) {
@@ -194,8 +199,18 @@ export async function bootstrap(): Promise<void> {
       const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
       await indexCollection(db, "dev", name, resolve(dir, c.source!), { taxonomies: devTaxonomies, metadata });
       if (c.source_live) {
-        await syncDatasetTerms(db, cfg, "live");
         const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
+        // indexCollection throws on a term its bindings don't know, and a dataset-sourced
+        // vocabulary has no live terms until data_live holds rows. Indexing anyway would abort
+        // the whole boot on a deployment whose only fault is not having imported data yet, so
+        // skip and say why — dev content is already indexed and the app comes up.
+        const unpopulated = liveTaxonomies.filter((t) => t.slugs.length === 0);
+        if (unpopulated.length) {
+          console.warn(`[entrypoint] skipping live index of "${name}": no live terms for `
+            + `${unpopulated.map((t) => `"${t.field}"`).join(", ")}. `
+            + `Import rows into data_live for the source collection, then re-run.`);
+          continue;
+        }
         await indexCollection(db, "live", name, resolve(dir, c.source_live), { taxonomies: liveTaxonomies, metadata });
       }
     }
