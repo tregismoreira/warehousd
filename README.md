@@ -88,26 +88,54 @@ deep-merged over it, and `${env:VAR}` interpolation keeps secrets out of YAML.
 project: acme
 server: { port: 8722 }
 
+taxonomies:
+  client:
+    label: Client
+    # dataset-sourced: terms are rows of `clients`, not literals in this file
+    source: { collection: clients, slug: client_number, label: name }
+  tags:
+    label: Tags
+    multiple: true
+    terms:
+      urgent: { label: Urgent }
+      confidential: { label: Confidential }
+
 collections:
+  departments:
+    description: Departments
+    fields:
+      id:   { type: uuid, posture: allow, pk: true }
+      name: { type: text, posture: allow }
+
+  clients:
+    description: Client directory
+    fields:
+      id:            { type: uuid, posture: allow, pk: true }
+      client_number: { type: text, posture: allow }
+      name:          { type: text, posture: allow }
+
   people:
     description: Employee directory
     fields:
       id:              { type: uuid, posture: allow, pk: true }
       full_name:       { type: text, posture: allow }
       email:           { type: text, posture: allow }
-      department_name: { type: text, posture: allow, view_join: departments.name }
+      department_id:   { type: uuid, posture: allow, fk: departments.id }
+      department_name: { type: text, posture: allow, view_join: { table: departments, column: name, on: department_id } }
       home_address:    { type: text, posture: deny }   # can never be granted
 
-  policies:
+  case_files:
     type: file                      # parsed + full-text indexed
-    description: Company policy documents
-    source: ./seed/docs-dev         # dev content — never real corporate files
-    source_live: ./seed/docs-live
-    taxonomy: category
+    description: Client case files
+    source: ./seed/case-files-dev   # dev content — never real corporate files
+    source_live: ./seed/case-files-live
+    taxonomies: [client, tags]      # plural, list of vocabulary slugs
     fields:
-      title:   { posture: allow }
-      content: { posture: allow }
-      path:    { posture: deny }    # gates documents, never readable
+      title:          { posture: allow }
+      content:        { posture: allow }
+      path:           { posture: deny }    # gates documents, never readable
+      matter_number:  { type: text, posture: allow }
+      filed_date:     { type: date, posture: allow }
 
 synthetic:
   documents_per_collection: { people: 40 }
@@ -212,7 +240,7 @@ MCP, or UI imports, and is independently testable.
 apps/web/          Next.js — UI, MCP adapter, auth routes (published as the Docker image)
 packages/broker/   the core: grants, query validation, synthetic data, indexing, YAML loader
 packages/cli/      the published `warehousd` npm CLI
-examples/meridian/ a complete consuming project (the demo company)
+examples/harbor/   a complete consuming project (the demo company)
 ```
 
 ## MCP surface
@@ -276,7 +304,8 @@ yet built:
 | Dev/live isolation | **real** | Two Postgres roles, two pools, selected by token scope. |
 | Synthetic data generation | **real** | From the schema only; deterministic by seed; FK-consistent. |
 | File collections + full-text search | **real** | `.md`/`.txt`; `tsvector` + GIN, `ts_rank_cd` ordering. |
-| Taxonomies and term-scoped grants | **real** | |
+| Taxonomies and term-scoped grants | **real** | Several vocabularies per collection; single- or multi-value; terms from YAML or from a dataset collection's rows. |
+| Multi-predicate grant scoping | **real** | A grant's document filter is a list of predicates, ANDed — across vocabularies, paths, and plain metadata fields. |
 | OAuth 2.1 provider, env-as-scope, dynamic client registration | **real** | 15-min access tokens; scope rules re-run on refresh. |
 | MCP endpoint (streamable HTTP) | **real** | |
 | REST API (`/v1`) | **real** | Same broker and grants as MCP; one status-code table, no per-route invention. |
@@ -286,7 +315,7 @@ yet built:
 | Admin / manager / member web UI | **real** | |
 | Audit log | **real** | Insert-only for the app role. |
 | Real-data import | *simplified* | Admin-only CSV/JSON append into `data_live` through an `INSERT`-only role. No update or delete path. |
-| App-schema migrations | *simplified* | Create-if-not-exists; versioned migrations are planned. |
+| App-schema migrations | *simplified* | Create-if-not-exists plus add-column-if-not-exists, so adding a field or binding a vocabulary lands on an existing collection. Type changes, renames and drops are not applied; versioned migrations are planned. |
 | Semantic / vector search | *stubbed* | `vector(1536)` column and pgvector are reserved but not populated. |
 | `warehousd deploy` | *not built* | Planned; deploy by running the published image yourself for now. |
 | Write path (MCP, REST, and review queue) | **real** | Append-only revisions; `proposal_only` grants hold writes pending until a human approves. Approve/reject are never MCP tools. |
@@ -303,7 +332,7 @@ Consumers never need this — but if you want to work on warehousd itself:
 ```bash
 pnpm install
 pnpm test:up                                             # Postgres 16 + pgvector on :54330
-WAREHOUSD_PROJECT_DIR=$(pwd)/examples/meridian pnpm test # unit + integration
+WAREHOUSD_PROJECT_DIR=$(pwd)/examples/harbor pnpm test # unit + integration
 pnpm lint
 pnpm build                                               # production build + typecheck
 pnpm e2e                                                 # Playwright, real browser
@@ -311,14 +340,14 @@ pnpm test:down
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the full setup, including running the app
-against the Meridian demo company — three personas, six collections, planted
-canary values, and a pre-seeded grant request. Demo mode seeds `ana@demo.local`
-(admin), `marcus@demo.local` (manager), and `mia@demo.local` (member), password
-`demo`.
+against the Harbor Law demo company — seven personas, nineteen collections, planted
+canary values, and a pre-seeded grant request. Demo mode seeds personnel including
+`ana@demo.local` (admin), `marcus@demo.local` (manager), and `mia@demo.local` (member),
+password `demo`.
 
-The demo arc is the shortest way to understand the product: ask about salaries
-as Mia and watch the probe refuse, have Marcus approve a trimmed grant, ask
-again and get an answer, then revoke and watch the next query fail — with every
+The demo arc is the shortest way to understand the product: search case files
+as Mia and watch the probe refuse, have Marcus approve a trimmed grant, search
+again and see results, then revoke and watch the next query fail — with every
 decision visible in the audit browser.
 
 ## Documentation

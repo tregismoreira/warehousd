@@ -2,7 +2,7 @@
 // the hostile-intent probe suite over query_collection, a search_documents success path
 // asserting _rank/document_seq, the dev/live env wall across all five tools (incl. forged
 // env args), and §10 test 6 (env parity). Uses setupWebDbWithData, which applies the
-// meridian YAML, generates synthetic data, seeds live data, and indexes policies for both
+// harbor YAML, generates synthetic data, seeds live data, and indexes policies for both
 // envs — the same recipe as scripts/dev-bootstrap.ts — so DEV_DATABASE_URL/LIVE_DATABASE_URL
 // serve real data instead of just exercising refusal paths.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -20,7 +20,7 @@ let miaCookie: string;
 beforeAll(async () => {
   db = await setupWebDbWithData("mcpaccept");
   admin = new Pool({ connectionString: db.appUrl });
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 
   // Plant canaries in denied columns directly, mirroring packages/broker/test/probe.test.ts —
   // the only thing that should block them is posture, not a missing grant.
@@ -173,7 +173,7 @@ describe("env wall over MCP (§10 test 5, all five tools)", () => {
     });
     expect(out.ok).toBe(true);
     expect(JSON.stringify(out).includes(LIVE_ONLY_CANARY)).toBe(false);
-    // dev has 40 synthetic people (meridian's synthetic.documents_per_collection) plus the
+    // dev has 40 synthetic people (harbor's synthetic.documents_per_collection) plus the
     // canary-planted row; live's seed has exactly 1. A leaked env switch would return 1 row.
     expect(out.documents.length).toBeGreaterThan(1);
   });

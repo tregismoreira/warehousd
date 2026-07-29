@@ -43,7 +43,7 @@ describe("REST API /v1/* routes", () => {
 
   beforeAll(async () => {
     db = await setupWebDbWithConfig("restapi", fixtureDir);
-    miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
     const app = getAppPool();
     const fields = ["id", "title", "message", "submitted_by", "created_at"];
 

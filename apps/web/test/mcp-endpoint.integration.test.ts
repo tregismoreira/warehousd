@@ -4,8 +4,8 @@ import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
 import { upsertClientPolicy, requestGrant, approveGrant, loadConfig } from "@warehousd/broker";
 
 // approveGrant validates verbs against the collection's config, and these fixtures grant over
-// meridian collections — so that is the config the rules have to be checked against.
-const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+// harbor collections — so that is the config the rules have to be checked against.
+const harborCfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 
 import { getAppPool } from "../app/lib/broker";
 
@@ -14,7 +14,7 @@ let miaCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDb("mcpendpoint");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
 afterAll(async () => { await db?.end(); });
 
@@ -112,7 +112,7 @@ describe("/mcp endpoint", () => {
   it("describe_collection is grant-filtered", async () => {
     const app = getAppPool();
     const g = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "dev", purposeLabel: "t", allowedFields: ["id"] });
-    await approveGrant(app, meridianCfg, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    await approveGrant(app, harborCfg, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
     const token = await mintAccessToken("env:dev");
     const { body } = await rpc(token, "tools/call", { name: "describe_collection", arguments: { name: "people" } });
     const out = JSON.parse(body.result.content[0].text);
@@ -136,7 +136,7 @@ describe("/mcp endpoint", () => {
 
   it("search_documents refuses an ungranted collection with a hint (grant-filtering entry point)", async () => {
     const token = await mintAccessToken("env:dev");
-    // `policies` is the one `type: file` collection in examples/meridian/warehousd.yml. No grant
+    // `policies` is a `type: file` collection in examples/harbor/warehousd.yml. No grant
     // exists in this test, so this exercises the deny-by-default path — same boundary the unit
     // tests in mcp-tools.test.ts already cover; a real successful search against live synthetic/
     // indexed content is out of scope here since apps/web's test harness doesn't provision

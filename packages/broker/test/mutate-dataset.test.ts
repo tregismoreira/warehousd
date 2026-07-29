@@ -243,8 +243,9 @@ describe("broker.mutate dataset operations", () => {
           writable: true,
           fields: {
             id: { type: "uuid", posture: "allow", pk: true },
-            dept_id: { type: "uuid", posture: { read: "allow", write: "allow" } },
-            dept_name: { type: "text", posture: "allow", view_join: "departments.name" },
+            dept_id: { type: "uuid", posture: { read: "allow", write: "allow" }, fk: "departments.id" },
+            dept_name: { type: "text", posture: "allow",
+              view_join: { table: "departments", column: "name", on: "dept_id" } },
           },
         },
       },
@@ -270,7 +271,7 @@ describe("broker.mutate dataset operations", () => {
     });
     await approveGrant(app, cfg, grantId, "admin", {
       verbs: ["read", "update"],
-      documentFilter: { field: "owner", op: "eq", value: "$self" },
+      documentFilters: [{ field: "owner", op: "eq", value: "$self" }],
     });
 
     // Insert document owned by someone else

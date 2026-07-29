@@ -7,8 +7,8 @@ import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
 import { upsertClientPolicy, approveGrant, requestGrant, loadConfig } from "@warehousd/broker";
 
 // approveGrant validates verbs against the collection's config, and these fixtures grant over
-// meridian collections — so that is the config the rules have to be checked against.
-const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+// harbor collections — so that is the config the rules have to be checked against.
+const harborCfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 
 import { getAppPool } from "../app/lib/broker";
 
@@ -23,7 +23,7 @@ beforeAll(async () => {
   appPool = getAppPool();
 
   // Sign in as admin to register SSO provider
-  anaCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
+  anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
 
   // Register the fake OIDC provider (requires admin role)
   const registerRes = await db.auth.handler(
@@ -36,7 +36,7 @@ beforeAll(async () => {
       body: JSON.stringify({
         providerId: "test-oidc",
         issuer: fakeIdp.issuer,
-        domain: "meridian.demo",
+        domain: "harbor.demo",
         oidcConfig: {
           clientId: "test-client",
           clientSecret: "test-secret",
@@ -59,8 +59,8 @@ afterAll(async () => {
 describe("SSO: JIT provisioning", () => {
   it("signs in a new SSO identity and creates a user with role='member'", async () => {
     fakeIdp.setNextUser({
-      sub: "newperson@meridian.demo",
-      email: "newperson@meridian.demo",
+      sub: "newperson@harbor.demo",
+      email: "newperson@harbor.demo",
       email_verified: true,
       name: "New Person",
     });
@@ -70,12 +70,12 @@ describe("SSO: JIT provisioning", () => {
     // Query the database for the new user
     const result = await appPool.query(
       `select id, email, role from app."user" where email = $1`,
-      ["newperson@meridian.demo"],
+      ["newperson@harbor.demo"],
     );
 
     expect(result.rows).toHaveLength(1);
     const user = result.rows[0];
-    expect(user.email).toBe("newperson@meridian.demo");
+    expect(user.email).toBe("newperson@harbor.demo");
     expect(user.role).toBe("member");
   });
 });
@@ -83,8 +83,8 @@ describe("SSO: JIT provisioning", () => {
 describe("SSO: No demotion on link", () => {
   it("an existing admin who links an SSO account stays admin", async () => {
     fakeIdp.setNextUser({
-      sub: "ana@meridian.demo",
-      email: "ana@meridian.demo",
+      sub: "ana@harbor.demo",
+      email: "ana@harbor.demo",
       email_verified: true,
       name: "Ana",
     });
@@ -94,7 +94,7 @@ describe("SSO: No demotion on link", () => {
     // Check ana's role
     const result = await appPool.query(
       `select role from app."user" where email = $1`,
-      ["ana@meridian.demo"],
+      ["ana@harbor.demo"],
     );
 
     expect(result.rows).toHaveLength(1);
@@ -136,8 +136,8 @@ describe("SSO: MCP authorize delegates to the IdP", () => {
 
     // Step 2: Sign in via SSO to establish a session
     fakeIdp.setNextUser({
-      sub: "scenario3ssouser@meridian.demo",
-      email: "scenario3ssouser@meridian.demo",
+      sub: "scenario3ssouser@harbor.demo",
+      email: "scenario3ssouser@harbor.demo",
       email_verified: true,
       name: "Scenario 3 SSO User",
     });
@@ -194,8 +194,8 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
 
     // Sign in via SSO to establish session (use fresh SSO-only user)
     fakeIdp.setNextUser({
-      sub: "rule1ssouser@meridian.demo",
-      email: "rule1ssouser@meridian.demo",
+      sub: "rule1ssouser@harbor.demo",
+      email: "rule1ssouser@harbor.demo",
       email_verified: true,
       name: "Rule 1 SSO User",
     });
@@ -252,8 +252,8 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
 
     // Sign in via SSO to establish session (use fresh SSO-only user with no live grant)
     fakeIdp.setNextUser({
-      sub: "rule2ssouser@meridian.demo",
-      email: "rule2ssouser@meridian.demo",
+      sub: "rule2ssouser@harbor.demo",
+      email: "rule2ssouser@harbor.demo",
       email_verified: true,
       name: "Rule 2 SSO User",
     });
@@ -309,8 +309,8 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
 
     // Sign in via SSO to establish session and get the user ID
     fakeIdp.setNextUser({
-      sub: "rule3ssouser@meridian.demo",
-      email: "rule3ssouser@meridian.demo",
+      sub: "rule3ssouser@harbor.demo",
+      email: "rule3ssouser@harbor.demo",
       email_verified: true,
       name: "Rule 3 SSO User",
     });
@@ -319,7 +319,7 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
     // Get the new SSO user's ID from the database
     const userResult = await appPool.query(
       `select id from app."user" where email = $1`,
-      ["rule3ssouser@meridian.demo"],
+      ["rule3ssouser@harbor.demo"],
     );
     const userId = userResult.rows[0].id;
 
@@ -331,7 +331,7 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
       purposeLabel: "test",
       allowedFields: ["id"],
     });
-    await approveGrant(appPool, meridianCfg, grantId, "ana", {
+    await approveGrant(appPool, harborCfg, grantId, "ana", {
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
     });
 

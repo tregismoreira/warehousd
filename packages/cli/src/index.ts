@@ -2,7 +2,8 @@ import { Command } from "commander";
 import { Pool } from "pg";
 import { resolve } from "node:path";
 import {
-  loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection,
+  loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms,
+  loadTaxonomyBindings, fileMetadataFields,
 } from "@warehousd/broker";
 import { runInit } from "./init";
 import { runStart } from "./start";
@@ -29,7 +30,12 @@ export async function runApply(projectDir: string, dbUrl: string): Promise<void>
 export async function runSeed(projectDir: string, dbUrl: string, seed = 42): Promise<void> {
   const cfg = loadConfig(projectDir);
   const db = new Pool({ connectionString: dbUrl });
-  try { await regenerateSynthetic(db, cfg, seed); } finally { await db.end(); }
+  // Dataset-backed vocabularies read their terms out of the rows just generated, so the sync
+  // has to happen here — a later `warehousd index` would otherwise see a stale term set.
+  try {
+    await regenerateSynthetic(db, cfg, seed);
+    await syncDatasetTerms(db, cfg, "dev");
+  } finally { await db.end(); }
 }
 
 export async function runIndex(
@@ -46,12 +52,13 @@ export async function runIndex(
   // Invariant 5: the YAML `source` dir is DEV content. Live indexing must be explicit.
   const dir = env === "dev" ? (opts.source ?? c.source!) : (opts.source ?? c.source_live);
   if (!dir) throw new Error(`Indexing env=live requires \`source_live\` in warehousd.yml or --source`);
-  const taxonomy = c.taxonomy
-    ? { field: c.taxonomy, slugs: Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) }
-    : undefined;
   const db = new Pool({ connectionString: dbUrl });
   try {
-    return await indexCollection(db, env, collection, resolve(projectDir, dir), { taxonomy });
+    // Sync dataset-sourced vocabulary terms before indexing
+    await syncDatasetTerms(db, cfg, env);
+    const taxonomies = await loadTaxonomyBindings(db, cfg, collection, env);
+    const metadata = fileMetadataFields(c);
+    return await indexCollection(db, env, collection, resolve(projectDir, dir), { taxonomies, metadata });
   } finally { await db.end(); }
 }
 
@@ -132,17 +139,19 @@ program.command("regen-synth")
     const cfg = loadConfig(o.dir);
     const pool = new Pool({ connectionString: db });
     try {
-      // Seed truncates and generates synthetic data
+      // Seed truncates, generates synthetic data, and syncs the dev term set from those rows.
       await runSeed(o.dir, db, Number(o.seed));
-      // Re-index all file collections
+      // Re-index all file collections. `metadata` is not optional in practice: every other
+      // index call site passes it, and omitting it here would re-index a changed file with
+      // its declared metadata columns left null — the exact drift fileMetadataFields exists
+      // to prevent.
       for (const [name, c] of Object.entries(cfg.collections)) {
         if (c.type === "file") {
           const env = "dev";
           const dir = c.source!;
-          const taxonomy = c.taxonomy
-            ? { field: c.taxonomy, slugs: Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {}) }
-            : undefined;
-          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomy });
+          const taxonomies = await loadTaxonomyBindings(pool, cfg, name, env);
+          const metadata = fileMetadataFields(c);
+          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomies, metadata });
         }
       }
     } finally {

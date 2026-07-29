@@ -7,8 +7,8 @@ let marcusCookie: string, miaCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDbWithData("grantapprove");
-  marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+  marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
 afterAll(async () => { await db?.end(); });
 
@@ -34,7 +34,7 @@ async function grantRow(id: string) {
 }
 
 describe("approve — document scoping actually persists", () => {
-  it("path selection lands in document_filter, not a dropped key", async () => {
+  it("path selection lands in documentFilters array, not a dropped key", async () => {
     const id = await pending("mia", "policies", ["title", "content"], "live");
     const { POST } = await import("../app/api/grants/route");
     const res = await POST(req({
@@ -44,29 +44,31 @@ describe("approve — document scoping actually persists", () => {
     expect(res.status).toBe(200);
     const g = await grantRow(id);
     expect(g.status).toBe("approved");
-    expect(g.document_filter).toEqual({ field: "path", op: "in", value: ["security.md"] });
+    expect(g.document_filter).toEqual([{ field: "path", op: "in", value: ["security.md"] }]);
   });
 
-  it("term selection lands in document_filter on the taxonomy field", async () => {
+  it("term selection lands in documentFilters array on the taxonomy field", async () => {
     const id = await pending("marcus", "policies", ["title", "content"], "live");
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["title", "content"],
-      selectedTerms: ["hr", "benefits"],
+      selectedTerms: { department: ["hr", "finance"] },
     }, marcusCookie) as any);
     const g = await grantRow(id);
-    expect(g.document_filter).toEqual({ field: "category", op: "in", value: ["hr", "benefits"] });
+    expect(g.document_filter).toEqual([{ field: "department", op: "in", value: ["hr", "finance"] }]);
   });
 
-  it("terms win over paths when both are sent", async () => {
+  it("terms and paths can coexist in the documentFilters array", async () => {
     const id = await pending("mia", "policies", ["title"], "dev");
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["title"],
-      selectedPaths: ["hr/pto.md"], selectedTerms: ["finance"],
+      selectedPaths: ["hr/pto.md"], selectedTerms: { department: ["finance"] },
     }, marcusCookie) as any);
     const g = await grantRow(id);
-    expect(g.document_filter.field).toBe("category");
+    expect(g.document_filter).toHaveLength(2);
+    expect(g.document_filter).toContainEqual({ field: "department", op: "in", value: ["finance"] });
+    expect(g.document_filter).toContainEqual({ field: "path", op: "in", value: ["hr/pto.md"] });
   });
 
   it("no selection leaves document_filter null (whole collection)", async () => {
@@ -82,11 +84,11 @@ describe("approve — document scoping actually persists", () => {
     const { POST } = await import("../app/api/grants/route");
     await POST(req({
       action: "approve", id, allowedFields: ["content"],
-      selectedTerms: ["hr"],
-      documentFilter: { field: "content", op: "in", value: ["anything"] }, // forged
+      selectedTerms: { department: ["hr"] },
+      documentFilter: [{ field: "content", op: "in", value: ["anything"] }], // forged
     }, marcusCookie) as any);
     const g = await grantRow(id);
-    expect(g.document_filter.field).toBe("category");
+    expect(g.document_filter[0].field).toBe("department");
   });
 });
 

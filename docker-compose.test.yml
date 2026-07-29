@@ -1,6 +1,23 @@
 services:
   db:
     image: pgvector/pgvector:pg16
+    # Throughput over durability, but not at the cost of surviving a crash. synchronous_commit=off
+    # takes the WAL flush off the commit path, which is the dominant cost for a suite that commits
+    # constantly, and risks only the last few commits if the server dies. `fsync=off` and
+    # `full_page_writes=off` were also set here and have been removed deliberately: they buy
+    # comparatively little on top, and they turn any crash into an unrecoverable cluster — one
+    # backend exiting abnormally then costs the whole run with `the database system is in recovery
+    # mode`, which reads like a broken test rather than a broken server.
+    # max_connections covers several parallel workers holding small pools, across sibling
+    # checkouts sharing this server.
+    command:
+      - postgres
+      - -c
+      - synchronous_commit=off
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

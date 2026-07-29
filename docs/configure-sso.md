@@ -57,7 +57,7 @@ curl -X POST http://localhost:8722/api/sso/providers \
   -d '{
     "providerId": "keycloak-oidc",
     "issuer": "http://127.0.0.1:8780/realms/warehousd-test",
-    "domain": "meridian.demo",
+    "domain": "harbor.demo",
     "oidcConfig": {
       "clientId": "warehousd-oidc",
       "clientSecret": "oidc-secret",
@@ -82,7 +82,7 @@ curl -X POST http://localhost:8722/api/sso/providers \
   -d '{
     "providerId": "keycloak-saml",
     "issuer": "http://127.0.0.1:8780/realms/warehousd-test",
-    "domain": "meridian.demo",
+    "domain": "harbor.demo",
     "samlConfig": {
       "entryPoint": "http://127.0.0.1:8780/realms/warehousd-test/protocol/saml",
       "cert": "<IdP signing certificate, PEM, no headers/footers>",

@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
       ...g,
       effectiveStatus: expired ? "expired" : g.status,
       collectionType: c?.type ?? "dataset",
-      taxonomyField: c?.taxonomy ?? null,
+      taxonomyFields: c?.taxonomies ?? [],
     };
   });
 

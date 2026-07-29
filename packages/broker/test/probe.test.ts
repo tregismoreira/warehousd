@@ -1,6 +1,7 @@
 import { it, expect, beforeAll, afterAll, vi, describe } from "vitest";
 import { Pool } from "pg";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
@@ -11,7 +12,7 @@ import { loadConfig } from "../src/config/load";
 import { DENIED_CANARY, SSN_CANARY } from "./fixtures/canaries";
 import type { QueryIntent } from "../src/types";
 
-const cfg = loadConfig(join(__dirname, "../../../examples/meridian"));
+const cfg = loadConfig(join(__dirname, "../../../examples/harbor"));
 const allProbes = JSON.parse(readFileSync(join(__dirname, "fixtures/probes.json"), "utf8")) as
   { name: string; surface?: string; intent: QueryIntent; expect: "allowed" | "refused" }[];
 // Skip document-specific probes (tested separately via searchDocuments)
@@ -119,7 +120,9 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
 
     // Seed 2 fixture docs: normal one + restricted one with canary
     const { mkdtempSync } = await import("node:fs");
-    const tmpDir = mkdtempSync("probe-doc-");
+    // Absolute prefix: a bare one resolves against the CWD, so a run that dies before the
+    // rmSync below leaves the fixture directory sitting in the repo root.
+    const tmpDir = mkdtempSync(join(tmpdir(), "probe-doc-"));
     const fs = await import("node:fs");
     fs.mkdirSync(`${tmpDir}/restricted`, { recursive: true });
     fs.writeFileSync(`${tmpDir}/normal.md`, "# Normal Policy\n\nThis is a work policy.");
@@ -129,7 +132,7 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
     await indexCollection(db2, "dev", "policies", tmpDir);
     fs.rmSync(tmpDir, { recursive: true });
 
-    // Approve grant with document_filter excluding the restricted document
+    // Approve grant with documentFilters excluding the restricted document
     const { approveGrant } = await import("../src/grants/manage");
     const grantRes = await db2.query(
       `insert into app.grants (user_id, collection, allowed_fields, env, status)
@@ -138,7 +141,7 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
     );
     const grantId = grantRes.rows[0].id;
     await approveGrant(db2, docCfg, grantId, "admin", {
-      documentFilter: { field: "path", op: "in", value: ["normal.md"] },
+      documentFilters: [{ field: "path", op: "in", value: ["normal.md"] }],
     });
 
     pools2 = createPools({ app: p2.urls.admin, dev: p2.urls.dev, live: p2.urls.live });

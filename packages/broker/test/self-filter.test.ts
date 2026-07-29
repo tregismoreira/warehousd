@@ -66,7 +66,7 @@ it("$self with op:eq scopes to the calling user", async () => {
   const grantId = grantRes.rows[0].id;
 
   await approveGrant(db, cfg, grantId, "admin", {
-    documentFilter: { field: "owner", op: "eq", value: "$self" },
+    documentFilters: [{ field: "owner", op: "eq", value: "$self" }],
   });
 
   const r = await broker.query(makeCtx("alice"), { collection: "notes" });
@@ -87,7 +87,7 @@ it("$self inside an op:in array resolves per element", async () => {
   const grantId = grantRes.rows[0].id;
 
   await approveGrant(db, cfg, grantId, "admin", {
-    documentFilter: { field: "owner", op: "in", value: ["alice", "$self"] },
+    documentFilters: [{ field: "owner", op: "in", value: ["alice", "$self"] }],
   });
 
   const r = await broker.query(makeCtx("bob"), { collection: "notes" });
@@ -108,7 +108,7 @@ it("'$self-service' is treated as a literal, not a sentinel", async () => {
   const grantId = grantRes.rows[0].id;
 
   await approveGrant(db, cfg, grantId, "admin", {
-    documentFilter: { field: "owner", op: "eq", value: "$self-service" },
+    documentFilters: [{ field: "owner", op: "eq", value: "$self-service" }],
   });
 
   const r = await broker.query(makeCtx("charlie"), { collection: "notes" });
@@ -130,7 +130,7 @@ it("the generated SQL contains no literal '$self'", async () => {
   const grantId = grantRes.rows[0].id;
 
   await approveGrant(db, cfg, grantId, "admin", {
-    documentFilter: { field: "owner", op: "eq", value: "$self" },
+    documentFilters: [{ field: "owner", op: "eq", value: "$self" }],
   });
 
   // Query and ensure it resolves properly

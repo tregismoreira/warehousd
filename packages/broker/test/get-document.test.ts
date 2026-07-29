@@ -94,7 +94,7 @@ describe("broker.getDocument", () => {
     });
     await approveGrant(app, cfg, grantId, "admin", {
       verbs: ["read"],
-      documentFilter: { field: "status", op: "eq", value: "active" },
+      documentFilters: [{ field: "status", op: "eq", value: "active" }],
     });
 
     // Insert inactive document
@@ -120,7 +120,7 @@ describe("broker.getDocument", () => {
     });
     await approveGrant(app, cfg, grantId, "admin", {
       verbs: ["read"],
-      documentFilter: { field: "owner", op: "eq", value: "$self" },
+      documentFilters: [{ field: "owner", op: "eq", value: "$self" }],
     });
 
     // Insert document owned by self_user

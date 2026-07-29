@@ -102,7 +102,7 @@ export type ApproveGrantError = "unknown_grant" | "invalid_verbs";
 // caller can take by accident.
 export async function approveGrant(
   app: Pool, cfg: WarehousdConfig, id: string, by: string,
-  opts: { allowedFields?: string[]; expiresAt?: string; documentFilter?: DocumentFilter;
+  opts: { allowedFields?: string[]; expiresAt?: string; documentFilters?: DocumentFilter[];
           verbs?: string[]; mode?: "direct" | "proposal_only"; orgId?: string } = {},
 ): Promise<{ ok: true } | { ok: false; error: ApproveGrantError; detail?: string }> {
   const orgId = opts.orgId ?? DEFAULT_ORG_ID;
@@ -126,7 +126,7 @@ export async function approveGrant(
        verbs=$6, mode=$7
      where id=$1 and org_id=$8 and status='pending'`,
     [id, by, opts.allowedFields ?? null, opts.expiresAt ?? null,
-     opts.documentFilter ? JSON.stringify(opts.documentFilter) : null,
+     opts.documentFilters && opts.documentFilters.length ? JSON.stringify(opts.documentFilters) : null,
      verbs, mode, orgId]);
   // Zero rows means the grant was not pending — already decided, or raced.
   return (result.rowCount ?? 0) > 0 ? { ok: true } : { ok: false, error: "unknown_grant" };

@@ -16,12 +16,17 @@ const q = (id: string) => {
   return `"${id}"`;
 };
 
+// A filter the builder can express no SQL for. Distinct from the generic Error above so the
+// broker can answer `invalid_intent` — a caller's mistake — rather than `internal_error`.
+export class UnsupportedFilter extends Error {}
+
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
   // searchFields: the dataset fields carrying a generated "<f>_tsv" column. Omitted means a
   // file collection, whose view exposes a single fixed `tsv`. Field names go through q() like
   // every other identifier — they are config-validated, but that is the builder's rule to keep.
-  opts: { documentFilter?: DocumentFilter | null; q?: string; searchFields?: string[] } = {},
+  opts: { documentFilters?: DocumentFilter[]; q?: string;
+          isMultiValueField?: (field: string) => boolean; searchFields?: string[] } = {},
 ): { text: string; values: unknown[] } {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const view = `${schema}.v_${intent.collection}`;
@@ -59,19 +64,46 @@ export function buildSelect(
 
   const where: string[] = [];
   for (const f of intent.filters ?? []) {
+    const isMulti = opts.isMultiValueField?.(f.field) ?? false;
     if (f.op === "in") {
       const arr = Array.isArray(f.value) ? f.value : [f.value];
-      where.push(`${q(f.field)} in (${arr.map(param).join(", ")})`);
+      // An empty in-list matches nothing. Say so outright — the same guard the grant's
+      // document filters below have always had; intent filters were missing it.
+      if (!arr.length) { where.push("false"); continue; }
+      if (isMulti) {
+        // For multi-value columns, use overlap operator: "col" && $n::text[]
+        const arrParam = param(arr);
+        where.push(`${q(f.field)} && ${arrParam}::text[]`);
+      } else {
+        where.push(`${q(f.field)} in (${arr.map(param).join(", ")})`);
+      }
+    } else if (isMulti && f.op === "eq") {
+      // For multi-value columns with eq, use: $n = any("col")
+      where.push(`${param(f.value)} = any(${q(f.field)})`);
+    } else if (isMulti) {
+      // Ordering and pattern operators have no defensible meaning against a set of terms, and
+      // the scalar form below would compare text[] against text — a driver error the caller
+      // can do nothing with. Refuse the intent instead; broker.ts maps this to invalid_intent.
+      throw new UnsupportedFilter(`operator "${f.op}" is not supported on multi-value field "${f.field}"`);
     } else {
       where.push(`${q(f.field)} ${OP_SQL[f.op]} ${param(f.value)}`);
     }
   }
-  // AND the grant-carried document filter
-  const rf = opts.documentFilter;
-  if (rf) {
+  // AND all grant-carried document filters
+  for (const rf of opts.documentFilters ?? []) {
+    const isMulti = opts.isMultiValueField?.(rf.field) ?? false;
     if (rf.op === "in") {
       const arr = Array.isArray(rf.value) ? rf.value : [rf.value];
-      where.push(arr.length ? `${q(rf.field)} in (${arr.map(param).join(", ")})` : `false`);
+      if (isMulti) {
+        // For multi-value columns, use overlap operator: "col" && $n::text[]
+        const arrParam = param(arr);
+        where.push(arr.length ? `${q(rf.field)} && ${arrParam}::text[]` : `false`);
+      } else {
+        where.push(arr.length ? `${q(rf.field)} in (${arr.map(param).join(", ")})` : `false`);
+      }
+    } else if (isMulti) {
+      // For multi-value columns with eq, use: $n = any("col")
+      where.push(`${param(rf.value)} = any(${q(rf.field)})`);
     } else {
       where.push(`${q(rf.field)} = ${param(rf.value)}`);
     }

@@ -61,11 +61,11 @@ it("approving a second grant for the same (user, collection, env) fails (design 
   await expect(approveGrant(admin, cfg, id2, "marcus")).rejects.toThrow(/grants_one_active|duplicate key/);
 });
 
-it("approveGrant persists documentFilter", async () => {
+it("approveGrant persists documentFilters array", async () => {
   const id = await requestGrant(admin, { userId: "u2", collection: "people", orgId: "default", env: "dev", purposeLabel: "p", allowedFields: ["title","content"] });
-  await approveGrant(admin, cfg, id, "marcus", { documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] } });
+  await approveGrant(admin, cfg, id, "marcus", { documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md"] }] });
   const g = await loadActiveGrant(admin, { userId: "u2", env: "dev", orgId: "default" }, "people");
-  expect(g?.documentFilter?.op).toBe("in");
+  expect(g?.documentFilter?.[0]?.op).toBe("in");
 });
 
 it("denyGrant returns false for nonexistent grant", async () => {

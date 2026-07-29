@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
+import { generateSynthetic } from "../src/synthetic/generate";
 import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
 
 const cfg: WarehousdConfig = {
@@ -108,14 +109,67 @@ describe("file collection apply", () => {
   });
 });
 
+describe("apply: additive field on an existing dataset collection", () => {
+  const before = ConfigSchema.parse({
+    project: "t", server: { port: 1 },
+    synthetic: { documents_per_collection: { people: 5 } },
+    collections: { people: { description: "dir", fields: {
+      id: { type: "uuid", posture: "allow", pk: true },
+      email: { type: "text", posture: "allow" },
+    }}},
+  });
+  // `role` is declared *before* `email`, not appended: a view can only be replaced in place
+  // when the new column list extends the old one, so a field added mid-list is the case that
+  // catches `create or replace view` where an appended one would not.
+  const after = ConfigSchema.parse({
+    project: "t", server: { port: 1 },
+    synthetic: { documents_per_collection: { people: 5 } },
+    collections: { people: { description: "dir", fields: {
+      id: { type: "uuid", posture: "allow", pk: true },
+      role: { type: "text", posture: "allow" },
+      email: { type: "text", posture: "allow" },
+      hire_date: { type: "date", posture: "allow", nullable: true },
+    }}},
+  });
+
+  it("adds the new columns in both envs and generates without error", async () => {
+    p = await provision("apply_addcol");
+    const db = new Pool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, before);
+    // `create table if not exists` is a no-op the second time round, so only an explicit
+    // `add column` can carry the new fields onto the already-created table.
+    await applyConfig(db, after);
+
+    for (const schema of ["data_synth", "data_live"]) {
+      const cols = await db.query(
+        `select column_name from information_schema.columns
+         where table_schema=$1 and table_name='people' order by column_name`, [schema]);
+      // `org_id` is on every base table for tenant isolation; it is not a declared field, so
+      // it appears here and deliberately not on the view below.
+      expect(cols.rows.map((r) => r.column_name)).toEqual(["email", "hire_date", "id", "org_id", "role"]);
+      // The view has to carry them too, or the broker can never read them.
+      const view = await db.query(
+        `select column_name from information_schema.columns
+         where table_schema=$1 and table_name='v_people' order by column_name`, [schema]);
+      expect(view.rows.map((r) => r.column_name)).toEqual(["email", "hire_date", "id", "role"]);
+    }
+    // The generator builds its insert from the config, so a missing column fails here.
+    await generateSynthetic(db, after, 42);
+    const n = (await db.query(`select count(*)::int as n from data_synth.people where role is not null`)).rows[0].n;
+    expect(n).toBe(5);
+    await db.end();
+  });
+});
+
 describe("apply: taxonomy", () => {
   const cfgIn = {
     project: "t", server: { port: 1 },
     taxonomies: { category: { label: "Category", terms: { hr: { label: "HR" }, finance: { label: "Finance" } } } },
     collections: {
-      notes:  { description: "d", taxonomy: "category", fields: {
+      notes:  { description: "d", taxonomies: ["category"], fields: {
         id: { type: "uuid", posture: "allow", pk: true } } },
-      briefs: { description: "d", type: "file", source: "./x", taxonomy: "category", fields: {
+      briefs: { description: "d", type: "file", source: "./x", taxonomies: ["category"], fields: {
         title: { posture: "allow" }, content: { posture: "allow" } } },
     },
   };

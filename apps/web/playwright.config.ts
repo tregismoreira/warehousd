@@ -17,7 +17,7 @@ const url = (role: string, pw: string) => `postgres://${role}:${pw}@127.0.0.1:54
 // corrupts state, but a shared port makes this run *test the other checkout's application* and
 // report the result as ours. So the port is derived too, rather than left to a flag someone has
 // to remember. FNV-1a over the slug lands in 8800-8899, clear of 8722 (`pnpm dev`), 8723
-// (`warehousd start`'s database), 8780 (Keycloak) and 8791 (the fake IdP).
+// (`warehousd start`'s database) and 8780 (Keycloak).
 function derivePort(slug: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < slug.length; i++) {
@@ -73,7 +73,7 @@ export default defineConfig({
       DEV_WRITE_DATABASE_URL: url("warehousd_dev_write", "pw"),
       LIVE_WRITE_DATABASE_URL: url("warehousd_live_write", "pw"),
       IMPORT_DATABASE_URL: url("warehousd_import", "pw"),
-      WAREHOUSD_PROJECT_DIR: resolve(ROOT, "examples/meridian"),
+      WAREHOUSD_PROJECT_DIR: resolve(ROOT, "examples/harbor"),
       WAREHOUSD_DEMO: "true",
       // Throwaway — this database is dropped and rebuilt by scripts/e2e-setup.ts on every run.
       BETTER_AUTH_SECRET: "e2e-secret-at-least-32-chars-long-0000",

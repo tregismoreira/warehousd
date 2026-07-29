@@ -8,7 +8,9 @@ describe("bootstrap", () => {
   let provisioned: Awaited<ReturnType<typeof provision>>;
 
   beforeEach(async () => {
-    provisioned = await provision("bootstrap");
+    // Bare, not the template: this suite is what proves ensureSchemasAndRoles creates the
+    // schemas and roles in the first place, so it has to start from an empty database.
+    provisioned = await provision("bootstrap", { bare: true });
     db = new Pool({ connectionString: provisioned.urls.admin });
   });
 

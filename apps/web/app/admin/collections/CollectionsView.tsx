@@ -13,20 +13,26 @@ type ApplyStatus = "not_applied" | "applied" | "drifted";
 // becomes {read:"allow", write:"deny"} by the time it reaches this API.
 type Posture = { read: "allow" | "deny"; write: "allow" | "deny" };
 
+interface ViewJoin {
+  table: string;
+  column: string;
+  on: string;
+}
+
 interface Field {
   name: string;
   type: string | null;
   posture: Posture;
   pk: boolean;
   fk: string | null;
-  view_join: string | null;
+  view_join: ViewJoin | null;
 }
 
 interface Collection {
   name: string;
   description: string;
   type: "dataset" | "file";
-  taxonomy: string | null;
+  taxonomies: string[];
   status: ApplyStatus;
   appliedAt: string | null;
   fields: Field[];
@@ -147,7 +153,7 @@ export function CollectionsView() {
                         <PostureBadge posture={field.posture} />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {field.pk ? "pk" : field.fk ? `fk:${field.fk}` : field.view_join ? `join:${field.view_join}` : "—"}
+                        {field.pk ? "pk" : field.fk ? `fk:${field.fk}` : field.view_join ? `join:${field.view_join.table}.${field.view_join.column}` : "—"}
                       </TableCell>
                     </TableRow>
                   ))}

@@ -24,11 +24,72 @@ for the SSO suite); `pnpm test:down` tears it down with its volume.
 ```bash
 pnpm test:up
 pnpm lint
-WAREHOUSD_PROJECT_DIR=examples/meridian pnpm test
+WAREHOUSD_PROJECT_DIR=examples/harbor pnpm test
 pnpm build
 pnpm e2e
 pnpm test:down
 ```
+
+## Template databases
+
+`pnpm test` used to bootstrap every test database from scratch: schemas, roles, the app
+schema, a `@better-auth/cli migrate` subprocess and three persona signups, forty times over.
+That work is identical every time, so `vitest.global-setup.ts` does it once into three
+template databases and each test copies one with `create database … template …`, which is a
+file copy.
+
+- `wh_tmpl_broker_<suffix>` — schemas, grants and the cluster-global data roles.
+- `wh_tmpl_web_<suffix>` — the above plus the app schema, the Better Auth migration and the
+  three personas. Built by `bootstrapWebDb` in `apps/web/test/helpers/web-db.ts`.
+- `wh_tmpl_web_data_<suffix>` — layered on the previous one, plus the whole harbor example:
+  config, synthetic data, live seed and the file-collection indexes.
+
+The `<suffix>` is a hash of the checkout path. Databases are cluster-global and sibling
+workspaces share this Postgres, so without it one workspace's globalSetup would drop the
+template another one is mid-run cloning from — the same destructive failure described under
+"Running two checkouts at once" below.
+
+Templates are **left in place between runs**, so a second `pnpm test` skips the bootstrap
+entirely. They rebuild when a hash of `packages/broker/src/**`, `apps/web/lib/**`,
+`examples/harbor/**` and `pnpm-lock.yaml` changes — the whole of `apps/web/lib` because
+`oauth.ts` and `sso.ts` decide which tables the Better Auth migration creates. To force it:
+
+```bash
+WAREHOUSD_TEST_REBUILD_TEMPLATES=1 pnpm test
+```
+
+Because nothing else drives the bootstrap against an empty database any more,
+`apps/web/test/entrypoint-bootstrap.integration.test.ts` does — calling the same
+`bootstrapWebDb` the template is built from, so the two cannot drift. `bootstrap.test.ts`
+likewise provisions a bare database rather than a copy of the template.
+
+`pnpm test` runs in two passes: `test:parallel` (every file, four workers) then `test:serial`.
+`WAREHOUSD_TEST_WORKERS` changes the worker count — it defaults to 4 because sibling
+workspaces share this machine.
+
+Arguments are forwarded, so `pnpm test change-feed` and
+`pnpm test packages/broker/test/types.test.ts --reporter=verbose` both work. That needs
+`scripts/run-tests.ts` rather than a `&&` chain: pnpm hands trailing arguments to the *last*
+command in a chain, so a filter would have run the parallel pass unfiltered and then failed the
+serial one on a name it could never match. The wrapper sends a filter to whichever pass owns
+the file.
+
+Two suites are in the serial pass, both because they assert on state that is global to the
+Postgres *cluster* rather than to their own database:
+
+- `bootstrap.test.ts` rotates the `warehousd_dev` password to prove the escaping round-trips.
+  Roles are cluster-global, so a parallel worker's pool hits that window and fails with
+  `password authentication failed`.
+- `change-feed.test.ts` expects an entry to be readable immediately after the write. The feed
+  holds a row back until `pg_snapshot_xmin` passes its `xmin`, which is what stops `seq` from
+  being handed out non-monotonically (see the comment at `broker.ts:1087`). Transaction ids are
+  cluster-global, so an open transaction in *any other database on the same server* keeps that
+  watermark below the new row and the feed correctly returns nothing yet. Worth knowing beyond
+  the tests: change-feed latency depends on the busiest writer in the cluster, not just on this
+  application.
+
+Adding a suite that asserts on roles, transaction ids, or anything else outside its own
+database means adding it to `SERIAL_TESTS` in `vitest.config.ts`.
 
 **`pnpm test` does not typecheck.** Vitest transpiles without checking, so type
 errors sit undetected while every test passes. `pnpm build` is what catches them;
@@ -50,7 +111,15 @@ built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 > problem. They are set in `playwright.config.ts` alongside the read URLs; any
 > harness that starts the app itself must set them too.
 
-CI runs lint, `pnpm test`, and `pnpm build`, then Playwright, a packaging
+> ⚠️ **Recreate Keycloak after editing `test/keycloak/warehousd-realm.json`.** The
+> realm is imported at container start, so `pnpm test:up` leaves an already-running
+> container serving the old one. `pnpm test:e2e:sso` then fails inside Keycloak's
+> login form — `expected 200 to be greater than or equal to 300`, or `Could not
+> find SAMLResponse in form` — because the user the test signs in as does not exist
+> in the realm actually loaded. Run
+> `docker compose -f docker-compose.test.yml up -d --force-recreate keycloak`.
+
+CI runs lint in its own job, `pnpm test` and `pnpm build` in another, then Playwright, a packaging
 smoke test that installs the CLI tarball outside the workspace, and the CLI and
 SSO end-to-end suites.
 
@@ -84,8 +153,8 @@ and adoption of a foreign server is refused outright:
   independently derive `warehousd_e2e_<workspace-dir>`. Override with
   `WAREHOUSD_E2E_DB`.
 - **App port** — `playwright.config.ts` hashes the same slug into 8800-8899,
-  clear of 8722 (`pnpm dev`), 8723 (`warehousd start`'s database), 8780
-  (Keycloak) and 8791 (the fake IdP). Override with `WAREHOUSD_E2E_PORT`. Your
+  clear of 8722 (`pnpm dev`), 8723 (`warehousd start`'s database) and 8780
+  (Keycloak). Override with `WAREHOUSD_E2E_PORT`. Your
   own `pnpm dev` on 8722 is untouched by, and cannot interfere with, a suite run.
 - **Adoption** — `reuseExistingServer` is `false` unconditionally. There is
   nothing legitimate to reuse once the port is per-workspace, and the failure it
@@ -96,14 +165,24 @@ start when something already answers on the origin, and
 `scripts/assert-port-free.mjs` runs ahead of `next dev` because `next dev -p N`
 does *not* fail on a busy port — it binds N+1 and carries on.
 
-Vitest was already safe: `packages/broker/test/helpers/db.ts` and
-`apps/web/test/helpers/web-db.ts` name their databases `wh_<label>_<pid>`. The
-~90 test files mentioning `http://localhost:8722` only build `Request` objects
-for route handlers; none binds a port.
+Vitest names its databases `wh_<label>_<pid>` in
+`packages/broker/test/helpers/db.ts` and `apps/web/test/helpers/web-db.ts`, and
+its template databases carry a per-checkout suffix. The ~90 test files
+mentioning `http://localhost:8722` only build `Request` objects for route
+handlers; none binds a port.
 
-Keycloak (8780) and the fake IdP (8791) have the same collision class and are
-**not** fixed. They are reached only by `test:e2e:sso`, which is gated behind
-`WAREHOUSD_E2E_KEYCLOAK` and is not part of `pnpm test` or `pnpm e2e`.
+The servers the suites *do* bind — the fake IdP in `helpers/fake-idp.ts` and the
+one-off ones in `sso-admin`, `admin-sso-ui` and `token-exchange` — all listen on
+port 0 and hand their real origin back to the caller. The fake IdP used to be
+fixed on 8791, which collided both across checkouts and, once test files began
+running in parallel, between `sso-oidc` and `sso-local-login-disabled` in a
+single run. `startFakeIdp` appends its ephemeral origin to
+`WAREHOUSD_TRUSTED_ORIGINS`, which is why it has to be started before
+`setupWebDb` imports `lib/auth`.
+
+Keycloak (8780) is fixed and shared, but it is reached only by `test:e2e:sso`,
+which is gated behind `WAREHOUSD_E2E_KEYCLOAK` and is not part of `pnpm test` or
+`pnpm e2e`.
 
 `ps aux | grep -E "vitest|next-server"` catches orphaned workers, which outlive
 a `pkill` aimed at their parent shell and will otherwise hold the port.
@@ -141,7 +220,8 @@ The interesting ones, and where they live:
   and `fields` are combined.
 - **Document and term scoping** (`document-paths`, `taxonomy-grants`) — scoped
   documents are silently absent, bypass probes leak nothing, an empty `in` list
-  denies everything, and a second approved grant is refused by the unique index.
+  denies everything, multi-value vocabularies use array-overlap (`&&`) semantics,
+  and a second approved grant is refused by the unique index.
 - **Tenant isolation, data plane** (`org-isolation`) — two orgs' documents in one
   collection; each org's query returns only its own. The proof that *the database*
   is what refuses: the SQL `buildSelect` produced is asserted to contain no

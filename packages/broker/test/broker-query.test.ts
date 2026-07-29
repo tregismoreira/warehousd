@@ -106,14 +106,14 @@ describe("document_filter on file collections", () => {
               (gen_random_uuid(),$2,0,'Benefits content')`,
       [docIds[0], docIds[1]]);
 
-    // Approve grant with document_filter limiting to hr/pto.md only
+    // Approve grant with documentFilters limiting to hr/pto.md only
     const grantRes = await dbDoc.query(
       `insert into app.grants (user_id, collection, allowed_fields, env, status)
        values ('u3', 'policies', array['title','content'], 'dev', 'pending') returning id`);
     const grantId = grantRes.rows[0].id;
     const { approveGrant } = await import("../src/grants/manage");
     await approveGrant(dbDoc, docCfg, grantId, "admin", {
-      documentFilter: { field: "path", op: "in", value: ["hr/pto.md"] },
+      documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md"] }],
     });
 
     const r = await brokerDoc.query(ctx, { collection: "policies", fields: ["title"] });
@@ -162,14 +162,14 @@ describe("document_filter on file collections", () => {
               (gen_random_uuid(),$2,0,'Benefits content')`,
       [docIds[0], docIds[1]]);
 
-    // Approve grant with empty documentFilter
+    // Approve grant with empty documentFilters
     const grantRes = await dbDoc.query(
       `insert into app.grants (user_id, collection, allowed_fields, env, status)
        values ('u4', 'policies', array['title','content'], 'dev', 'pending') returning id`);
     const grantId = grantRes.rows[0].id;
     const { approveGrant } = await import("../src/grants/manage");
     await approveGrant(dbDoc, docCfg, grantId, "admin", {
-      documentFilter: { field: "path", op: "in", value: [] },
+      documentFilters: [{ field: "path", op: "in", value: [] }],
     });
 
     const r = await brokerDoc.query(ctx, { collection: "policies", fields: ["title"] });

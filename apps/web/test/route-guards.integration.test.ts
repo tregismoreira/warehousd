@@ -6,9 +6,9 @@ const cookies: Record<string, string> = {};
 
 beforeAll(async () => {
   db = await setupWebDb("guards");
-  cookies.mia = await signIn(db.auth, "mia@meridian.demo", "demo");
-  cookies.marcus = await signIn(db.auth, "marcus@meridian.demo", "demo");
-  cookies.ana = await signIn(db.auth, "ana@meridian.demo", "demo");
+  cookies.mia = await signIn(db.auth, "mia@harbor.demo", "demo");
+  cookies.marcus = await signIn(db.auth, "marcus@harbor.demo", "demo");
+  cookies.ana = await signIn(db.auth, "ana@harbor.demo", "demo");
 }, 60_000);
 afterAll(async () => { await db?.end(); });
 

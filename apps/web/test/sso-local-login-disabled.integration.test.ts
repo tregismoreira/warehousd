@@ -64,7 +64,7 @@ describe("Local login disabled", () => {
       new Request("http://localhost:8722/api/auth/sign-in/email", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: "ana@meridian.demo", password: "demo" }),
+        body: JSON.stringify({ email: "ana@harbor.demo", password: "demo" }),
       }),
     );
 

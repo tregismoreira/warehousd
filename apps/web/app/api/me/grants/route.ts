@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
       // showing a green "Approved" the user cannot actually use.
       effectiveStatus: expired ? "expired" : g.status,
       collectionType: c?.type ?? "dataset",
-      taxonomyField: c?.taxonomy ?? null,
+      taxonomyFields: c?.taxonomies ?? [],
     };
   });
   return Response.json({ grants });

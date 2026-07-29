@@ -206,7 +206,7 @@ describe("broker.mutate refusals", () => {
     });
     await approveGrant(app, cfg, grantId, "admin", {
       verbs: ["read", "update"],
-      documentFilter: { field: "owner", op: "eq", value: "filter_user" },
+      documentFilters: [{ field: "owner", op: "eq", value: "filter_user" }],
     });
 
     // Insert a document not owned by filter_user

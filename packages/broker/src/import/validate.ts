@@ -1,5 +1,6 @@
 import type { WarehousdConfig, FieldConfig } from "../config/schema";
 import { findCollection } from "../config/load";
+import type { TaxonomyBinding } from "../taxonomy";
 
 export type ImportError = { row: number; column: string | null; reason: string };
 
@@ -56,11 +57,18 @@ export function coerce(v: unknown, f: FieldConfig): { ok: true; value: unknown }
   }
 }
 
+/**
+ * @param opts.taxonomies Bindings already resolved from the database by the caller. A
+ * dataset-sourced vocabulary keeps its terms in env-scoped `app.terms`, which this function
+ * cannot reach — it is synchronous and pure so that the unit tests need no database. Supply
+ * the bindings and such a column is validated against `slugs` exactly like a YAML one; omit
+ * them and it is refused as `unvalidatable_term`. The default stays closed.
+ */
 export function validateImportRows(
   cfg: WarehousdConfig,
   collection: string,
   rows: Record<string, unknown>[],
-  opts: { maxRows?: number } = {},
+  opts: { maxRows?: number; taxonomies?: TaxonomyBinding[] } = {},
 ): ImportValidation {
   const c = findCollection(cfg, collection);
   if (!c) return { ok: false, errors: [{ row: -1, column: null, reason: "unknown_collection" }] };
@@ -86,8 +94,26 @@ export function validateImportRows(
   const storable = new Map<string, FieldConfig>(
     Object.entries(c.fields).filter(([, f]) => !f.view_join));
   const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null;
-  const termSlugs = c.taxonomy
-    ? new Set(Object.keys(cfg.taxonomies[c.taxonomy]?.terms ?? {})) : null;
+  // Build a map of taxonomy field names to their valid slugs.
+  //
+  // A YAML vocabulary carries its terms in the config. A dataset-sourced one keeps them in
+  // env-scoped `app.terms`, which only the caller can read; it supplies them via
+  // `opts.taxonomies`. Without them the column stays unvalidatable, and waving it through
+  // would let an import write a term no grant can ever match — and worse, one no reviewer
+  // would notice was unvalidated. Refuse instead; see `unvalidatable_term` below.
+  const suppliedSlugs = new Map<string, string[]>(
+    (opts.taxonomies ?? []).map((b) => [b.field, b.slugs]));
+  const termSlugsMap = new Map<string, Set<string>>();
+  const datasetSourcedFields = new Set<string>();
+  for (const vocabSlug of c.taxonomies ?? []) {
+    const vocab = cfg.taxonomies?.[vocabSlug];
+    if (vocab?.terms) termSlugsMap.set(vocabSlug, new Set(Object.keys(vocab.terms)));
+    else if (vocab?.source) {
+      const slugs = suppliedSlugs.get(vocabSlug);
+      if (slugs) termSlugsMap.set(vocabSlug, new Set(slugs));
+      else datasetSourcedFields.add(vocabSlug);
+    }
+  }
 
   const first = rows[0]!;
   const columns = Object.keys(first);
@@ -95,6 +121,7 @@ export function validateImportRows(
     const f = c.fields[col];
     if (!f) { push({ row: 0, column: col, reason: "unknown_column" }); continue; }
     if (f.view_join) push({ row: 0, column: col, reason: "derived_column" });
+    if (datasetSourcedFields.has(col)) push({ row: 0, column: col, reason: "unvalidatable_term" });
   }
   if (errors.length) return { ok: false, errors };
 
@@ -125,8 +152,26 @@ export function validateImportRows(
         out.push(null);
         continue;
       }
-      if (termSlugs && col === c.taxonomy) {
-        if (!termSlugs.has(String(raw))) { push({ row: idx, column: col, reason: "unknown_term" }); out.push(null); continue; }
+      // Check if this column is a vocabulary field
+      const vocabTerms = termSlugsMap.get(col);
+      if (vocabTerms) {
+        // A multi-value column arrives semicolon-separated (a comma would collide with the
+        // CSV delimiter); every part is validated against the term set independently.
+        if (cfg.taxonomies[col]?.multiple) {
+          const parts = String(raw).split(";").map((s) => s.trim()).filter((s) => s.length > 0);
+          if (!parts.length || parts.some((t) => !vocabTerms.has(t))) {
+            push({ row: idx, column: col, reason: "unknown_term" });
+            out.push(null);
+            continue;
+          }
+          out.push(parts);
+          continue;
+        }
+        if (!vocabTerms.has(String(raw))) {
+          push({ row: idx, column: col, reason: "unknown_term" });
+          out.push(null);
+          continue;
+        }
         out.push(String(raw));
         continue;
       }

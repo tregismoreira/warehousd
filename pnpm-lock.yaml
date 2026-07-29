@@ -133,7 +133,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.17
 
-  examples/meridian:
+  examples/harbor:
     dependencies:
       '@warehousd/broker':
         specifier: workspace:*

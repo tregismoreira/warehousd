@@ -100,7 +100,7 @@ describe("token exchange (delegated flow)", () => {
       await app.query(`update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`, [trustedIssuer.id, clientId]);
       const { secret } = await createClientSecret(app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
 
-      const jwt = await signSubjectJwt("mia@meridian.demo");
+      const jwt = await signSubjectJwt("mia@harbor.demo");
       const res = await delegatedExchange(clientId, secret, jwt);
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -117,7 +117,7 @@ describe("token exchange (delegated flow)", () => {
         `update app.client_policies set mode='delegated', allowed_collections=$1, trusted_issuer_id=$2 where client_id=$3`,
         [["feedback"], trustedIssuer.id, clientId]);
       const { secret } = await createClientSecret(app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
-      const jwt = await signSubjectJwt("mia@meridian.demo");
+      const jwt = await signSubjectJwt("mia@harbor.demo");
 
       const res = await delegatedExchange(clientId, secret, jwt);
       expect(res.status).toBe(200);
@@ -138,7 +138,7 @@ describe("token exchange (delegated flow)", () => {
     // mode='delegated' but trusted_issuer_id left null — never registered.
     await app.query(`update app.client_policies set mode='delegated' where client_id=$1`, [clientId]);
     const { secret } = await createClientSecret(app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
-    const jwt = await signSubjectJwt("mia@meridian.demo");
+    const jwt = await signSubjectJwt("mia@harbor.demo");
 
     const res = await delegatedExchange(clientId, secret, jwt);
     expect(res.status).toBeGreaterThanOrEqual(400);
@@ -190,7 +190,7 @@ describe("token exchange (delegated flow)", () => {
     await upsertClientPolicy(app, clientId, "TE Revoke", ["env:dev"]);
     await app.query(`update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`, [trustedIssuer.id, clientId]);
     const { id: secretId, secret } = await createClientSecret(app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
-    const jwt = await signSubjectJwt("mia@meridian.demo");
+    const jwt = await signSubjectJwt("mia@harbor.demo");
 
     const res1 = await delegatedExchange(clientId, secret, jwt);
     expect(res1.status).toBe(200);
@@ -207,7 +207,7 @@ describe("token exchange (delegated flow)", () => {
       await upsertClientPolicy(app, clientId, "TE Rule1", ["env:dev"]);
       await app.query(`update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`, [trustedIssuer.id, clientId]);
       const { secret } = await createClientSecret(app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
-      const jwt = await signSubjectJwt("mia@meridian.demo");
+      const jwt = await signSubjectJwt("mia@harbor.demo");
 
       const res = await exchange({
         grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -226,7 +226,7 @@ describe("token exchange (delegated flow)", () => {
       await upsertClientPolicy(app, clientId, "TE Rule2", ["env:dev", "env:live"]);
       await app.query(`update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`, [trustedIssuer.id, clientId]);
       const { secret } = await createClientSecret(app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
-      const jwt = await signSubjectJwt("mia@meridian.demo");
+      const jwt = await signSubjectJwt("mia@harbor.demo");
 
       const res = await exchange({
         grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -254,7 +254,7 @@ describe("token exchange (delegated flow)", () => {
       await upsertClientPolicy(app, clientId, "TE Rule2b", ["env:dev", "env:live"]);
       await app.query(`update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`, [trustedIssuer.id, clientId]);
       const { secret } = await createClientSecret(app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
-      const jwt = await signSubjectJwt("mia@meridian.demo");
+      const jwt = await signSubjectJwt("mia@harbor.demo");
 
       const res = await exchange({
         grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -271,7 +271,7 @@ describe("token exchange (delegated flow)", () => {
       await upsertClientPolicy(app, clientId, "TE Parity", ["env:dev"]);
       await app.query(`update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`, [trustedIssuer.id, clientId]);
       const { secret } = await createClientSecret(app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
-      const jwt = await signSubjectJwt("mia@meridian.demo");
+      const jwt = await signSubjectJwt("mia@harbor.demo");
 
       for (const scope of ["env:live", "env:dev env:live", "ENV:LIVE", "env:live env:dev"]) {
         const res = await exchange({

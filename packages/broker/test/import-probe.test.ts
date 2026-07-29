@@ -8,7 +8,7 @@ import { loadConfig } from "../src/config/load";
 import { IMPORT_CANARY, IMPORT_DENIED_CANARY } from "./fixtures/canaries";
 
 let p: Provisioned, admin: Pool, pools: Pools, broker: ReturnType<typeof makeBroker>;
-const cfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+const cfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 const PERSON = "9a000001-0000-4000-8000-000000000001";
 const DEPT = "8b000001-0000-4000-8000-000000000001";
 const ctx = { userId: "mia", orgId: "default", env: "live", via: "session" as const };

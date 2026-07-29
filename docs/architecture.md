@@ -183,8 +183,9 @@ expressive enough that the assistant can ask real questions.
 
 For each collection and environment there is a Postgres view
 `data_{env}.v_{collection}` defining the queryable surface. Views may pre-join —
-`v_people` joins `departments` for a flat `department_name` — so the MCP surface
-stays flat. The broker only ever selects from views, never base tables, and the
+`v_people` joins `departments` for a flat `department_name`, and `v_matters` joins
+`clients` and `people` twice (for responsible and originating attorney), so the MCP
+surface stays flat. The broker only ever selects from views, never base tables, and the
 env roles hold `SELECT` on the view only.
 
 Views are intentionally *flat*: every field appears regardless of posture. Access
@@ -210,6 +211,41 @@ The only write path into `data_live` is the admin import (`IMPORT_DATABASE_URL`)
 a role with `INSERT` and nothing else — no update, no delete. If that variable is
 unset, the import endpoint refuses with `import_not_configured` and there is no
 write path at all.
+
+An import either lands whole or not at all. Every outcome that reaches the broker
+is audited through the app pool — the writer of the data is deliberately not the
+writer of its own audit trail. The three request-shape rejections below are
+refused by the route before the broker sees them, and `import_not_configured`
+returns before anything is attempted, so those four carry no audit row.
+
+A refusal carries a `reason`, and the admin UI shows it verbatim, so these are
+the codes to look up:
+
+| `reason` | HTTP | Meaning |
+|---|---|---|
+| `unsupported_format` | 400 | Not `csv` or `json`. |
+| `no_file` | 400 | No file part, or an empty one. |
+| `file_too_large` | 413 | Over 5 MB. |
+| `parse_failed` | 400 | Malformed CSV or JSON. |
+| `validation_failed` | 400 | The payload was checked against the config and rejected. Carries a per-row `errors` list — see below. |
+| `constraint_violation` | 400 | Postgres refused a row (`23xxx`): duplicate key, missing FK, failed check. Nothing was written. |
+| `write_failed` | 400 | Any other database error during the insert. |
+| `import_not_configured` | 503 | `IMPORT_DATABASE_URL` is unset, so there is no write path at all. |
+| `taxonomy_unavailable` | 503 | A bound vocabulary's terms could not be read. Distinct from the config being wrong: the file may be fine and worth retrying. |
+
+The two 503s mean the stack cannot serve the request; the file itself may be
+perfectly good. That distinction is the point — an admin should never be sent to
+fix a vocabulary that was never broken. Note that `write_failed` is also a stack
+fault but is still returned as 400, which is a rough edge rather than a decision.
+
+Inside `validation_failed`, each entry names a row and column: `unknown_column`,
+`derived_column` (a `view_join` field, which has no stored column),
+`missing_required`, `ragged_rows`, `duplicate_pk`, `unknown_term`,
+`unvalidatable_term` (a vocabulary this stack never applied), the `invalid_*`
+type-coercion codes, and the whole-payload codes `unknown_collection`,
+`file_collection` (files are ingested by the indexer), `no_rows` and
+`too_many_rows`. Reasons never carry the offending value: an import file may hold
+real personal data and an error body is still a response body.
 
 ## Identity, OAuth, and env-as-scope
 
@@ -263,9 +299,10 @@ const ctx: BrokerContext = { userId: token.sub, orgId, env };
 ## File collections and search
 
 A `type: file` collection points at a directory of `.md`/`.txt` files. Its
-grantable schema is fixed — `title`, `content`, `path`, `owner`, `updated_at`
-(plus a bound taxonomy field) — and the YAML `fields` block only sets postures on
-those.
+grantable schema includes five fixed fields — `title`, `content`, `path`, `owner`,
+`updated_at` (plus any bound taxonomy fields) — and additional metadata fields
+declared in the YAML `fields` block. Metadata fields are populated from frontmatter
+in the source files.
 
 **Storage.** Per environment and collection: a `{collection}__files` table (one
 row per source file, `path` unique as the upsert key, `checksum` for idempotent
@@ -294,27 +331,32 @@ reserved `_rank` and `document_seq` keys that are never part of `fieldsReturned`
 for free.
 
 **Document-level scoping.** A grant may carry a `document_filter` —
-`{ field, op: "eq" | "in", value }` — restricting which documents it reaches. Its
-field is validated against the collection's *YAML field set*, not the user's
-allowed fields: that is what lets a denied field like `path` gate documents
-without ever being readable. It is author-supplied at approval time, never
-client-supplied. It is ANDed into the same parameterized WHERE machinery as
-client filters, an empty `in` list compiles to constant-false rather than a SQL
-error, and excluded documents are silently absent rather than a distinguishable
-refusal.
+a **list** of `{ field, op: "eq" | "in", value }` predicates, ANDed — restricting
+which documents it reaches. Every predicate's field is validated against the
+collection's *YAML field set*, not the user's allowed fields: that is what lets a
+denied field like `path` gate documents without ever being readable, and equally
+what lets a plain metadata field like `confidentiality` gate them. The list is
+author-supplied at approval time, never client-supplied — the approver picks
+values, the server decides which column those values gate. Because predicates AND
+rather than take precedence over one another, one grant can be scoped across two
+vocabularies and a path at once. They compile into the same parameterized WHERE
+machinery as client filters, an empty `in` list compiles to constant-false rather
+than a SQL error, and excluded documents are silently absent rather than a
+distinguishable refusal.
 
-The value may be the sentinel **`$self`**, bound to the calling user's id when
-the grant is loaded:
+A predicate's value may be the sentinel **`$self`**, bound to the calling user's
+id when the grant is loaded:
 
 ```yaml
-document_filter: { field: owner, op: eq, value: $self }
+document_filter: [{ field: owner, op: eq, value: $self }]
 ```
 
 That makes "lower-level roles see and edit only what is assigned to them" a
 property of the *grant* rather than of application logic. Binding happens in
-`loadActiveGrant`, so no caller can forget it and the SQL builder still sees a
-plain literal. Only the exact string `$self` is a sentinel — `$self-service` is
-a literal, and there is no substring interpolation. A partial unique index guarantees at most one approved grant per
+`loadActiveGrant`, per predicate and per element inside an `in` list, so no
+caller can forget it and the SQL builder still sees a plain literal. Only the
+exact string `$self` is a sentinel — `$self-service` is a literal, and there is
+no substring interpolation. A partial unique index guarantees at most one approved grant per
 `(user, collection, env)`, so a second, broader grant can never silently override
 the restriction.
 
@@ -711,12 +753,16 @@ A caller needing the exact source must keep it.
 ## Taxonomies
 
 A vocabulary is declared once under `taxonomies` and bound to a collection with
-`taxonomy: <slug>`. The bound field is a normal text field on the collection —
+`taxonomies: [<slug>, ...]`. The bound field is a normal text field on the collection —
 auto-added as `allow` if the YAML omits it — and terms are validated against the
-vocabulary. A grant scoped to `hr` compiles to a document filter over that field,
-so `finance` documents are silently absent: the user never learns they exist.
-Vocabulary slugs may not collide with the fixed file fields or the structural
-columns (`id`, `checksum`, `file_id`, `document_seq`, `tsv`, `_rank`).
+vocabulary. A vocabulary may allow multiple terms per document with `multiple: true`;
+grants scoped to multiple terms use Postgres array overlap (`&&`) semantics. A grant
+scoped to `hr` compiles to a document filter over that field, so `finance` documents
+are silently absent: the user never learns they exist. Vocabulary slugs may not
+collide with the fixed file fields or the structural columns (`id`, `checksum`,
+`file_id`, `document_seq`, `tsv`, `_rank`). Vocabularies may be dataset-sourced
+(pulling terms from another collection) instead of inline; the ordering requirement
+is that `syncDatasetTerms()` must run after data is loaded but before `indexCollection()`.
 
 ## The app schema
 
@@ -782,6 +828,15 @@ Drizzle manages the `app` schema. `warehousd apply` owns everything in
 `data_synth` and `data_live` — tables and views — idempotently, diffing against
 `app.collections.config`. Broker data queries and view DDL are raw SQL through
 `pg` with the two role-scoped pools.
+
+What re-applying will and will not migrate: every table is `create table if not
+exists`, and every non-primary-key column — plain field, bound vocabulary, file
+metadata — is followed by `add column if not exists`. Views are dropped and
+recreated rather than replaced, since `create or replace view` can only append
+columns. So adding a field to a collection that already exists, or binding a new
+vocabulary to it, lands on both the table and the view no matter where in the
+YAML it goes. Changing a field's type, renaming it, or removing it does not: the
+old column stays as it was. Those are the cases versioned migrations are for.
 
 ## The MCP surface
 

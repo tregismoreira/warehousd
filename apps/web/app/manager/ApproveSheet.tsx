@@ -14,7 +14,12 @@ import { Mono } from "@/components/common/Mono";
 export type PendingGrant = {
   id: string; user_id: string; collection: string; env: "dev" | "live";
   allowed_fields: string[] | null; purpose_label: string | null; purpose_detail: string | null;
-  requested_at: string; collectionType?: string; taxonomyField?: string | null;
+  requested_at: string; collectionType?: string; taxonomyFields?: string[];
+};
+
+type Vocabulary = {
+  field: string; label: string; multiple: boolean;
+  terms: { slug: string; label: string }[];
 };
 
 export function ApproveSheet({
@@ -26,30 +31,42 @@ export function ApproveSheet({
   const [fields, setFields] = useState<Set<string>>(new Set());
   const [expiresAt, setExpiresAt] = useState("");
   const [paths, setPaths] = useState<string[]>([]);
-  const [terms, setTerms] = useState<{ slug: string; label: string }[]>([]);
+  const [vocabularies, setVocabularies] = useState<Vocabulary[]>([]);
   const [pickedPaths, setPickedPaths] = useState<Set<string>>(new Set());
-  const [pickedTerms, setPickedTerms] = useState<Set<string>>(new Set());
+  const [pickedTermsByField, setPickedTermsByField] = useState<Record<string, Set<string>>>({});
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!grant) return;
     setFields(new Set(grant.allowed_fields ?? []));
-    setPickedPaths(new Set()); setPickedTerms(new Set());
-    setExpiresAt(""); setPaths([]); setTerms([]);
+    setPickedPaths(new Set()); setPickedTermsByField({});
+    setExpiresAt(""); setPaths([]); setVocabularies([]);
 
     if (grant.collectionType === "file") {
       fetch(`/api/grants/doc-paths?collection=${grant.collection}&env=${grant.env}`)
         .then((r) => r.json()).then((d) => setPaths(d.paths ?? []));
     }
-    if (grant.taxonomyField) {
+    if (grant.taxonomyFields && grant.taxonomyFields.length > 0) {
       fetch(`/api/grants/terms?collection=${grant.collection}`)
-        .then((r) => r.json()).then((d) => setTerms(d.terms ?? []));
+        .then((r) => r.json()).then((d) => {
+          setVocabularies(d.vocabularies ?? []);
+          const picked: Record<string, Set<string>> = {};
+          for (const vocab of (d.vocabularies ?? [])) {
+            picked[vocab.field] = new Set();
+          }
+          setPickedTermsByField(picked);
+        });
     }
   }, [grant]);
 
   async function act(action: "approve" | "deny") {
     if (!grant) return;
     setBusy(true);
+    // Flatten pickedTermsByField into selectedTerms: { field: [terms...] }
+    const selectedTerms: Record<string, string[]> = {};
+    for (const [field, terms] of Object.entries(pickedTermsByField)) {
+      if (terms.size > 0) selectedTerms[field] = Array.from(terms);
+    }
     const res = await fetch("/api/grants", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(
@@ -60,7 +77,7 @@ export function ApproveSheet({
               allowedFields: Array.from(fields),
               expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
               selectedPaths: Array.from(pickedPaths),
-              selectedTerms: Array.from(pickedTerms),
+              selectedTerms,
             }),
     });
     setBusy(false);
@@ -70,7 +87,8 @@ export function ApproveSheet({
   }
 
   if (!grant) return null;
-  const scoped = pickedTerms.size > 0 || pickedPaths.size > 0;
+  const scopedTerms = Object.values(pickedTermsByField).some(s => s.size > 0);
+  const scoped = scopedTerms || pickedPaths.size > 0;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -122,31 +140,38 @@ export function ApproveSheet({
             </p>
           </div>
 
-          {terms.length > 0 && (
-            <div className="space-y-2">
-              <Label>Categories</Label>
-              <p className="text-xs text-muted-foreground">
-                Restrict the grant to these categories. Overrides file selection.
-              </p>
-              <div className="space-y-1.5 rounded-md border p-3">
-                {terms.map((t) => (
-                  <label key={t.slug} className="flex items-center gap-2 text-xs">
-                    <Checkbox
-                      checked={pickedTerms.has(t.slug)}
-                      onCheckedChange={(v) => {
-                        const next = new Set(pickedTerms);
-                        if (v) next.add(t.slug); else next.delete(t.slug);
-                        setPickedTerms(next);
-                      }}
-                    />
-                    {t.label} <Mono className="text-muted-foreground">{t.slug}</Mono>
-                  </label>
-                ))}
-              </div>
+          {vocabularies.length > 0 && (
+            <div className="space-y-4">
+              {vocabularies.map((vocab) => (
+                <div key={vocab.field} className="space-y-2">
+                  <Label>{vocab.label}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {vocab.multiple ? "Select one or more. " : "Select one. "}
+                    Combined with every other selection below by AND.
+                  </p>
+                  <div className="space-y-1.5 rounded-md border p-3">
+                    {vocab.terms.map((t) => (
+                      <label key={t.slug} className="flex items-center gap-2 text-xs">
+                        <Checkbox
+                          checked={pickedTermsByField[vocab.field]?.has(t.slug) ?? false}
+                          onCheckedChange={(v) => {
+                            const next = new Map(Object.entries(pickedTermsByField).map(([k, s]) => [k, new Set(s)]));
+                            const fieldTerms = next.get(vocab.field) || new Set<string>();
+                            if (v) fieldTerms.add(t.slug); else fieldTerms.delete(t.slug);
+                            next.set(vocab.field, fieldTerms);
+                            setPickedTermsByField(Object.fromEntries(next));
+                          }}
+                        />
+                        {t.label} <Mono className="text-muted-foreground">{t.slug}</Mono>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
-          {paths.length > 0 && pickedTerms.size === 0 && (
+          {paths.length > 0 && (
             <div className="space-y-2">
               <Label>Files</Label>
               <div className="space-y-1.5 rounded-md border p-3">

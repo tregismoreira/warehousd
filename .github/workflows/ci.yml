@@ -6,6 +6,26 @@ on:
   pull_request:
 
 jobs:
+  # Lint runs on its own so a style failure does not sit in front of the test suite.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -25,11 +45,9 @@ jobs:
 
       - run: pnpm test:up
 
-      - run: pnpm lint
-
       - run: pnpm test
         env:
-          WAREHOUSD_PROJECT_DIR: examples/meridian
+          WAREHOUSD_PROJECT_DIR: examples/harbor
 
       - run: pnpm build
 

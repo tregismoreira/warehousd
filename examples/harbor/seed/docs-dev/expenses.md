@@ -1,5 +1,7 @@
 ---
-category: finance
+department: finance
+tags: [compliance]
+review_date: 2025-04-01
 ---
 # Expense Reimbursement Policy
 

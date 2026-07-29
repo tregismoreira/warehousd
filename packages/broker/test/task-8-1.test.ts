@@ -128,7 +128,7 @@ describe("listRevisions", () => {
     });
     await approveGrant(app, cfg, grantId, "admin", {
       verbs: ["read"],
-      documentFilter: { field: "owner", op: "eq", value: "admin" },
+      documentFilters: [{ field: "owner", op: "eq", value: "admin" }],
     });
 
     const docId = "dddddddd-dddd-dddd-dddd-dddddddddddd";

@@ -6,9 +6,9 @@ let miaCookie: string, marcusCookie: string, anaCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDb("authz");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
-  marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
-  anaCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
+  marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
+  anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
 }, 60_000);
 afterAll(async () => { await db?.end(); });
 

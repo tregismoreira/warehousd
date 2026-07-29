@@ -5,18 +5,22 @@ import { tableDDL, viewDDL, grantViewDDL, grantImportDDL, rlsDDL, grantWriteDDL 
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
   await db.query(`create extension if not exists vector`);
 
-  // Taxonomies: upsert by slug (labels renameable in place). apply never deletes
+  // Vocabularies: upsert by slug (labels renameable in place). apply never deletes
   // vocabularies/terms — data rows store term slugs, so removal is a manual operation.
   for (const [slug, v] of Object.entries(cfg.taxonomies ?? {})) {
     const vid = (await db.query(
       `insert into app.vocabularies (slug, label) values ($1,$2)
        on conflict (slug) do update set label=excluded.label returning id`,
       [slug, v.label])).rows[0].id;
-    for (const [t, tv] of Object.entries(v.terms))
-      await db.query(
-        `insert into app.terms (vocabulary_id, slug, label) values ($1,$2,$3)
-         on conflict (vocabulary_id, slug) do update set label=excluded.label`,
-        [vid, t, tv.label]);
+    // Insert YAML-sourced terms with env='all'
+    if (v.terms) {
+      for (const [t, tv] of Object.entries(v.terms))
+        await db.query(
+          `insert into app.terms (vocabulary_id, env, slug, label) values ($1,$2,$3,$4)
+           on conflict (vocabulary_id, env, slug) do update set label=excluded.label`,
+          [vid, 'all', t, tv.label]);
+    }
+    // Dataset-sourced vocabularies: terms are synced by syncDatasetTerms, not here
   }
 
   for (const name of Object.keys(cfg.collections)) {

@@ -7,7 +7,9 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "vitest run",
+    "test": "tsx scripts/run-tests.ts",
+    "test:parallel": "vitest run",
+    "test:serial": "vitest run --config vitest.serial.config.ts",
     "test:e2e:cli": "vitest run --config vitest.e2e.config.ts",
     "test:up": "docker compose -f docker-compose.test.yml up -d --wait",
     "test:down": "docker compose -f docker-compose.test.yml down -v",

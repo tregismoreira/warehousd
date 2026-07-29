@@ -60,11 +60,13 @@ test.describe("login", () => {
       page.getByRole("button", { name: /sign in with your company account/i }),
     ).toBeVisible();
 
-    // Local login is still reachable, but only behind the collapsed disclosure.
-    const details = page.locator("details");
-    await expect(details.locator("summary")).toContainText("Use a local account");
+    // Local login is still reachable, but only behind the collapsed disclosure. The demo
+    // credentials nest a second "More personas" disclosure inside this one, so scope to the
+    // outer element's own summary rather than matching every <details> on the page.
+    const details = page.locator("details").first();
+    await expect(details.locator("> summary")).toContainText("Use a local account");
     await expect(page.getByPlaceholder("email")).not.toBeVisible();
-    await details.locator("summary").click();
+    await details.locator("> summary").click();
     await expect(page.getByPlaceholder("email")).toBeVisible();
   });
 

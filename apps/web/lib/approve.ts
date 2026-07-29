@@ -3,7 +3,7 @@ import { findCollection, grantableFields, type WarehousdConfig } from "@warehous
 export type ApproveOpts = {
   allowedFields?: string[];
   expiresAt?: string;
-  documentFilter?: { field: string; op: "in"; value: string[] };
+  documentFilters?: { field: string; op: "in"; value: string[] }[];
 };
 
 export type ApprovalInput = {
@@ -51,14 +51,29 @@ export function buildApproval(
     opts.expiresAt = new Date(t).toISOString();
   }
 
-  // Terms take precedence over paths: a term scope is the coarser, intentional choice, and
-  // approving with both selected would otherwise silently drop one of them.
-  const terms = strings(input.selectedTerms);
+  // Build array of predicates: one per scoped vocabulary, plus path if specified.
+  // Vocabularies and paths can coexist now.
+  const selectedTermsMap = (typeof input.selectedTerms === "object" && input.selectedTerms !== null)
+    ? (input.selectedTerms as Record<string, unknown>)
+    : {};
   const paths = strings(input.selectedPaths);
-  if (terms.length > 0 && c.taxonomy) {
-    opts.documentFilter = { field: c.taxonomy, op: "in", value: terms };
-  } else if (paths.length > 0 && c.type === "file") {
-    opts.documentFilter = { field: "path", op: "in", value: paths };
+  const filters: { field: string; op: "in"; value: string[] }[] = [];
+
+  // Emit one predicate per vocabulary with selected terms
+  for (const vocabSlug of c.taxonomies ?? []) {
+    const vocabTerms = strings(selectedTermsMap[vocabSlug]);
+    if (vocabTerms.length > 0) {
+      filters.push({ field: vocabSlug, op: "in", value: vocabTerms });
+    }
+  }
+
+  // Emit path predicate if specified
+  if (paths.length > 0 && c.type === "file") {
+    filters.push({ field: "path", op: "in", value: paths });
+  }
+
+  if (filters.length > 0) {
+    opts.documentFilters = filters;
   }
 
   return { ok: true, opts };

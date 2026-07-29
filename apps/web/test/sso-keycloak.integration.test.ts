@@ -22,7 +22,7 @@ beforeAll(async () => {
   appPool = getAppPool();
 
   // Sign in as admin to register SSO provider
-  anaCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
+  anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
 
   // Register the Keycloak OIDC provider (requires admin role)
   const registerOidcRes = await db.auth.handler(
@@ -35,7 +35,7 @@ beforeAll(async () => {
       body: JSON.stringify({
         providerId: "keycloak-oidc",
         issuer: REALM_ENDPOINT,
-        domain: "meridian.demo",
+        domain: "harbor.demo",
         oidcConfig: {
           clientId: "warehousd-oidc",
           clientSecret: "oidc-secret",
@@ -63,7 +63,7 @@ beforeAll(async () => {
       body: JSON.stringify({
         providerId: "keycloak-saml",
         issuer: REALM_ENDPOINT,
-        domain: "meridian.demo",
+        domain: "harbor.demo",
         samlConfig: {
           entryPoint: `${REALM_ENDPOINT}/protocol/saml`,
           cert: samlCert,
@@ -231,7 +231,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
       // Step 4: POST credentials to login form
       const loginFormUrl = new URL(action, KEYCLOAK_BASE);
       const formData = new URLSearchParams();
-      formData.append("username", "sso-user@meridian.demo");
+      formData.append("username", "sso-user@harbor.demo");
       formData.append("password", "demo");
       for (const [key, value] of Object.entries(fields)) {
         formData.append(key, value);
@@ -266,12 +266,12 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
       // Step 6: Verify user was created with role='member'
       const userResult = await appPool.query(
         `select id, email, role from app."user" where email = $1`,
-        ["sso-user@meridian.demo"],
+        ["sso-user@harbor.demo"],
       );
 
       expect(userResult.rows).toHaveLength(1);
       const user = userResult.rows[0];
-      expect(user.email).toBe("sso-user@meridian.demo");
+      expect(user.email).toBe("sso-user@harbor.demo");
       expect(user.role).toBe("member");
 
       // Step 7: Test full OAuth flow: /mcp/authorize → code → token with proper scope
@@ -364,7 +364,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
       // Step 4: POST credentials to login form (use a different user for SAML vs OIDC)
       const loginFormUrl = new URL(action, KEYCLOAK_BASE);
       const formData = new URLSearchParams();
-      formData.append("username", "sso-saml-user@meridian.demo");
+      formData.append("username", "sso-saml-user@harbor.demo");
       formData.append("password", "demo");
       for (const [key, value] of Object.entries(fields)) {
         formData.append(key, value);
@@ -436,7 +436,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
       // Step 6: Verify user was created with role='member'
       const userResult = await appPool.query(
         `select id, email, role from app."user" where email = $1`,
-        ["sso-saml-user@meridian.demo"],
+        ["sso-saml-user@harbor.demo"],
       );
 
       if (userResult.rows.length === 0) {
@@ -445,7 +445,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
 
       expect(userResult.rows).toHaveLength(1);
       const user = userResult.rows[0];
-      expect(user.email).toBe("sso-saml-user@meridian.demo");
+      expect(user.email).toBe("sso-saml-user@harbor.demo");
       expect(user.role).toBe("member");
 
       // Step 7: Test that SAML login can resume MCP authorize flow identically to OIDC

@@ -1,6 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
 import { URL } from "node:url";
+import type { AddressInfo } from "node:net";
 
 interface OIDCUser {
   sub: string;
@@ -10,8 +11,11 @@ interface OIDCUser {
 }
 
 export async function startFakeIdp(opts: { users: OIDCUser[] }) {
-  const PORT = 8791;
-  const issuer = "http://127.0.0.1:8791";
+  // An ephemeral port, like the other in-test servers (sso-admin, admin-sso-ui,
+  // token-exchange): two suites use this helper, and with test files running in parallel a
+  // fixed port makes whichever one starts second fail with EADDRINUSE. Assigned once the
+  // listener is bound — every handler below reads it per request, which is after that.
+  let issuer = "";
 
   let currentUser: OIDCUser | null = null;
   const codeToUser = new Map<string, OIDCUser>();
@@ -97,7 +101,13 @@ export async function startFakeIdp(opts: { users: OIDCUser[] }) {
     setNextUser(u: OIDCUser): void;
     close(): Promise<void>;
   }>((resolve) => {
-    server.listen(PORT, "127.0.0.1", () => {
+    server.listen(0, "127.0.0.1", () => {
+      issuer = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      // lib/auth reads WAREHOUSD_TRUSTED_ORIGINS once at module load and every caller starts
+      // the IdP before setupWebDb triggers that import, so this is where the now-dynamic
+      // callback origin has to be registered.
+      process.env.WAREHOUSD_TRUSTED_ORIGINS ??= "http://127.0.0.1:8780";
+      process.env.WAREHOUSD_TRUSTED_ORIGINS += `,${issuer}`;
       resolve({
         issuer,
         setNextUser(u: OIDCUser) {

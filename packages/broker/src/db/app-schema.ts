@@ -51,7 +51,8 @@ export const vocabularies = app.table("vocabularies", {
 
 export const terms = app.table("terms", {
   id: uuid("id").primaryKey().defaultRandom(),
-  vocabularyId: uuid("vocabulary_id").notNull(),   // FK + unique(vocabulary_id, slug) enforced in DDL
+  vocabularyId: uuid("vocabulary_id").notNull(),   // FK + unique(vocabulary_id, env, slug) enforced in DDL
+  env: text("env").notNull().default("all"),       // check ('all','dev','live'); 'all' for YAML, env-specific for dataset-sourced
   slug: text("slug").notNull(),
   label: text("label").notNull(),
   parentId: uuid("parent_id"),                     // reserved for hierarchy, unused in MVP

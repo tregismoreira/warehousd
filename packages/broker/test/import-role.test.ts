@@ -5,7 +5,7 @@ import { createAppSchema, applyConfig, withOrg } from "../src/index";
 import { loadConfig } from "../src/config/load";
 
 let p: Provisioned, admin: Pool, imp: Pool;
-const cfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+const cfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 
 beforeAll(async () => {
   p = await provision("importrole");

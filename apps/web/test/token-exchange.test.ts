@@ -8,7 +8,7 @@ import {
 import { getAppPool } from "../app/lib/broker";
 import { randomBytes } from "node:crypto";
 
-const meridianCfg = loadConfig(new URL("../../../examples/meridian", import.meta.url).pathname);
+const harborCfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
 

@@ -31,8 +31,8 @@ beforeAll(async () => {
   });
   process.env.WAREHOUSD_TRUSTED_ORIGINS = idpUrl;
   db = await setupWebDb("ssoui");
-  anaCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
-  marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
+  anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
+  marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
 }, 60_000);
 
 afterAll(async () => {

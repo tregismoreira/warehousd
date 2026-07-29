@@ -147,7 +147,7 @@ describe("broker proposal authorization", () => {
     });
     await approveGrant(app, cfg, approverGrantId, "admin", {
       verbs: ["read", "approve"],
-      documentFilter: { field: "dept", op: "eq", value: "Engineering" },
+      documentFilters: [{ field: "dept", op: "eq", value: "Engineering" }],
     });
 
     // Create document with dept != Engineering

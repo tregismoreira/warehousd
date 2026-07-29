@@ -23,8 +23,8 @@ describe("Control-plane API routes", () => {
 
   beforeAll(async () => {
     db = await setupWebDb("apikeys");
-    adminCookie = await signIn(db.auth, "ana@meridian.demo", "demo");
-    memberCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
+    adminCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
+    memberCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
   }, 60_000);
 
   afterAll(async () => {

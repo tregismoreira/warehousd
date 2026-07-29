@@ -26,7 +26,7 @@ async function mintMiaToken(page: Page) {
 }
 
 async function proposeTask(page: Page, token: string, title: string) {
-  const res = await page.request.post("/v1/collections/tasks/documents", {
+  const res = await page.request.post("/v1/collections/matter_tasks/documents", {
     headers: { authorization: `Bearer ${token}` },
     data: { title, notes: "needs approval", assignee: "mia" },
   });
@@ -38,7 +38,7 @@ async function proposeTask(page: Page, token: string, title: string) {
 
 // The queue lists metadata and CHANGED FIELD NAMES only — never a field's value. So a row is
 // addressed by collection + requester, never by the title the proposer submitted.
-const queueRow = (page: Page) => page.getByRole("row", { name: /tasks.*mia/ });
+const queueRow = (page: Page) => page.getByRole("row", { name: /matter_tasks.*mia/ });
 
 test.describe("governed write path", () => {
   test("proposal → review queue → approve → visible in query", async ({ page, context }) => {
@@ -48,7 +48,7 @@ test.describe("governed write path", () => {
     const token = await mintMiaToken(page);
     await proposeTask(page, token, "Proposed task");
 
-    // Marcus (holds approve on tasks) sees it and approves it.
+    // Marcus (holds approve on matter_tasks) sees it and approves it.
     await as(page, "manager");
     await page.goto("/manager/review");
     await expect(page.getByRole("heading", { name: "Proposal review" })).toBeVisible();
@@ -74,7 +74,7 @@ test.describe("governed write path", () => {
     await expect(page.getByText("No pending proposals")).toBeVisible();
 
     // The approved document is now readable through the REST API.
-    const queryRes = await page.request.post("/v1/collections/tasks/query", {
+    const queryRes = await page.request.post("/v1/collections/matter_tasks/query", {
       headers: { authorization: `Bearer ${token}` },
       data: {
         fields: ["id", "title", "notes", "assignee"],
@@ -97,13 +97,13 @@ test.describe("governed write path", () => {
     // Grants are revoked from the manager surface ("Active grants"), not an admin page.
     await as(page, "manager");
     await page.goto("/manager/grants");
-    const grantRow = page.getByRole("row", { name: /marcus.*tasks/ });
+    const grantRow = page.getByRole("row", { name: /marcus.*matter_tasks/ });
     await expect(grantRow).toBeVisible();
     await grantRow.getByRole("button", { name: "Revoke" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Revoke" }).click();
     await expectToast(page, /revoked/i);
 
-    // Denied means absent: without `approve` on tasks the proposal is not merely
+    // Denied means absent: without `approve` on matter_tasks the proposal is not merely
     // un-approvable, it is not listed at all.
     await page.goto("/manager/review");
     await expect(page.getByText("No pending proposals")).toBeVisible();

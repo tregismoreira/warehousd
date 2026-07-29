@@ -7,8 +7,8 @@ let miaCookie: string, marcusCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDbWithData("megrants");
-  miaCookie = await signIn(db.auth, "mia@meridian.demo", "demo");
-  marcusCookie = await signIn(db.auth, "marcus@meridian.demo", "demo");
+  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
+  marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
   const app = getAppPool();
   await app.query(
     `insert into app.grants (user_id,collection,env,status,allowed_fields,purpose_label)
@@ -57,7 +57,7 @@ describe("GET /api/me/grants", () => {
     expect(metrics.effectiveStatus).toBe("expired");
   });
 
-  it("annotates file collections with their type and taxonomy field", async () => {
+  it("annotates file collections with their type and taxonomy fields", async () => {
     const app = getAppPool();
     await app.query(
       `insert into app.grants (user_id,collection,env,status,allowed_fields)
@@ -66,7 +66,8 @@ describe("GET /api/me/grants", () => {
     const body = await (await GET(req("/api/me/grants", miaCookie) as any)).json();
     const policies = body.grants.find((g: any) => g.collection === "policies");
     expect(policies.collectionType).toBe("file");
-    expect(policies.taxonomyField).toBe("category");
+    expect(policies.taxonomyFields).toContain("department");
+    expect(policies.taxonomyFields).toContain("tags");
   });
 });
 

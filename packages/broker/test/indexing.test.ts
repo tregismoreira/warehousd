@@ -6,6 +6,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { extractFile } from "../src/indexing/extract";
 import { chunkText } from "../src/indexing/chunk";
 import { indexCollection } from "../src/indexing";
+import { loadTaxonomyBindings } from "../src/taxonomy";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
@@ -13,10 +14,10 @@ import { applyConfig } from "../src/apply/apply";
 describe("extractFile", () => {
   const mtime = new Date("2026-07-01T00:00:00Z");
   it("title from first # heading, owner from frontmatter, checksum stable", () => {
-    const raw = "---\nowner: ana@meridian.demo\n---\n# PTO Policy\n\nBody text.";
+    const raw = "---\nowner: ana@harbor.demo\n---\n# PTO Policy\n\nBody text.";
     const d = extractFile("hr/pto.md", raw, mtime);
     expect(d.title).toBe("PTO Policy");
-    expect(d.owner).toBe("ana@meridian.demo");
+    expect(d.owner).toBe("ana@harbor.demo");
     expect(d.content).not.toContain("owner:");        // frontmatter stripped
     expect(d.checksum).toBe(extractFile("hr/pto.md", raw, mtime).checksum);
   });
@@ -25,12 +26,29 @@ describe("extractFile", () => {
     expect(d.title).toBe("q3-plan");
     expect(d.owner).toBeNull();
   });
-  it("parses the taxonomy term from frontmatter when termField given", () => {
-    const raw = "---\nowner: ana@meridian.demo\ncategory: hr\n---\n# T\n\nBody.";
-    const d = extractFile("a.md", raw, mtime, "category");
-    expect(d.term).toBe("hr");
-    expect(extractFile("a.md", raw, mtime).term).toBeNull();       // no termField → null
-    expect(extractFile("a.md", "# T\n\nBody.", mtime, "category").term).toBeNull(); // no frontmatter → null
+  it("parses the taxonomy term from frontmatter when termFields given", () => {
+    const raw = "---\nowner: ana@harbor.demo\ncategory: hr\n---\n# T\n\nBody.";
+    const d = extractFile("a.md", raw, mtime, [{ field: "category" }]);
+    expect(d.terms.category).toBe("hr");
+    // not requested → no key at all; requested but absent → an explicit null
+    expect(extractFile("a.md", raw, mtime).terms).not.toHaveProperty("category");
+    expect(extractFile("a.md", "# T\n\nBody.", mtime, [{ field: "category" }]).terms.category).toBeNull();
+  });
+  it("parses a multi-value vocabulary as a list, in either frontmatter form", () => {
+    const tf = [{ field: "tags", multiple: true }];
+    expect(extractFile("a.md", "---\ntags: [litigation, discovery]\n---\n# T", mtime, tf).terms.tags)
+      .toEqual(["litigation", "discovery"]);
+    expect(extractFile("a.md", "---\ntags: litigation, discovery\n---\n# T", mtime, tf).terms.tags)
+      .toEqual(["litigation", "discovery"]);
+    expect(extractFile("a.md", "---\ntags: litigation\n---\n# T", mtime, tf).terms.tags)
+      .toEqual(["litigation"]);
+  });
+  it("rejects a list for a single-value vocabulary, naming the file", () => {
+    const tf = [{ field: "category" }];
+    expect(() => extractFile("a.md", "---\ncategory: [hr, finance]\n---\n# T", mtime, tf))
+      .toThrow(/a\.md.*single-value/);
+    expect(() => extractFile("a.md", "---\ncategory: hr, finance\n---\n# T", mtime, tf))
+      .toThrow(/a\.md.*single-value/);
   });
 });
 
@@ -134,7 +152,6 @@ describe("indexCollection: taxonomy", () => {
   let db: Pool;
   let dir: string;
 
-  const tax = { field: "category", slugs: ["hr", "finance"] };
   const taxonomyCfg = {
     ...docCfg,
     taxonomies: {
@@ -143,16 +160,19 @@ describe("indexCollection: taxonomy", () => {
     collections: {
       policies: {
         ...docCfg.collections.policies,
-        taxonomy: "category",
+        taxonomies: ["category"],
       },
     },
   };
+
+  let taxonomies: Awaited<ReturnType<typeof loadTaxonomyBindings>>;
 
   beforeAll(async () => {
     p = await provision("taxonomy");
     db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, taxonomyCfg);
+    taxonomies = await loadTaxonomyBindings(db, taxonomyCfg, "policies", "dev");
   });
 
   beforeEach(() => {
@@ -170,33 +190,33 @@ describe("indexCollection: taxonomy", () => {
 
   it("writes the term column from frontmatter", async () => {
     writeFileSync(join(dir, "a.md"), "---\ncategory: hr\n---\n# A\n\nAlpha body.");
-    await indexCollection(db, "dev", "policies", dir, { taxonomy: tax });
+    await indexCollection(db, "dev", "policies", dir, { taxonomies });
     const r = (await db.query(`select category from data_synth."policies__files" where path='a.md'`)).rows[0];
     expect(r.category).toBe("hr");
   });
 
   it("updates the term when frontmatter changes", async () => {
     writeFileSync(join(dir, "a.md"), "---\ncategory: finance\n---\n# A\n\nAlpha body v2.");
-    await indexCollection(db, "dev", "policies", dir, { taxonomy: tax });
+    await indexCollection(db, "dev", "policies", dir, { taxonomies });
     const r = (await db.query(`select category from data_synth."policies__files" where path='a.md'`)).rows[0];
     expect(r.category).toBe("finance");
   });
 
   it("rejects a file with missing term, naming the file", async () => {
     writeFileSync(join(dir, "b.md"), "# B\n\nNo frontmatter.");
-    await expect(indexCollection(db, "dev", "policies", dir, { taxonomy: tax }))
+    await expect(indexCollection(db, "dev", "policies", dir, { taxonomies }))
       .rejects.toThrow(/b\.md.*missing required category/);
   });
 
   it("rejects a file with an unknown term, naming file and term", async () => {
     writeFileSync(join(dir, "b.md"), "---\ncategory: bogus\n---\n# B\n\nBody.");
-    await expect(indexCollection(db, "dev", "policies", dir, { taxonomy: tax }))
+    await expect(indexCollection(db, "dev", "policies", dir, { taxonomies }))
       .rejects.toThrow(/b\.md.*unknown category term "bogus"/);
   });
 
   it("unbound collections index exactly as before", async () => {
     writeFileSync(join(dir, "a.md"), "# A\n\nalpha body");
-    const r = await indexCollection(db, "dev", "policies", dir);   // no opts
+    const r = await indexCollection(db, "dev", "policies", dir);   // use docCfg without taxonomy
     expect(r.deleted + r.indexed + r.skipped).toBeGreaterThan(0);
   });
 });
