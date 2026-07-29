@@ -16,6 +16,10 @@ const q = (id: string) => {
   return `"${id}"`;
 };
 
+// A filter the builder can express no SQL for. Distinct from the generic Error above so the
+// broker can answer `invalid_intent` — a caller's mistake — rather than `internal_error`.
+export class UnsupportedFilter extends Error {}
+
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
   opts: { documentFilters?: DocumentFilter[]; q?: string; isMultiValueField?: (field: string) => boolean } = {},
@@ -51,6 +55,9 @@ export function buildSelect(
     const isMulti = opts.isMultiValueField?.(f.field) ?? false;
     if (f.op === "in") {
       const arr = Array.isArray(f.value) ? f.value : [f.value];
+      // An empty in-list matches nothing. Say so outright — the same guard the grant's
+      // document filters below have always had; intent filters were missing it.
+      if (!arr.length) { where.push("false"); continue; }
       if (isMulti) {
         // For multi-value columns, use overlap operator: "col" && $n::text[]
         const arrParam = param(arr);
@@ -61,6 +68,11 @@ export function buildSelect(
     } else if (isMulti && f.op === "eq") {
       // For multi-value columns with eq, use: $n = any("col")
       where.push(`${param(f.value)} = any(${q(f.field)})`);
+    } else if (isMulti) {
+      // Ordering and pattern operators have no defensible meaning against a set of terms, and
+      // the scalar form below would compare text[] against text — a driver error the caller
+      // can do nothing with. Refuse the intent instead; broker.ts maps this to invalid_intent.
+      throw new UnsupportedFilter(`operator "${f.op}" is not supported on multi-value field "${f.field}"`);
     } else {
       where.push(`${q(f.field)} ${OP_SQL[f.op]} ${param(f.value)}`);
     }

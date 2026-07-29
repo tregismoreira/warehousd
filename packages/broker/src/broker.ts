@@ -6,7 +6,7 @@ import type { WarehousdConfig } from "./config/schema";
 import type { Pools } from "./db/pools";
 import { dataPool } from "./db/pools";
 import { loadActiveGrant } from "./grants/eval";
-import { buildSelect } from "./sql/build";
+import { buildSelect, UnsupportedFilter } from "./sql/build";
 import { writeAudit } from "./audit/write";
 import { findCollection } from "./config/load";
 
@@ -25,6 +25,13 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     const c = findCollection(cfg, collection);
     return c ? Object.keys(c.fields) : null;
   }
+
+  // A term field bound to a `multiple: true` vocabulary is a text[] column (apply/ddl.ts), so
+  // buildSelect has to reach for `&&`/`= any` rather than `in`/`=`. Omitting this makes it
+  // compare text[] against text, which Postgres rejects outright.
+  // `taxonomies` is optional-chained, not indexed: callers that hand-build a config object and
+  // cast it never get zod's default, so the key is genuinely absent for most of the test suite.
+  const isMultiValueField = (field: string) => cfg.taxonomies?.[field]?.multiple ?? false;
 
   async function query(ctx: BrokerContext, intent: QueryIntent): Promise<BrokerResult> {
     // 1. intent shape
@@ -55,7 +62,8 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       : grant.allowedFields.filter((f) => all.includes(f));
     // 5. build + execute on the env-scoped pool
     try {
-      const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, { documentFilters: grant.documentFilter });
+      const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields,
+        { documentFilters: grant.documentFilter, isMultiValueField });
       const documents = (await dataPool(pools, ctx).query(text, values)).rows;
       const fieldsReturned = intent.aggregate && intent.aggregate.length
         ? [...(intent.groupBy ?? []), ...intent.aggregate.map((a) => `${a.fn}_${a.field}`)]
@@ -65,6 +73,10 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         fieldsReturned, grantId: grant.id, outcome: "allowed", reason: null });
       return { ok: true, documents, fieldsReturned, auditId };
     } catch (err) {
+      // A filter the builder can't express is the caller's mistake, not ours. It carries no
+      // driver detail, so answering invalid_intent tells them something actionable.
+      if (err instanceof UnsupportedFilter)
+        return refuse(ctx, intent.collection, intent, "invalid_intent", grant?.id ?? null);
       // Never surface a raw driver error: Postgres messages name columns, tables and
       // values, which is exactly what §10 test 4 forbids leaking. The audit row is
       // the non-negotiable part — an unaudited probe leaves no trace.
@@ -81,7 +93,10 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     const fields = Object.entries(c.fields)
       .filter(([n]) => grant.allowedFields.includes(n))
       // type is guaranteed by CollectionSchema refinement for structured collections; file collections have types filled in by transform
-      .map(([n, f]) => ({ name: n, type: f.type!, pk: f.pk }));
+      // A multi-value term field is pinned to `text` in config so the schema stays simple, but
+      // the column is text[]. Report what the caller will actually be querying, or they write a
+      // scalar filter against an array and get a refusal they can't diagnose.
+      .map(([n, f]) => ({ name: n, type: isMultiValueField(n) ? "text[]" : f.type!, pk: f.pk }));
     await writeAudit(app, { userId: ctx.userId, env: ctx.env, collection: name, intent: null,
       fieldsReturned: fields.map((f) => f.name), grantId: grant.id, outcome: "allowed", reason: null });
     return { collection: name, description: c.description, fields };
@@ -116,7 +131,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     try {
       const { text, values } = buildSelect(ctx.env,
         { collection: intent.collection, fields: selectFields, limit: intent.limit, offset: intent.offset } as QueryIntent,
-        grant.allowedFields, { q: intent.q, documentFilters: grant.documentFilter });
+        grant.allowedFields, { q: intent.q, documentFilters: grant.documentFilter, isMultiValueField });
       const documents = (await dataPool(pools, ctx).query(text, values)).rows;
       const auditId = await writeAudit(app, { userId: ctx.userId, env: ctx.env,
         collection: intent.collection, intent, fieldsReturned: selectFields,
