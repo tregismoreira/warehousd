@@ -56,14 +56,30 @@ async function main() {
   }
 
   // Seed grants for E2E tests: proposal flow (write-path.spec.ts)
-  const { requestGrant, approveGrant, loadConfig } = await import("../packages/broker/src/index");
+  const { requestGrant, approveGrant, revokeGrant, loadConfig } = await import("../packages/broker/src/index");
   const { getAppPool } = await import("../apps/web/app/lib/broker");
   const app = getAppPool();
   const cfg = loadConfig(process.env.WAREHOUSD_PROJECT_DIR!);
 
   const fields = ["id", "title", "notes", "assignee", "created_at"];
 
+  // dev-bootstrap derives Marcus's and Ana's grants from the config, so they already hold an
+  // approved grant on every collection — matter_tasks included. `grants_one_active` permits one
+  // approved grant per (org, user, collection, env), and these specs need a particular shape
+  // (Marcus direct with approve, Mia proposal_only), so retire whatever the demo seed left on
+  // the tuples below instead of colliding with it. Revoked rather than deleted: the status
+  // transition is the model's own, and the specs read the grant history.
+  async function retireApproved(userId: string, collection: string, env: string) {
+    const { rows } = await app.query(
+      `select id from app.grants
+        where org_id='default' and user_id=$1 and collection=$2 and env=$3 and status='approved'`,
+      [userId, collection, env],
+    );
+    for (const r of rows) await revokeGrant(app, r.id, "e2e-setup");
+  }
+
   // Marcus: direct-mode grant with read+create+approve on matter_tasks
+  await retireApproved("marcus", "matter_tasks", "dev");
   const marcusGrant = await requestGrant(app, {
     userId: "marcus",
     collection: "matter_tasks",
@@ -78,6 +94,9 @@ async function main() {
   });
 
   // Mia: proposal_only-mode grant with read+create on matter_tasks
+  // Mia's demo grants do not currently cover matter_tasks, but they are seeded from the same
+  // config-derived path, so guard the tuple rather than rely on that staying true.
+  await retireApproved("mia", "matter_tasks", "dev");
   const miaGrant = await requestGrant(app, {
     userId: "mia",
     collection: "matter_tasks",

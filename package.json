@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm test:parallel && pnpm test:serial",
+    "test": "tsx scripts/run-tests.ts",
     "test:parallel": "vitest run",
     "test:serial": "vitest run --config vitest.serial.config.ts",
     "test:e2e:cli": "vitest run --config vitest.e2e.config.ts",

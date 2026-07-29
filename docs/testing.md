@@ -67,6 +67,13 @@ likewise provisions a bare database rather than a copy of the template.
 `WAREHOUSD_TEST_WORKERS` changes the worker count — it defaults to 4 because sibling
 workspaces share this machine.
 
+Arguments are forwarded, so `pnpm test change-feed` and
+`pnpm test packages/broker/test/types.test.ts --reporter=verbose` both work. That needs
+`scripts/run-tests.ts` rather than a `&&` chain: pnpm hands trailing arguments to the *last*
+command in a chain, so a filter would have run the parallel pass unfiltered and then failed the
+serial one on a name it could never match. The wrapper sends a filter to whichever pass owns
+the file.
+
 Two suites are in the serial pass, both because they assert on state that is global to the
 Postgres *cluster* rather than to their own database:
 
