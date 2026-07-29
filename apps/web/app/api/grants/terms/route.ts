@@ -22,12 +22,10 @@ export async function GET(req: NextRequest) {
       field: b.field,
       label: b.label,
       multiple: b.multiple,
-      terms: b.slugs.map((slug) => {
-        // Look up label from the vocabulary config
-        const vocab = cfg.taxonomies[b.field];
-        const label = vocab?.terms?.[slug]?.label ?? slug;
-        return { slug, label };
-      }),
+      // Labels come from app.terms, which applyConfig fills from the YAML and syncDatasetTerms
+      // fills from the source collection's rows. Resolving them from config instead would leave
+      // a dataset-sourced vocabulary showing raw `c-0042` slugs, since it has no YAML terms.
+      terms: b.terms,
     })),
   });
 }

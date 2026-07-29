@@ -1,6 +1,9 @@
 import type { Pool } from "pg";
 import type { WarehousdConfig } from "./config/schema";
 
+// Identifier shape shared with config/schema.ts — anything interpolated into SQL must match.
+const IDENT = /^[a-z_][a-z0-9_]*$/i;
+
 /**
  * Taxonomy binding loaded from the database for a specific environment.
  */
@@ -8,7 +11,14 @@ export type TaxonomyBinding = {
   field: string;
   label: string;
   multiple: boolean;
+  /** Term slugs, in sort order. Convenience view of `terms` for validation and error messages. */
   slugs: string[];
+  /**
+   * Terms with their display labels. A dataset-sourced vocabulary's labels live only here —
+   * they are columns of the source collection, not literals in the YAML — so a picker that
+   * resolves labels from config alone can only show raw slugs.
+   */
+  terms: { slug: string; label: string }[];
 };
 
 /**
@@ -33,12 +43,33 @@ export async function syncDatasetTerms(db: Pool, cfg: WarehousdConfig, env: "dev
        on conflict (slug) do update set label=excluded.label returning id`,
       [vocabSlug, vocab.label])).rows[0].id;
 
-    // Slugify and upsert terms from the dataset
-    const rows = (await db.query(
-      `select distinct "${vocab.source.slug}" as slug, "${vocab.source.label}" as label from ${schema}."${vocab.source.collection}" where "${vocab.source.slug}" is not null`)).rows;
+    // Slugify and upsert terms from the dataset. Every interpolated identifier is re-checked
+    // here rather than trusted: ConfigSchema proves these name real fields on a real collection,
+    // but that guarantee is transitive, and this is the one place a vocabulary's own strings
+    // reach SQL. See sql/build.ts for the same discipline on the query side.
+    const src = vocab.source;
+    for (const id of [src.collection, src.slug, src.label])
+      if (!IDENT.test(id)) throw new Error(`vocabulary "${vocabSlug}": unsafe identifier "${id}"`);
 
+    const rows = (await db.query(
+      `select distinct "${src.slug}" as slug, "${src.label}" as label
+       from ${schema}."${src.collection}" where "${src.slug}" is not null`)).rows;
+
+    // Two source rows can slugify to the same term ("Acme, Inc." and "Acme Inc" both give
+    // `acme-inc`), and the upsert would quietly fold them into one — which silently widens
+    // every grant scoped to that term. Refuse instead; the config author picks a better slug
+    // field. Same for a value with nothing slug-safe in it at all.
+    const seen = new Map<string, string>();
     for (const row of rows) {
       const slug = slugify(row.slug);
+      if (!slug)
+        throw new Error(`vocabulary "${vocabSlug}": ${src.collection}.${src.slug} value `
+          + `"${row.slug}" has no slug-safe characters`);
+      const clash = seen.get(slug);
+      if (clash !== undefined && clash !== row.slug)
+        throw new Error(`vocabulary "${vocabSlug}": ${src.collection}.${src.slug} values `
+          + `"${clash}" and "${row.slug}" both slugify to "${slug}"`);
+      seen.set(slug, row.slug);
       await db.query(
         `insert into app.terms (vocabulary_id, env, slug, label) values ($1,$2,$3,$4)
          on conflict (vocabulary_id, env, slug) do update set label=excluded.label`,
@@ -74,14 +105,16 @@ export async function loadTaxonomyBindings(
     // YAML vocabularies have env='all', dataset-sourced have env='dev' or 'live'
     const termEnv = vocab.terms ? 'all' : env;
     const termRows = (await db.query(
-      `select slug from app.terms where vocabulary_id=$1 and env=$2 order by slug`,
+      `select slug, label from app.terms where vocabulary_id=$1 and env=$2 order by slug`,
       [vidRow.id, termEnv])).rows;
+    const terms = termRows.map((r: any) => ({ slug: r.slug, label: r.label ?? r.slug }));
 
     bindings.push({
       field: vocabSlug,
       label: vocab.label,
       multiple: vocab.multiple ?? false,
-      slugs: termRows.map((r: any) => r.slug),
+      slugs: terms.map((t) => t.slug),
+      terms,
     });
   }
 
