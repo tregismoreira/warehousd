@@ -1,7 +1,7 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
 import { execSync } from "child_process";
-import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, loadTaxonomyBindings, fileMetadataFields, ensureSchemasAndRoles } from "@warehousd/broker";
+import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, loadTaxonomyBindings, fileMetadataFields, ensureSchemasAndRoles, grantableFields } from "@warehousd/broker";
 import { seedLive } from "../examples/harbor/seed/live";
 import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
@@ -110,17 +110,20 @@ async function main() {
       ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
   }
   // Marcus (manager) and Ana (admin) see everything (README §"grants" — managers get fields: "*").
+  // Derived from the config rather than listed literally: a hand-written list silently stops
+  // covering the demo the moment a collection is added, which is how `matters` — the whole point
+  // of the view_join work — ended up ungranted for every persona. Deny-posture fields are not
+  // grantable, so `home_address`, `ssn` and `path` stay out of reach here as everywhere else.
   for (const user of ["marcus", "ana"]) {
     const already = await db.query(`select 1 from app.grants where user_id=$1 limit 1`, [user]);
     if (already.rowCount === 0) {
-      await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
-        ($1,'announcements', array['id','title','department','summary','owner','updated_at'],'dev','approved'),
-        ($1,'departments', array['id','name'],'dev','approved'),
-        ($1,'people', array['id','full_name','email','department_name','department_id'],'dev','approved'),
-        ($1,'salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','approved'),
-        ($1,'metrics', array['id','date','revenue','active_customers','region'],'dev','approved'),
-        ($1,'policies', array['title','content','owner','updated_at','department','tags'],'dev','approved')`,
-        [user]);
+      for (const name of Object.keys(cfg.collections)) {
+        const fields = grantableFields(cfg, name);
+        if (!fields.length) continue;
+        await db.query(
+          `insert into app.grants (user_id,collection,allowed_fields,env,status)
+           values ($1,$2,$3,'dev','approved')`, [user, name, fields]);
+      }
     }
   }
 
@@ -176,6 +179,18 @@ async function main() {
       ('omar','salaries', array['id','job_title','base_salary'],'dev','denied','marcus',now())`);
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,decided_by,decided_at) values
       ('omar','performance_reviews', array['id','person_id','review_date','rating'],'dev','revoked','marcus',now())`);
+  }
+
+  // Dan also gets the third file collection, scoped by department rather than client — without
+  // it `precedents` is the one collection in the config no persona can reach, so its bound
+  // vocabularies and metadata fields never get exercised by the demo.
+  const danPrecedents = await db.query(
+    `select 1 from app.grants where user_id='dan' and collection='precedents' limit 1`);
+  if (danPrecedents.rowCount === 0) {
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,document_filter) values
+      ('dan','precedents', array['title','content','owner','updated_at','department','tags','jurisdiction','last_reviewed'],
+       'dev','approved',
+       '[{"field":"department","op":"in","value":["litigation"]}]'::jsonb)`);
   }
   await db.end();
   console.log("bootstrap complete (indexed " + indexed.join(", ") + ")");
