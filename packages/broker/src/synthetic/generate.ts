@@ -1,11 +1,13 @@
 import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
+import { loadTaxonomyBindings, syncDatasetTerms } from "../taxonomy";
 import { makeRng, genValue } from "./generators";
 
 // Generates in FK dependency order so parent ids exist before children reference them.
 export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: number): Promise<void> {
   const rng = makeRng(seed);
   const idsByCollection: Record<string, string[]> = {};
+  const pkByCollection: Record<string, string> = {};
   const order = topoSort(cfg);
   const deferred: { collection: string; column: string; parent: string; pk: string }[] = [];
 
@@ -17,10 +19,9 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
     const n = cfg.synthetic.documents_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
     // Build term slug sets for each bound vocabulary. Only YAML vocabularies have terms to
-    // draw from: a dataset-sourced one is populated by syncDatasetTerms, which by construction
-    // runs *after* this — the rows it reads are the ones being generated here. Such a column
-    // is left NULL, and stays NULL, since nothing back-fills it. Harbor binds `client` only to
-    // a file collection (skipped above), so this is a latent shape rather than a live one.
+    // draw from here: a dataset-sourced one is populated by syncDatasetTerms, which by
+    // construction cannot run yet — the rows it reads are the ones being generated below.
+    // Those columns are left NULL and back-filled by the third pass at the end.
     const termsByVocab = new Map<string, string[]>();
     for (const taxSlug of c.taxonomies ?? []) {
       const vocab = cfg.taxonomies[taxSlug];
@@ -34,6 +35,7 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
     for (const [fname, f] of storedFields) {
       if (f.pk) { pkField = fname; break; }
     }
+    if (pkField) pkByCollection[name] = pkField;
     for (let i = 0; i < n; i++) {
       const cols: string[] = [], vals: unknown[] = [];
       for (const [fname, f] of storedFields) {
@@ -98,6 +100,51 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
       if (!pick || pick === rowId) continue; // nobody is their own manager/head
       await db.query(
         `update data_synth.${d.collection} set "${d.column}"=$1 where "${d.pk}"=$2`, [pick, rowId]);
+    }
+  }
+
+  // Third pass: dataset-sourced vocabularies. Their terms are distinct values of a column on
+  // another collection, so the term set does not exist until that collection has rows — which
+  // is why the first pass leaves these columns NULL. Sync the terms now, then fill the columns
+  // with the same per-row update the FK pass uses.
+  //
+  // `dev` is not a guess: this function writes data_synth and nothing else. Callers run
+  // syncDatasetTerms immediately afterwards anyway and it is idempotent, so this adds no
+  // ordering constraint.
+  const datasetSourced = order.filter((name) => {
+    const c = cfg.collections[name];
+    return !!c && c.type !== "file"
+      && (c.taxonomies ?? []).some((slug) => cfg.taxonomies[slug]?.source);
+  });
+  if (datasetSourced.length) {
+    await syncDatasetTerms(db, cfg, "dev");
+    for (const name of datasetSourced) {
+      const rowIds = idsByCollection[name] ?? [];
+      const bindings = await loadTaxonomyBindings(db, cfg, name, "dev");
+      for (const b of bindings) {
+        if (!cfg.taxonomies[b.field]?.source) continue; // YAML terms were filled in pass one
+        const pk = pkByCollection[name];
+        // The back-fill addresses rows by primary key, exactly as the FK pass does. Fail here,
+        // naming the collection, rather than emitting `where ""=$2`.
+        if (!pk)
+          throw new Error(`collection "${name}" needs a pk to back-fill the dataset-sourced vocabulary "${b.field}"`);
+        if (!b.slugs.length || !rowIds.length) continue;
+        for (const rowId of rowIds) {
+          let value: string | string[];
+          if (b.multiple) {
+            // Same draw as the first pass: a fixed number of rolls so the rng stream is
+            // stable for a seed, with repeats dropped rather than re-rolled.
+            const count = Math.floor(rng() * 3) + 1;
+            const selected = new Set<string>();
+            for (let j = 0; j < count; j++) selected.add(b.slugs[Math.floor(rng() * b.slugs.length)]!);
+            value = [...selected];
+          } else {
+            value = b.slugs[Math.floor(rng() * b.slugs.length)]!;
+          }
+          await db.query(
+            `update data_synth.${name} set "${b.field}"=$1 where "${pk}"=$2`, [value, rowId]);
+        }
+      }
     }
   }
 }

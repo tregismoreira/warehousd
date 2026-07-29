@@ -80,6 +80,77 @@ describe("synthetic: taxonomy terms", () => {
   });
 });
 
+describe("synthetic: dataset-sourced taxonomy terms", () => {
+  // The term set is distinct `clients.client_number`, so it does not exist until `clients`
+  // has rows — the generator has to fill this column in a pass after the inserts.
+  const base = (multiple: boolean) => ({
+    project: "t", server: { port: 1 },
+    synthetic: { documents_per_collection: { clients: 12, matters: 25 } },
+    taxonomies: { client: { label: "Client", multiple,
+      source: { collection: "clients", slug: "client_number", label: "name" } } },
+    collections: {
+      clients: { description: "d", fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        client_number: { type: "text", posture: "allow", gen: "client_number" },
+        name: { type: "text", posture: "allow", gen: "company_name" },
+      }},
+      matters: { description: "d", taxonomies: ["client"], fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        matter_number: { type: "text", posture: "allow", gen: "matter_number" },
+      }},
+    },
+  });
+
+  it("fills a single-value bound column with real slugs, deterministically", async () => {
+    const cfg = ConfigSchema.parse(base(false));
+    const p2 = await provision("synth_dsvocab");
+    const db = new Pool({ connectionString: p2.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, cfg);
+    await generateSynthetic(db, cfg, 11);
+
+    const expected = new Set(
+      (await db.query(`select client_number from data_synth.clients`)).rows
+        .map((r) => r.client_number.toLowerCase()));
+    const rows = (await db.query(`select client from data_synth.matters order by id`)).rows;
+    expect(rows.length).toBe(25);
+    expect(rows.filter((r) => r.client === null).length).toBe(0);
+    for (const r of rows) expect(expected.has(r.client)).toBe(true);
+
+    // Same seed → same assignment. regenerate.test.ts depends on this holding.
+    await db.query(`truncate data_synth.clients, data_synth.matters`);
+    await generateSynthetic(db, cfg, 11);
+    const again = (await db.query(`select client from data_synth.matters order by id`)).rows;
+    expect(again).toEqual(rows);
+    await db.end();
+    await p2.end();
+  });
+
+  it("fills a multi-value bound column with a text[] of 1-3 distinct slugs", async () => {
+    const cfg = ConfigSchema.parse(base(true));
+    const p2 = await provision("synth_dsvocab_multi");
+    const db = new Pool({ connectionString: p2.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, cfg);
+    await generateSynthetic(db, cfg, 11);
+
+    const expected = new Set(
+      (await db.query(`select client_number from data_synth.clients`)).rows
+        .map((r) => r.client_number.toLowerCase()));
+    const rows = (await db.query(`select client from data_synth.matters order by id`)).rows;
+    expect(rows.length).toBe(25);
+    for (const r of rows) {
+      expect(Array.isArray(r.client)).toBe(true);
+      expect(r.client.length).toBeGreaterThanOrEqual(1);
+      expect(r.client.length).toBeLessThanOrEqual(3);
+      expect(new Set(r.client).size).toBe(r.client.length);
+      for (const slug of r.client) expect(expected.has(slug)).toBe(true);
+    }
+    await db.end();
+    await p2.end();
+  });
+});
+
 describe("synthetic: gen: hints", () => {
   it("client_number generates dense deterministic sequence", async () => {
     const cfg = ConfigSchema.parse({
