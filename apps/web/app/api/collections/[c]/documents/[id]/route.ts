@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server";
 import type { GetDocumentIntent } from "@warehousd/broker";
-import { deriveContext } from "../../../../../lib/session";
-import { getBroker } from "../../../../lib/broker";
-import { unauthenticated, refuse, ok } from "../../../../../lib/rest";
+import { deriveContext } from "../../../../../../lib/session";
+import { getBroker } from "../../../../../lib/broker";
+import { unauthenticated, refuse, ok } from "../../../../../../lib/rest";
 
 export async function GET(
   req: NextRequest,

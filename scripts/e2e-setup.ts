@@ -1,11 +1,15 @@
-// Provisions `warehousd_e2e` from scratch: schemas, the four roles, YAML apply, synthetic
+// Provisions the e2e database from scratch: schemas, the four roles, YAML apply, synthetic
 // data, indexed policies, and the three personas. Idempotent — drops and recreates.
 import { Pool } from "pg";
 import { execSync } from "node:child_process";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 
 const ADMIN = "postgres://postgres:postgres@127.0.0.1:54330/postgres";
-const DB = "warehousd_e2e";
+// Sibling checkouts share one Postgres container, so a fixed database name means two
+// concurrent `pnpm e2e` runs drop and recreate each other's data mid-suite. Scope the name to
+// the workspace directory. `apps/web/playwright.config.ts` derives the same slug.
+const SLUG = basename(resolve(__dirname, "..")).toLowerCase().replace(/[^a-z0-9_]/g, "_");
+const DB = process.env.WAREHOUSD_E2E_DB ?? `warehousd_e2e_${SLUG}`;
 
 async function main() {
   const a = new Pool({ connectionString: ADMIN });

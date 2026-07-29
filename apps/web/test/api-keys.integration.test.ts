@@ -449,10 +449,10 @@ describe("Control-plane API routes", () => {
     });
   });
 
-  describe("GET /api/documents/[c]/[id]", () => {
+  describe("GET /api/collections/[c]/documents/[id]", () => {
     it("requires session auth", async () => {
-      const { GET } = await import("../app/api/documents/[c]/[id]/route");
-      const req = apiRequest("/api/documents/people/fake-id", {});
+      const { GET } = await import("../app/api/collections/[c]/documents/[id]/route");
+      const req = apiRequest("/api/collections/people/documents/fake-id", {});
       const res = await GET(req as any, { params: Promise.resolve({ c: "people", id: "fake-id" }) } as any);
       expect(res.status).toBe(401);
     });

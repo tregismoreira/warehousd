@@ -13,7 +13,7 @@ change enforcement, the pull request must carry a test that fails without it.
 | `pnpm lint` | ESLint, including the rule that keeps `packages/broker` free of HTTP/MCP/UI/LLM imports | — |
 | `pnpm test` | Vitest: broker unit + integration, CLI, and web route/integration tests | Postgres |
 | `pnpm build` | Production build and full typecheck | — |
-| `pnpm e2e` | Playwright against a real browser: all thirteen web surfaces | Postgres |
+| `pnpm e2e` | Playwright against a real browser: every web surface | Postgres |
 | `pnpm test:e2e:cli` | The built CLI driving real Docker containers end to end | Docker |
 | `pnpm test:e2e:sso` | A real OIDC and SAML round trip against Keycloak | Docker |
 | `pnpm test:e2e` | Both of the above, in sequence | Docker |
@@ -42,15 +42,6 @@ runs the *built* CLI against real containers and takes several minutes — run
 `warehousd` also matches the private root package), and point it at a locally
 built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 
-> ⚠️ **Free port 8722 before running `pnpm e2e`.** `playwright.config.ts` sets
-> `reuseExistingServer: !process.env.CI`, so if anything is already serving
-> `http://localhost:8722/login` — most easily a container left behind by
-> `warehousd start` or a previous `test:e2e:cli` run — Playwright silently reuses
-> it instead of starting the dev server under test. The suite then runs against
-> the wrong database and fails with `WARN [Better Auth]: User not found` and
-> sign-in timeouts that look like application bugs. Check with
-> `lsof -nP -iTCP:8722 -sTCP:LISTEN` before debugging anything else.
-
 > ⚠️ **The write path needs its own two database URLs.** `DEV_WRITE_DATABASE_URL`
 > and `LIVE_WRITE_DATABASE_URL` point at the `*_write` roles, which are the only
 > ones holding `INSERT`/`UPDATE` on the base tables — the read roles see just the
@@ -59,16 +50,63 @@ built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 > problem. They are set in `playwright.config.ts` alongside the read URLs; any
 > harness that starts the app itself must set them too.
 
-> ⚠️ **Do not run two suites against one Postgres.** Sibling conductor workspaces
-> share `127.0.0.1:54330` — whichever one ran `pnpm test:up` first owns the
-> container. Concurrent runs create and drop each other's databases, which
-> surfaces as tests that hang far past their own timeout rather than as a clean
-> failure. `ps aux | grep vitest` catches orphaned workers, which outlive a
-> `pkill` aimed at their parent shell.
-
 CI runs lint, `pnpm test`, and `pnpm build`, then Playwright, a packaging
 smoke test that installs the CLI tarball outside the workspace, and the CLI and
 SSO end-to-end suites.
+
+### Running two checkouts at once
+
+`pnpm e2e` is safe to run in two checkouts simultaneously. Nothing needs to be
+configured for it, but it is worth knowing what makes it safe, because the
+failure it prevents does not look like a collision — it looks like your code is
+broken.
+
+Sibling workspaces share `127.0.0.1:54330`, whichever one ran `pnpm test:up`
+first. Sharing the Postgres *server* is fine and intended. Sharing a *database*
+or an *app port* is not:
+
+- A shared database is destructive — each `e2e:setup` drops and recreates it, so
+  one suite pulls the schema out from under the other mid-run. It surfaced as
+  `relation "session" does not exist`, `column g.org_id does not exist`, and
+  hangs well past Playwright's own timeout.
+- A shared port is worse, because it is *silent*. Playwright's usual
+  `reuseExistingServer: !process.env.CI` cannot tell whose dev server answers on
+  a port, so it adopts the other checkout's — and the suite then exercises that
+  checkout's code against that checkout's database while reporting the result as
+  yours. Its signature is a plausible-looking failure run: 404s on routes that
+  demonstrably exist, and assertions failing against seed data from a branch that
+  is not checked out here.
+
+So neither is shared. Both are derived from the repository root's directory name,
+and adoption of a foreign server is refused outright:
+
+- **Databases** — `scripts/e2e-setup.ts` and `apps/web/playwright.config.ts`
+  independently derive `warehousd_e2e_<workspace-dir>`. Override with
+  `WAREHOUSD_E2E_DB`.
+- **App port** — `playwright.config.ts` hashes the same slug into 8800-8899,
+  clear of 8722 (`pnpm dev`), 8723 (`warehousd start`'s database), 8780
+  (Keycloak) and 8791 (the fake IdP). Override with `WAREHOUSD_E2E_PORT`. Your
+  own `pnpm dev` on 8722 is untouched by, and cannot interfere with, a suite run.
+- **Adoption** — `reuseExistingServer` is `false` unconditionally. There is
+  nothing legitimate to reuse once the port is per-workspace, and the failure it
+  buys back is a loud one.
+
+Two guards keep a residual collision from going quiet. Playwright refuses to
+start when something already answers on the origin, and
+`scripts/assert-port-free.mjs` runs ahead of `next dev` because `next dev -p N`
+does *not* fail on a busy port — it binds N+1 and carries on.
+
+Vitest was already safe: `packages/broker/test/helpers/db.ts` and
+`apps/web/test/helpers/web-db.ts` name their databases `wh_<label>_<pid>`. The
+~90 test files mentioning `http://localhost:8722` only build `Request` objects
+for route handlers; none binds a port.
+
+Keycloak (8780) and the fake IdP (8791) have the same collision class and are
+**not** fixed. They are reached only by `test:e2e:sso`, which is gated behind
+`WAREHOUSD_E2E_KEYCLOAK` and is not part of `pnpm test` or `pnpm e2e`.
+
+`ps aux | grep -E "vitest|next-server"` catches orphaned workers, which outlive
+a `pkill` aimed at their parent shell and will otherwise hold the port.
 
 ## What the enforcement tests assert
 
@@ -211,7 +249,7 @@ The interesting ones, and where they live:
 
 ## What is still manual
 
-The Playwright suite covers all eleven web surfaces. Three things are still
+The Playwright suite covers every web surface. Three things are still
 checked by hand, because they need credentials or a product UI no test can drive:
 
 1. **Connecting a real assistant.** [connect-claude.md](connect-claude.md) — add

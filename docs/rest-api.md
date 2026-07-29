@@ -23,6 +23,13 @@ A thin HTTP adapter for programmatic access to collections, governed by the same
 | GET | `/v1/grants` | (custom) | List grants for the authenticated user | 200 |
 | POST | `/v1/grants` | (custom) | Request access to a collection | 201 |
 
+**There is deliberately no `GET /v1/proposals/{id}`.** `listProposals` returns no field
+values, so reading the *proposed content* of a single proposal is a separate, more privileged
+call — `broker.getProposal`, reachable only through the console's session route
+`GET /api/proposals/{id}`. Reviewing proposed content is a console-only surface. Exposing it
+over `/v1` would be a new public API commitment rather than a gap to close, so it is left to
+its own decision.
+
 ## Status codes and reasons
 
 All refusals return a `reason` code; never a denied field value, never SQL. `/v1/token` uses a

@@ -46,7 +46,7 @@ export function ProposalDetail({
         // document at all — it is invisible until approved — so that read 404s by design.
         const [propRes, docRes] = await Promise.all([
           fetch(`/api/proposals/${proposal.proposalId}`),
-          fetch(`/api/documents/${proposal.collection}/${proposal.documentId}`),
+          fetch(`/api/collections/${proposal.collection}/documents/${proposal.documentId}`),
         ]);
 
         if (propRes.ok) {

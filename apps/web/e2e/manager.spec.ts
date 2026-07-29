@@ -71,19 +71,18 @@ test.describe("manager review", () => {
 
   test("an approved grant is listed as active and can be revoked", async ({ page }) => {
     await as(page, "manager");
-    // Wait for the grant list itself, not just the route: the table re-renders when the fetch
-    // lands, which detaches the confirm dialog if it is already open.
-    const loaded = page.waitForResponse(
-      (r) => r.url().includes("/api/grants") && r.request().method() === "GET",
-    );
     await page.getByRole("link", { name: "Active grants" }).click();
     await page.waitForURL(/\/manager\/grants$/);
-    await loaded;
 
     const active = page.getByRole("row", { name: new RegExp(`mia.*${SEEDED_PENDING}`) });
     await expect(active).toBeVisible();
     await active.getByRole("button", { name: "Revoke" }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: "Revoke" }).click();
+    // The confirm dialog lives outside the table, so a refetch no longer detaches it — but
+    // assert it rendered before clicking through, so a regression fails here rather than as a
+    // mystery timeout on the toast.
+    const confirm = page.getByRole("alertdialog");
+    await expect(confirm.getByText(/Revoke .* access to /)).toBeVisible();
+    await confirm.getByRole("button", { name: "Revoke" }).click();
     await expect(page.getByText("Grant revoked")).toBeVisible();
     await expect(active).toHaveCount(0);
   });

@@ -10,7 +10,6 @@ import { EmptyState } from "@/components/common/EmptyState";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 type ActiveGrant = {
@@ -23,6 +22,10 @@ export function ActiveGrants() {
   const [grants, setGrants] = useState<ActiveGrant[]>([]);
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState<string | null>(null);
+  // One dialog for the whole table, keyed off which grant is pending revocation. Rendering it
+  // inside the row meant `load()`'s re-render unmounted it mid-confirm.
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const pending = grants.find((g) => g.id === pendingId) ?? null;
 
   const load = async () => {
     setLoading(true);
@@ -53,6 +56,7 @@ export function ActiveGrants() {
         return;
       }
       toast.success("Grant revoked");
+      setPendingId(null);
       await load();
     } finally {
       setRevoking(null);
@@ -86,46 +90,54 @@ export function ActiveGrants() {
       ) },
     { id: "actions", header: "",
       cell: ({ row }) => (
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="destructive" size="sm">Revoke</Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Revoke {row.original.user_id}&rsquo;s access to {row.original.collection}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Revocation is immediate — their very next query is refused, with no token refresh
-                involved. They can request access again.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive hover:bg-destructive/90"
-                onClick={() => revoke(row.original.id)}
-                disabled={revoking === row.original.id}
-              >
-                {revoking === row.original.id && <Loader2 size={16} className="mr-2 animate-spin" />}
-                Revoke
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <Button variant="destructive" size="sm" onClick={() => setPendingId(row.original.id)}>
+          Revoke
+        </Button>
       ) },
   ];
 
   return (
-    <DataTable
-      columns={columns}
-      data={grants}
-      loading={loading}
-      empty={
-        <EmptyState
-          icon={ListChecks}
-          title="No active grants"
-          description="Approved grants across the deployment will show up here, with revoke taking effect on the next query."
-        />
-      }
-    />
+    <>
+      <DataTable
+        columns={columns}
+        data={grants}
+        loading={loading}
+        empty={
+          <EmptyState
+            icon={ListChecks}
+            title="No active grants"
+            description="Approved grants across the deployment will show up here, with revoke taking effect on the next query."
+          />
+        }
+      />
+
+      <AlertDialog open={pending !== null} onOpenChange={(v) => { if (!v) setPendingId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke {pending?.user_id}&rsquo;s access to {pending?.collection}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Revocation is immediate — their very next query is refused, with no token refresh
+              involved. They can request access again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={(e) => {
+                // Keep the dialog mounted while the POST is in flight so the spinner is real;
+                // `revoke` closes it once the refetch has landed.
+                e.preventDefault();
+                if (pending) revoke(pending.id);
+              }}
+              disabled={revoking !== null}
+            >
+              {revoking !== null && <Loader2 size={16} className="mr-2 animate-spin" />}
+              Revoke
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
