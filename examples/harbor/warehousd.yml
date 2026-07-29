@@ -56,7 +56,9 @@ collections:
       full_name:         { type: text, posture: allow }
       email:             { type: text, posture: allow }
       department_name:   { type: text, posture: allow, view_join: { table: departments, column: name, on: department_id } }
-      department_id:     { type: uuid, posture: allow, fk: departments.id }
+      # The deferred side of the people ↔ departments cycle: rows are inserted with this NULL
+      # and back-filled once both collections exist, exactly like departments.head_id above.
+      department_id:     { type: uuid, posture: allow, fk: departments.id, nullable: true }
       home_address:      { type: text, posture: deny }
       phone:             { type: text, posture: deny }
       role:              { type: text, posture: allow, nullable: true }
