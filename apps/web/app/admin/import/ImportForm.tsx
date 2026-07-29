@@ -46,9 +46,10 @@ const ERROR_LABELS: Record<string, string> = {
   invalid_uuid: "not a UUID",
   missing_required: "required value missing",
   unknown_term: "not a term in the bound vocabulary",
-  // The admin path always resolves bindings before validating, so this only surfaces when the
-  // vocabulary itself could not be read — apply it, or import its source collection first.
-  unvalidatable_term: "its vocabulary's terms could not be resolved for this collection",
+  // The admin path always resolves bindings before validating, so this now means the
+  // vocabulary was never applied. A term store that is merely unreachable refuses the whole
+  // file as `taxonomy_unavailable` instead, and never reaches this per-column list.
+  unvalidatable_term: "its vocabulary has not been applied to this stack",
   duplicate_pk: "duplicate primary key in this file",
   constraint_violation: "conflicts with data already in the collection",
 };

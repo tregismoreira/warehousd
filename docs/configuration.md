@@ -235,10 +235,11 @@ collections:
   NULLs.
 - **Import validates against the live term set.** An import naming a
   dataset-sourced term is checked against `app.terms` for `live`, resolved before
-  validation runs; an unrecognised value is `unknown_term`. A vocabulary that
-  cannot be resolved at all is `unvalidatable_term` and refuses the file — the
-  default is closed, because a term no grant can match is worse than a rejected
-  import.
+  validation runs; an unrecognised value is `unknown_term`. A vocabulary that was
+  never applied is `unvalidatable_term` and refuses the file — the default is
+  closed, because a term no grant can match is worse than a rejected import. If
+  the term store cannot be read at all, the refusal is `taxonomy_unavailable`
+  (HTTP 503), kept distinct so an outage never reads as a broken config.
 - The bound field is added automatically as `text`/`allow` if you don't declare it.
   Declaring it lets you override the posture; it may not set `pk`, `fk`, or `view_join`.
 

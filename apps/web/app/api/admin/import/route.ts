@@ -30,7 +30,11 @@ export async function POST(req: NextRequest) {
     getBroker().pools, getConfig(), guard.user.id, collection, { text, format });
 
   if (!result.ok) {
-    const status = result.reason === "import_not_configured" ? 503 : 400;
+    // Both mean the stack cannot serve the request right now — the file may well be fine.
+    // Every other refusal is something about the payload, which is the caller's to fix.
+    const status =
+      result.reason === "import_not_configured" || result.reason === "taxonomy_unavailable"
+        ? 503 : 400;
     return Response.json(
       { ok: false, reason: result.reason, errors: result.errors ?? [] }, { status });
   }

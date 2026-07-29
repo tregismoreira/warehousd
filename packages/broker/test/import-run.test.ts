@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, type Pools } from "../src/index";
 import { importCollection } from "../src/import/run";
+import { syncDatasetTerms } from "../src/taxonomy";
 import { loadConfig } from "../src/config/load";
 import { ConfigSchema } from "../src/config/schema";
 
@@ -213,5 +214,47 @@ describe("importCollection: dataset-sourced vocabulary", () => {
     expect(r.errors?.[0]).toMatchObject({ column: "client", reason: "unknown_term" });
     const stored = await dAdmin.query(`select 1 from data_live.matters where id=$1`, [U(12)]);
     expect(stored.rowCount).toBe(0);
+  });
+
+  it("refuses a vocabulary this stack never applied as unvalidatable_term", async () => {
+    // The vocabulary row is gone, so loadTaxonomyBindings throws a plain Error — the terms
+    // are genuinely unresolvable rather than temporarily unreachable.
+    await dAdmin.query(`delete from app.terms`);
+    await dAdmin.query(`delete from app.vocabularies where slug='client'`);
+    try {
+      const r = await importCollection(dPools, dsCfg, "ana", "matters", {
+        format: "csv", text: `id,matter_number,client\n${U(13)},M-3,c-0001`,
+      });
+      expect(r.ok).toBe(false);
+      if (r.ok) throw new Error("unreachable");
+      expect(r.reason).toBe("validation_failed");
+      expect(r.errors?.[0]).toMatchObject({ column: "client", reason: "unvalidatable_term" });
+    } finally {
+      await applyConfig(dAdmin, dsCfg);
+      await syncDatasetTerms(dAdmin, dsCfg, "live");
+    }
+  });
+
+  it("refuses a broken app schema as taxonomy_unavailable, not as a config problem", async () => {
+    // An outage must not be reported as an unvalidatable vocabulary: that sends an admin to
+    // fix a config that was never wrong. `app.terms` is unreadable but the pool still works,
+    // so the refusal is still audited — which is the case that distinguishes the two.
+    await dAdmin.query(`alter table app.terms rename to terms_hidden`);
+    try {
+      const r = await importCollection(dPools, dsCfg, "ana", "matters", {
+        format: "csv", text: `id,matter_number,client\n${U(14)},M-4,c-0001`,
+      });
+      expect(r.ok).toBe(false);
+      if (r.ok) throw new Error("unreachable");
+      expect(r.reason).toBe("taxonomy_unavailable");
+      expect(r.auditId).not.toBeNull();
+      const ev = await dAdmin.query(`select * from app.audit_events where id=$1`, [r.auditId]);
+      expect(ev.rows[0]).toMatchObject({ outcome: "refused", reason: "taxonomy_unavailable" });
+      // Nothing was written: the refusal happens before the insert transaction opens.
+      const stored = await dAdmin.query(`select 1 from data_live.matters where id=$1`, [U(14)]);
+      expect(stored.rowCount).toBe(0);
+    } finally {
+      await dAdmin.query(`alter table app.terms_hidden rename to terms`);
+    }
   });
 });
