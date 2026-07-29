@@ -131,7 +131,7 @@ describe("/mcp endpoint", () => {
 
   it("search_documents refuses an ungranted collection with a hint (grant-filtering entry point)", async () => {
     const token = await mintAccessToken("env:dev");
-    // `policies` is the one `type: file` collection in examples/meridian/warehousd.yml. No grant
+    // `policies` is a `type: file` collection in examples/harbor/warehousd.yml. No grant
     // exists in this test, so this exercises the deny-by-default path — same boundary the unit
     // tests in mcp-tools.test.ts already cover; a real successful search against live synthetic/
     // indexed content is out of scope here since apps/web's test harness doesn't provision

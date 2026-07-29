@@ -11,7 +11,7 @@ import { loadConfig } from "../src/config/load";
 import { DENIED_CANARY, SSN_CANARY } from "./fixtures/canaries";
 import type { QueryIntent } from "../src/types";
 
-const cfg = loadConfig(join(__dirname, "../../../examples/meridian"));
+const cfg = loadConfig(join(__dirname, "../../../examples/harbor"));
 const allProbes = JSON.parse(readFileSync(join(__dirname, "fixtures/probes.json"), "utf8")) as
   { name: string; surface?: string; intent: QueryIntent; expect: "allowed" | "refused" }[];
 // Skip document-specific probes (tested separately via searchDocuments)

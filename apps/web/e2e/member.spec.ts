@@ -19,7 +19,7 @@ test.describe("member surfaces", () => {
   });
 
   test("a grant shows only its granted fields, never a deny-posture one", async ({ page }) => {
-    // meridian marks people.home_address and people.phone as posture: deny, so they can never
+    // harbor marks people.home_address and people.phone as posture: deny, so they can never
     // appear on a grant.
     const people = page.getByRole("row", { name: /people/ });
     await expect(people).toContainText("Approved");
