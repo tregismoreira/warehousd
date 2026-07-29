@@ -64,7 +64,7 @@ describe("term-scoped grants: structured", () => {
   it("document_filter on the term restricts documents; excluded documents silently absent", async () => {
     await grant("u1", "notes", ["id", "body", "category"],
       [{ field: "category", op: "in", value: ["hr"] }]);
-    const r = await broker.query({ userId: "u1", env: "dev" }, { collection: "notes" });
+    const r = await broker.query({ userId: "u1", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.documents.length).toBe(2);
@@ -74,7 +74,7 @@ describe("term-scoped grants: structured", () => {
 
   it("client filters AND with the term scope — no widening", async () => {
     await grant("u1", "notes", ["id", "body", "category"], [{ field: "category", op: "in", value: ["hr"] }]);
-    const r = await broker.query({ userId: "u1", env: "dev" },
+    const r = await broker.query({ userId: "u1", orgId: "default", env: "dev", via: "session" },
       { collection: "notes", filters: [{ field: "category", op: "eq", value: "finance" }] });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents.length).toBe(0);
@@ -82,13 +82,13 @@ describe("term-scoped grants: structured", () => {
 
   it("term field can gate rows without being readable (deny-style)", async () => {
     await grant("u2", "notes", ["id", "body"], [{ field: "category", op: "in", value: ["hr"] }]);
-    const r = await broker.query({ userId: "u2", env: "dev" }, { collection: "notes" });
+    const r = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.documents.length).toBe(2);
       for (const row of r.documents) expect("category" in row).toBe(false);  // absent, not null
     }
-    const denied = await broker.query({ userId: "u2", env: "dev" },
+    const denied = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" },
       { collection: "notes", fields: ["category"] });
     expect(denied.ok).toBe(false);
     if (!denied.ok) expect(denied.reason).toBe("field_denied");
@@ -96,7 +96,7 @@ describe("term-scoped grants: structured", () => {
 
   it("empty in-list denies all rows", async () => {
     await grant("u3", "notes", ["id", "body"], [{ field: "category", op: "in", value: [] }]);
-    const r = await broker.query({ userId: "u3", env: "dev" }, { collection: "notes" });
+    const r = await broker.query({ userId: "u3", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents.length).toBe(0);
   });
@@ -107,7 +107,7 @@ describe("term-scoped grants: file search", () => {
     await grant("u4", "briefs", ["title", "content", "category"],
       [{ field: "category", op: "in", value: ["hr"] }]);
     // "vacation" matches a document in BOTH files — only the hr one may return
-    const r = await broker.searchDocuments({ userId: "u4", env: "dev" },
+    const r = await broker.searchDocuments({ userId: "u4", orgId: "default", env: "dev", via: "session" },
       { collection: "briefs", q: "vacation" });
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -121,7 +121,7 @@ describe("term-scoped grants: file search", () => {
 
   it("broker.query on the bound file collection filters by term too", async () => {
     await grant("u4", "briefs", ["title", "content", "category"], [{ field: "category", op: "in", value: ["hr"] }]);
-    const r = await broker.query({ userId: "u4", env: "dev" }, { collection: "briefs" });
+    const r = await broker.query({ userId: "u4", orgId: "default", env: "dev", via: "session" }, { collection: "briefs" });
     expect(r.ok).toBe(true);
     if (r.ok) for (const row of r.documents) expect(row.category).toBe("hr");
   });
@@ -184,7 +184,7 @@ describe("Stage 2: multi-predicate document filters", () => {
       values ('u_multi','incidents',array['id','title','priority','severity'],'dev','approved',
        '[{"field":"priority","op":"in","value":["high"]},{"field":"severity","op":"in","value":["critical"]}]'::jsonb)`);
 
-    const r = await broker2.query({ userId: "u_multi", env: "dev" }, { collection: "incidents" });
+    const r = await broker2.query({ userId: "u_multi", orgId: "default", env: "dev", via: "session" }, { collection: "incidents" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       // Should only return the high-critical incident
@@ -255,7 +255,7 @@ describe("multi-value term scoping through the broker", () => {
   it("describe_collection reports the multi-value term field as text[], not text", async () => {
     await admin3.query(`insert into app.grants (user_id,collection,allowed_fields,env,status)
       values ('u_desc','case_files',array['title','client','tags'],'dev','approved')`);
-    const d = await broker3.describeCollection({ userId: "u_desc", env: "dev" }, "case_files");
+    const d = await broker3.describeCollection({ userId: "u_desc", orgId: "default", env: "dev", via: "session" }, "case_files");
     expect("ok" in d && d.ok === false).toBe(false);
     if (!("ok" in d)) {
       const byName = Object.fromEntries(d.fields.map((f) => [f.name, f.type]));
@@ -270,7 +270,7 @@ describe("multi-value term scoping through the broker", () => {
       values ('u_mv','case_files',array['title','content','client','tags'],'dev','approved',
        '[{"field":"tags","op":"in","value":["litigation","filings"]}]'::jsonb)`);
 
-    const r = await broker3.query({ userId: "u_mv", env: "dev" }, { collection: "case_files" });
+    const r = await broker3.query({ userId: "u_mv", orgId: "default", env: "dev", via: "session" }, { collection: "case_files" });
     // Before isMultiValueField reached buildSelect this refused with internal_error, because
     // `"tags" in ($1,$2)` asks Postgres to compare text[] against text.
     expect(r.ok).toBe(true);
@@ -285,7 +285,7 @@ describe("multi-value term scoping through the broker", () => {
        '[{"field":"client","op":"in","value":["c-0042"]},
          {"field":"tags","op":"in","value":["litigation","discovery","filings"]}]'::jsonb)`);
 
-    const r = await broker3.query({ userId: "u_mv2", env: "dev" }, { collection: "case_files" });
+    const r = await broker3.query({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" }, { collection: "case_files" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       // tax-memo.md fails the tag overlap, other-client.md fails the client predicate.
@@ -295,7 +295,7 @@ describe("multi-value term scoping through the broker", () => {
   });
 
   it("searchDocuments honours the same overlap scope", async () => {
-    const r = await broker3.searchDocuments({ userId: "u_mv2", env: "dev" },
+    const r = await broker3.searchDocuments({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" },
       { collection: "case_files", q: "vacation" });
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -305,14 +305,14 @@ describe("multi-value term scoping through the broker", () => {
   });
 
   it("a client filter naming a multi-value field ANDs with the grant's overlap, never widens it", async () => {
-    const r = await broker3.query({ userId: "u_mv2", env: "dev" },
+    const r = await broker3.query({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" },
       { collection: "case_files", filters: [{ field: "tags", op: "in", value: ["tax"] }] });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents).toHaveLength(0);
   });
 
   it("an empty in-list on a multi-value field matches nothing rather than erroring", async () => {
-    const r = await broker3.query({ userId: "u_mv2", env: "dev" },
+    const r = await broker3.query({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" },
       { collection: "case_files", filters: [{ field: "tags", op: "in", value: [] }] });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents).toHaveLength(0);
@@ -320,7 +320,7 @@ describe("multi-value term scoping through the broker", () => {
 
   it("refuses an ordering operator on a multi-value field as invalid_intent, not internal_error", async () => {
     // `"tags" > $1` would compare text[] to text; the caller needs to know it's their filter.
-    const r = await broker3.query({ userId: "u_mv2", env: "dev" },
+    const r = await broker3.query({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" },
       { collection: "case_files", filters: [{ field: "tags", op: "gt", value: "litigation" }] });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("invalid_intent");

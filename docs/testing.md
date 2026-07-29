@@ -13,7 +13,7 @@ change enforcement, the pull request must carry a test that fails without it.
 | `pnpm lint` | ESLint, including the rule that keeps `packages/broker` free of HTTP/MCP/UI/LLM imports | — |
 | `pnpm test` | Vitest: broker unit + integration, CLI, and web route/integration tests | Postgres |
 | `pnpm build` | Production build and full typecheck | — |
-| `pnpm e2e` | Playwright against a real browser: all eleven web surfaces | Postgres |
+| `pnpm e2e` | Playwright against a real browser: every web surface | Postgres |
 | `pnpm test:e2e:cli` | The built CLI driving real Docker containers end to end | Docker |
 | `pnpm test:e2e:sso` | A real OIDC and SAML round trip against Keycloak | Docker |
 | `pnpm test:e2e` | Both of the above, in sequence | Docker |
@@ -42,14 +42,13 @@ runs the *built* CLI against real containers and takes several minutes — run
 `warehousd` also matches the private root package), and point it at a locally
 built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 
-> ⚠️ **Free port 8722 before running `pnpm e2e`.** `playwright.config.ts` sets
-> `reuseExistingServer: !process.env.CI`, so if anything is already serving
-> `http://localhost:8722/login` — most easily a container left behind by
-> `warehousd start` or a previous `test:e2e:cli` run — Playwright silently reuses
-> it instead of starting the dev server under test. The suite then runs against
-> the wrong database and fails with `WARN [Better Auth]: User not found` and
-> sign-in timeouts that look like application bugs. Check with
-> `lsof -nP -iTCP:8722 -sTCP:LISTEN` before debugging anything else.
+> ⚠️ **The write path needs its own two database URLs.** `DEV_WRITE_DATABASE_URL`
+> and `LIVE_WRITE_DATABASE_URL` point at the `*_write` roles, which are the only
+> ones holding `INSERT`/`UPDATE` on the base tables — the read roles see just the
+> views. Omit them and `writePool` is null, so every mutation refuses with
+> `not_writable` and the write specs fail in a way that looks like a grant
+> problem. They are set in `playwright.config.ts` alongside the read URLs; any
+> harness that starts the app itself must set them too.
 
 > ⚠️ **Recreate Keycloak after editing `test/keycloak/warehousd-realm.json`.** The
 > realm is imported at container start, so `pnpm test:up` leaves an already-running
@@ -62,6 +61,60 @@ built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 CI runs lint, `pnpm test`, and `pnpm build`, then Playwright, a packaging
 smoke test that installs the CLI tarball outside the workspace, and the CLI and
 SSO end-to-end suites.
+
+### Running two checkouts at once
+
+`pnpm e2e` is safe to run in two checkouts simultaneously. Nothing needs to be
+configured for it, but it is worth knowing what makes it safe, because the
+failure it prevents does not look like a collision — it looks like your code is
+broken.
+
+Sibling workspaces share `127.0.0.1:54330`, whichever one ran `pnpm test:up`
+first. Sharing the Postgres *server* is fine and intended. Sharing a *database*
+or an *app port* is not:
+
+- A shared database is destructive — each `e2e:setup` drops and recreates it, so
+  one suite pulls the schema out from under the other mid-run. It surfaced as
+  `relation "session" does not exist`, `column g.org_id does not exist`, and
+  hangs well past Playwright's own timeout.
+- A shared port is worse, because it is *silent*. Playwright's usual
+  `reuseExistingServer: !process.env.CI` cannot tell whose dev server answers on
+  a port, so it adopts the other checkout's — and the suite then exercises that
+  checkout's code against that checkout's database while reporting the result as
+  yours. Its signature is a plausible-looking failure run: 404s on routes that
+  demonstrably exist, and assertions failing against seed data from a branch that
+  is not checked out here.
+
+So neither is shared. Both are derived from the repository root's directory name,
+and adoption of a foreign server is refused outright:
+
+- **Databases** — `scripts/e2e-setup.ts` and `apps/web/playwright.config.ts`
+  independently derive `warehousd_e2e_<workspace-dir>`. Override with
+  `WAREHOUSD_E2E_DB`.
+- **App port** — `playwright.config.ts` hashes the same slug into 8800-8899,
+  clear of 8722 (`pnpm dev`), 8723 (`warehousd start`'s database), 8780
+  (Keycloak) and 8791 (the fake IdP). Override with `WAREHOUSD_E2E_PORT`. Your
+  own `pnpm dev` on 8722 is untouched by, and cannot interfere with, a suite run.
+- **Adoption** — `reuseExistingServer` is `false` unconditionally. There is
+  nothing legitimate to reuse once the port is per-workspace, and the failure it
+  buys back is a loud one.
+
+Two guards keep a residual collision from going quiet. Playwright refuses to
+start when something already answers on the origin, and
+`scripts/assert-port-free.mjs` runs ahead of `next dev` because `next dev -p N`
+does *not* fail on a busy port — it binds N+1 and carries on.
+
+Vitest was already safe: `packages/broker/test/helpers/db.ts` and
+`apps/web/test/helpers/web-db.ts` name their databases `wh_<label>_<pid>`. The
+~90 test files mentioning `http://localhost:8722` only build `Request` objects
+for route handlers; none binds a port.
+
+Keycloak (8780) and the fake IdP (8791) have the same collision class and are
+**not** fixed. They are reached only by `test:e2e:sso`, which is gated behind
+`WAREHOUSD_E2E_KEYCLOAK` and is not part of `pnpm test` or `pnpm e2e`.
+
+`ps aux | grep -E "vitest|next-server"` catches orphaned workers, which outlive
+a `pkill` aimed at their parent shell and will otherwise hold the port.
 
 ## What the enforcement tests assert
 
@@ -98,6 +151,105 @@ The interesting ones, and where they live:
   documents are silently absent, bypass probes leak nothing, an empty `in` list
   denies everything, multi-value vocabularies use array-overlap (`&&`) semantics,
   and a second approved grant is refused by the unique index.
+- **Tenant isolation, data plane** (`org-isolation`) — two orgs' documents in one
+  collection; each org's query returns only its own. The proof that *the database*
+  is what refuses: the SQL `buildSelect` produced is asserted to contain no
+  `org_id`, then run directly against the view under each org, and it still
+  separates the rows. With no org in scope the view returns nothing — the wall
+  fails closed.
+- **Tenant isolation, control plane** (`org-control-plane`) — `app.grants` has no
+  view or RLS policy behind it, so each decision function carries the predicate:
+  a manager cannot approve, deny or revoke another org's grant, an omitted org
+  fails closed rather than open, and `env:live` eligibility does not leak across
+  orgs for the same user id.
+- **Two-axis postures** (`postures-two-axis`) — a bare `allow` normalizes to
+  read-allow/write-deny, so no pre-existing config becomes writable; `view_join`
+  plus `write: allow` is a config error; a posture stored in the old bare-string
+  form still reads back correctly.
+- **Verbs** (`verbs`) — existing grants default to `['read']`; a grant without
+  `read` refuses with `no_grant` rather than a distinguishable code; `approve`
+  without `read` is rejected at approval time; `update` on a file collection is
+  rejected structurally; an append-only `create` grant with no `read` is valid.
+- **`$self` filters** (`self-filter`) — the sentinel binds to the caller, resolves
+  per element inside an `in` list, `$self-service` stays a literal, and the
+  generated SQL never contains the string `$self`.
+- **Dataset search** (`searchable`) — `searchable: true` makes a dataset reachable
+  from `search_documents`, a non-searchable field on the same collection is not
+  matched, and the generated `<field>_tsv` column never appears in
+  `describe_collection` or in `fieldsReturned`.
+- **Revision storage** (`revisions-ddl`) — a `writable` dataset gets `_rev*` and
+  the partial unique index, and its declared pk stops being the primary key; a
+  second *current* revision for one document is rejected by the database while a
+  non-current one is accepted, which is what lets proposals coexist; the view
+  hides superseded and tombstoned revisions while the history stays in the table;
+  a non-writable dataset gains none of it; turning `writable: true` on over an
+  existing plain table fails the apply.
+- **Immutability by privilege** (`write-privileges`, against real Postgres) — the
+  write role *cannot* UPDATE a data column and *cannot* DELETE, asserted as
+  Postgres errors and again against `information_schema`; it *can* insert and
+  update `_current`/`_rev_status`; RLS confines its base-table SELECT to one org.
+- **Full-document reads** (`get-document`) — only granted fields come back; a
+  document the filter excludes is `not_found`, the same answer as one that does
+  not exist; `$self` scopes it; `path` on a dataset is `invalid_intent`; a file's
+  chunks are rejoined into one document rather than returning the first chunk;
+  `org_id` and `_rev*` never appear; every outcome writes an audit row.
+- **Mutation refusals** (`mutate-refusals`) — one test per reason code, plus the
+  leak assertion: no refusal body contains a submitted field name, a submitted
+  value, or SQL, checked by stringifying the whole result and grepping.
+- **Dataset writes** (`mutate-dataset`) — create appends `_rev_seq=1` and is
+  readable through `query`; update appends a new revision, demotes the old, and
+  carries untouched columns forward; delete leaves a tombstone that is absent
+  from reads but present in the table; a stale `expect` is `conflict`; a `$self`
+  filter blocks editing someone else's document; the audit row names the fields
+  touched and never their values.
+- **File writes** (`mutate-file`) — create inserts a file row plus its chunks and
+  the result is immediately searchable; a duplicate `path` is `conflict`, decided
+  by the unique index rather than a pre-check the write role has no privilege to
+  make; `update`/`delete` are `verb_not_supported` even with those verbs granted.
+- **Write env isolation** (`mutate-env-isolation`) — a dev context reaches only
+  the dev write pool, and with no write pool configured `mutate` returns
+  `not_writable` rather than throwing.
+- **Proposals** (`proposals`) — a `proposal_only` grant yields `status: "pending"`
+  and leaves the document unchanged in both `query` and `getDocument`; the pending
+  after-state is not readable through the view by anyone; approve merges and
+  promotes; reject leaves the row in place with `_rev_status='rejected'`; revoking
+  the approver's grant makes the very next approval refuse.
+- **Merge and conflict** (`proposal-merge`) — two proposals on disjoint fields both
+  promote and the final document carries both changes; two on overlapping fields
+  make the second refuse `conflict`; a stale `_rev_base` with overlap refuses while
+  a stale base without overlap promotes; the merged revision credits the proposer,
+  not the approver; `_rev_seq` is strictly increasing per document throughout.
+- **Approval authorization** (`proposal-authz`) — approving a proposal touching a
+  field outside the approver's grant refuses `field_denied` (the
+  approve-requires-read invariant); an approver whose document filter excludes the
+  document gets `not_found`; a grant without `approve` gets `verb_denied`;
+  `listProposals` returns no field values, asserted by stringifying and grepping
+  for the proposed value.
+- **Change feed** (`change-feed`) — a create, update, delete, file create, proposal
+  and approval each write exactly one entry; the feed carries no field values and
+  no field names, asserted by stringifying and grepping; `since` is exclusive and
+  strictly ordered; a caller sees only their own org's and env's entries, and none
+  from a collection they hold no grant on. Two proofs worth naming: revoking the
+  write role's `insert` on `app.change_log` makes the whole mutation disappear,
+  showing the revision and the feed row share one transaction; and two interleaved
+  writers yield every committed revision exactly once across successive polls,
+  showing the cursor is not lossy when `seq` order diverges from commit order.
+- **Client secrets** (`client-secrets`) — the plaintext is unrecoverable after
+  creation and appears in no query result; a revoked key fails the next verify with
+  no expiry wait; an expired key is refused; both secrets verify during a rotation
+  window and the retired one stops only on explicit revoke; a third unrevoked
+  secret is refused; creation beyond the lifetime ceiling is refused; a malformed
+  checksum is rejected with no database round trip.
+- **Collection ceiling** (`collection-ceiling`) — a user holding a grant on a
+  collection outside the client's ceiling is refused through that client and
+  allowed through another; the refusal is `no_grant`, indistinguishable from having
+  none; a ceiling can never widen access; a null ceiling behaves as before.
+- **Env-scope parity** (`env-scope-parity`) — table-driven over every combination of
+  requested scopes, policy and live eligibility, so the OAuth path and the key path
+  cannot answer differently. Covers the `env:dev` floor and the separate
+  refresh-time recompute that lets a promotion reach an existing token.
+- **Audit `via`** (`audit-via`) — allowed and refused outcomes both record which
+  credential produced them.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
 - **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a
@@ -106,7 +258,7 @@ The interesting ones, and where they live:
 
 ## What is still manual
 
-The Playwright suite covers all eleven web surfaces. Three things are still
+The Playwright suite covers every web surface. Three things are still
 checked by hand, because they need credentials or a product UI no test can drive:
 
 1. **Connecting a real assistant.** [connect-claude.md](connect-claude.md) — add

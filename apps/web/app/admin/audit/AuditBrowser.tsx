@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
-import { ScrollText } from "lucide-react";
+import { ArrowLeft, ScrollText } from "lucide-react";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Mono } from "@/components/common/Mono";
@@ -38,7 +38,11 @@ type Collection = {
   description?: string;
 };
 
-export function AuditBrowser() {
+// via/onBack turn this into the scoped "events for one API key" view used from a client's
+// detail page — same filters and columns, just a fixed `via` and a back link instead of a title.
+export function AuditBrowser(
+  { via, onBack, backLabel }: { via?: string; onBack?: () => void; backLabel?: string } = {}
+) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -63,6 +67,7 @@ export function AuditBrowser() {
   useEffect(() => {
     setLoading(true);
     const qs = new URLSearchParams();
+    if (via) qs.append("via", via);
     if (user) qs.append("user", user);
     if (collection) qs.append("collection", collection);
     if (outcome) qs.append("outcome", outcome);
@@ -85,7 +90,7 @@ export function AuditBrowser() {
         toast.error("Failed to load audit events");
         setLoading(false);
       });
-  }, [user, collection, outcome, env, limit, offset]);
+  }, [via, user, collection, outcome, env, limit, offset]);
 
   function updateParam(key: string, value: string) {
     const qs = new URLSearchParams(searchParams);
@@ -181,6 +186,12 @@ export function AuditBrowser() {
 
   return (
     <div className="space-y-4">
+      {onBack && (
+        <button onClick={onBack} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft size={16} />{backLabel ?? "Back"}
+        </button>
+      )}
+
       <div className="flex flex-wrap gap-4">
         <div className="flex-1 min-w-40">
           <Label htmlFor="filter-outcome" className="block text-xs font-medium mb-1">Outcome</Label>
@@ -246,8 +257,12 @@ export function AuditBrowser() {
         empty={
           <EmptyState
             icon={ScrollText}
-            title="No matching events"
-            description="Every broker decision lands here — allowed or refused. Widen the filters to see more."
+            title={via ? "No events for this key" : "No matching events"}
+            description={
+              via
+                ? "This API key has not accessed any data yet."
+                : "Every broker decision lands here — allowed or refused. Widen the filters to see more."
+            }
           />
         }
       />

@@ -1,3 +1,27 @@
+const DEFAULT_OVERLAP = 100;
+
+// Undo chunkText's overlap: each chunk after the first begins with a slice of the previous
+// chunk's tail, so the join is the longest suffix/prefix match within the overlap window.
+//
+// This reconstructs the *chunked* text, not the source file byte-for-byte — chunkText trims
+// paragraphs and rejoins them with "\n\n", and that normalization is not reversible. Nothing
+// stores the original body, so this is the best a full-document read can do today. Callers
+// that need the exact source must keep it themselves.
+export function reassembleChunks(chunks: string[], opts: { overlap?: number } = {}): string {
+  const overlap = opts.overlap ?? DEFAULT_OVERLAP;
+  if (chunks.length === 0) return "";
+  let out = chunks[0]!;
+  for (const next of chunks.slice(1)) {
+    const window = Math.min(overlap, out.length, next.length);
+    let matched = 0;
+    for (let n = window; n > 0; n--) {
+      if (out.endsWith(next.slice(0, n))) { matched = n; break; }
+    }
+    out += next.slice(matched);
+  }
+  return out;
+}
+
 // Paragraph-aware chunking: greedily pack paragraphs up to `max` chars,
 // carrying `overlap` chars of tail into the next chunk for context continuity.
 export function chunkText(content: string, opts: { max?: number; overlap?: number } = {}): string[] {

@@ -22,7 +22,11 @@ export class UnsupportedFilter extends Error {}
 
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
-  opts: { documentFilters?: DocumentFilter[]; q?: string; isMultiValueField?: (field: string) => boolean } = {},
+  // searchFields: the dataset fields carrying a generated "<f>_tsv" column. Omitted means a
+  // file collection, whose view exposes a single fixed `tsv`. Field names go through q() like
+  // every other identifier — they are config-validated, but that is the builder's rule to keep.
+  opts: { documentFilters?: DocumentFilter[]; q?: string;
+          isMultiValueField?: (field: string) => boolean; searchFields?: string[] } = {},
 ): { text: string; values: unknown[] } {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const view = `${schema}.v_${intent.collection}`;
@@ -39,13 +43,21 @@ export function buildSelect(
     selectClause = cols.join(", ");
   }
 
+  // A file collection searches its one `tsv` column; a dataset searches the concatenation of
+  // its searchable fields' generated columns, so one query matches across all of them.
+  const isFileSearch = !opts.searchFields?.length;
+  const tsvExpr = isFileSearch ? "tsv" : opts.searchFields!.map((f) => q(`${f}_tsv`)).join(" || ");
+
   let rankExpr: string | null = null;
   let searchSlot: string | null = null;
   if (opts.q !== undefined) {
     searchSlot = param(opts.q); // ONE slot, reused for WHERE and ORDER BY
     const tsq = `websearch_to_tsquery('english', ${searchSlot})`;
-    rankExpr = `ts_rank_cd(tsv, ${tsq})`;
-    selectClause += `, ${rankExpr} as "_rank", "document_seq"`;
+    rankExpr = `ts_rank_cd(${tsvExpr}, ${tsq})`;
+    selectClause += `, ${rankExpr} as "_rank"`;
+    // document_seq is a file-collection column: one file yields many documents, and the seq
+    // identifies which. A dataset document is the whole row, so there is nothing to number.
+    if (isFileSearch) selectClause += `, "document_seq"`;
   }
 
   let text = `select ${selectClause} from ${view}`;
@@ -98,10 +110,8 @@ export function buildSelect(
   }
 
   // Add full-text search WHERE clause if q is present (reuses searchSlot)
-  if (searchSlot !== null) {
-    const tsq = `websearch_to_tsquery('english', ${searchSlot})`;
-    where.push(`tsv @@ ${tsq}`);
-  }
+  if (searchSlot !== null)
+    where.push(`${tsvExpr} @@ websearch_to_tsquery('english', ${searchSlot})`);
 
   if (where.length) text += ` where ${where.join(" and ")}`;
 

@@ -1,14 +1,41 @@
 import type { Pool } from "pg";
 import { randomBytes } from "node:crypto";
+import { DEFAULT_ORG_ID } from "../db/migrate-app";
 
 export const DEV_CLIENT_NAME = "warehousd dev client";
 
-export type ClientPolicy = { clientId: string; allowedScopes: string[] };
+export type ClientPolicy = {
+  clientId: string;
+  allowedScopes: string[];
+  allowedCollections: string[] | null;
+  mode: "delegated" | "headless";
+  robotUserId: string | null;
+  trustedIssuerId: string | null;
+};
 
 export async function getClientPolicy(app: Pool, clientId: string): Promise<ClientPolicy> {
-  const r = await app.query(`select allowed_scopes from app.client_policies where client_id=$1`, [clientId]);
-  if (r.rowCount === 0) return { clientId, allowedScopes: ["env:dev"] };
-  return { clientId, allowedScopes: r.rows[0].allowed_scopes };
+  const r = await app.query(
+    `select allowed_scopes, allowed_collections, mode, robot_user_id, trusted_issuer_id
+     from app.client_policies where client_id=$1`, [clientId]);
+  if (r.rowCount === 0) {
+    return {
+      clientId,
+      allowedScopes: ["env:dev"],
+      allowedCollections: null,
+      mode: "delegated",
+      robotUserId: null,
+      trustedIssuerId: null,
+    };
+  }
+  const row = r.rows[0];
+  return {
+    clientId,
+    allowedScopes: row.allowed_scopes,
+    allowedCollections: row.allowed_collections,
+    mode: row.mode || "delegated",
+    robotUserId: row.robot_user_id,
+    trustedIssuerId: row.trusted_issuer_id,
+  };
 }
 
 export async function upsertClientPolicy(
@@ -29,15 +56,19 @@ export async function setAllowedScopes(
     [clientId, allowedScopes, by]);
 }
 
-export async function hasApprovedLiveGrant(app: Pool, userId: string): Promise<boolean> {
+export async function hasApprovedLiveGrant(
+  app: Pool, userId: string, orgId = DEFAULT_ORG_ID,
+): Promise<boolean> {
   // NULL expires_at means "no expiry", matching loadActiveGrant (grants/eval.ts).
   // The two must agree: a grant the broker honors must also make the user
-  // eligible for the env:live scope, or live access silently half-works.
+  // eligible for the env:live scope, or live access silently half-works. That includes the
+  // org predicate — loadActiveGrant keys on it, so eligibility has to as well, or a token
+  // could be issued for an env the broker will then refuse to serve.
   const r = await app.query(
     `select 1 from app.grants
-     where user_id=$1 and env='live' and status='approved'
+     where org_id=$2 and user_id=$1 and env='live' and status='approved'
        and (expires_at is null or expires_at > now()) limit 1`,
-    [userId]);
+    [userId, orgId]);
   return (r.rowCount ?? 0) > 0;
 }
 

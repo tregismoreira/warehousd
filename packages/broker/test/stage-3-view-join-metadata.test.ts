@@ -138,7 +138,7 @@ async function grant(userId: string, documentFilters: unknown[] = []) {
 
 it("metadata fields like filed_date come back from search_documents", async () => {
   await grant("meta-reader");
-  const r = await broker.searchDocuments({ userId: "meta-reader", env: "dev" }, {
+  const r = await broker.searchDocuments({ userId: "meta-reader", orgId: "default", env: "dev", via: "session" }, {
     collection: "case_files", q: "case",
   });
   expect(r.ok).toBe(true);
@@ -154,7 +154,7 @@ it("metadata fields like filed_date come back from search_documents", async () =
 
 it("a metadata field can gate documents through document_filter", async () => {
   await grant("meta-scoped", [{ field: "case_number", op: "in", value: ["C-2024-001"] }]);
-  const r = await broker.searchDocuments({ userId: "meta-scoped", env: "dev" }, {
+  const r = await broker.searchDocuments({ userId: "meta-scoped", orgId: "default", env: "dev", via: "session" }, {
     collection: "case_files", q: "case",
   });
   expect(r.ok).toBe(true);

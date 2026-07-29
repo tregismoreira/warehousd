@@ -15,9 +15,9 @@ test.describe("admin overview", () => {
 
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
-    // harbor defines nineteen collections; the count renders once the fetch settles.
+    // harbor defines twenty collections; the count renders once the fetch settles.
     const collections = card("Collections").getByText(/^\d+$/).first();
-    await expect(collections).toHaveText("19");
+    await expect(collections).toHaveText("20");
 
     await expect(card("Users by Role")).toContainText(/\d+ admin, \d+ manager, \d+ member/);
     await expect(card("Pending Grants").getByText(/^\d+$/).first()).toBeVisible();

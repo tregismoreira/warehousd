@@ -1,0 +1,34 @@
+project: rest-api-test
+demo: false
+server: { port: 8722 }
+taxonomies:
+  category:
+    label: Category
+    terms:
+      engineering: { label: Engineering }
+      operations: { label: Operations }
+collections:
+  feedback:
+    writable: true
+    description: User feedback entries
+    fields:
+      id:         { type: uuid, posture: allow, pk: true }
+      title:      { type: text, posture: { read: allow, write: allow } }
+      message:    { type: text, posture: { read: allow, write: allow } }
+      submitted_by: { type: text, posture: { read: allow, write: allow } }
+      created_at: { type: timestamptz, posture: allow }
+  documents:
+    type: file
+    description: Test documents
+    taxonomy: category
+    source: ./seed/docs-dev
+    source_live: ./seed/docs-live
+    fields:
+      title:      { posture: allow }
+      content:    { posture: allow }
+      owner:      { posture: allow }
+      updated_at: { posture: allow }
+      category:   { posture: allow }
+      path:       { posture: deny }
+synthetic:
+  documents_per_collection: {}

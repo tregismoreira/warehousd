@@ -31,7 +31,7 @@ beforeAll(async () => {
 afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
 
 it("no grant → no_grant, still audited", async () => {
-  const r = await broker.query({ userId: "u", env: "dev" }, { collection: "people" });
+  const r = await broker.query({ userId: "u", orgId: "default", env: "dev", via: "session" }, { collection: "people" });
   expect(r.ok).toBe(false);
   if (!r.ok) expect(r.reason).toBe("no_grant");
   const a = await admin.query(`select outcome, reason from app.audit_events where id=$1`, [r.auditId]);
@@ -42,14 +42,14 @@ it("grant excluding email → requesting email is field_denied", async () => {
   await admin.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status)
      values ('u2','people', array['id','full_name'],'dev','approved')`);
-  const r = await broker.query({ userId: "u2", env: "dev" },
+  const r = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" },
     { collection: "people", fields: ["id", "email"] });
   expect(r.ok).toBe(false);
   if (!r.ok) expect(r.reason).toBe("field_denied");
 });
 
 it("grant excluding email → default fields omit the email key entirely (absent, not null)", async () => {
-  const r = await broker.query({ userId: "u2", env: "dev" }, { collection: "people", limit: 3 });
+  const r = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" }, { collection: "people", limit: 3 });
   expect(r.ok).toBe(true);
   if (r.ok) {
     expect(r.fieldsReturned.sort()).toEqual(["full_name", "id"]);
@@ -61,9 +61,9 @@ it("grant excluding email → default fields omit the email key entirely (absent
 });
 
 it("unknown collection / unknown field", async () => {
-  const r1 = await broker.query({ userId: "u2", env: "dev" }, { collection: "nope" });
+  const r1 = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" }, { collection: "nope" });
   if (!r1.ok) expect(r1.reason).toBe("unknown_collection");
-  const r2 = await broker.query({ userId: "u2", env: "dev" },
+  const r2 = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" },
     { collection: "people", fields: ["id", "ghost"] });
   if (!r2.ok) expect(r2.reason).toBe("unknown_field");
 });
@@ -91,7 +91,7 @@ describe("document_filter on file collections", () => {
     await applyConfig(dbDoc, docCfg);
     const poolsDoc = createPools({ app: pDoc.urls.admin, dev: pDoc.urls.dev, live: pDoc.urls.live });
     const brokerDoc = makeBroker(poolsDoc, docCfg);
-    const ctx = { userId: "u3", env: "dev" as const };
+    const ctx = { userId: "u3", orgId: "default", env: "dev", via: "session" as const };
 
     // Seed documents
     const docRes = await dbDoc.query(
@@ -112,7 +112,7 @@ describe("document_filter on file collections", () => {
        values ('u3', 'policies', array['title','content'], 'dev', 'pending') returning id`);
     const grantId = grantRes.rows[0].id;
     const { approveGrant } = await import("../src/grants/manage");
-    await approveGrant(dbDoc, grantId, "admin", {
+    await approveGrant(dbDoc, docCfg, grantId, "admin", {
       documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md"] }],
     });
 
@@ -147,7 +147,7 @@ describe("document_filter on file collections", () => {
     await applyConfig(dbDoc, docCfg);
     const poolsDoc = createPools({ app: pDoc.urls.admin, dev: pDoc.urls.dev, live: pDoc.urls.live });
     const brokerDoc = makeBroker(poolsDoc, docCfg);
-    const ctx = { userId: "u4", env: "dev" as const };
+    const ctx = { userId: "u4", orgId: "default", env: "dev", via: "session" as const };
 
     // Seed documents
     const docRes = await dbDoc.query(
@@ -168,7 +168,7 @@ describe("document_filter on file collections", () => {
        values ('u4', 'policies', array['title','content'], 'dev', 'pending') returning id`);
     const grantId = grantRes.rows[0].id;
     const { approveGrant } = await import("../src/grants/manage");
-    await approveGrant(dbDoc, grantId, "admin", {
+    await approveGrant(dbDoc, docCfg, grantId, "admin", {
       documentFilters: [{ field: "path", op: "in", value: [] }],
     });
 

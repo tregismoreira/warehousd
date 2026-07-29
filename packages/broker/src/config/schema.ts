@@ -40,9 +40,14 @@ export const ViewJoinSchema = z.object({
 });
 export type ViewJoinConfig = z.infer<typeof ViewJoinSchema>;
 
+const PostureSchema = z.union([
+  z.enum(["allow", "deny"]),
+  z.object({ read: z.enum(["allow", "deny"]), write: z.enum(["allow", "deny"]) }),
+]);
+
 export const FieldSchema = z.object({
   type: z.enum(["uuid", "text", "numeric", "int", "timestamptz", "date", "boolean", "json"]).optional(),
-  posture: z.enum(["allow", "deny"]),
+  posture: PostureSchema,
   pk: z.boolean().optional(),
   fk: z.string().optional(),            // "people.id"
   view_join: ViewJoinSchema.optional(), // { table: "people", column: "full_name", on: "responsible_attorney_id" }
@@ -50,6 +55,7 @@ export const FieldSchema = z.object({
   min: z.number().optional(),
   max: z.number().optional(),
   gen: z.string().optional(),
+  searchable: z.boolean().optional(),   // datasets only, text fields only
 });
 export type FieldConfig = z.infer<typeof FieldSchema>;
 
@@ -62,12 +68,32 @@ export const FILE_FIELD_TYPES: Record<(typeof FILE_FIELDS)[number], FieldConfig[
   title: "text", content: "text", path: "text", owner: "text", updated_at: "timestamptz",
 };
 
+export function normalizePosture(p: unknown): { read: "allow" | "deny"; write: "allow" | "deny" } {
+  if (typeof p === "string") return { read: p === "allow" ? "allow" : "deny", write: "deny" };
+  if (typeof p === "object" && p !== null && "read" in p && "write" in p) {
+    const o = p as { read?: unknown; write?: unknown };
+    return { read: o.read === "allow" ? "allow" : "deny", write: o.write === "allow" ? "allow" : "deny" };
+  }
+  return { read: "deny", write: "deny" };
+}
+
+export function readPosture(f: FieldConfig): "allow" | "deny" {
+  const p = normalizePosture(f.posture);
+  return p.read;
+}
+
+export function writePosture(f: FieldConfig): "allow" | "deny" {
+  const p = normalizePosture(f.posture);
+  return p.write;
+}
+
 export const CollectionSchema = z.object({
   description: z.string(),
   type: z.enum(["dataset", "file"]).default("dataset"),
   source: z.string().optional(),
   source_live: z.string().optional(),
   taxonomies: z.array(z.string()).default([]),  // vocabulary slugs — validated against `taxonomies` at ConfigSchema level
+  writable: z.boolean().optional(),     // opt-in to write path; verb support is structural
   fields: z.record(FieldSchema),
 }).superRefine((c, ctx) => {
   const FIELD_NAME = /^[a-z_][a-z0-9_]*$/i;
@@ -119,12 +145,49 @@ export const CollectionSchema = z.object({
       if (!f.type && !taxonomySet.has(k))
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${k}" requires a type` });
   }
+
+  // searchable only on dataset text fields
+  for (const [name, f] of Object.entries(c.fields)) {
+    if (!f.searchable) continue;
+    if (c.type === "file")
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" has searchable: true on a file collection; the {c}__documents.tsv column already exists, so it is redundant` });
+    if (f.type !== "text")
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" has searchable: true but is not type text` });
+    // A searchable field generates a sibling "<name>_tsv" column. A declared field of that
+    // name would collide with it at DDL time, which is a confusing failure a long way from
+    // its cause — refuse it here instead.
+    if (c.fields[`${name}_tsv`])
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}_tsv" collides with the generated search column for "${name}"` });
+  }
+
+  // writable: true requires at least one writable field
+  if (c.writable) {
+    const hasWritable = Object.values(c.fields).some((f) => writePosture(f) === "allow");
+    if (!hasWritable)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection has writable: true but no field with write:allow` });
+  }
+
+  // view_join fields are structurally write-deny
+  for (const [name, f] of Object.entries(c.fields)) {
+    if (f.view_join) {
+      const wp = writePosture(f);
+      if (wp === "allow")
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" has view_join and write: allow; view_join fields are always write-deny` });
+    }
+  }
 }).transform((c) => {
-  const fields = { ...c.fields };
+  const fields = Object.fromEntries(Object.entries(c.fields).map(([k, f]) => [k, {
+    ...f,
+    // Normalize posture to canonical {read, write} form
+    posture: normalizePosture(f.posture),
+  }]));
+
   // Bound term fields: auto-add as text/allow when omitted; fill type text when untyped.
   for (const taxSlug of c.taxonomies) {
     const tf = fields[taxSlug];
-    fields[taxSlug] = tf ? { ...tf, type: tf.type ?? "text" } : { posture: "allow", type: "text" };
+    fields[taxSlug] = tf ? {
+      ...tf, type: tf.type ?? "text",
+    } : { posture: { read: "allow", write: "deny" }, type: "text" };
   }
   if (c.type !== "file") return { ...c, fields };
   const filled = Object.fromEntries(Object.entries(fields).map(([k, f]) =>

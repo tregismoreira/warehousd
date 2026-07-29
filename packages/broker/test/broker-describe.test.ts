@@ -25,13 +25,13 @@ beforeAll(async () => {
 afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
 
 it("no grant → refusal", async () => {
-  const r = await broker.describeCollection({ userId: "x", env: "dev" }, "people");
+  const r = await broker.describeCollection({ userId: "x", orgId: "default", env: "dev", via: "session" }, "people");
   expect("ok" in r && r.ok === false).toBe(true);
 });
 it("grant → only granted fields visible", async () => {
   await admin.query(`insert into app.grants (user_id,collection,allowed_fields,env,status)
     values ('x','people', array['id','email'],'dev','approved')`);
-  const r = await broker.describeCollection({ userId: "x", env: "dev" }, "people");
+  const r = await broker.describeCollection({ userId: "x", orgId: "default", env: "dev", via: "session" }, "people");
   expect("fields" in r).toBe(true);
   if ("fields" in r) expect(r.fields.map((f) => f.name).sort()).toEqual(["email", "id"]);
 });

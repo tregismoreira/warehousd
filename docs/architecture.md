@@ -8,6 +8,14 @@ with real data, this is the document to read.
 - [The broker](#the-broker)
 - [Named views](#named-views)
 - [Environments: dev and live](#environments-dev-and-live)
+- [Organizations and tenant isolation](#organizations-and-tenant-isolation)
+- [Postures, verbs, and writability](#postures-verbs-and-writability)
+- [Revisions, and immutability by privilege](#revisions-and-immutability-by-privilege)
+- [The write path: broker.mutate](#the-write-path-brokermutate)
+- [Proposals](#proposals)
+- [The change feed](#the-change-feed)
+- [Client credentials and the collection ceiling](#client-credentials-and-the-collection-ceiling)
+- [Full-document reads](#full-document-reads)
 - [Identity, OAuth, and env-as-scope](#identity-oauth-and-env-as-scope)
 - [File collections and search](#file-collections-and-search)
 - [Taxonomies](#taxonomies)
@@ -27,7 +35,8 @@ A modular monolith: one deployable, one Postgres, one hard internal boundary.
 │  Adapters (thin, replaceable):                  │
 │  ├── MCP server  (streamable HTTP, OAuth 2.1)   │
 │  ├── Web UI      (admin / manager / member)     │
-│  └── [future]    REST, CMS delivery, apps       │
+│  ├── REST (/v1)  (token-authenticated HTTP)     │
+│  └── [future]    CMS delivery, apps             │
 │                    │                            │
 │         ▼ all calls go through ▼                │
 │  ┌───────────────────────────────────────────┐  │
@@ -59,12 +68,14 @@ is testable on its own and identical no matter which adapter called it.
 | **Collection** | A named, governed set of documents. `type: dataset` (default) for queryable tables, `type: file` for indexed files. Backed by Postgres tables, one set per environment. |
 | **Document** | One governed, queryable record. For dataset collections, one table row. For file collections, one indexed segment of a parsed file. |
 | **Field** | A document's governed attribute. Postures and grants operate on fields. |
-| **Field posture** | Per-field `allow` or `deny`, declared in `warehousd.yml`. `deny` means the field can *never* be granted. `allow` only makes a field **grantable** — it stays denied per user until a grant covers it. No posture means denied. |
-| **Grant** | `(user, collection, purpose, allowed fields ⊆ grantable fields, env, expires_at, optional document filter)`. Requested by a user, approved by a manager or admin, evaluated at query time. |
+| **Field posture** | Per-field, two-axis: `{ read, write }`, each `allow` or `deny`, declared in `warehousd.yml`. `deny` means that axis can *never* be granted. `allow` only makes a field **grantable** on that axis — it stays denied per user until a grant covers it. No posture means denied on both. A bare `posture: allow` is read-allow, **write-deny**. |
+| **Grant** | `(org, user, collection, purpose, verbs, allowed fields ⊆ grantable fields, env, mode, expires_at, optional document filter)`. Requested by a user, approved by a manager or admin, evaluated at query time. |
+| **Verb** | `read`, `create`, `update`, `delete`, `approve`. A grant carries a set. Which verbs a collection can support at all is **structural** — it follows from its type, not from the grant. |
 | **Environment** | `dev` or `live`. Dev resolves to synthetic data, live to real data. Carried in the access token, never in a request. |
+| **Organization** | The tenant. Every grant, audit event and document belongs to exactly one. Derived from the authenticated user, never from a request. |
 | **Purpose** | A short label plus free text, stated at request time and stamped on every audit event the grant produces. |
 | **Role** | `admin` (collections, SSO, users, clients, import, audit), `manager` (approves grants, promotes clients), `member` (requests grants, queries). |
-| **Audit event** | Immutable record of every broker decision: who, env, collection, intent, fields returned, grant id, outcome, timestamp. |
+| **Audit event** | Immutable record of every broker decision: who, org, env, collection, intent, fields returned, grant id, outcome, timestamp. |
 
 Configuration is declarative and lives in the consuming project's repo — see
 [configuration.md](configuration.md).
@@ -94,13 +105,18 @@ tests in the suite.
    difference is the source schema; the response shape is the same.
 7. **Everything is audited**, before the response is returned — refusals
    included.
+8. **Tenants are separated by the database, not by a predicate the broker
+   remembers.** See [Organizations](#organizations-and-tenant-isolation).
 
 ## The broker
 
 ```ts
 interface BrokerContext {
   userId: string;
+  orgId: string;              // from the token/session's user row, never from a request
   env: "dev" | "live";        // from the token, never from a request body
+  allowedCollections?: string[] | null;   // the client's ceiling; null = none. Only narrows.
+  via: string;                // session | oauth | token_exchange | api_key:<id>
 }
 
 type QueryIntent = {
@@ -118,11 +134,17 @@ type BrokerResult =
   | { ok: true;  documents: Document[]; fieldsReturned: string[]; auditId: string }
   | { ok: false; reason: "no_grant" | "expired_grant" | "field_denied"
                | "unknown_collection" | "unknown_field" | "invalid_intent"
-               | "internal_error";
+               | "not_found" | "internal_error";
       auditId: string };       // reason codes only — never a denied value, never SQL
 
 broker.query(ctx, intent)
-broker.searchDocuments(ctx, intent)     // file collections only
+broker.searchDocuments(ctx, intent)     // file collections, and datasets with a searchable field
+broker.getDocument(ctx, { collection, id | path })   // one document, full granted field set
+broker.mutate(ctx, intent)              // create | update | delete, on a writable collection
+broker.listProposals(ctx, opts)         // pending revisions the caller may approve — metadata only
+broker.approveProposal(ctx, { proposalId })
+broker.rejectProposal(ctx, { proposalId })
+broker.changes(ctx, { since, limit })   // control-plane feed; metadata only, no field data
 broker.describeCollection(ctx, name)    // only fields visible under the caller's grants
 broker.listCollections(ctx)             // names and descriptions only
 ```
@@ -269,8 +291,9 @@ Adapters derive the context in exactly one place:
 ```ts
 const token = await auth.verifyAccessToken(req);        // signature + expiry
 const env = token.scopes.includes("env:live") ? "live" : "dev";
-const ctx: BrokerContext = { userId: token.sub, env };
-// Any env-like value in the request body or params is ignored and never read.
+const orgId = await orgOfUser(token.sub);               // from the user row, not the token
+const ctx: BrokerContext = { userId: token.sub, orgId, env };
+// Any env-like or org-like value in the request body or params is ignored and never read.
 ```
 
 ## File collections and search
@@ -319,9 +342,413 @@ rather than take precedence over one another, one grant can be scoped across two
 vocabularies and a path at once. They compile into the same parameterized WHERE
 machinery as client filters, an empty `in` list compiles to constant-false rather
 than a SQL error, and excluded documents are silently absent rather than a
-distinguishable refusal. A partial unique index guarantees at most one approved grant per
+distinguishable refusal.
+
+A predicate's value may be the sentinel **`$self`**, bound to the calling user's
+id when the grant is loaded:
+
+```yaml
+document_filter: [{ field: owner, op: eq, value: $self }]
+```
+
+That makes "lower-level roles see and edit only what is assigned to them" a
+property of the *grant* rather than of application logic. Binding happens in
+`loadActiveGrant`, per predicate and per element inside an `in` list, so no
+caller can forget it and the SQL builder still sees a plain literal. Only the
+exact string `$self` is a sentinel — `$self-service` is a literal, and there is
+no substring interpolation. A partial unique index guarantees at most one approved grant per
 `(user, collection, env)`, so a second, broader grant can never silently override
 the restriction.
+
+## Organizations and tenant isolation
+
+Every deployment has at least one organization. An existing single-tenant install
+gets one implicit org, `default`, created at bootstrap, and behaves exactly as it
+did before — `org_id` defaults to it on every table.
+
+`org_id` is on `app.collections`, `app.grants`, `app.audit_events`,
+`app.client_policies`, Better Auth's `user`, and every data table in
+`data_synth` / `data_live`. Grant lookup keys on
+`(org_id, user_id, collection, env)`.
+
+**`ctx.orgId` is derived from the verified session or token, never from the
+request** — the same rule as `ctx.env`. A caller cannot name its own tenant any
+more than it can name its own environment.
+
+Isolation is enforced **in the database, twice**, because two different kinds of
+role reach the data by two different routes:
+
+```sql
+-- the wall for the read roles, which only ever see the view
+create or replace view data_live.v_pages as
+  select ... from data_live.pages base
+  where base.org_id = current_setting('warehousd.org_id', true);
+
+-- the wall for roles that touch base tables directly (import, and the write roles)
+alter table data_live.pages enable row level security;
+create policy org_isolation on data_live.pages
+  using      (org_id = current_setting('warehousd.org_id', true))
+  with check (org_id = current_setting('warehousd.org_id', true));
+```
+
+The broker sets `warehousd.org_id` transaction-locally from `ctx.orgId` before
+any data statement (`withOrg` in `db/pools.ts`); `set_config(..., true)` means a
+pooled connection can never leak one org's setting into another's query. **The
+broker's generated SQL contains no org predicate at all** — that is deliberate,
+and a test asserts it. A bug in the broker cannot cross the tenant wall, exactly
+as a bug in schema-name resolution cannot cross the env wall (invariant 5).
+
+The two-argument `current_setting` returns NULL when the setting is absent, so an
+unset org yields no rows rather than all rows. **It fails closed.**
+
+The control plane is the other half, and it has no view and no RLS policy behind
+it: `/api/grants`, `/api/audit`, `/api/me/*` and `/api/admin/users` read
+`app.*` directly, so each carries the org predicate itself. The grant decision
+functions (`approveGrant`, `denyGrant`, `revokeGrant`) scope by org as well as
+id; an omitted org scopes to the implicit one, which fails to find a foreign
+grant rather than finding one.
+
+## Postures, verbs, and writability
+
+A posture has **two axes**. A bare value sets the read axis and leaves write
+denied, so every configuration written before the write path existed stays valid
+and nothing becomes writable by accident:
+
+```yaml
+email:       { type: text,    posture: allow }                        # read allow, write deny
+base_salary: { type: numeric, posture: { read: deny, write: allow } }
+```
+
+`view_join` fields are **always** write-deny, structurally — a joined view is not
+updatable in Postgres and the field belongs to another collection anyway. Asking
+for `write: allow` on one is a config error, not a silent override.
+
+A grant carries **verbs**: `read`, `create`, `update`, `delete`, `approve`.
+Existing grants are `['read']`. A grant without `read` refuses reads with
+`no_grant` — not a distinct code, because "you have a grant but not for reading"
+would be an information leak.
+
+Two rules are enforced at approval time, in one place
+(`validateVerbs`), so no approval path can skip them:
+
+- **`approve` requires `read`.** You cannot approve what you cannot see; without
+  this, "approve, then read the diff" is a privilege-escalation path around field
+  postures. Read is *not* required in general — an append-only ingestion grant
+  (`create`, no `read`) is legitimate and forcing `read` onto it would widen
+  access rather than narrow it.
+- **Verb support is structural.** It follows from the collection's type, so
+  `update` on a file collection is refused regardless of what an approver asks
+  for. File collections are a record of what was *ingested*; dataset collections
+  are a record of what is currently *true*. You append to the former and revise
+  the latter.
+
+`writable: true` on a collection opts it into the write path. Collections that do
+not opt in are physically untouched — no extra columns, no extra view predicate,
+no read cost.
+
+`searchable: true` on a dataset text field generates the same `tsv` column and
+GIN index the file branch already emits, and makes `broker.searchDocuments` work
+against datasets. A dataset with no searchable field still refuses
+`invalid_intent`.
+
+## Revisions, and immutability by privilege
+
+A `writable: true` **dataset** is append-only. There is no in-place `UPDATE` of
+data, and no config knob to allow one. Its declared `pk` stops being row identity
+and becomes **document identity**:
+
+```sql
+create table data_live.pages (
+  _rev uuid primary key default gen_random_uuid(),
+  _rev_seq bigint not null,          -- monotonic per document
+  _rev_at timestamptz not null default now(),
+  _rev_by text not null,             -- the author, not the approver
+  _rev_op text not null,             -- create | update | delete
+  _rev_status text not null,         -- pending | approved | rejected
+  _rev_fields text[] not null,       -- which fields this revision touches
+  _rev_base bigint,                  -- the _rev_seq it was derived from
+  _current boolean not null default false,
+  org_id text not null,
+  id uuid not null,                  -- the declared pk; no longer unique
+  ...);
+create unique index on data_live.pages (org_id, id) where _current;
+```
+
+- **Exactly-one-current is a database guarantee** — the partial unique index —
+  not an ordering convention.
+- **Pending revisions have `_current = false`**, so they never contend for that
+  index. Multiple proposals can coexist against one document, and the proposed
+  after-state is never readable through the view.
+- **Delete is a tombstone revision.** No `DELETE` privilege is granted anywhere,
+  and the view's `_rev_op <> 'delete'` predicate makes the document disappear
+  from reads while the history stays.
+- **`_rev*` and `org_id` can never be granted.** They are not in `warehousd.yml`,
+  so no grant can name them and `describe_collection` never shows them.
+  Bookkeeping is invisible to the query surface for free, with no filtering code.
+
+**File collections keep their existing shape.** No revision columns, no
+migration: a `create` appends a file row plus its derived chunks, `path` stays
+unique so a repeat is a `conflict`, and chunks are never re-derived — which is
+why the "search still returns pre-edit text" bug class cannot occur here.
+
+Turning `writable: true` on over a collection that already has a plain table
+**fails the apply** with an operator-facing error. Migrating existing rows into
+revisions is deferred, and silently emitting a table that cannot hold a revision
+would be worse than refusing.
+
+### Immutability is enforced by privilege, not by code
+
+Two new roles, `warehousd_dev_write` and `warehousd_live_write`, mirror the read
+split. Their grants are column-level:
+
+```sql
+grant insert on data_live.pages to warehousd_live_write;
+grant update (_current, _rev_status) on data_live.pages to warehousd_live_write;
+grant select on data_live.pages to warehousd_live_write;   -- concurrency checks and merges
+```
+
+**Postgres itself refuses any change to a data column**, and no role anywhere
+holds `DELETE`. A broker bug cannot rewrite history. The write role's `select` on
+the base table is confined to one tenant by the RLS policy above — that is
+precisely the case RLS exists for, since the write role bypasses the view.
+
+If `DEV_WRITE_DATABASE_URL` / `LIVE_WRITE_DATABASE_URL` are unset there is no
+mutation path at all, which is the safer default.
+
+## The write path: `broker.mutate`
+
+```ts
+type MutationIntent =
+  | { collection: string; op: "create"; values: Record<string, unknown> }
+  | { collection: string; op: "update"; id: string; expect?: string; values: Record<string, unknown> }
+  | { collection: string; op: "delete"; id: string; expect?: string };
+
+type MutationResult =
+  | { ok: true;  status: "applied"; documentId: string; rev: string; auditId: string }
+  | { ok: true;  status: "pending"; proposalId: string; auditId: string }
+  | { ok: false; reason: MutationRefusalReason; auditId: string };
+```
+
+`MutationRefusalReason` extends the read set with `verb_denied`,
+`verb_not_supported`, `field_not_writable`, `conflict`, `invalid_value` and
+`not_writable`.
+
+Validation order — fail fast, audit every outcome, mirroring `query`:
+
+collection exists → collection is writable → op supported for this collection
+type → active grant for `(org, user, collection, env)` → verb ∈ `grant.verbs` →
+every field exists → no field is `view_join` → every field write-allowed by
+posture → every field ∈ `grant.allowedFields` → coerce to declared types →
+target document passes the document filter → concurrency check → append revision
+→ promote → audit → return.
+
+**Identity is not content.** The declared pk (dataset) and `path` (file) address
+a document rather than describing it, so they are exempt from the write posture
+on `create` — a create must be able to name what it creates. Requiring
+`write: allow` on a pk would assert the opposite of what is true, namely that
+identity may later be changed. On `update` and `delete` they are refused
+outright: changing identity is not an edit.
+
+**The audit intent records the op and the field *names*, never the values.** A
+write payload can carry real personal data and an audit row is readable by every
+admin — a deliberate departure from `query`, whose intent is safe to store
+verbatim.
+
+Refusals carry a reason code and nothing else. `coerce()` is reused from the
+import path because its reasons already never echo the offending value; its
+granular type codes are collapsed to `invalid_value` at the broker boundary,
+since naming a type is itself a small disclosure.
+
+**Concurrency.** `expect` is the `_rev` the caller last saw; a mismatch is
+`conflict`. On promotion the old revision is demoted *before* the new one is
+inserted — both would otherwise be `_current` between the two statements and the
+partial unique index would reject the write.
+
+## Proposals
+
+`request_access → pending grant → manager approval` was already a
+proposal/approval engine. Pointed at *mutations* instead of *access*, it becomes
+the governed write path: **an agent may propose; only an authenticated human may
+approve.**
+
+Whether a write applies directly or becomes a proposal is a property of the
+**grant**, not of the caller: `mode: direct | proposal_only`. An agent-driven
+integration gets `proposal_only`; a trusted back-office tool gets `direct`.
+
+A `proposal_only` write runs the *identical* validation chain and then, instead
+of promoting, stores the revision with `_rev_status = 'pending'` and
+`_current = false`, returning `{ status: "pending", proposalId }`. Two properties
+follow from the storage model rather than from code:
+
+- Pending revisions never contend for the partial unique index, so **multiple
+  proposals can coexist** against one document.
+- **The proposed after-state is never readable through the view**, so unapproved
+  agent output cannot leak into ordinary `query` or `search` results.
+
+### Promotion is a merge, not a replace
+
+Replacing the current row would make two agents editing *disjoint* fields collide
+spuriously. Instead, promoting a pending revision writes a new current revision
+whose values are *current values, overwritten by the proposal's `_rev_fields`*.
+Two disjoint proposals both apply cleanly, in approval order.
+
+**Conflict is detected semantically.** A proposal carries `_rev_base`, the
+`_rev_seq` it was derived from. At promotion, if any field in its `_rev_fields`
+was also changed by an approved revision after `_rev_base`, it refuses with
+`conflict`. Staleness alone is not a conflict — overlap is.
+
+The merged revision records the **proposer** as `_rev_by`: that column is who
+authored the content. Who approved it is in the audit row.
+
+`broker.listProposals` returns metadata and the *names* of the fields a proposal
+touches — **never their values**. A reviewer fetches content through
+`getDocument`, where postures are already enforced; duplicating values into the
+listing would be a posture bypass. It reads through the write pool, the only role
+with `SELECT` on base tables, because a pending revision is by definition not in
+the view.
+
+### Approval authorization
+
+- `approve ∈ grant.verbs`, loaded fresh, so a revoked grant fails the very next
+  call with no token wait.
+- The proposal's document must pass the **approver's** document filter; failure
+  is `not_found`, not a distinguishable refusal.
+- **`approve` requires `read` coverage of every field in the proposal.** If any
+  field in `_rev_fields` is outside the approver's `allowedFields`, the approval
+  refuses `field_denied`. You cannot approve what you cannot see; without this,
+  "approve, then read the diff" is a privilege-escalation path around field
+  postures. This is enforced at approval time as well as at grant time.
+
+> **`approve` and `reject` are deliberately not MCP tools.** The untrusted model
+> may propose; it may never approve. Approval happens only through an
+> authenticated human surface — the warehousd web UI, or the integrating app's
+> own UI over REST.
+
+## The change feed
+
+Without a feed, every review UI polls the data. The revision history is already
+an event log, so the feed is nearly free — but it is a **control-plane artifact
+carrying no field data**, or it would become a posture bypass.
+
+```sql
+create table app.change_log (
+  seq         bigserial primary key,   -- the cursor
+  org_id      text not null, env text not null,
+  collection  text not null, document_id text not null,
+  rev         uuid not null, op text not null, status text not null,
+  at          timestamptz not null default now(), by text not null);
+```
+
+`seq` is a **global** monotonic cursor; `_rev_seq` is per-document and cannot
+serve as one, which is why this table exists rather than reading the revision
+tables directly.
+
+**Written in the same transaction as the revision.** If the revision rolls back,
+the feed entry does too. That requires the write roles to hold `usage` on schema
+`app` and `insert` on `app.change_log` — and nothing else there. Writing the feed
+row on the app pool after commit was rejected: that is a second transaction, and
+the feed would drift from the revisions on any crash between them. A test proves
+it by revoking the feed insert and asserting the revision disappears with it.
+
+**`seq` order is not commit order.** `bigserial` hands out numbers when a
+statement runs, not when its transaction commits, so a writer can take `seq 7`
+and commit after one holding `seq 8`. A reader polling in between would see 8,
+advance past 7, and lose it. The feed therefore returns only rows whose inserting
+transaction is older than the oldest still-running one
+(`xmin < pg_snapshot_xmin(pg_current_snapshot())`). Once a row is returned, no
+lower `seq` can appear afterwards. A fixed time delay was rejected: it is both
+laggy and still wrong for any transaction outliving the delay.
+
+`broker.changes(ctx, { since, limit })` returns entries for `(org, env)` with
+`seq > since`, filtered to collections the caller holds a `read` grant on. A
+caller with no grants gets an empty feed, not a refusal — the feed is not an
+existence oracle for collections.
+
+**A grant's document filter is not applied**, because the feed holds no field
+data to test a predicate against. The consequence is deliberate and bounded: such
+a caller learns that *some* document in that collection changed, and its id, but
+not which fields moved or what they hold. `getDocument` then refuses the ones
+outside the filter.
+
+**Retention is deferred.** Revision history and the change log both grow without
+bound on a writable collection. The eventual answer is a retention policy or
+partitioning on `_rev_at` / `at`; until then an operator should plan for growth
+rather than discover it.
+
+## Client credentials and the collection ceiling
+
+IT issues a key/secret pair per company app. The key authenticates the **app**; a
+subject token identifies the **user**. They compose:
+
+```
+effective access = grants(user) ∩ client_policy(app) ∩ env_scope(token)
+```
+
+This extends `app.client_policies` rather than introducing a parallel credential
+system — a parallel system is precisely how the two sets of rules drift apart.
+
+**Secret handling**, matching OpenAI/Anthropic/GitHub conventions:
+
+- **Prefixed and self-identifying** — `whd_live_…` / `whd_dev_…` with a checksum
+  suffix. A leaked key is greppable, its environment is visible on sight, and an
+  obviously-malformed key is rejected before any database work.
+- **Shown once at creation**, never retrievable. Only a salted scrypt hash is
+  stored, compared in constant time.
+- **Rotation without downtime** — a client may hold two live secrets at once, and
+  the old one is revoked *explicitly*. Revoking on rotation would make every
+  rotation an outage. A third unrevoked secret is refused.
+- **Mandatory expiry with a ceiling** (365 days). A never-expiring credential is
+  philosophically opposite to purpose-bound expiring grants.
+- `last_used_at`, `created_by`, `created_at` recorded per key.
+
+**The collection ceiling.** `client_policies.allowed_collections` lets IT declare
+*"the Marketing Dashboard may touch `campaigns` and `accounts`."* Even if a user
+personally holds a grant on `salaries`, that app cannot reach it as them. A
+ceiling **only ever narrows** — it can never widen a grant.
+
+It is carried on `BrokerContext` and enforced inside `loadActiveGrant`, which
+takes the whole context rather than spread arguments precisely so that no verb
+can forget it. A collection outside the ceiling returns null, so every verb
+refuses `no_grant` uniformly: a distinguishable code would tell an app exactly
+which collections it is missing.
+
+**Audit `via`.** Every audit row records which credential produced it —
+`session | oauth | token_exchange | api_key:<id>`. *"Which credential did this"*
+is a compliance question the previous audit row could not answer.
+
+### One implementation of the env rules
+
+The §6.1 scope rules were inline in the OAuth plugin. They are now a pure broker
+function, because **if a key can reach `env:live` by any path an OAuth token
+cannot, invariant 5 is dead** — and two implementations is how that happens.
+
+Issuance and refresh are deliberately *different questions* and have separate
+entry points:
+
+- `resolveEnvScopes` answers **"what may this request have"** — intersect with
+  the policy, drop `env:live` unless the user is eligible, and fall back to the
+  `env:dev` floor. A caller that requested no env scope at all is left untouched.
+- `recomputeEnvScope` answers **"what may this user have now"**, re-derived from
+  current policy and eligibility. Refresh must not narrow from the scopes the
+  token already holds: `env:live` was stripped at issuance, so an intersection
+  could never widen it back after a promotion.
+
+## Full-document reads
+
+`broker.getDocument(ctx, { collection, id | path })` returns one document's full
+granted field set, subject to **the same grant, read verb, field postures and
+document filter as `query`** — it shares that prologue rather than duplicating
+it, and builds its SQL through the same builder.
+
+A document excluded by the document filter is `not_found`, indistinguishable
+from one that does not exist: a distinct code would be an existence oracle.
+
+`path` addresses a source file and is file-collections-only; on a dataset it is
+`invalid_intent`. Because one file yields many documents, the file form fetches
+every chunk in `document_seq` order and rejoins them, undoing the indexer's
+overlap. That reconstructs the *chunked* text, not the source file byte-for-byte
+— chunking trims and rejoins paragraphs, and nothing stores the original body.
+A caller needing the exact source must keep it.
 
 ## Taxonomies
 
@@ -341,30 +768,58 @@ is that `syncDatasetTerms()` must run after data is loaded but before `indexColl
 
 ```sql
 -- Better Auth manages: user, session, account, sso_provider, oauth_client
-create table app.collections (name text pk, description text, config jsonb, updated_at timestamptz);
+-- (user gains an orgId column via additionalFields)
+create table app.organizations (id text pk, name text, created_at timestamptz);
+
+create table app.collections (
+  name text pk, description text, config jsonb, org_id text, updated_at timestamptz);
 
 create table app.grants (
-  id uuid pk, user_id text references "user", collection text references collections,
+  id uuid pk, org_id text references organizations,
+  user_id text references "user", collection text references collections,
   purpose_label text, purpose_detail text,
   allowed_fields text[],            -- ⊆ the collection's grantable fields
+  verbs text[] not null default '{read}',   -- read|create|update|delete|approve
+  mode text not null default 'direct',      -- direct | proposal_only
   document_filter jsonb,            -- optional, author-supplied; null = whole collection
+                                    -- value may be the sentinel $self, bound at eval time
   env text check (env in ('dev','live')),
   status text check (status in ('pending','approved','denied','revoked')),
   requested_at timestamptz, decided_at timestamptz, decided_by text, expires_at timestamptz
 );
-create unique index grants_one_active on app.grants (user_id, collection, env)
-  where status = 'approved';
+create unique index grants_one_active
+  on app.grants (org_id, user_id, collection, env) where status = 'approved';
 
 create table app.client_policies (
   client_id text pk references oauth_client,
-  display_name text,
+  display_name text, org_id text references organizations,
   allowed_scopes text[] not null default '{env:dev}',
+  allowed_collections text[],        -- the ceiling; null = none
+  mode text not null default 'delegated',   -- delegated | headless
+  robot_user_id text, trusted_issuer_id uuid,
   promoted_at timestamptz, promoted_by text
 );
 
+create table app.client_secrets (   -- only a hash; the secret is shown once, at creation
+  id uuid pk, client_id text references client_policies, org_id text,
+  prefix text, secret_hash text, created_at timestamptz, created_by text,
+  expires_at timestamptz not null,  -- mandatory, capped at 365 days
+  last_used_at timestamptz, revoked_at timestamptz
+);
+
+create table app.trusted_issuers (  -- registered IdPs for RFC 8693 token exchange
+  id uuid pk, org_id text, issuer text, jwks_uri text,
+  audience text, subject_claim text default 'sub', unique (org_id, issuer)
+);
+
 create table app.audit_events (
-  id uuid pk, at timestamptz, user_id text, env text, collection text,
+  id uuid pk, at timestamptz, user_id text, org_id text, env text, collection text,
   intent jsonb, fields_returned text[], grant_id uuid, outcome text, reason text
+);
+
+create table app.change_log (          -- the change feed; carries no field data
+  seq bigserial pk, org_id text, env text, collection text, document_id text,
+  rev uuid, op text, status text, at timestamptz, by text
 );
 -- audit_events is INSERT-only for the app role: no UPDATE, no DELETE privilege.
 ```
@@ -436,6 +891,14 @@ scheduled export:
    refusal, return the reason code — never a denied value, never SQL.
 4. Do not query `data_live` or `data_synth`. The role you are given cannot
    anyway, and that is the point.
+
+The REST adapter (`/v1`) follows this pattern exactly. It derives context in
+`lib/rest-context.ts` with `deriveRestContext()` — extracting the token scope
+for env, looking up orgId from the user row, loading the client policy to
+determine `via` (how the client authenticated), and applying the collection
+ceiling — then translates HTTP requests into broker intents and returns reason
+codes on refusal. See `apps/web/lib/rest-context.ts` and `apps/web/app/v1/`
+for the reference implementation.
 
 `broker.query` is read-only. Naming is deliberately kept open for an additive
 `broker.mutate` with its own validation and audit; the audit outcome column is

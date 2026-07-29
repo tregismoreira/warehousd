@@ -209,6 +209,19 @@ collections:
       end_date:    { type: date, posture: allow }
       status:      { type: text, posture: allow }
       reason:      { type: text, posture: deny }
+  # The one writable collection in the demo — the target of the governed write path. It has no
+  # `fk`, so an agent can propose a task without first resolving a matter, and it is absent
+  # from `synthetic.documents_per_collection` below because a writable collection's rows come
+  # from proposals rather than the generator (which skips it either way).
+  matter_tasks:
+    description: Matter tasks (writable — governed write path)
+    writable: true
+    fields:
+      id:         { type: uuid, posture: allow, pk: true }
+      title:      { type: text, posture: { read: allow, write: allow } }
+      notes:      { type: text, posture: { read: allow, write: allow } }
+      assignee:   { type: text, posture: { read: allow, write: allow } }
+      created_at: { type: timestamptz, posture: allow }
   policies:
     type: file
     description: Firm policy documents (searchable)

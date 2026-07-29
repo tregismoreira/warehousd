@@ -15,21 +15,21 @@ it("returns the active approved grant and null for revoked/expired", async () =>
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
      values ('mia','people', array['id','email'],'dev','approved', now() + interval '1 day')`);
-  const g = await loadActiveGrant(db, "mia", "people", "dev");
+  const g = await loadActiveGrant(db, { userId: "mia", env: "dev", orgId: "default" }, "people");
   expect(g?.allowedFields).toEqual(["id", "email"]);
 
   // revoked → none
   await db.query(`update app.grants set status='revoked' where user_id='mia'`);
-  expect(await loadActiveGrant(db, "mia", "people", "dev")).toBeNull();
+  expect(await loadActiveGrant(db, { userId: "mia", env: "dev", orgId: "default" }, "people")).toBeNull();
 
   // expired approved → none
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
      values ('mia','people', array['id'],'dev','approved', now() - interval '1 hour')`);
-  expect(await loadActiveGrant(db, "mia", "people", "dev")).toBeNull();
+  expect(await loadActiveGrant(db, { userId: "mia", env: "dev", orgId: "default" }, "people")).toBeNull();
 
   // wrong env → none (dev grant not visible to live)
-  const g2 = await loadActiveGrant(db, "mia", "people", "live");
+  const g2 = await loadActiveGrant(db, { userId: "mia", env: "live", orgId: "default" }, "people");
   expect(g2).toBeNull();
 });
 
@@ -41,13 +41,13 @@ it("loadActiveGrant returns documentFilters as array when set, empty array other
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at,document_filter)
      values ('mia','policies', array['title'],'dev','approved', now() + interval '1 day', '[{"field":"path","op":"in","value":["hr/pto.md"]}]')`);
-  const g = await loadActiveGrant(db, "mia", "policies", "dev");
+  const g = await loadActiveGrant(db, { userId: "mia", env: "dev", orgId: "default" }, "policies");
   expect(g?.documentFilter).toEqual([{ field: "path", op: "in", value: ["hr/pto.md"] }]);
 
   // Check that grants without document_filter get empty array
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
      values ('mia2','policies', array['title'],'dev','approved', now() + interval '1 day')`);
-  const g2 = await loadActiveGrant(db, "mia2", "policies", "dev");
+  const g2 = await loadActiveGrant(db, { userId: "mia2", env: "dev", orgId: "default" }, "policies");
   expect(g2?.documentFilter).toEqual([]);
 });

@@ -46,7 +46,7 @@ let ctx: ReturnType<typeof makeCtx>;
 let ctxNoGrant: ReturnType<typeof makeCtx>;
 
 function makeCtx(userId: string, env: "dev" | "live" = "dev") {
-  return { userId, env };
+  return { userId, orgId: "default", env };
 }
 
 async function countAudit(db: Pool): Promise<number> {
@@ -185,7 +185,7 @@ it("document_filter applies to search too (design test 3 over the search path)",
   );
   const grantId = grantRes.rows[0].id;
   const { approveGrant } = await import("../src/grants/manage");
-  await approveGrant(db, grantId, "admin", {
+  await approveGrant(db, docCfg, grantId, "admin", {
     documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md"] }],
   });
 

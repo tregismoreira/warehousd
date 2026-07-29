@@ -4,6 +4,7 @@ import { resolve } from "path";
 import {
   ensureSchemasAndRoles,
   createAppSchema,
+  migrateUserOrg,
   loadConfig,
   applyConfig,
   generateSynthetic,
@@ -167,6 +168,10 @@ export async function bootstrap(): Promise<void> {
       });
     }
 
+    // 4b. Push the org default down onto Better Auth's generated `user.orgId` column.
+    //     Must follow step 4 — the table does not exist before it.
+    await migrateUserOrg(db);
+
     // 5. YAML → data_synth/data_live tables + views + app.collections. Idempotent by design.
     const cfg = loadConfig(dir);
     await applyConfig(db, cfg);
@@ -218,9 +223,12 @@ export async function bootstrap(): Promise<void> {
     // 10. The outputs-contract OAuth client
     await ensureDevClient(db, adminId);
 
-    // Inject DEV_DATABASE_URL and LIVE_DATABASE_URL for the app to use
+    // Inject the role-scoped URLs for the app to use. The write roles are separate
+    // principals from the read roles — a read pool can never write, whatever the broker does.
     process.env.DEV_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_dev", rolePw);
     process.env.LIVE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_live", rolePw);
+    process.env.DEV_WRITE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_dev_write", rolePw);
+    process.env.LIVE_WRITE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_live_write", rolePw);
 
     console.log("bootstrap complete");
   } finally {

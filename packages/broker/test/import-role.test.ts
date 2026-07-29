@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema, applyConfig } from "../src/index";
+import { createAppSchema, applyConfig, withOrg } from "../src/index";
 import { loadConfig } from "../src/config/load";
 
 let p: Provisioned, admin: Pool, imp: Pool;
@@ -16,11 +16,23 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await admin.end(); await imp.end(); await p.end(); });
 
+// The import role writes base tables directly, so RLS — not the view predicate — is what
+// confines it to one org. Every insert therefore has to declare the org it is writing into,
+// and the policy's WITH CHECK refuses a mismatch. `withOrg` is how the real import path does it.
+const asOrg = (orgId: string, sql: string, params: unknown[] = []) =>
+  withOrg(imp, orgId, (c) => c.query(sql, params));
+
 describe("warehousd_import privileges", () => {
   it("can INSERT into a data_live base table", async () => {
-    await expect(imp.query(
-      `insert into data_live.departments (id, name) values (gen_random_uuid(), 'Imported')`,
+    await expect(asOrg("default",
+      `insert into data_live.departments (org_id, id, name) values ('default', gen_random_uuid(), 'Imported')`,
     )).resolves.toBeDefined();
+  });
+
+  it("cannot INSERT a row belonging to another org — RLS refuses, not the broker", async () => {
+    await expect(asOrg("default",
+      `insert into data_live.departments (org_id, id, name) values ('other', gen_random_uuid(), 'Smuggled')`,
+    )).rejects.toThrow(/row-level security/i);
   });
 
   it("cannot SELECT from data_live — write-only means write-only", async () => {
@@ -48,11 +60,11 @@ describe("warehousd_import privileges", () => {
   });
 
   it("can insert multiple rows into the same table sequentially", async () => {
-    await expect(imp.query(
-      `insert into data_live.departments (id, name) values (gen_random_uuid(), 'Sales')`,
+    await expect(asOrg("default",
+      `insert into data_live.departments (org_id, id, name) values ('default', gen_random_uuid(), 'Sales')`,
     )).resolves.toBeDefined();
-    await expect(imp.query(
-      `insert into data_live.departments (id, name) values (gen_random_uuid(), 'Engineering')`,
+    await expect(asOrg("default",
+      `insert into data_live.departments (org_id, id, name) values ('default', gen_random_uuid(), 'Engineering')`,
     )).resolves.toBeDefined();
   });
 });

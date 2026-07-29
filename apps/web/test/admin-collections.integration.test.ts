@@ -48,8 +48,9 @@ describe("GET /api/admin/collections", () => {
     const home = people.fields.find((f: any) => f.name === "home_address");
     // Admins configure postures, so they see the denied fields BY NAME. No values are
     // returned by this route — it reads app.collections, never a data schema.
-    expect(home.posture).toBe("deny");
-    expect(people.fields.find((f: any) => f.name === "full_name").posture).toBe("allow");
+    // Postures are normalized to {read, write} form in Phase 2.
+    expect(home.posture).toEqual({ read: "deny", write: "deny" });
+    expect(people.fields.find((f: any) => f.name === "full_name").posture).toEqual({ read: "allow", write: "deny" });
   });
 
   it("marks a collection applied after applyConfig ran in the fixture", async () => {
