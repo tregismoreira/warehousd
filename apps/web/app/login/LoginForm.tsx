@@ -13,6 +13,15 @@ const DEMO_CREDS = [
   { email: "mia@demo.local", role: "member" },
 ];
 
+// Behind a disclosure so the three buttons above keep a stable position for existing e2e
+// selectors (apps/web/e2e/login.spec.ts clicks "ana@demo.local" directly).
+const MORE_DEMO_CREDS = [
+  { email: "priya@demo.local", role: "manager — partner" },
+  { email: "dan@demo.local", role: "member — paralegal" },
+  { email: "elena@demo.local", role: "member — finance" },
+  { email: "omar@demo.local", role: "member — HR" },
+];
+
 interface SSOProvider {
   providerId: string;
   domain: string;
@@ -144,6 +153,22 @@ function LoginInner({ demo }: { demo: boolean }) {
           </li>
         ))}
       </ul>
+      <details>
+        <summary className="cursor-pointer">More personas</summary>
+        <ul className="mt-1 space-y-1">
+          {MORE_DEMO_CREDS.map((c) => (
+            <li key={c.email}>
+              <button
+                type="button"
+                className="font-mono underline-offset-2 hover:underline"
+                onClick={() => { setEmail(c.email); setPassword("demo"); }}
+              >
+                {c.email}
+              </button>{" "}— {c.role}
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 

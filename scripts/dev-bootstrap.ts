@@ -1,7 +1,7 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
 import { execSync } from "child_process";
-import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, loadTaxonomyBindings, ensureSchemasAndRoles } from "@warehousd/broker";
+import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, loadTaxonomyBindings, fileMetadataFields, ensureSchemasAndRoles } from "@warehousd/broker";
 import { seedLive } from "../examples/harbor/seed/live";
 import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
@@ -19,6 +19,10 @@ async function seedPersonaUsers(db: Pool) {
     { id: "ana",    email: "ana@demo.local",    name: "Ana",    role: "admin" },
     { id: "marcus", email: "marcus@demo.local", name: "Marcus", role: "manager" },
     { id: "mia",    email: "mia@demo.local",    name: "Mia",    role: "member" },
+    { id: "priya",  email: "priya@demo.local",  name: "Priya Raghavan", role: "manager" },
+    { id: "dan",    email: "dan@demo.local",    name: "Dan Okafor",     role: "member" },
+    { id: "elena",  email: "elena@demo.local",  name: "Elena Vasquez",  role: "member" },
+    { id: "omar",   email: "omar@demo.local",   name: "Omar Haddad",    role: "member" },
   ];
   for (const p of personas) {
     const exists = await db.query(`select 1 from app."user" where id=$1`, [p.id]);
@@ -77,21 +81,31 @@ async function main() {
   await seedLive(db);
   // Sync dataset-sourced vocabulary terms for live
   await syncDatasetTerms(db, cfg, "live");
-  // Index policies collection from seed docs (dev and live environments)
-  const devIndexed = await indexCollection(db, "dev", "policies", `${dir}/seed/docs-dev`,
-    { taxonomies: await loadTaxonomyBindings(db, cfg, "policies", "dev") });
-  const liveIndexed = await indexCollection(db, "live", "policies", `${dir}/seed/docs-live`,
-    { taxonomies: await loadTaxonomyBindings(db, cfg, "policies", "live") });
+  // Index file collections from seed docs (dev and live environments)
+  const indexed: string[] = [];
+  for (const [name, c] of Object.entries(cfg.collections)) {
+    if (c.type !== "file") continue;
+    const metadata = fileMetadataFields(c);
+    const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
+    const dev = await indexCollection(db, "dev", name, `${dir}/${c.source}`, { taxonomies: devTaxonomies, metadata });
+    let live = 0;
+    if (c.source_live) {
+      const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
+      live = (await indexCollection(db, "live", name, `${dir}/${c.source_live}`, { taxonomies: liveTaxonomies, metadata })).indexed;
+    }
+    indexed.push(`${name} dev:${dev.indexed} live:${live}`);
+  }
   // Mia's pending salaries request (Marcus's inbox) + her approved dev grants (§9) —
   // only seed if not already present, so re-running bootstrap doesn't duplicate grant rows.
   const existing = await db.query(`select 1 from app.grants where user_id='mia' limit 1`);
   if (existing.rowCount === 0) {
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
-      ('mia','announcements', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
+      ('mia','announcements', array['id','title','department','summary','owner','updated_at'],'dev','approved'),
       ('mia','people', array['id','full_name','email','department_name'],'dev','approved')`);
+    // single-vocabulary scoped: department only (tags is not part of this grant).
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,document_filter) values
-      ('mia','policies', array['title','content','owner','updated_at','category'],'dev','approved',
-       '[{"field":"category","op":"in","value":["hr","benefits"]}]'::jsonb)`);
+      ('mia','policies', array['title','content','owner','updated_at','department'],'dev','approved',
+       '[{"field":"department","op":"in","value":["hr","finance"]}]'::jsonb)`);
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,purpose_label) values
       ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','pending','comp benchmarking')`);
   }
@@ -100,16 +114,70 @@ async function main() {
     const already = await db.query(`select 1 from app.grants where user_id=$1 limit 1`, [user]);
     if (already.rowCount === 0) {
       await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
-        ($1,'announcements', array['id','title','category','summary','owner','updated_at'],'dev','approved'),
+        ($1,'announcements', array['id','title','department','summary','owner','updated_at'],'dev','approved'),
         ($1,'departments', array['id','name'],'dev','approved'),
         ($1,'people', array['id','full_name','email','department_name','department_id'],'dev','approved'),
         ($1,'salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],'dev','approved'),
         ($1,'metrics', array['id','date','revenue','active_customers','region'],'dev','approved'),
-        ($1,'policies', array['title','content','owner','updated_at','category'],'dev','approved')`,
+        ($1,'policies', array['title','content','owner','updated_at','department','tags'],'dev','approved')`,
         [user]);
     }
   }
+
+  // Priya (manager, partner): live-env grants + full-collection access to matters.
+  const priyaExisting = await db.query(`select 1 from app.grants where user_id='priya' limit 1`);
+  if (priyaExisting.rowCount === 0) {
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
+      ('priya','matters',
+       array['id','matter_number','client_id','client_name','responsible_attorney_id',
+             'responsible_attorney_name','originating_attorney_id','originating_attorney_name'],
+       'live','approved')`);
+  }
+
+  // Dan (member, paralegal): multi-predicate + multi-value — case_files scoped to one client
+  // AND an overlap with a set of tags (both predicates AND'd, the second array-overlap).
+  const danExisting = await db.query(`select 1 from app.grants where user_id='dan' limit 1`);
+  if (danExisting.rowCount === 0) {
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,document_filter) values
+      ('dan','case_files',
+       array['title','content','owner','updated_at','client','tags','matter_number','document_type','confidentiality','filed_date'],
+       'dev','approved',
+       '[{"field":"client","op":"in","value":["c-0042"]},{"field":"tags","op":"in","value":["litigation","discovery","filings"]}]'::jsonb)`);
+  }
+
+  // Elena (member, finance): field-trimmed invoices/expenses, a trust_accounts grant with a
+  // future expiry ("expiring"), and a separate collection whose grant has already expired.
+  const elenaExisting = await db.query(`select 1 from app.grants where user_id='elena' limit 1`);
+  if (elenaExisting.rowCount === 0) {
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
+      ('elena','invoices', array['id','invoice_number','client_id','amount','status'],'dev','approved'),
+      ('elena','expenses', array['id','matter_id','category','amount'],'dev','approved')`);
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at) values
+      ('elena','trust_accounts', array['id','client_id','balance','currency','opened_date'],'dev','approved',
+       now() + interval '90 days')`);
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at) values
+      ('elena','vendors', array['id','name','category','active'],'dev','approved',
+       now() - interval '10 days')`);
+  }
+
+  // Omar (member, HR): a metadata-field-scoped grant (confidentiality, not a vocabulary), a
+  // path-scoped grant, one denied request, and one revoked grant.
+  const omarExisting = await db.query(`select 1 from app.grants where user_id='omar' limit 1`);
+  if (omarExisting.rowCount === 0) {
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,document_filter) values
+      ('omar','case_files',
+       array['title','content','owner','updated_at','client','tags','matter_number','document_type','confidentiality','filed_date'],
+       'dev','approved',
+       '[{"field":"confidentiality","op":"in","value":["internal"]}]'::jsonb)`);
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,document_filter) values
+      ('omar','policies', array['title','content','owner','updated_at','department'],'dev','approved',
+       '[{"field":"path","op":"in","value":["pto.md"]}]'::jsonb)`);
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,decided_by,decided_at) values
+      ('omar','salaries', array['id','job_title','base_salary'],'dev','denied','marcus',now())`);
+    await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,decided_by,decided_at) values
+      ('omar','performance_reviews', array['id','person_id','review_date','rating'],'dev','revoked','marcus',now())`);
+  }
   await db.end();
-  console.log("bootstrap complete (indexed dev policies: " + devIndexed.indexed + ", live policies: " + liveIndexed.indexed + ")");
+  console.log("bootstrap complete (indexed " + indexed.join(", ") + ")");
 }
 main();

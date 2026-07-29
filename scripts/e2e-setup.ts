@@ -17,7 +17,7 @@ async function main() {
   process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${DB}`;
   process.env.LIVE_DATABASE_URL = `postgres://warehousd_live:pw@127.0.0.1:54330/${DB}`;
   process.env.IMPORT_DATABASE_URL = `postgres://warehousd_import:pw@127.0.0.1:54330/${DB}`;
-  process.env.WAREHOUSD_PROJECT_DIR = resolve(__dirname, "../examples/meridian");
+  process.env.WAREHOUSD_PROJECT_DIR = resolve(__dirname, "../examples/harbor");
   process.env.WAREHOUSD_DEMO = "true";
 
   execSync("pnpm tsx scripts/dev-bootstrap.ts", { stdio: "inherit", env: process.env });

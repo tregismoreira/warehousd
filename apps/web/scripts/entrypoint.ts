@@ -9,6 +9,7 @@ import {
   generateSynthetic,
   indexCollection,
   loadTaxonomyBindings,
+  fileMetadataFields,
   syncDatasetTerms,
   ensureDevClient,
   dataRoleUrl,
@@ -61,12 +62,18 @@ async function ensureAdminUser(db: Pool): Promise<string> {
   return userId;
 }
 
-// Seed demo personas (ana/marcus/mia with appropriate roles and grants)
+// Seed demo personas (ana/marcus/mia with appropriate roles and grants, plus the extra
+// personas LoginForm.tsx offers behind its "more personas" disclosure — ungranted here just
+// like mia, since the richer grant matrix is dev-bootstrap.ts's job, not this production path)
 async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
   const personas = [
     { id: "ana", email: "ana@demo.local", name: "Ana", role: "admin" },
     { id: "marcus", email: "marcus@demo.local", name: "Marcus", role: "manager" },
     { id: "mia", email: "mia@demo.local", name: "Mia", role: "member" },
+    { id: "priya", email: "priya@demo.local", name: "Priya Raghavan", role: "manager" },
+    { id: "dan", email: "dan@demo.local", name: "Dan Okafor", role: "member" },
+    { id: "elena", email: "elena@demo.local", name: "Elena Vasquez", role: "member" },
+    { id: "omar", email: "omar@demo.local", name: "Omar Haddad", role: "member" },
   ];
 
   // Check if personas already exist to guard against duplicates on re-run
@@ -183,12 +190,13 @@ export async function bootstrap(): Promise<void> {
     // 9. Index file collections
     for (const [name, c] of Object.entries(cfg.collections)) {
       if (c.type !== "file") continue;
+      const metadata = fileMetadataFields(c);
       const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
-      await indexCollection(db, "dev", name, resolve(dir, c.source!), { taxonomies: devTaxonomies });
+      await indexCollection(db, "dev", name, resolve(dir, c.source!), { taxonomies: devTaxonomies, metadata });
       if (c.source_live) {
         await syncDatasetTerms(db, cfg, "live");
         const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
-        await indexCollection(db, "live", name, resolve(dir, c.source_live), { taxonomies: liveTaxonomies });
+        await indexCollection(db, "live", name, resolve(dir, c.source_live), { taxonomies: liveTaxonomies, metadata });
       }
     }
 

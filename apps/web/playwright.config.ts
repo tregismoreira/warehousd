@@ -38,7 +38,7 @@ export default defineConfig({
       DEV_DATABASE_URL: "postgres://warehousd_dev:pw@127.0.0.1:54330/warehousd_e2e",
       LIVE_DATABASE_URL: "postgres://warehousd_live:pw@127.0.0.1:54330/warehousd_e2e",
       IMPORT_DATABASE_URL: "postgres://warehousd_import:pw@127.0.0.1:54330/warehousd_e2e",
-      WAREHOUSD_PROJECT_DIR: resolve(__dirname, "../../examples/meridian"),
+      WAREHOUSD_PROJECT_DIR: resolve(__dirname, "../../examples/harbor"),
       WAREHOUSD_DEMO: "true",
       // Throwaway — this database is dropped and rebuilt by scripts/e2e-setup.ts on every run.
       BETTER_AUTH_SECRET: "e2e-secret-at-least-32-chars-long-0000",

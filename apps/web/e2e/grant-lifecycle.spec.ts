@@ -21,7 +21,7 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   const row = page.getByRole("row", { name: /mia.*departments/ });
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Review" }).click();
-  await page.getByRole("checkbox", { name: "id" }).uncheck();
+  await page.getByRole("checkbox", { name: "id", exact: true }).uncheck();
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText("Grant approved")).toBeVisible();
   await signOut(page);
@@ -31,7 +31,7 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   const mine = page.getByRole("row", { name: /departments/ }).last();
   await expect(mine).toContainText("Approved");
   await expect(mine).toContainText("name");
-  await expect(mine).not.toContainText("id,");
+  await expect(mine).not.toContainText(/\bid\b/);
   await signOut(page);
 
   // 4. Marcus revokes it.

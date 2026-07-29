@@ -204,25 +204,34 @@ collections:
     process.env.WAREHOUSD_DEMO = "true";
     await bootstrap();
 
-    // Assert demo personas exist (ana, marcus, mia)
+    // Assert demo personas exist (ana, marcus, mia, plus the extra personas behind
+    // LoginForm's "more personas" disclosure)
     db = new Pool({ connectionString: setup.appUrl });
     const usersResult = await db.query(`select id from app."user" order by id`);
     const ids = usersResult.rows.map((r: any) => r.id);
 
-    // Should have admin + 3 demo personas
-    expect(usersResult.rowCount).toBe(4);
+    // Should have admin + 7 demo personas
+    expect(usersResult.rowCount).toBe(8);
     expect(ids).toContain("ana");
     expect(ids).toContain("marcus");
     expect(ids).toContain("mia");
+    expect(ids).toContain("priya");
+    expect(ids).toContain("dan");
+    expect(ids).toContain("elena");
+    expect(ids).toContain("omar");
 
     // Verify roles
     const anaRole = await db.query(`select role from app."user" where id='ana'`);
     const marcusRole = await db.query(`select role from app."user" where id='marcus'`);
     const miaRole = await db.query(`select role from app."user" where id='mia'`);
+    const priyaRole = await db.query(`select role from app."user" where id='priya'`);
+    const danRole = await db.query(`select role from app."user" where id='dan'`);
 
     expect(anaRole.rows[0].role).toBe("admin");
     expect(marcusRole.rows[0].role).toBe("manager");
     expect(miaRole.rows[0].role).toBe("member");
+    expect(priyaRole.rows[0].role).toBe("manager");
+    expect(danRole.rows[0].role).toBe("member");
 
     // Verify grants are created (at least for ana and marcus)
     const grantCount = await db.query(`select count(*) as cnt from app.grants`);

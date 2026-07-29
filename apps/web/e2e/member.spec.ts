@@ -32,7 +32,7 @@ test.describe("member surfaces", () => {
     page,
   }) => {
     await expect(page.getByRole("row", { name: /policies/ })).toContainText(
-      'category in ["hr","benefits"]',
+      'department in ["hr","finance"]',
     );
     await expect(page.getByRole("row", { name: /announcements/ })).toContainText(
       "Whole collection",
