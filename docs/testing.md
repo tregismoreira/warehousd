@@ -165,11 +165,15 @@ start when something already answers on the origin, and
 `scripts/assert-port-free.mjs` runs ahead of `next dev` because `next dev -p N`
 does *not* fail on a busy port — it binds N+1 and carries on.
 
-Vitest names its databases `wh_<label>_<pid>` in
-`packages/broker/test/helpers/db.ts` and `apps/web/test/helpers/web-db.ts`, and
-its template databases carry a per-checkout suffix. The ~90 test files
-mentioning `http://localhost:8722` only build `Request` objects for route
-handlers; none binds a port.
+Vitest names its databases `wh_<label>_<pid>_<suffix>` through `runDbName` in
+`packages/broker/test/helpers/templates.ts`, called from
+`packages/broker/test/helpers/db.ts` and `apps/web/test/helpers/web-db.ts`. The
+suffix is the same per-checkout hash the template databases carry, and the pid
+alone was not enough: pids repeat across checkouts, so a leftover clone could not
+be told from a sibling's live one. With it, `scripts/agent/cleanup.sh` can drop
+this checkout's abandoned databases while another checkout's suite is still
+running. The ~90 test files mentioning `http://localhost:8722` only build
+`Request` objects for route handlers; none binds a port.
 
 The servers the suites *do* bind — the fake IdP in `helpers/fake-idp.ts` and the
 one-off ones in `sso-admin`, `admin-sso-ui` and `token-exchange` — all listen on

@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { BASE, ADMIN, cloneTemplate, templateName } from "./templates";
+import { BASE, ADMIN, cloneTemplate, runDbName, templateName } from "./templates";
 
 // Roles are cluster-global, so they outlive a cached template. bootstrap.test.ts rotates
 // warehousd_dev's password and puts it back in a finally; a crash in between would otherwise
@@ -62,7 +62,7 @@ export async function bootstrapBrokerDb(appUrl: string): Promise<void> {
 // built. `bare` skips the template and hands back an empty database — for the tests that
 // exercise the bootstrap itself and need a virgin cluster to run against.
 export async function provision(label: string, opts: { bare?: boolean } = {}): Promise<Provisioned> {
-  const dbName = `wh_${label}_${process.pid}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  const dbName = runDbName(label);
 
   if (opts.bare) {
     const admin = new Pool({ connectionString: ADMIN, max: 1 });
