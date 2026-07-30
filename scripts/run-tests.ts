@@ -29,8 +29,14 @@ const withCoverage = args.some((a) => a === "--coverage" || a.startsWith("--cove
 const BLOBS = ".vitest-reports";
 if (withCoverage) rmSync(BLOBS, { recursive: true, force: true });
 
+// `default` alongside `blob`, not blob on its own. A lone `--reporter=blob` *replaces* the default
+// reporter, so a failing run under `--coverage` printed no test output at all — no failure, no
+// counts, nothing to read but a non-zero exit. With two reporters the file target has to name which
+// one it is for, hence `--outputFile.blob`.
 const blobArgs = (name: string) =>
-  withCoverage ? ["--reporter=blob", `--outputFile=${BLOBS}/${name}.json`] : [];
+  withCoverage
+    ? ["--reporter=default", "--reporter=blob", `--outputFile.blob=${BLOBS}/${name}.json`]
+    : [];
 
 const passes: string[][] = [];
 if (wantsParallel) passes.push(["run", ...args, ...blobArgs("parallel")]);

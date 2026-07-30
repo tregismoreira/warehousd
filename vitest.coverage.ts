@@ -36,13 +36,17 @@ export const coverage: Coverage = {
   // A floor, not a target — it exists to catch a regression, not to block work that has not moved
   // the number. The audit's named blind spots to attack first: refusal branches in the broker
   // verbs, sql/build.ts's operator paths, and oauth/env-scope.ts's rule interactions.
+  // Measured on the merged report, 2026-07-30: lines 87.95, statements 87.95, branches 84.77,
+  // functions 90.78 (931 tests). Each floor sits ~3 points under its measurement — close enough to
+  // catch a real regression, far enough not to trip on one test moving. Raise them when a phase
+  // raises the real number; `WAREHOUSD_COVERAGE_MIN` overrides all four for a one-off run.
   ...(process.env.WAREHOUSD_COVERAGE_THRESHOLDS
     ? {
         thresholds: {
-          lines: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 70),
-          functions: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 70),
-          branches: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 70),
-          statements: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 70),
+          lines: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 85),
+          statements: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 85),
+          branches: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 82),
+          functions: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 88),
         },
       }
     : {}),

@@ -29,8 +29,8 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
       description: "writable dataset",
       fields: {
         id: { type: "uuid", posture: "allow", pk: true },
-        title: { type: "text", posture: "allow", write: "allow" as const },
-        content: { type: "text", posture: "allow", write: "allow" as const },
+        title: { type: "text", posture: { read: "allow", write: "allow" } as const },
+        content: { type: "text", posture: { read: "allow", write: "allow" } as const },
       },
     },
     sources: {

@@ -17,7 +17,7 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
       writable: true,
       fields: {
         id: { type: "uuid", posture: "allow", pk: true },
-        title: { type: "text", posture: "allow" },
+        title: { type: "text", posture: { read: "allow", write: "allow" } },
         body: { type: "text", posture: "allow" },
       },
     },
