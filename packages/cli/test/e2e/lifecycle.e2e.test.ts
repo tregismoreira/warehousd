@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "node:path";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, chmodSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:net";
@@ -31,6 +31,21 @@ async function freePort(): Promise<number> {
       probe.close(() => resolve(port));
     });
   });
+}
+
+// `mkdtempSync` creates the directory 0700, which no real project directory is: a git clone or a
+// plain `mkdir` under the usual umask lands on 0755. The difference is invisible on macOS, where
+// Docker Desktop virtualises bind-mount ownership so the container user can read anything the host
+// user can. On Linux a bind mount keeps the host's uid and mode, and the image runs as `node`
+// (uid 1000) while a CI runner is uid 1001 — so 0700 makes /project untraversable, `loadConfig`
+// finds no warehousd.yml, and the container restarts until the health check gives up 180s later.
+//
+// So: mode the directory like the thing it stands in for. Testing against 0700 tests a directory
+// layout this project never ships.
+function projectDirLike0755(): string {
+  const dir = mkdtempSync(join(tmpdir(), "wh-e2e-"));
+  chmodSync(dir, 0o755);
+  return dir;
 }
 
 interface StackState {
@@ -69,7 +84,7 @@ describe("CLI Docker Lifecycle E2E", () => {
     const dbPort = await freePort();
 
     stack = {
-      projectDir: mkdtempSync(join(tmpdir(), "wh-e2e-")),
+      projectDir: projectDirLike0755(),
       projectName: `wh-e2e-${Date.now()}-${Math.random().toString(36).substring(7)}`,
       serverPort,
       dbPort,

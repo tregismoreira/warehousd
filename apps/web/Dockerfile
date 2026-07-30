@@ -41,6 +41,12 @@ VOLUME ["/project"]
 # `node` (uid 1000) ships with the base image. Running as root gave every process in the container
 # — including the config parser and the file indexer, both of which read attacker-influenced paths
 # out of the mounted project directory — more than it needs.
+#
+# The cost is that /project must be readable by uid 1000 on Linux, where a bind mount keeps the
+# host's ownership and mode. A 0755 directory — a git clone, or a `mkdir` under the usual umask —
+# is fine; a 0700 one owned by another uid is not, and fails as "No warehousd.yml in /project"
+# rather than as a permission error. Docker Desktop on macOS hides this by remapping ownership, so
+# it only ever shows up on Linux.
 USER node
 
 # The same endpoint `warehousd status` polls: it answers 503 rather than throwing when Postgres is

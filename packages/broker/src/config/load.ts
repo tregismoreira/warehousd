@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, accessSync, constants } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { ConfigSchema, readPosture, writePosture, type WarehousdConfig } from "./schema";
@@ -51,7 +51,25 @@ function deepMerge<T>(base: T, over: Partial<T>): T {
 
 export function loadConfig(dir: string): WarehousdConfig {
   const basePath = join(dir, "warehousd.yml");
-  if (!existsSync(basePath)) throw new Error(`No warehousd.yml in ${dir}`);
+  if (!existsSync(basePath)) {
+    // `existsSync` answers false for "no such file" and for "not allowed to look" alike — it
+    // swallows EACCES. Under Docker `dir` is a bind mount and the container user is not the host
+    // user, so an unreadable project directory is a real case, and reporting it as a missing file
+    // sends the reader looking for the wrong thing entirely.
+    //
+    // Only EACCES earns the different message. A directory that is simply not there also makes
+    // accessSync throw, with ENOENT, and reporting that as a permission problem would trade one
+    // misleading error for another.
+    try {
+      accessSync(dir, constants.R_OK | constants.X_OK);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EACCES" || code === "EPERM") {
+        throw new Error(`Cannot read ${dir}: permission denied`, { cause: err });
+      }
+    }
+    throw new Error(`No warehousd.yml in ${dir}`);
+  }
   let cfg = parse(interpolate(readFileSync(basePath, "utf8"))) as unknown;
   const localPath = join(dir, "warehousd.local.yml");
   if (existsSync(localPath)) {
