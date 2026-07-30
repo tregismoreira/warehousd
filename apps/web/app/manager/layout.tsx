@@ -13,7 +13,6 @@ export default async function ManagerLayout({ children }: { children: React.Reac
   return (
     <AppShell
       surface="manager" role={role} email={session.user.email} env={env}
-      showConsole={process.env.NODE_ENV !== "production" || process.env.WAREHOUSD_DEMO === "true"}
     >
       {children}
     </AppShell>

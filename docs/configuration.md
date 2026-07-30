@@ -319,7 +319,6 @@ Set on the container or the dev process, not in YAML:
 | `WAREHOUSD_DISABLE_LOCAL_LOGIN` | `true` forces every sign-in through SSO. |
 | `WAREHOUSD_DEMO` | `true` behaves like `demo: true`. |
 | `WAREHOUSD_IMAGE` | Server image the CLI should run, if `server.image` is unset. |
-| `ANTHROPIC_API_KEY` | Only for the built-in `/console` chat page. |
 
 ## A complete example
 

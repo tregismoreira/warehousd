@@ -1,6 +1,6 @@
 import {
   BadgeCheck, Boxes, FileUp, Key, KeyRound, ScrollText, ShieldCheck, Users,
-  Inbox, ListChecks, Plug, MessagesSquare, LayoutDashboard, ClipboardCheck,
+  Inbox, ListChecks, Plug, LayoutDashboard, ClipboardCheck,
 } from "lucide-react";
 import type { Role } from "./authz";
 
@@ -30,6 +30,3 @@ export const NAV: Record<Role, NavItem[]> = {
     { href: "/member/connect", label: "How to connect", icon: Plug },
   ],
 };
-
-// The chat console is a dev bench, not a product surface.
-export const CONSOLE_ITEM: NavItem = { href: "/console", label: "Chat console", icon: MessagesSquare };

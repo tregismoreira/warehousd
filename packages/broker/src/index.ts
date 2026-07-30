@@ -1,5 +1,11 @@
 export * from "./types";
 export { makeBroker } from "./broker";
+// The runtime shapes behind types.ts. Adapters parse with these so a malformed body answers 400
+// before it costs a grant lookup; the broker parses again regardless (see checkIntent).
+export {
+  QueryIntentSchema, DocSearchIntentSchema, GetDocumentIntentSchema, MutationIntentSchema,
+  FilterSchema, AggregateSchema, FILTER_OPS, AGGREGATE_FNS, describeIntentError,
+} from "./intents/schema";
 export { createPools, onPoolError, type Pools, withOrg, writePool } from "./db/pools";
 export { loadConfig, grantableFields, findCollection } from "./config/load";
 export type { WarehousdConfig } from "./config/schema";

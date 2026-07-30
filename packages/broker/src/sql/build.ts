@@ -1,9 +1,29 @@
-import type { QueryIntent, FilterOp, DocumentFilter } from "../types";
+import type { QueryIntent, FilterOp, DocumentFilter, Aggregate } from "../types";
 import { MAX_LIMIT, DEFAULT_LIMIT } from "../types";
+
+// A filter the builder can express no SQL for. Distinct from the generic Error below so the
+// broker can answer `invalid_intent` — a caller's mistake — rather than `internal_error`.
+export class UnsupportedFilter extends Error {}
 
 const OP_SQL: Record<Exclude<FilterOp, "in">, string> = {
   eq: "=", neq: "<>", gt: ">", lt: "<", gte: ">=", lte: "<=", like: "like",
 };
+// An aggregate's `fn` is the only part of an intent that lands in the SQL text as syntax rather
+// than as a bound parameter, so it gets the same treatment as an identifier: looked up in a
+// closed set, never interpolated from the caller's string. The intent schema holds it to this
+// same enum; this is the layer that must not depend on that having happened.
+const AGG_SQL: Record<Aggregate["fn"], string> = {
+  avg: "avg", sum: "sum", count: "count", min: "min", max: "max",
+};
+// `OP_SQL[op]` and `AGG_SQL[fn]` are property reads on object literals, so every name on
+// Object.prototype answers them: `op: "constructor"` returns the Object constructor, whose
+// string form then lands in the statement. Own properties only, and an unknown name is the
+// caller's mistake — invalid_intent — rather than a broken statement.
+function lookup(table: object, key: unknown, kind: string): string {
+  if (typeof key !== "string" || !Object.hasOwn(table, key))
+    throw new UnsupportedFilter(`unknown ${kind}: ${String(key)}`);
+  return (table as Record<string, string>)[key]!;
+}
 // Identifiers reaching q() are drawn from the collection's YAML-defined field set:
 // granted fields for client intents, plus the grant-author-supplied document_filter.field
 // (validated against the same YAML set in broker.ts) — never from raw client input.
@@ -15,10 +35,6 @@ const q = (id: string) => {
   if (!IDENT.test(id)) throw new Error(`unsafe identifier: ${id}`);
   return `"${id}"`;
 };
-
-// A filter the builder can express no SQL for. Distinct from the generic Error above so the
-// broker can answer `invalid_intent` — a caller's mistake — rather than `internal_error`.
-export class UnsupportedFilter extends Error {}
 
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
@@ -36,7 +52,13 @@ export function buildSelect(
   let selectClause: string;
   if (intent.aggregate && intent.aggregate.length) {
     const groupCols = (intent.groupBy ?? []).map(q);
-    const aggs = intent.aggregate.map((a) => `${a.fn}(${q(a.field)}) as "${a.fn}_${a.field}"`);
+    const aggs = intent.aggregate.map((a) => {
+      const fn = lookup(AGG_SQL, a.fn, "aggregate function");
+      // The alias is built from the looked-up name and the quoted field, never from the raw
+      // strings: `as "<caller text>"` is an injection point of its own the moment the caller's
+      // text can contain a double quote.
+      return `${fn}(${q(a.field)}) as ${q(`${fn}_${a.field}`)}`;
+    });
     selectClause = [...groupCols, ...aggs].join(", ");
   } else {
     const cols = (intent.fields && intent.fields.length ? intent.fields : grantedFields).map(q);
@@ -86,7 +108,7 @@ export function buildSelect(
       // can do nothing with. Refuse the intent instead; broker.ts maps this to invalid_intent.
       throw new UnsupportedFilter(`operator "${f.op}" is not supported on multi-value field "${f.field}"`);
     } else {
-      where.push(`${q(f.field)} ${OP_SQL[f.op]} ${param(f.value)}`);
+      where.push(`${q(f.field)} ${lookup(OP_SQL, f.op, "operator")} ${param(f.value)}`);
     }
   }
   // AND all grant-carried document filters

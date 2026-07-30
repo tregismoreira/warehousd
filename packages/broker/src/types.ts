@@ -57,7 +57,11 @@ export type MutationIntent =
 export type MutationRefusalReason =
   | RefusalReason
   | "verb_denied" | "verb_not_supported" | "field_not_writable"
-  | "conflict" | "invalid_value" | "not_writable";
+  | "conflict" | "invalid_value" | "not_writable"
+  // Distinct from verb_denied on purpose: the caller does hold the approve verb, so telling them
+  // "denied" would send them asking for a grant they already have. What they need is a second
+  // person. See approveProposal.
+  | "self_approval_denied";
 
 export type MutationResult =
   | { ok: true; status: "applied"; documentId: string; rev: string; auditId: string }

@@ -12,7 +12,6 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/api/chat/:path*",
     "/api/grants/:path*",
     "/api/audit/:path*",
     "/api/env/:path*",

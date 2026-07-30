@@ -17,6 +17,11 @@ import { findCollection, supportedVerbs } from "./config/load";
 import { reassembleChunks, chunkText } from "./indexing/chunk";
 import { writePosture } from "./config/schema";
 import { coerce } from "./import/validate";
+import type { ZodType } from "zod";
+import {
+  QueryIntentSchema, DocSearchIntentSchema, GetDocumentIntentSchema, MutationIntentSchema,
+  describeIntentError,
+} from "./intents/schema";
 
 // The parsed shape of one collection, as CollectionSchema produces it.
 type CollectionConfig = WarehousdConfig["collections"][string];
@@ -69,7 +74,33 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     return { ok: false, reason, auditId };
   }
 
-  async function query(ctx: BrokerContext, intent: QueryIntent): Promise<BrokerResult> {
+  // Hold a client-supplied intent to its runtime shape before any of it is read.
+  //
+  // types.ts describes these shapes to the compiler, which says nothing about a JSON body or an
+  // MCP tool argument — and `aggregate[].fn` reached the SQL text as syntax, not as a bound
+  // parameter. The schemas in intents/schema.ts close that; parsing here rather than only in the
+  // adapters means a new adapter cannot reintroduce it by forgetting.
+  //
+  // The failure answers `invalid_intent` through the normal refusal path so the probe is
+  // audited — an unaudited probe leaves no trace, which is the worse half of the bug. Detail
+  // goes to the log only: the reason codes deliberately carry nothing back to the caller.
+  function checkIntent<T>(
+    schema: ZodType<T>, raw: unknown, verb: string,
+  ): { ok: true; intent: T } | { ok: false; collection: string } {
+    const r = schema.safeParse(raw);
+    if (r.success) return { ok: true, intent: r.data };
+    // On a malformed intent `collection` may not be a string at all, and the audit row still
+    // has to name something. "*" is what the other collection-less verbs already record.
+    const c = (raw as { collection?: unknown } | null)?.collection;
+    console.warn(`[broker] ${verb} intent rejected`, { detail: describeIntentError(r.error) });
+    return { ok: false, collection: typeof c === "string" ? c : "*" };
+  }
+
+  async function query(ctx: BrokerContext, raw: QueryIntent): Promise<BrokerResult> {
+    // 0. intent shape at runtime, before anything reads it
+    const parsed = checkIntent(QueryIntentSchema, raw, "query");
+    if (!parsed.ok) return refuse(ctx, parsed.collection, null, "invalid_intent");
+    const intent = parsed.intent;
     // 1. intent shape
     if (intent.aggregate && intent.aggregate.length && intent.fields && intent.fields.length)
       return refuse(ctx, intent.collection, intent, "invalid_intent");
@@ -151,7 +182,10 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     return collections;
   }
 
-  async function searchDocuments(ctx: BrokerContext, intent: DocSearchIntent): Promise<BrokerResult> {
+  async function searchDocuments(ctx: BrokerContext, raw: DocSearchIntent): Promise<BrokerResult> {
+    const parsed = checkIntent(DocSearchIntentSchema, raw, "searchDocuments");
+    if (!parsed.ok) return refuse(ctx, parsed.collection, null, "invalid_intent");
+    const intent = parsed.intent;
     const c = findCollection(cfg, intent.collection);
     if (!c) return refuse(ctx, intent.collection, intent, "unknown_collection");
     if (typeof intent.q !== "string" || !intent.q.trim())
@@ -204,7 +238,10 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   // The full-document read. It shares query's prologue deliberately — same grant, same read
   // verb, same field postures, same document filter — and differs only in how the target is
   // addressed and, for file collections, in reassembling the chunks back into one document.
-  async function getDocument(ctx: BrokerContext, intent: GetDocumentIntent): Promise<GetDocumentResult> {
+  async function getDocument(ctx: BrokerContext, raw: GetDocumentIntent): Promise<GetDocumentResult> {
+    const parsed = checkIntent(GetDocumentIntentSchema, raw, "getDocument");
+    if (!parsed.ok) return refuse(ctx, parsed.collection, null, "invalid_intent");
+    const intent = parsed.intent;
     const c = findCollection(cfg, intent.collection);
     if (!c) return refuse(ctx, intent.collection, null, "unknown_collection");
     const isFile = c.type === "file";
@@ -299,7 +336,12 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       return refuse(ctx, intent.collection, null, "internal_error", grant.id);
     }
   }
-  async function mutate(ctx: BrokerContext, intent: MutationIntent): Promise<MutationResult> {
+  async function mutate(ctx: BrokerContext, raw: MutationIntent): Promise<MutationResult> {
+    // Parsed before `values` is read: refuseMutation reaches into intent.values to record the
+    // field names it touched, so an unparsed intent cannot even be refused safely.
+    const parsed = checkIntent(MutationIntentSchema, raw, "mutate");
+    if (!parsed.ok) return refuse(ctx, parsed.collection, null, "invalid_intent");
+    const intent = parsed.intent;
     const values = intent.op !== "delete" ? intent.values : {};
     const fieldNames = Object.keys(values);
 
@@ -679,9 +721,10 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     }
   }
 
-  // Approve and reject are deliberately NOT MCP tools — the untrusted model may propose,
-  // but only an authenticated human may approve. Approval happens only through an authenticated
-  // human surface. A future contributor should not add these as MCP tools.
+  // Approve and reject are deliberately NOT MCP tools — the untrusted model may propose, but not
+  // decide. That is a surface restriction, and it is only half of the rule: the REST adapter
+  // exposes both verbs to any bearer token, so the other half — that the decider is not the
+  // proposer — is enforced below against `_rev_by`, where no adapter can omit it.
   async function approveProposal(
     ctx: BrokerContext, proposalId: string,
   ): Promise<{ ok: true; documentId: string; rev: string; auditId: string } | { ok: false; reason: MutationRefusalReason; auditId: string }> {
@@ -736,6 +779,25 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
             userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
             intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "no_grant", via: ctx.via });
           return { ok: false, reason: "no_grant", auditId };
+        }
+
+        // Four eyes. A proposal exists so that something other than the proposer decides, and
+        // the approve verb alone does not make the approver that something.
+        //
+        // This was previously left to "approve is not an MCP tool", which held only while the
+        // model was the only proposer. The REST adapter exposes approveProposal to any bearer
+        // token — including a headless API key — so a single credential holding
+        // verbs: ["update", "approve"] could propose and approve in two calls, and the pending
+        // state that exists to interpose a person interposed nobody.
+        //
+        // Checked before the verb, so the answer does not depend on the caller's own grant: a
+        // proposer who lacks `approve` learns they cannot approve their own work either way.
+        if (proposal._rev_by === ctx.userId) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused",
+            reason: "self_approval_denied", via: ctx.via });
+          return { ok: false, reason: "self_approval_denied", auditId };
         }
 
         // Require approve verb
@@ -943,6 +1005,19 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
             userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
             intent: null, fieldsReturned: [], grantId: grant?.id ?? null, outcome: "refused", reason: "verb_denied", via: ctx.via });
           return { ok: false, reason: "verb_denied", auditId };
+        }
+
+        // Rejecting your own proposal is closer to withdrawing it than to deciding on it, and
+        // there is no withdraw verb — so it takes the same second person approve does. The rule
+        // matters less here than the symmetry does: one decision verb enforcing four eyes and
+        // its opposite not enforcing it is the kind of gap that reads as an oversight and gets
+        // used as one. A proposal a proposer wants gone is rejected by a reviewer.
+        if (proposal._rev_by === ctx.userId) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused",
+            reason: "self_approval_denied", via: ctx.via });
+          return { ok: false, reason: "self_approval_denied", auditId };
         }
 
         const table = `${schema}.${ident(collectionName)}`;

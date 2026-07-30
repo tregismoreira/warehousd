@@ -14,7 +14,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <AppShell
       surface="admin" role={role} email={session.user.email} env={env}
-      showConsole={process.env.NODE_ENV !== "production" || process.env.WAREHOUSD_DEMO === "true"}
     >
       {children}
     </AppShell>

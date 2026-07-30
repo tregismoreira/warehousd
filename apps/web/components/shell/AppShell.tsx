@@ -3,19 +3,19 @@
 // be serialized across a server→client boundary. Without this the shell renders on the server
 // and every authenticated surface dies on `<SidebarNav items={items} />`. Children still
 // arrive pre-rendered from the server layouts, so nothing else moves to the client.
-import { NAV, CONSOLE_ITEM } from "@/lib/nav";
+import { NAV } from "@/lib/nav";
 import type { Role } from "@/lib/authz";
 import { SidebarNav } from "./SidebarNav";
 import { EnvSwitcher } from "./EnvSwitcher";
 import { UserMenu } from "./UserMenu";
 
 export function AppShell({
-  surface, role, email, env, showConsole, children,
+  surface, role, email, env, children,
 }: {
-  surface: Role; role: Role; email: string; env: "dev" | "live"; showConsole: boolean;
+  surface: Role; role: Role; email: string; env: "dev" | "live";
   children: React.ReactNode;
 }) {
-  const items = showConsole ? [...NAV[surface], CONSOLE_ITEM] : NAV[surface];
+  const items = NAV[surface];
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="flex w-60 shrink-0 flex-col border-r">

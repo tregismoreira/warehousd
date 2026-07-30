@@ -13,7 +13,6 @@ export default async function MemberLayout({ children }: { children: React.React
   return (
     <AppShell
       surface="member" role={role} email={session.user.email} env={env}
-      showConsole={process.env.NODE_ENV !== "production" || process.env.WAREHOUSD_DEMO === "true"}
     >
       {children}
     </AppShell>

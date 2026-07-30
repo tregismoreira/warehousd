@@ -12,7 +12,15 @@ import { defineConfig } from "vitest/config";
 //   in-flight transaction in *any other database* on this server holds that watermark down and
 //   the entry is — correctly — not yet returned. The feed is right; the assertion needs a quiet
 //   cluster.
-export const SERIAL_TESTS = ["**/test/bootstrap.test.ts", "**/test/change-feed.test.ts"];
+// - rest-api.integration.test.ts reaches the same feed through `GET /v1/changes` and asserts a
+//   just-written entry is present, so it carries change-feed.test.ts's dependency on a quiet
+//   cluster without being obviously about the feed. It was missed here and failed roughly one
+//   run in two in the parallel pass while passing every time on its own.
+export const SERIAL_TESTS = [
+  "**/test/bootstrap.test.ts",
+  "**/test/change-feed.test.ts",
+  "**/test/rest-api.integration.test.ts",
+];
 
 export default defineConfig({
   test: {

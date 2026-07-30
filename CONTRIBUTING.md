@@ -22,8 +22,6 @@ clone this repo — see the [CLI reference](docs/cli.md).
 - Node.js 22+
 - pnpm 10+ (`corepack enable`)
 - Docker (for Postgres, and for the CLI end-to-end tests)
-- An Anthropic API key — only if you want to exercise the built-in chat console
-  at `/console`; nothing else needs it
 
 ## 1. Install
 
@@ -65,9 +63,6 @@ BETTER_AUTH_URL=http://localhost:8722
 # Comma-separated origins trusted as OIDC/SAML issuers. Required for any
 # loopback/private-network IdP — see docs/configure-sso.md. Leave unset otherwise.
 WAREHOUSD_TRUSTED_ORIGINS=
-
-# Only needed for the /console chat page
-ANTHROPIC_API_KEY=sk-ant-...
 
 # Seeds the three demo personas and shows their buttons on the login screen
 WAREHOUSD_DEMO=true

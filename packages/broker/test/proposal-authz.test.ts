@@ -315,3 +315,99 @@ describe("broker proposal authorization", () => {
     }
   });
 });
+
+// A proposal exists so that something other than the proposer decides. Holding the approve verb
+// does not make the approver that something — and until this was enforced, one grant carrying
+// verbs: ["update", "approve"] could propose and approve in two calls through the REST adapter,
+// so the pending state that exists to interpose a person interposed nobody.
+describe("four eyes: a proposer cannot decide on their own proposal", () => {
+  // One identity holding both verbs, in proposal_only mode: the exact grant that made
+  // self-approval reachable. loadActiveGrant picks one active grant per (user, collection, env,
+  // org), so the proposer and the reviewer have to be different users by construction.
+  async function seedDoc(email: string): Promise<string> {
+    const r = await app.query(
+      `insert into data_synth.people
+         (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+       values ('default', gen_random_uuid(), $1, 'Seed', 'HR', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
+       returning id`, [email]);
+    return r.rows[0].id;
+  }
+
+  async function grant(userId: string, verbs: string[], mode?: string) {
+    const id = await requestGrant(app, {
+      userId, collection: "people", env: "dev", orgId: "default",
+      purposeLabel: "test", allowedFields: ["id", "email", "name", "dept"],
+    });
+    await approveGrant(app, cfg, id, "admin", mode ? { verbs, mode } : { verbs });
+  }
+
+  async function propose(userId: string, docId: string, values: Record<string, unknown>) {
+    const res = await broker.mutate(
+      { userId, env: "dev", orgId: "default" } as BrokerContext,
+      { collection: "people", op: "update", id: docId, values });
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.status !== "pending") throw new Error("expected a pending proposal");
+    return res.proposalId;
+  }
+
+  it("refuses self-approval with self_approval_denied, not verb_denied", async () => {
+    await grant("selfapprover", ["read", "update", "approve"], "proposal_only");
+    const docId = await seedDoc("selfapprove@ex.com");
+    const proposalId = await propose("selfapprover", docId, { name: "Renamed By Me" });
+
+    const res = await broker.approveProposal(
+      { userId: "selfapprover", env: "dev", orgId: "default" } as BrokerContext, proposalId);
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("self-approval succeeded");
+    // Not verb_denied: the caller does hold `approve`. Saying "denied" would send them asking
+    // for a grant they already have, when what they need is a second person.
+    expect(res.reason).toBe("self_approval_denied");
+    expect(res.auditId).toBeTruthy();
+  });
+
+  it("leaves the proposal pending and the document unchanged after a refused self-approval", async () => {
+    await grant("selfapprover2", ["read", "update", "approve"], "proposal_only");
+    const docId = await seedDoc("selfapprove2@ex.com");
+    const proposalId = await propose("selfapprover2", docId, { name: "Should Not Land" });
+
+    await broker.approveProposal(
+      { userId: "selfapprover2", env: "dev", orgId: "default" } as BrokerContext, proposalId);
+
+    const still = await app.query(
+      `select _rev_status from data_synth.people where _rev = $1`, [proposalId]);
+    expect(still.rows[0]._rev_status).toBe("pending");
+    const current = await app.query(
+      `select name from data_synth.people where id = $1 and _current`, [docId]);
+    expect(current.rows[0].name).toBe("Seed");
+  });
+
+  it("refuses self-rejection too — one decision verb enforcing four eyes and its opposite not is a gap", async () => {
+    await grant("selfrejecter", ["read", "update", "approve"], "proposal_only");
+    const docId = await seedDoc("selfreject@ex.com");
+    const proposalId = await propose("selfrejecter", docId, { name: "Withdraw Me" });
+
+    const res = await broker.rejectProposal(
+      { userId: "selfrejecter", env: "dev", orgId: "default" } as BrokerContext, proposalId);
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("self-rejection succeeded");
+    expect(res.reason).toBe("self_approval_denied");
+
+    const still = await app.query(
+      `select _rev_status from data_synth.people where _rev = $1`, [proposalId]);
+    expect(still.rows[0]._rev_status).toBe("pending");
+  });
+
+  it("still lets a different reviewer approve the same proposal", async () => {
+    await grant("proposer_fe", ["read", "update"], "proposal_only");
+    await grant("reviewer_fe", ["read", "approve"]);
+    const docId = await seedDoc("fourEyes@ex.com");
+    const proposalId = await propose("proposer_fe", docId, { name: "Renamed By Reviewer" });
+
+    const res = await broker.approveProposal(
+      { userId: "reviewer_fe", env: "dev", orgId: "default" } as BrokerContext, proposalId);
+    expect(res.ok).toBe(true);
+    const current = await app.query(
+      `select name from data_synth.people where id = $1 and _current`, [docId]);
+    expect(current.rows[0].name).toBe("Renamed By Reviewer");
+  });
+});

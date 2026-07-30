@@ -11,6 +11,11 @@ export function restStatus(reason: RefusalReason | MutationRefusalReason, ifMatc
   if (reason === "no_grant" || reason === "expired_grant" || reason === "field_denied" || reason === "verb_denied")
     return 403;
 
+  // Forbidden rather than conflict: the request is well-formed and the state is fine, it is the
+  // caller who may not be the one to do this. No retry and no If-Match will change it — only a
+  // different person will.
+  if (reason === "self_approval_denied") return 403;
+
   // Extended table gap: field_not_writable is not in the plan's table because the plan
   // considered only query refusals initially. It maps to 403 (same family as field_denied:
   // both mean "you may see this exists but you may not act on it").

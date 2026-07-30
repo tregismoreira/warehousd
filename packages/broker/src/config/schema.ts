@@ -16,7 +16,7 @@ export const TermSchema = z.object({ label: z.string() });
 export const VocabularySchema = z.object({
   label: z.string(),
   multiple: z.boolean().default(false),
-  terms: z.record(TermSchema).optional(),
+  terms: z.record(z.string(), TermSchema).optional(),
   // syncDatasetTerms interpolates all three into a select. The cross-reference check in
   // ConfigSchema proves they name something real; these prove they are safe to quote.
   source: z.object({
@@ -28,9 +28,9 @@ export const VocabularySchema = z.object({
   const hasTerms = !!v.terms;
   const hasSource = !!v.source;
   if (!hasTerms && !hasSource)
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary must declare either "terms" (YAML) or "source" (dataset)` });
+    ctx.addIssue({ code: "custom", message: `vocabulary must declare either "terms" (YAML) or "source" (dataset)` });
   if (hasTerms && hasSource)
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary must declare either "terms" (YAML) or "source" (dataset), not both` });
+    ctx.addIssue({ code: "custom", message: `vocabulary must declare either "terms" (YAML) or "source" (dataset), not both` });
 });
 export type VocabularyConfig = z.infer<typeof VocabularySchema>;
 export const ViewJoinSchema = z.object({
@@ -94,21 +94,21 @@ export const CollectionSchema = z.object({
   source_live: z.string().optional(),
   taxonomies: z.array(z.string()).default([]),  // vocabulary slugs — validated against `taxonomies` at ConfigSchema level
   writable: z.boolean().optional(),     // opt-in to write path; verb support is structural
-  fields: z.record(FieldSchema),
+  fields: z.record(z.string(), FieldSchema),
 }).superRefine((c, ctx) => {
   const FIELD_NAME = /^[a-z_][a-z0-9_]*$/i;
   for (const name of Object.keys(c.fields))
     if (!FIELD_NAME.test(name))
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field name "${name}" invalid (must match [a-z_][a-z0-9_]*)` });
+      ctx.addIssue({ code: "custom", message: `field name "${name}" invalid (must match [a-z_][a-z0-9_]*)` });
 
   // Validate each bound taxonomy field
   for (const taxSlug of c.taxonomies) {
     const tf = c.fields[taxSlug];
     if (tf) {
       if (tf.type && tf.type !== "text" && !tf.type.startsWith("text"))
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `taxonomy field "${taxSlug}" must be type text` });
+        ctx.addIssue({ code: "custom", message: `taxonomy field "${taxSlug}" must be type text` });
       if (tf.pk || tf.fk || tf.view_join)
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `taxonomy field "${taxSlug}" may not set pk/fk/view_join` });
+        ctx.addIssue({ code: "custom", message: `taxonomy field "${taxSlug}" may not set pk/fk/view_join` });
     }
   }
 
@@ -118,15 +118,15 @@ export const CollectionSchema = z.object({
       const fkFieldName = f.view_join.on;
       const fkField = c.fields[fkFieldName];
       if (!fkField)
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" view_join references unknown field "${fkFieldName}"` });
+        ctx.addIssue({ code: "custom", message: `field "${name}" view_join references unknown field "${fkFieldName}"` });
       else if (!fkField.fk)
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" view_join references field "${fkFieldName}" which does not have fk` });
+        ctx.addIssue({ code: "custom", message: `field "${name}" view_join references field "${fkFieldName}" which does not have fk` });
       else if (!fkField.fk.startsWith(`${f.view_join.table}.`))
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" view_join references table "${f.view_join.table}" but field "${fkFieldName}" has fk: ${fkField.fk}` });
+        ctx.addIssue({ code: "custom", message: `field "${name}" view_join references table "${f.view_join.table}" but field "${fkFieldName}" has fk: ${fkField.fk}` });
     }
   }
   if (c.type === "file") {
-    if (!c.source) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "file collection requires `source`" });
+    if (!c.source) ctx.addIssue({ code: "custom", message: "file collection requires `source`" });
     const allowedFileFieldNames = new Set(FILE_FIELDS as readonly string[]);
     const allowedMetadataFieldTypes = new Set<string>(FILE_METADATA_TYPES);
     for (const [k, f] of Object.entries(c.fields)) {
@@ -134,37 +134,37 @@ export const CollectionSchema = z.object({
       if (c.taxonomies.includes(k)) continue; // taxonomy fields are allowed
       // Extra metadata fields: must have a type from the allowed set
       if (!f.type || !allowedMetadataFieldTypes.has(f.type))
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `file collection field "${k}" must have type text/date/timestamptz/numeric/int/boolean (or be a FILE_FIELD or bound taxonomy)` });
+        ctx.addIssue({ code: "custom", message: `file collection field "${k}" must have type text/date/timestamptz/numeric/int/boolean (or be a FILE_FIELD or bound taxonomy)` });
       // Metadata fields cannot be pk/fk/view_join
       if (f.pk || f.fk || f.view_join)
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `file metadata field "${k}" cannot have pk/fk/view_join` });
+        ctx.addIssue({ code: "custom", message: `file metadata field "${k}" cannot have pk/fk/view_join` });
     }
   } else {
     const taxonomySet = new Set(c.taxonomies);
     for (const [k, f] of Object.entries(c.fields))
       if (!f.type && !taxonomySet.has(k))
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${k}" requires a type` });
+        ctx.addIssue({ code: "custom", message: `field "${k}" requires a type` });
   }
 
   // searchable only on dataset text fields
   for (const [name, f] of Object.entries(c.fields)) {
     if (!f.searchable) continue;
     if (c.type === "file")
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" has searchable: true on a file collection; the {c}__documents.tsv column already exists, so it is redundant` });
+      ctx.addIssue({ code: "custom", message: `field "${name}" has searchable: true on a file collection; the {c}__documents.tsv column already exists, so it is redundant` });
     if (f.type !== "text")
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" has searchable: true but is not type text` });
+      ctx.addIssue({ code: "custom", message: `field "${name}" has searchable: true but is not type text` });
     // A searchable field generates a sibling "<name>_tsv" column. A declared field of that
     // name would collide with it at DDL time, which is a confusing failure a long way from
     // its cause — refuse it here instead.
     if (c.fields[`${name}_tsv`])
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}_tsv" collides with the generated search column for "${name}"` });
+      ctx.addIssue({ code: "custom", message: `field "${name}_tsv" collides with the generated search column for "${name}"` });
   }
 
   // writable: true requires at least one writable field
   if (c.writable) {
     const hasWritable = Object.values(c.fields).some((f) => writePosture(f) === "allow");
     if (!hasWritable)
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection has writable: true but no field with write:allow` });
+      ctx.addIssue({ code: "custom", message: `collection has writable: true but no field with write:allow` });
   }
 
   // view_join fields are structurally write-deny
@@ -172,7 +172,7 @@ export const CollectionSchema = z.object({
     if (f.view_join) {
       const wp = writePosture(f);
       if (wp === "allow")
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `field "${name}" has view_join and write: allow; view_join fields are always write-deny` });
+        ctx.addIssue({ code: "custom", message: `field "${name}" has view_join and write: allow; view_join fields are always write-deny` });
     }
   }
 }).transform((c) => {
@@ -211,34 +211,34 @@ export const ConfigSchema = z.object({
     // Override the published server image (CI/E2E point this at a locally built tag).
     image: z.string().optional(),
   }).default({ port: 8722 }),
-  taxonomies: z.record(VocabularySchema).default({}).superRefine((tx, ctx) => {
+  taxonomies: z.record(z.string(), VocabularySchema).default({}).superRefine((tx, ctx) => {
     for (const [slug, v] of Object.entries(tx)) {
       if (!/^[a-z][a-z0-9_]*$/.test(slug) || slug.includes("__") || TAXONOMY_RESERVED_SLUGS.has(slug))
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary slug "${slug}" invalid (must match [a-z][a-z0-9_]*, no "__", not a reserved column name)` });
+        ctx.addIssue({ code: "custom", message: `vocabulary slug "${slug}" invalid (must match [a-z][a-z0-9_]*, no "__", not a reserved column name)` });
       if (v.terms) {
         for (const t of Object.keys(v.terms))
           if (!/^[a-z0-9][a-z0-9-]*$/.test(t))
-            ctx.addIssue({ code: z.ZodIssueCode.custom, message: `term slug "${t}" in vocabulary "${slug}" must be lowercase kebab-case` });
+            ctx.addIssue({ code: "custom", message: `term slug "${t}" in vocabulary "${slug}" must be lowercase kebab-case` });
       }
     }
   }),
-  collections: z.record(CollectionSchema).superRefine((cols, ctx) => {
+  collections: z.record(z.string(), CollectionSchema).superRefine((cols, ctx) => {
     for (const name of Object.keys(cols)) {
       if (name.includes("__"))
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection name "${name}" must not contain "__" (reserved)` });
+        ctx.addIssue({ code: "custom", message: `collection name "${name}" must not contain "__" (reserved)` });
       // A collection name becomes a table name, and apply/ddl.ts interpolates some of those
       // unquoted. Field names have always been held to this shape; collection names were not.
       if (!IDENT.test(name))
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection name "${name}" invalid (must match [a-z_][a-z0-9_]*)` });
+        ctx.addIssue({ code: "custom", message: `collection name "${name}" invalid (must match [a-z_][a-z0-9_]*)` });
     }
   }),
-  synthetic: z.object({ documents_per_collection: z.record(z.number()).default({}) }).default({ documents_per_collection: {} }),
+  synthetic: z.object({ documents_per_collection: z.record(z.string(), z.number()).default({}) }).default({ documents_per_collection: {} }),
 }).superRefine((cfg, ctx) => {
   for (const [name, c] of Object.entries(cfg.collections)) {
     // Validate that each bound taxonomy exists
     for (const taxSlug of c.taxonomies) {
       if (!cfg.taxonomies[taxSlug])
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `collection "${name}" binds unknown vocabulary "${taxSlug}"` });
+        ctx.addIssue({ code: "custom", message: `collection "${name}" binds unknown vocabulary "${taxSlug}"` });
     }
     // Validate dataset-sourced vocabularies reference valid collections and fields
     for (const taxSlug of c.taxonomies) {
@@ -246,11 +246,11 @@ export const ConfigSchema = z.object({
       if (vocab?.source) {
         const srcCol = cfg.collections[vocab.source.collection];
         if (!srcCol)
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary "${taxSlug}" references unknown source collection "${vocab.source.collection}"` });
+          ctx.addIssue({ code: "custom", message: `vocabulary "${taxSlug}" references unknown source collection "${vocab.source.collection}"` });
         else if (srcCol.type !== "dataset")
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary "${taxSlug}" source collection "${vocab.source.collection}" must be type dataset` });
+          ctx.addIssue({ code: "custom", message: `vocabulary "${taxSlug}" source collection "${vocab.source.collection}" must be type dataset` });
         else if (!srcCol.fields[vocab.source.slug] || !srcCol.fields[vocab.source.label])
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `vocabulary "${taxSlug}" source fields (slug: "${vocab.source.slug}", label: "${vocab.source.label}") not found in collection "${vocab.source.collection}"` });
+          ctx.addIssue({ code: "custom", message: `vocabulary "${taxSlug}" source fields (slug: "${vocab.source.slug}", label: "${vocab.source.label}") not found in collection "${vocab.source.collection}"` });
       }
     }
   }

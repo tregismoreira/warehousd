@@ -224,6 +224,60 @@ describe("REST API /v1/* routes", () => {
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: "unknown_collection" });
     });
+
+    // The route took `aggregate: body.aggregate` off a bare req.json() and buildSelect emitted
+    // `${a.fn}(...)`, so an authenticated caller with any read grant could put an arbitrary
+    // subquery in the SELECT list. SECURITY.md calls that out by name.
+    it("refuses an injected aggregate fn with 400, running no SQL", async () => {
+      const { POST } = await import("../app/v1/collections/[c]/query/route");
+      const res = await POST(
+        req("/v1/collections/feedback/query", {
+          method: "POST",
+          body: {
+            aggregate: [{
+              fn: "count(id) as z, (select current_setting('is_superuser')) as leak, count",
+              field: "id",
+            }],
+          },
+        }) as any,
+        { params: Promise.resolve({ c: "feedback" }) });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_intent" });
+    });
+
+    it("refuses a prototype-chain filter operator with 400", async () => {
+      const { POST } = await import("../app/v1/collections/[c]/query/route");
+      const res = await POST(
+        req("/v1/collections/feedback/query", {
+          method: "POST",
+          body: { fields: ["id"], filters: [{ field: "id", op: "constructor", value: "x" }] },
+        }) as any,
+        { params: Promise.resolve({ c: "feedback" }) });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_intent" });
+    });
+
+    // A non-numeric limit reached `Math.max(1, "abc")` → `limit NaN`, which Postgres rejects —
+    // so the caller's bad input came back as internal_error (500), reading as a server fault.
+    it("answers 400 rather than 500 for a non-numeric limit", async () => {
+      const { POST } = await import("../app/v1/collections/[c]/query/route");
+      const res = await POST(
+        req("/v1/collections/feedback/query", { method: "POST", body: { fields: ["id"], limit: "abc" } }) as any,
+        { params: Promise.resolve({ c: "feedback" }) });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_intent" });
+    });
+
+    it("answers 400 for an unparseable body instead of throwing", async () => {
+      const { POST } = await import("../app/v1/collections/[c]/query/route");
+      const raw = new Request("http://localhost:8722/v1/collections/feedback/query", {
+        method: "POST",
+        headers: { authorization: `Bearer ${marcusToken}`, "content-type": "application/json" },
+        body: "{not json",
+      });
+      const res = await POST(raw as any, { params: Promise.resolve({ c: "feedback" }) });
+      expect(res.status).toBe(400);
+    });
   });
 
   describe("GET /v1/collections/[c]/search", () => {
@@ -299,6 +353,40 @@ describe("REST API /v1/* routes", () => {
       const { POST: Reject } = await import("../app/v1/proposals/[id]/reject/route");
       const rejectRes = await Reject(req(`/v1/proposals/${proposalId}/reject`, { method: "POST" }) as any, { params: Promise.resolve({ id: proposalId }) });
       expect(rejectRes.status).toBe(200);
+    });
+  });
+
+  // marcus holds every verb including approve, so through the REST adapter he could propose and
+  // approve in two calls — the pending state that exists to interpose a person interposing
+  // nobody. The broker refuses against the proposal's _rev_by; this checks the status code the
+  // adapter puts on it.
+  describe("four eyes over REST", () => {
+    it("refuses a self-approval with 403 self_approval_denied", async () => {
+      // mia is proposal_only, so her create lands pending and she also holds no approve verb;
+      // marcus is the one who can hold both, so he is the one who has to be stopped.
+      const { POST: Create } = await import("../app/v1/collections/[c]/documents/route");
+      const createRes = await Create(
+        req("/v1/collections/feedback/documents", {
+          method: "POST", token: miaToken,
+          body: { title: "Self approval", message: "should need a second pair of eyes", submitted_by: "mia" },
+        }) as any,
+        { params: Promise.resolve({ c: "feedback" }) });
+      expect(createRes.status).toBe(202);
+      const { proposalId } = await createRes.json();
+
+      // mia proposed it, so mia may not decide on it — regardless of what verbs she holds.
+      const { POST: Approve } = await import("../app/v1/proposals/[id]/approve/route");
+      const selfRes = await Approve(
+        req(`/v1/proposals/${proposalId}/approve`, { method: "POST", token: miaToken }) as any,
+        { params: Promise.resolve({ id: proposalId }) });
+      expect(selfRes.status).toBe(403);
+      expect(await selfRes.json()).toEqual({ error: "self_approval_denied" });
+
+      // and marcus, a different person, still can.
+      const marcusRes = await Approve(
+        req(`/v1/proposals/${proposalId}/approve`, { method: "POST" }) as any,
+        { params: Promise.resolve({ id: proposalId }) });
+      expect(marcusRes.status).toBe(200);
     });
   });
 

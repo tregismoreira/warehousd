@@ -68,10 +68,53 @@ describe("mcp-tools: search_documents", () => {
   });
 });
 
-describe("DATA_TOOL_NAMES", () => {
-  it("includes data-returning tools: query, search, and get", async () => {
-    const { DATA_TOOL_NAMES } = await import("../lib/mcp-tools");
-    expect(DATA_TOOL_NAMES).toEqual(["query_collection", "search_documents", "get_document"]);
+// The `enum`s in each tool's inputSchema are advertised to the client, not enforced by it: the
+// SDK's low-level CallToolRequestSchema handler validates the JSON-RPC envelope and hands
+// `arguments` straight to the handler. The model is the untrusted party, so the handler parses.
+describe("mcp-tools: tool arguments are validated, not trusted", () => {
+  it("refuses an injected aggregate fn on query_collection", async () => {
+    const tool = toolByName("query_collection")!;
+    const out = await tool.handler(ctx, {
+      collection: "people",
+      aggregate: [{
+        fn: "count(id) as z, (select current_setting('is_superuser')) as leak, count",
+        field: "id",
+      }],
+    }) as { ok: boolean; reason: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("invalid_intent");
+  });
+
+  it("refuses a prototype-chain filter operator on query_collection", async () => {
+    const tool = toolByName("query_collection")!;
+    const out = await tool.handler(ctx, {
+      collection: "people", fields: ["id"],
+      filters: [{ field: "id", op: "constructor", value: "x" }],
+    }) as { ok: boolean; reason: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("invalid_intent");
+  });
+
+  it("refuses a field name that is not an identifier", async () => {
+    const tool = toolByName("query_collection")!;
+    const out = await tool.handler(ctx, {
+      collection: "people", fields: ["id; drop table people --"],
+    }) as { ok: boolean; reason: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("invalid_intent");
+  });
+
+  it("refuses get_document naming neither id nor path", async () => {
+    const out = await toolByName("get_document")!.handler(ctx, { collection: "policies" }) as
+      { ok: boolean; reason: string };
+    expect(out).toMatchObject({ ok: false, reason: "invalid_intent" });
+  });
+
+  it("refuses update_document with no id — the union requires one per op", async () => {
+    const out = await toolByName("update_document")!.handler(ctx, {
+      collection: "people", values: { full_name: "x" },
+    }) as { ok: boolean; reason: string };
+    expect(out).toMatchObject({ ok: false, reason: "invalid_intent" });
   });
 });
 

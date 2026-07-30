@@ -866,18 +866,28 @@ Nothing. Two failure modes are handled separately.
 **Its tool calls are untrusted proposals**, re-validated by the broker like any
 other caller's. That is the whole architecture above.
 
-**Its final text answer is untrusted output too.** Observed in practice: asked
-for salary data with no grant, a model ignored the `no_grant` tool result and
-produced a plausible table of invented salaries, admitting they were fabricated
-only when challenged. The built-in chat console defends against this in two
-layers: the system prompt forbids fabricating, guessing, or simulating data
-absent from a tool result even under repeated pressure; and a server-side guard
-scans the conversation for `query_collection` results with `ok: true`, and if the
-model's final text contains a table or multiple currency figures while that set
-is empty, injects a corrective message rather than streaming the fabrication.
-This is a targeted heuristic, not a grounding check — it catches the observed
-failure mode cheaply. Any adapter that puts an LLM in front of the broker should
-assume it needs its own version.
+**Its final text answer is untrusted output too**, and warehousd does not try to
+police it. Observed in practice: asked for salary data with no grant, a model
+ignored the `no_grant` tool result and produced a plausible table of invented
+salaries, admitting they were fabricated only when challenged. Nothing the broker
+enforces prevents that — no field was disclosed, no grant was bypassed, and the
+audit log correctly records a refusal. The failure is entirely in the answer the
+model composed on top of it.
+
+warehousd therefore ships **no LLM-facing surface of its own**. It earlier
+included a chat console with a fabrication heuristic — a system prompt forbidding
+invented data, plus a server-side scan for tables or currency figures in turns
+where no `query_collection` had returned `ok: true`. Both were removed. The
+heuristic was a demo bench, its state was reconstructed from a client-supplied
+conversation history and so was forgeable by the client it was meant to check,
+and it put a live model API key behind an endpoint that every authenticated
+member could reach. A governance layer should not be the thing that also holds
+the model credential.
+
+Grounding an answer is the adapter's problem, and any adapter that puts an LLM in
+front of the broker needs its own defence. The broker gives it what it needs to
+build one: `fieldsReturned` on every allowed result, and a reason code with no
+data on every refusal.
 
 ## Adding an adapter
 

@@ -323,9 +323,12 @@ The interesting ones, and where they live:
   credential produced them.
 - **Audit completeness** (`audit`) — every outcome above writes an event, and the
   audit role cannot UPDATE or DELETE.
-- **Fabrication guard** (`apps/web/test/mcp-tools.test.ts`, `console-gate`) — a
-  model pressed for data it has no grant for does not get to present invented
-  numbers as an answer.
+- **Intent validation** (`sql-build`, `apps/web/test/mcp-tools.test.ts`,
+  `rest-api.integration`) — no value in a client-supplied intent reaches SQL as
+  syntax. Covers the injected `aggregate.fn`, prototype-chain operator names, and
+  non-numeric `limit`, over both the REST and MCP paths.
+- **Four eyes** (`proposal-authz`, `rest-api.integration`) — a proposer cannot
+  approve or reject their own proposal, whatever verbs their grant carries.
 
 ## What is still manual
 
