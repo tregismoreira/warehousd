@@ -18,6 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Read-only, and required rather than optional: on a *private* repository the analyze step
+      # reads its own workflow run to build the upload metadata, and without this it fails with
+      # "Resource not accessible by integration" *after* a full successful analysis — SARIF
+      # exported and fingerprinted, then dropped at the last step. Public repositories get this
+      # implicitly, which is why the omission survives review.
+      actions: read
       # The one write this repository's CI grants, and only here: it is how findings reach the
       # Security tab.
       security-events: write
