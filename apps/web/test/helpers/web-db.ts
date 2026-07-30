@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { ADMIN, BASE, cloneTemplate } from "../../../../packages/broker/test/helpers/templates";
+import { ADMIN, BASE, cloneTemplate, runDbName } from "../../../../packages/broker/test/helpers/templates";
 
 export const PERSONAS = [
   { id: "ana", email: "ana@harbor.demo", name: "Ana", role: "admin" },
@@ -77,7 +77,7 @@ export async function bootstrapWebDb(appUrl: string): Promise<void> {
 }
 
 async function cloneAndOpen(kind: string, label: string, projectDir?: string) {
-  const dbName = `wh_web_${label}_${process.pid}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  const dbName = runDbName(`web_${label}`);
   await cloneTemplate(kind, dbName);
 
   const appUrl = `${BASE}/${dbName}`;

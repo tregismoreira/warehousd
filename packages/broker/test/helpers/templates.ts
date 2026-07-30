@@ -12,10 +12,20 @@ const repoRoot = new URL("../../../../", import.meta.url).pathname;
 // "Running two checkouts at once". Without a per-checkout suffix one workspace's globalSetup
 // would drop the template another workspace is mid-run cloning from, which surfaces as the
 // second suite's schema vanishing rather than as a collision.
-const SUFFIX = createHash("sha256").update(repoRoot).digest("hex").slice(0, 8);
+export const SUFFIX = createHash("sha256").update(repoRoot).digest("hex").slice(0, 8);
 
 export function templateName(kind: string): string {
   return `wh_tmpl_${kind}_${SUFFIX}`;
+}
+
+// Per-run clones are cluster-global too, and `wh_<label>_<pid>` said nothing about which checkout
+// created them — pids collide across checkouts routinely. Stamping the same suffix lets the
+// stale-database sweep in scripts/agent/cleanup.sh drop its own leftovers while a sibling's suite
+// is still running, instead of having to leave everything alone until the machine goes quiet.
+// Names stay well inside Postgres's 63-byte identifier limit: the longest label in the suites
+// reaches 47.
+export function runDbName(label: string): string {
+  return `wh_${label}_${process.pid}_${SUFFIX}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 }
 
 // Postgres refuses `create database x template t` while any other session is connected to t —

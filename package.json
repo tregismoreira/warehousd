@@ -18,7 +18,9 @@
     "e2e:setup": "tsx scripts/e2e-setup.ts",
     "e2e": "pnpm e2e:setup && pnpm --filter @warehousd/web exec playwright test",
     "e2e:ui": "pnpm --filter @warehousd/web exec playwright test --ui",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "agent:guard": "bash scripts/agent/guard-heavy.sh",
+    "agent:cleanup": "bash scripts/agent/cleanup.sh"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.10.0",

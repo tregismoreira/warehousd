@@ -350,6 +350,28 @@ as Mia and watch the probe refuse, have Marcus approve a trimmed grant, search
 again and see results, then revoke and watch the next query fail — with every
 decision visible in the audit browser.
 
+## Coding agents
+
+Instructions for the assistant writing the code — not for the ones querying the
+data through it. [AGENTS.md](AGENTS.md) is the single source and is deliberately
+vendor-neutral: how errors are shaped, where tests live, what is enforced and
+where, and the rules for sharing a machine with other checkouts. `CLAUDE.md`
+only imports it; any other harness reads `AGENTS.md` directly.
+
+Two of those rules are scripts rather than prose, because they cannot be
+expressed as advice:
+
+```bash
+pnpm agent:guard "pnpm test"   # is a suite already running anywhere? exit 1 means yes
+pnpm agent:cleanup             # reclaim what an interrupted run left behind
+```
+
+`docker-compose.test.yml` binds a fixed host port, so a second checkout of this
+repo shares the first one's Postgres — and its cores. Each agent can follow
+"check what is running first" correctly and the machine still ends up with four
+concurrent suites; only a machine-wide check actually serialises them. Under
+Claude Code, `.claude/hooks/` runs both scripts automatically.
+
 ## Documentation
 
 **Running warehousd**
@@ -369,6 +391,7 @@ decision visible in the audit browser.
 | [docs/architecture.md](docs/architecture.md) | How it works and why — invariants, broker, env-as-scope, adapters |
 | [docs/glossary.md](docs/glossary.md) | Collection, document, field — and the words we avoid |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Local setup, ground rules, what to run before a pull request |
+| [AGENTS.md](AGENTS.md) | Instructions for coding agents — conventions, test placement, machine load |
 | [docs/testing.md](docs/testing.md) | The suites, what they assert, what is still manual |
 | [docs/releasing.md](docs/releasing.md) | Cutting a tagged release of the image and the CLI |
 
