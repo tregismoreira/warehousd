@@ -10,10 +10,6 @@ export const MAX_KEY_LIFETIME_DAYS = 365;
 // A never-expiring credential is philosophically opposite to purpose-bound expiring grants.
 export const CLIENT_SECRET_REGEX = /^whd_(dev|live)_[a-z0-9]+_[a-z0-9]+_[a-z0-9]+$/i;
 
-export function exportSecretRegex(): RegExp {
-  return CLIENT_SECRET_REGEX;
-}
-
 // Generate a secret with format: prefix_id_random_checksum, where checksum validates the rest
 export function generateSecret(env: "dev" | "live", id: string): string {
   const random = randomBytes(12).toString("hex");
@@ -48,7 +44,16 @@ export function validateSecretFormat(secret: string): boolean {
   return checksum === computeChecksum(`${prefix}_${random}`);
 }
 
-// Extract env from secret without storing the plaintext
+// The env a key was minted for, read from its own prefix.
+//
+// Informational, NOT a boundary — verifyClientSecret reports it so a leaked key can be triaged on
+// sight, and nothing narrows access to it. Two reasons it cannot be a ceiling today: both admin
+// routes hardcode "dev" when minting, so a live-prefixed key is unreachable, and enforcing the
+// prefix would therefore cap every delegated client at dev with no way to opt out.
+//
+// What actually bounds the environment is `client_policies.allowed_scopes` intersected with the
+// user's live-grant eligibility (see resolveIssuedEnvScope). Making the prefix a real ceiling
+// needs a way to mint a live key first; until then this is a label, and SECURITY.md says so.
 export function envFromSecret(secret: string): "dev" | "live" | null {
   const match = secret.match(/^whd_(dev|live)_/i);
   if (match && match[1]) return match[1].toLowerCase() as "dev" | "live";
@@ -99,13 +104,14 @@ export async function createClientSecret(
   const existing = await db.query(
     `select count(*)::int as cnt from app.client_secrets
      where client_id=$1 and revoked_at is null`,
-    [clientId]);
+    [clientId],
+  );
   if (existing.rows[0].cnt >= 2) {
     throw new Error("Maximum 2 unrevoked secrets per client");
   }
 
-  // The env goes INTO the secret: a leaked key should say on sight which environment it
-  // reaches, which is the whole point of a self-identifying prefix.
+  // The env goes INTO the secret so a leaked key can be triaged on sight. It is a label, not a
+  // ceiling — see envFromSecret for why, and for what does bound the environment.
   const secretId = randomBytes(6).toString("hex");
   const secret = generateSecret(env, secretId);
 
@@ -119,23 +125,28 @@ export async function createClientSecret(
        (client_id, org_id, prefix, secret_hash, created_at, created_by, expires_at)
      values ($1, $2, $3, $4, now(), $5, $6)
      returning id`,
-    [clientId, orgId, prefix, secretHash, createdBy, expiresAt]);
+    [clientId, orgId, prefix, secretHash, createdBy, expiresAt],
+  );
 
   return { secret, id: r.rows[0].id };
 }
 
+// `env` is the ceiling encoded in the key's own prefix — see envFromSecret. Callers that issue
+// tokens must intersect it with whatever the client policy and the user's grants allow, so a
+// `whd_dev_*` key cannot reach live however the policy is later widened.
 export async function verifyClientSecret(
   db: Pool,
   secret: string,
-): Promise<{ clientId: string; orgId: string; id: string } | null> {
+): Promise<{ clientId: string; orgId: string; id: string; env: "dev" | "live" } | null> {
   // Fast path: reject obviously malformed secrets without a database round trip
   if (!validateSecretFormat(secret)) return null;
 
   const prefix = getPrefixFromSecret(secret);
   const r = await db.query(
-    `select id, client_id, org_id, secret_hash, revoked_at, expires_at
+    `select id, client_id, org_id, prefix, secret_hash, revoked_at, expires_at
      from app.client_secrets where prefix=$1 limit 1`,
-    [prefix]);
+    [prefix],
+  );
 
   if (r.rowCount === 0) return null;
 
@@ -159,11 +170,16 @@ export async function verifyClientSecret(
   if (!timingSafeEqual(testHash, storedHash)) return null;
 
   // Update last_used_at
-  await db.query(
-    `update app.client_secrets set last_used_at=now() where id=$1`,
-    [row.id]);
+  await db.query(`update app.client_secrets set last_used_at=now() where id=$1`, [row.id]);
 
-  return { clientId: row.client_id, orgId: row.org_id, id: row.id };
+  // From the stored prefix, not the presented string: same value, but unambiguously server-side.
+  // The format regex above guarantees the prefix carries one of the two.
+  return {
+    clientId: row.client_id,
+    orgId: row.org_id,
+    id: row.id,
+    env: envFromSecret(row.prefix) ?? "dev",
+  };
 }
 
 // Rotation issues a SECOND live secret and leaves the first working. That overlap is the
@@ -181,7 +197,8 @@ export async function rotateClientSecret(
   const old = await db.query(
     `select id from app.client_secrets
      where id=$1 and client_id=$2 and org_id=$3 and revoked_at is null`,
-    [oldSecretId, clientId, orgId]);
+    [oldSecretId, clientId, orgId],
+  );
   if (old.rowCount === 0) throw new Error("Old secret not found or already revoked");
 
   // createClientSecret enforces the ceiling of two unrevoked secrets, so a client cannot
@@ -189,10 +206,26 @@ export async function rotateClientSecret(
   return createClientSecret(db, clientId, orgId, expiresAt, createdBy, env);
 }
 
-export async function revokeClientSecret(db: Pool, secretId: string): Promise<void> {
-  await db.query(
-    `update app.client_secrets set revoked_at=now() where id=$1`,
-    [secretId]);
+// Scoped by client and org, not by secret id alone.
+//
+// A secret id is a uuid the caller supplies, so `where id=$1` revokes any secret in any org for
+// anyone who can guess or observe one. The revoke route did check ownership first — but as its own
+// SELECT, which is a guarantee the caller provides rather than one this function enforces, and the
+// next caller is the one that forgets. Requiring the scope makes the safe call the only call.
+//
+// Returns whether a row matched, so a caller can answer `not_found` without a second query.
+export async function revokeClientSecret(
+  db: Pool,
+  secretId: string,
+  clientId: string,
+  orgId: string,
+): Promise<boolean> {
+  const r = await db.query(
+    `update app.client_secrets set revoked_at=now()
+     where id=$1 and client_id=$2 and org_id=$3`,
+    [secretId, clientId, orgId],
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function listClientSecrets(
@@ -205,7 +238,8 @@ export async function listClientSecrets(
      from app.client_secrets
      where client_id=$1 and org_id=$2
      order by created_at desc`,
-    [clientId, orgId]);
+    [clientId, orgId],
+  );
 
   return r.rows.map((row) => ({
     id: row.id,

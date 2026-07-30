@@ -1,6 +1,7 @@
 import type { BrokerContext } from "@warehousd/broker";
 import { DEFAULT_ORG_ID } from "@warehousd/broker";
 import { auth } from "./auth";
+import { envFromScopes, scopesOf } from "./env-scope";
 import { getAppPool } from "../app/lib/broker";
 
 // The ONLY place BrokerContext is constructed for REST API (`/v1/*`) token-authenticated
@@ -20,8 +21,7 @@ import { getAppPool } from "../app/lib/broker";
 export async function deriveRestContext(req: Request): Promise<BrokerContext | null> {
   const session = await auth.api.getMcpSession({ headers: req.headers });
   if (!session) return null;
-  const scopes = (session.scopes ?? "").split(" ").filter(Boolean);
-  const env = scopes.includes("env:live") ? "live" : "dev";
+  const env = envFromScopes(scopesOf(session.scopes));
   const pool = getAppPool();
 
   // Derive orgId from token's userId's user record
@@ -31,7 +31,8 @@ export async function deriveRestContext(req: Request): Promise<BrokerContext | n
   // Load client policy to get mode (for via derivation) and collection ceiling
   const cp = await pool.query(
     `select mode, allowed_collections from app.client_policies where client_id=$1`,
-    [session.clientId || ""]);
+    [session.clientId || ""],
+  );
   const policy = cp.rows[0];
   const allowedCollections = policy?.allowed_collections ?? null;
 
@@ -45,7 +46,8 @@ export async function deriveRestContext(req: Request): Promise<BrokerContext | n
     // OAuth/MCP flow.
     const secrets = await pool.query(
       `select 1 from app.client_secrets where client_id=$1 and revoked_at is null limit 1`,
-      [session.clientId || ""]);
+      [session.clientId || ""],
+    );
     via = (secrets.rowCount ?? 0) > 0 ? "token_exchange" : "oauth";
   } else {
     via = "oauth";

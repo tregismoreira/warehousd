@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // tsup bundles the CLI and does not typecheck; this project exists so that `pnpm typecheck`
+    // covers it. Nothing here emits.
+    "noEmit": true,
+    "declaration": false,
+    "types": ["node"],
+    "resolveJsonModule": true
+  },
+  "include": ["src", "tsup.config.ts"]
+}

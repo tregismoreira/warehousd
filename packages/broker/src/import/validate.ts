@@ -6,8 +6,7 @@ export type ImportError = { row: number; column: string | null; reason: string }
 
 export type ImportPlan = { columns: string[]; values: unknown[][] };
 export type ImportValidation =
-  | { ok: true; columns: string[]; values: unknown[][] }
-  | { ok: false; errors: ImportError[] };
+  { ok: true; columns: string[]; values: unknown[][] } | { ok: false; errors: ImportError[] };
 
 const MAX_ERRORS = 50;
 const DEFAULT_MAX_ROWS = 10_000;
@@ -18,11 +17,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 //
 // Errors carry a reason code and never the value: an import file may hold real personal
 // data, and an error body is still a response body (invariant 4's discipline).
-export function coerce(v: unknown, f: FieldConfig): { ok: true; value: unknown } | { ok: false; reason: string } {
+export function coerce(
+  v: unknown,
+  f: FieldConfig,
+): { ok: true; value: unknown } | { ok: false; reason: string } {
   switch (f.type) {
     case "uuid":
       return typeof v === "string" && UUID_RE.test(v)
-        ? { ok: true, value: v } : { ok: false, reason: "invalid_uuid" };
+        ? { ok: true, value: v }
+        : { ok: false, reason: "invalid_uuid" };
     case "int": {
       const n = typeof v === "number" ? v : Number(String(v).trim());
       if (!Number.isInteger(n)) return { ok: false, reason: "invalid_int" };
@@ -46,14 +49,24 @@ export function coerce(v: unknown, f: FieldConfig): { ok: true; value: unknown }
       if (Number.isNaN(t)) return { ok: false, reason: "invalid_date" };
       return { ok: true, value: new Date(t).toISOString() };
     }
-    case "json":
+    case "json": {
       if (typeof v === "object") return { ok: true, value: JSON.stringify(v) };
-      try { JSON.parse(String(v)); return { ok: true, value: String(v) }; }
-      catch { return { ok: false, reason: "invalid_json" }; }
+      // The object case returned on the line above, so what is left is a scalar — which the
+      // compiler still only knows as `unknown`. Stringified once so the reason is stated once.
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      const text = String(v);
+      try {
+        JSON.parse(text);
+        return { ok: true, value: text };
+      } catch {
+        return { ok: false, reason: "invalid_json" };
+      }
+    }
     case "text":
     default:
       return typeof v === "string" || typeof v === "number"
-        ? { ok: true, value: String(v) } : { ok: false, reason: "invalid_text" };
+        ? { ok: true, value: String(v) }
+        : { ok: false, reason: "invalid_text" };
   }
 }
 
@@ -68,7 +81,7 @@ export function validateImportRows(
   cfg: WarehousdConfig,
   collection: string,
   rows: Record<string, unknown>[],
-  opts: { maxRows?: number; taxonomies?: TaxonomyBinding[] } = {},
+  opts: { maxRows?: number | undefined; taxonomies?: TaxonomyBinding[] | undefined } = {},
 ): ImportValidation {
   const c = findCollection(cfg, collection);
   if (!c) return { ok: false, errors: [{ row: -1, column: null, reason: "unknown_collection" }] };
@@ -83,7 +96,9 @@ export function validateImportRows(
     return { ok: false, errors: [{ row: -1, column: null, reason: "no_rows" }] };
 
   const errors: ImportError[] = [];
-  const push = (e: ImportError) => { if (errors.length < MAX_ERRORS) errors.push(e); };
+  const push = (e: ImportError) => {
+    if (errors.length < MAX_ERRORS) errors.push(e);
+  };
 
   // Storable columns: everything on the collection EXCEPT view_join fields, which are
   // resolved from a sibling table at view time and have no column on the base table.
@@ -92,7 +107,8 @@ export function validateImportRows(
   // exists — `people.home_address` is real data that must be importable and permanently
   // unreadable through the broker.
   const storable = new Map<string, FieldConfig>(
-    Object.entries(c.fields).filter(([, f]) => !f.view_join));
+    Object.entries(c.fields).filter(([, f]) => !f.view_join),
+  );
   const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null;
   // Build a map of taxonomy field names to their valid slugs.
   //
@@ -102,7 +118,8 @@ export function validateImportRows(
   // would let an import write a term no grant can ever match — and worse, one no reviewer
   // would notice was unvalidated. Refuse instead; see `unvalidatable_term` below.
   const suppliedSlugs = new Map<string, string[]>(
-    (opts.taxonomies ?? []).map((b) => [b.field, b.slugs]));
+    (opts.taxonomies ?? []).map((b) => [b.field, b.slugs]),
+  );
   const termSlugsMap = new Map<string, Set<string>>();
   const datasetSourcedFields = new Set<string>();
   for (const vocabSlug of c.taxonomies ?? []) {
@@ -119,7 +136,10 @@ export function validateImportRows(
   const columns = Object.keys(first);
   for (const col of columns) {
     const f = c.fields[col];
-    if (!f) { push({ row: 0, column: col, reason: "unknown_column" }); continue; }
+    if (!f) {
+      push({ row: 0, column: col, reason: "unknown_column" });
+      continue;
+    }
     if (f.view_join) push({ row: 0, column: col, reason: "derived_column" });
     if (datasetSourcedFields.has(col)) push({ row: 0, column: col, reason: "unvalidatable_term" });
   }
@@ -146,19 +166,32 @@ export function validateImportRows(
     for (const col of columns) {
       const f = storable.get(col)!;
       const raw = r[col];
-      const empty = raw === null || raw === undefined || (typeof raw === "string" && raw.trim() === "");
+      const empty =
+        raw === null || raw === undefined || (typeof raw === "string" && raw.trim() === "");
       if (empty) {
-        if (!f.nullable) { push({ row: idx, column: col, reason: "missing_required" }); out.push(null); continue; }
+        if (!f.nullable) {
+          push({ row: idx, column: col, reason: "missing_required" });
+          out.push(null);
+          continue;
+        }
         out.push(null);
         continue;
       }
       // Check if this column is a vocabulary field
       const vocabTerms = termSlugsMap.get(col);
       if (vocabTerms) {
+        // A CSV cell; `unknown` to the compiler because the parser hands back untyped values. A
+        // non-scalar would stringify to "[object Object]", which then matches no term slug and is
+        // reported as `unknown_term` — the right answer, arrived at without a special case.
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
+        const cell = String(raw);
         // A multi-value column arrives semicolon-separated (a comma would collide with the
         // CSV delimiter); every part is validated against the term set independently.
         if (cfg.taxonomies[col]?.multiple) {
-          const parts = String(raw).split(";").map((s) => s.trim()).filter((s) => s.length > 0);
+          const parts = cell
+            .split(";")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
           if (!parts.length || parts.some((t) => !vocabTerms.has(t))) {
             push({ row: idx, column: col, reason: "unknown_term" });
             out.push(null);
@@ -167,21 +200,27 @@ export function validateImportRows(
           out.push(parts);
           continue;
         }
-        if (!vocabTerms.has(String(raw))) {
+        if (!vocabTerms.has(cell)) {
           push({ row: idx, column: col, reason: "unknown_term" });
           out.push(null);
           continue;
         }
-        out.push(String(raw));
+        out.push(cell);
         continue;
       }
       const co = coerce(raw, f);
-      if (!co.ok) { push({ row: idx, column: col, reason: co.reason }); out.push(null); continue; }
+      if (!co.ok) {
+        push({ row: idx, column: col, reason: co.reason });
+        out.push(null);
+        continue;
+      }
       out.push(co.value);
     }
     if (pk && columns.includes(pk)) {
       const pkValue = out[columns.indexOf(pk)];
       if (pkValue !== null) {
+        // Same reasoning as `cell` above: a pk is a scalar, but only `unknown` to the compiler.
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const key = String(pkValue);
         if (seenPk.has(key)) push({ row: idx, column: pk, reason: "duplicate_pk" });
         seenPk.add(key);

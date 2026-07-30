@@ -10,14 +10,16 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { Mono } from "@/components/common/Mono";
 import { OutcomeBadge } from "@/components/common/OutcomeBadge";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Popover, PopoverContent, PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 type AuditEvent = {
@@ -40,9 +42,11 @@ type Collection = {
 
 // via/onBack turn this into the scoped "events for one API key" view used from a client's
 // detail page — same filters and columns, just a fixed `via` and a back link instead of a title.
-export function AuditBrowser(
-  { via, onBack, backLabel }: { via?: string; onBack?: () => void; backLabel?: string } = {}
-) {
+export function AuditBrowser({
+  via,
+  onBack,
+  backLabel,
+}: { via?: string; onBack?: () => void; backLabel?: string } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -59,9 +63,9 @@ export function AuditBrowser(
 
   useEffect(() => {
     fetch("/api/admin/collections")
-      .then(r => r.json())
-      .then(data => setCollections(data.collections))
-      .catch(e => console.error("Failed to load collections:", e));
+      .then((r) => r.json())
+      .then((data) => setCollections(data.collections))
+      .catch((e) => console.error("Failed to load collections:", e));
   }, []);
 
   useEffect(() => {
@@ -76,16 +80,16 @@ export function AuditBrowser(
     qs.append("offset", String(offset));
 
     fetch(`/api/audit?${qs}`)
-      .then(r => {
+      .then((r) => {
         if (!r.ok) throw new Error("Failed to fetch audit events");
         return r.json();
       })
-      .then(data => {
+      .then((data) => {
         setEvents(data.events);
         setTotal(data.total);
         setLoading(false);
       })
-      .catch(e => {
+      .catch((e) => {
         console.error("Failed to load audit events:", e);
         toast.error("Failed to load audit events");
         setLoading(false);
@@ -143,7 +147,9 @@ export function AuditBrowser(
     {
       accessorKey: "outcome",
       header: "Outcome",
-      cell: ({ row }) => <OutcomeBadge outcome={row.original.outcome} reason={row.original.reason} />,
+      cell: ({ row }) => (
+        <OutcomeBadge outcome={row.original.outcome} reason={row.original.reason ?? null} />
+      ),
       size: 150,
     },
     {
@@ -187,14 +193,20 @@ export function AuditBrowser(
   return (
     <div className="space-y-4">
       {onBack && (
-        <button onClick={onBack} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft size={16} />{backLabel ?? "Back"}
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft size={16} />
+          {backLabel ?? "Back"}
         </button>
       )}
 
       <div className="flex flex-wrap gap-4">
         <div className="flex-1 min-w-40">
-          <Label htmlFor="filter-outcome" className="block text-xs font-medium mb-1">Outcome</Label>
+          <Label htmlFor="filter-outcome" className="block text-xs font-medium mb-1">
+            Outcome
+          </Label>
           <Select value={outcome} onValueChange={(v) => updateParam("outcome", v)}>
             <SelectTrigger id="filter-outcome" className="w-full">
               <SelectValue placeholder="Any" />
@@ -208,7 +220,9 @@ export function AuditBrowser(
         </div>
 
         <div className="flex-1 min-w-40">
-          <Label htmlFor="filter-env" className="block text-xs font-medium mb-1">Env</Label>
+          <Label htmlFor="filter-env" className="block text-xs font-medium mb-1">
+            Env
+          </Label>
           <Select value={env} onValueChange={(v) => updateParam("env", v)}>
             <SelectTrigger id="filter-env" className="w-full">
               <SelectValue placeholder="Any" />
@@ -222,7 +236,9 @@ export function AuditBrowser(
         </div>
 
         <div className="flex-1 min-w-40">
-          <Label htmlFor="filter-user" className="block text-xs font-medium mb-1">User</Label>
+          <Label htmlFor="filter-user" className="block text-xs font-medium mb-1">
+            User
+          </Label>
           <Input
             id="filter-user"
             placeholder="User ID"
@@ -233,7 +249,9 @@ export function AuditBrowser(
         </div>
 
         <div className="flex-1 min-w-40">
-          <Label htmlFor="filter-collection" className="block text-xs font-medium mb-1">Collection</Label>
+          <Label htmlFor="filter-collection" className="block text-xs font-medium mb-1">
+            Collection
+          </Label>
           <Select value={collection} onValueChange={(v) => updateParam("collection", v)}>
             <SelectTrigger id="filter-collection" className="w-full">
               <SelectValue placeholder="Any" />
@@ -272,20 +290,10 @@ export function AuditBrowser(
           {total === 0 ? "No events" : `Showing ${start}–${end} of ${total}`}
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!hasPrev}
-            onClick={goToPreviousPage}
-          >
+          <Button variant="outline" size="sm" disabled={!hasPrev} onClick={goToPreviousPage}>
             Previous
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!hasNext}
-            onClick={goToNextPage}
-          >
+          <Button variant="outline" size="sm" disabled={!hasNext} onClick={goToNextPage}>
             Next
           </Button>
         </div>

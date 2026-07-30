@@ -29,7 +29,7 @@ export function ProposalsTable({
   onRefresh: () => Promise<void>;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selectedProposal = proposals.find(p => p.proposalId === selectedId) ?? null;
+  const selectedProposal = proposals.find((p) => p.proposalId === selectedId) ?? null;
 
   const columns: ColumnDef<Proposal, unknown>[] = [
     {
@@ -73,11 +73,7 @@ export function ProposalsTable({
       id: "review",
       header: "",
       cell: ({ row }) => (
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setSelectedId(row.original.proposalId)}
-        >
+        <Button size="sm" variant="ghost" onClick={() => setSelectedId(row.original.proposalId)}>
           Review
         </Button>
       ),

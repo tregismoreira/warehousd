@@ -10,7 +10,9 @@ beforeAll(async () => {
   marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
   anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(cookie?: string) {
   const headers: Record<string, string> = { "content-type": "application/json" };

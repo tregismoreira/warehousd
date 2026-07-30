@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { requestGrant, validateGrantRequest } from "@warehousd/broker";
 import { deriveRestContext } from "../../../lib/rest-context";
 import { getBroker, getAppPool } from "../../lib/broker";
-import { unauthenticated, refuse, ok } from "../../../lib/rest";
+import { unauthenticated, ok } from "../../../lib/rest";
 
 export async function GET(req: NextRequest) {
   const ctx = await deriveRestContext(req);
@@ -11,12 +11,11 @@ export async function GET(req: NextRequest) {
   const app = getAppPool();
   const r = await app.query(
     `select * from app.grants where org_id=$1 and user_id=$2 order by requested_at desc`,
-    [ctx.orgId, ctx.userId]
+    [ctx.orgId, ctx.userId],
   );
 
   const now = Date.now();
-  const { broker } = getBroker();
-  const cfg = getBroker().cfg;
+  const { cfg } = getBroker();
 
   const grants = r.rows.map((g) => {
     const expired =

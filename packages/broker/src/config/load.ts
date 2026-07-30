@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, accessSync, constants } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { ConfigSchema, readPosture, writePosture, type WarehousdConfig } from "./schema";
@@ -13,18 +13,18 @@ function splitInlineComment(line: string): { code: string; comment: string } {
     const c = line[i];
     if (c === "'" && !inDouble) inSingle = !inSingle;
     else if (c === '"' && !inSingle) inDouble = !inDouble;
-    else if (c === '#' && !inSingle && !inDouble && (i === 0 || /\s/.test(line.charAt(i - 1)))) {
+    else if (c === "#" && !inSingle && !inDouble && (i === 0 || /\s/.test(line.charAt(i - 1)))) {
       return { code: line.slice(0, i), comment: line.slice(i) };
     }
   }
-  return { code: line, comment: '' };
+  return { code: line, comment: "" };
 }
 
 function interpolate(raw: string): string {
-  const lines = raw.split('\n');
-  const interpolated = lines.map(line => {
+  const lines = raw.split("\n");
+  const interpolated = lines.map((line) => {
     // Skip lines that are YAML comments (trimmed line starts with #)
-    if (line.trim().startsWith('#')) return line;
+    if (line.trim().startsWith("#")) return line;
 
     const { code, comment } = splitInlineComment(line);
     const interpolatedCode = code.replace(/\$\{env:([A-Z0-9_]+)\}/g, (_, name) => {
@@ -34,7 +34,7 @@ function interpolate(raw: string): string {
     });
     return interpolatedCode + comment;
   });
-  return interpolated.join('\n');
+  return interpolated.join("\n");
 }
 
 function deepMerge<T>(base: T, over: Partial<T>): T {
@@ -51,7 +51,25 @@ function deepMerge<T>(base: T, over: Partial<T>): T {
 
 export function loadConfig(dir: string): WarehousdConfig {
   const basePath = join(dir, "warehousd.yml");
-  if (!existsSync(basePath)) throw new Error(`No warehousd.yml in ${dir}`);
+  if (!existsSync(basePath)) {
+    // `existsSync` answers false for "no such file" and for "not allowed to look" alike — it
+    // swallows EACCES. Under Docker `dir` is a bind mount and the container user is not the host
+    // user, so an unreadable project directory is a real case, and reporting it as a missing file
+    // sends the reader looking for the wrong thing entirely.
+    //
+    // Only EACCES earns the different message. A directory that is simply not there also makes
+    // accessSync throw, with ENOENT, and reporting that as a permission problem would trade one
+    // misleading error for another.
+    try {
+      accessSync(dir, constants.R_OK | constants.X_OK);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EACCES" || code === "EPERM") {
+        throw new Error(`Cannot read ${dir}: permission denied`, { cause: err });
+      }
+    }
+    throw new Error(`No warehousd.yml in ${dir}`);
+  }
   let cfg = parse(interpolate(readFileSync(basePath, "utf8"))) as unknown;
   const localPath = join(dir, "warehousd.local.yml");
   if (existsSync(localPath)) {
@@ -68,7 +86,8 @@ export function loadConfig(dir: string): WarehousdConfig {
 // The throw was the smaller half — refusals are what write the audit row, so a probe using
 // one of those names left no trace in the trail. Own properties only.
 export function findCollection(
-  cfg: WarehousdConfig, name: string,
+  cfg: WarehousdConfig,
+  name: string,
 ): WarehousdConfig["collections"][string] | null {
   return Object.hasOwn(cfg.collections, name) ? cfg.collections[name]! : null;
 }
@@ -77,18 +96,25 @@ export function findCollection(
 export function grantableFields(cfg: WarehousdConfig, collection: string): string[] {
   const c = findCollection(cfg, collection);
   if (!c) return [];
-  return Object.entries(c.fields).filter(([, f]) => readPosture(f) === "allow").map(([n]) => n);
+  return Object.entries(c.fields)
+    .filter(([, f]) => readPosture(f) === "allow")
+    .map(([n]) => n);
 }
 
 // Fields that can be written to (write:allow).
 export function writableFields(cfg: WarehousdConfig, collection: string): string[] {
   const c = findCollection(cfg, collection);
   if (!c) return [];
-  return Object.entries(c.fields).filter(([, f]) => writePosture(f) === "allow").map(([n]) => n);
+  return Object.entries(c.fields)
+    .filter(([, f]) => writePosture(f) === "allow")
+    .map(([n]) => n);
 }
 
 // Verbs this collection's structural type supports (if writable: true).
-export function supportedVerbs(cfg: WarehousdConfig, collection: string): ("create" | "update" | "delete")[] {
+export function supportedVerbs(
+  cfg: WarehousdConfig,
+  collection: string,
+): ("create" | "update" | "delete")[] {
   const c = findCollection(cfg, collection);
   if (!c || !c.writable) return [];
   if (c.type === "file") return ["create"];

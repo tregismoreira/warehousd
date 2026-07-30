@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { ident, literal } from "../sql/ident";
 
 export const DEFAULT_ORG_ID = "default";
 
@@ -40,8 +41,12 @@ export async function createAppSchema(db: Pool): Promise<void> {
   // deployment in v1, so it is not yet an isolation boundary there.
   for (const t of ["collections", "grants", "audit_events"]) await addOrgColumn(db, t);
   await db.query(`alter table app.grants add column if not exists document_filter jsonb`);
-  await db.query(`alter table app.grants add column if not exists verbs text[] not null default '{read}'`);
-  await db.query(`alter table app.grants add column if not exists mode text not null default 'direct'`);
+  await db.query(
+    `alter table app.grants add column if not exists verbs text[] not null default '{read}'`,
+  );
+  await db.query(
+    `alter table app.grants add column if not exists mode text not null default 'direct'`,
+  );
   // Backfill verbs to '{read}' for existing grants if they're still null (paranoia)
   await db.query(`update app.grants set verbs='{read}' where verbs is null`);
   // Enforce mode vocabulary
@@ -86,8 +91,12 @@ export async function createAppSchema(db: Pool): Promise<void> {
   `);
   await addOrgColumn(db, "client_policies");
   // Phase 7: collection ceiling (allowed_collections), credential type (mode), and per-mode config
-  await db.query(`alter table app.client_policies add column if not exists allowed_collections text[]`);
-  await db.query(`alter table app.client_policies add column if not exists mode text not null default 'delegated'`);
+  await db.query(
+    `alter table app.client_policies add column if not exists allowed_collections text[]`,
+  );
+  await db.query(
+    `alter table app.client_policies add column if not exists mode text not null default 'delegated'`,
+  );
   await db.query(`alter table app.client_policies add column if not exists robot_user_id text`);
   await db.query(`alter table app.client_policies add column if not exists trusted_issuer_id uuid`);
   await db.query(`
@@ -171,13 +180,22 @@ export async function createAppSchema(db: Pool): Promise<void> {
 // `add constraint` has no `if not exists` form, so re-running createAppSchema would fail on
 // the second pass. Checking pg_constraint keeps the whole function idempotent, which the
 // entrypoint relies on: it runs on every boot.
+//
+// The table name and the org default are interpolated because neither can be a bound parameter in
+// DDL, so both go through the shared quoting helpers. All three call sites pass literals, which is
+// why this was never reachable — but it was the one place in the codebase building SQL text around
+// a name without validating it, and "the callers happen to be literals" is a property of today's
+// callers rather than of this function.
 async function addOrgColumn(db: Pool, table: string): Promise<void> {
+  const t = ident(table);
+  const fk = `${table}_org_fk`;
   await db.query(
-    `alter table app.${table} add column if not exists org_id text not null default '${DEFAULT_ORG_ID}'`);
+    `alter table app.${t} add column if not exists org_id text not null default ${literal(DEFAULT_ORG_ID)}`,
+  );
   await db.query(`
     do $$ begin
-      if not exists (select 1 from pg_constraint where conname = '${table}_org_fk') then
-        alter table app.${table} add constraint ${table}_org_fk
+      if not exists (select 1 from pg_constraint where conname = ${literal(fk)}) then
+        alter table app.${t} add constraint ${ident(fk)}
           foreign key (org_id) references app.organizations(id);
       end if;
     end $$;`);

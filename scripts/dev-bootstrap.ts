@@ -1,9 +1,19 @@
 // Run once against a fresh DB: create data roles, apply YAML, seed synth + demo live.
 import { Pool } from "pg";
 import { execSync } from "child_process";
-import { loadConfig, applyConfig, regenerateSynthetic, createAppSchema, indexCollection, syncDatasetTerms, loadTaxonomyBindings, fileMetadataFields, ensureSchemasAndRoles, grantableFields } from "@warehousd/broker";
+import {
+  loadConfig,
+  applyConfig,
+  regenerateSynthetic,
+  createAppSchema,
+  indexCollection,
+  syncDatasetTerms,
+  loadTaxonomyBindings,
+  fileMetadataFields,
+  ensureSchemasAndRoles,
+  grantableFields,
+} from "@warehousd/broker";
 import { seedLive } from "../examples/harbor/seed/live";
-import { runIndex } from "../packages/cli/src/index";
 import { auth } from "../apps/web/lib/auth";
 
 const url = process.env.APP_DATABASE_URL!;
@@ -16,13 +26,13 @@ async function seedPersonaUsers(db: Pool) {
     // Must match apps/web/scripts/entrypoint.ts and the buttons hardcoded in
     // app/login/LoginForm.tsx — otherwise the demo buttons shown by this dev
     // flow reference users that were never seeded and sign-in always fails.
-    { id: "ana",    email: "ana@demo.local",    name: "Ana",    role: "admin" },
+    { id: "ana", email: "ana@demo.local", name: "Ana", role: "admin" },
     { id: "marcus", email: "marcus@demo.local", name: "Marcus", role: "manager" },
-    { id: "mia",    email: "mia@demo.local",    name: "Mia",    role: "member" },
-    { id: "priya",  email: "priya@demo.local",  name: "Priya Raghavan", role: "manager" },
-    { id: "dan",    email: "dan@demo.local",    name: "Dan Okafor",     role: "member" },
-    { id: "elena",  email: "elena@demo.local",  name: "Elena Vasquez",  role: "member" },
-    { id: "omar",   email: "omar@demo.local",   name: "Omar Haddad",    role: "member" },
+    { id: "mia", email: "mia@demo.local", name: "Mia", role: "member" },
+    { id: "priya", email: "priya@demo.local", name: "Priya Raghavan", role: "manager" },
+    { id: "dan", email: "dan@demo.local", name: "Dan Okafor", role: "member" },
+    { id: "elena", email: "elena@demo.local", name: "Elena Vasquez", role: "member" },
+    { id: "omar", email: "omar@demo.local", name: "Omar Haddad", role: "member" },
   ];
   for (const p of personas) {
     const exists = await db.query(`select 1 from app."user" where id=$1`, [p.id]);
@@ -39,7 +49,7 @@ async function seedPersonaUsers(db: Pool) {
     // persona with no credential, so demo sign-in silently never works.
     const account = await db.query(
       `select * from app."account" where "userId"=$1 and "providerId"='credential'`,
-      [generatedId]
+      [generatedId],
     );
     await db.query(`delete from app."session" where "userId"=$1`, [generatedId]);
     await db.query(`delete from app."account" where "userId"=$1`, [generatedId]);
@@ -50,7 +60,7 @@ async function seedPersonaUsers(db: Pool) {
         `insert into app."account"
            ("id","accountId","providerId","userId","password","createdAt","updatedAt")
          values ($1,$2,$3,$4,$5,$6,$7)`,
-        [a.id, a.accountId, a.providerId, p.id, a.password, a.createdAt, a.updatedAt]
+        [a.id, a.accountId, a.providerId, p.id, a.password, a.createdAt, a.updatedAt],
       );
     }
   }
@@ -71,7 +81,10 @@ async function main() {
   const cfg = loadConfig(dir);
   await createAppSchema(db);
   // Ensure Better Auth tables exist (user/session/account/verification) before seeding users.
-  execSync("npx @better-auth/cli migrate --config apps/web/lib/auth.ts -y", { cwd: process.cwd(), stdio: "inherit" });
+  execSync("npx @better-auth/cli migrate --config apps/web/lib/auth.ts -y", {
+    cwd: process.cwd(),
+    stdio: "inherit",
+  });
   await seedPersonaUsers(db);
   await applyConfig(db, cfg);
   // truncate before regenerating so re-running bootstrap (e.g. container restart) is idempotent
@@ -87,11 +100,19 @@ async function main() {
     if (c.type !== "file") continue;
     const metadata = fileMetadataFields(c);
     const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
-    const dev = await indexCollection(db, "dev", name, `${dir}/${c.source}`, { taxonomies: devTaxonomies, metadata });
+    const dev = await indexCollection(db, "dev", name, `${dir}/${c.source}`, {
+      taxonomies: devTaxonomies,
+      metadata,
+    });
     let live = 0;
     if (c.source_live) {
       const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
-      live = (await indexCollection(db, "live", name, `${dir}/${c.source_live}`, { taxonomies: liveTaxonomies, metadata })).indexed;
+      live = (
+        await indexCollection(db, "live", name, `${dir}/${c.source_live}`, {
+          taxonomies: liveTaxonomies,
+          metadata,
+        })
+      ).indexed;
     }
     indexed.push(`${name} dev:${dev.indexed} live:${live}`);
   }
@@ -122,7 +143,9 @@ async function main() {
         if (!fields.length) continue;
         await db.query(
           `insert into app.grants (user_id,collection,allowed_fields,env,status)
-           values ($1,$2,$3,'dev','approved')`, [user, name, fields]);
+           values ($1,$2,$3,'dev','approved')`,
+          [user, name, fields],
+        );
       }
     }
   }
@@ -185,7 +208,8 @@ async function main() {
   // it `precedents` is the one collection in the config no persona can reach, so its bound
   // vocabularies and metadata fields never get exercised by the demo.
   const danPrecedents = await db.query(
-    `select 1 from app.grants where user_id='dan' and collection='precedents' limit 1`);
+    `select 1 from app.grants where user_id='dan' and collection='precedents' limit 1`,
+  );
   if (danPrecedents.rowCount === 0) {
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status,document_filter) values
       ('dan','precedents', array['title','content','owner','updated_at','department','tags','jurisdiction','last_reviewed'],
@@ -195,4 +219,9 @@ async function main() {
   await db.end();
   console.log("bootstrap complete (indexed " + indexed.join(", ") + ")");
 }
-main();
+// A bare `main()` left a failure as an unhandled rejection: no message worth reading and, in a
+// script whose whole job is side effects, no clear signal that it stopped half-done.
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exit(1);
+});

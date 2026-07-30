@@ -45,7 +45,9 @@ describe("health", () => {
   it("returns 503 when the pool cannot be constructed", async () => {
     vi.resetModules();
     vi.doMock("../app/lib/broker", () => ({
-      getAppPool: () => { throw new Error("APP_DATABASE_URL is not set"); },
+      getAppPool: () => {
+        throw new Error("APP_DATABASE_URL is not set");
+      },
     }));
     try {
       const { GET } = await import("../app/api/health/route");

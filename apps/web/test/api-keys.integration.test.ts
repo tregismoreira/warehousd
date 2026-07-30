@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { getAppPool } from "../app/lib/broker";
 import { listClientSecrets } from "@warehousd/broker";
+import { must } from "./helpers/must";
 
 describe("Control-plane API routes", () => {
   let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -10,14 +11,16 @@ describe("Control-plane API routes", () => {
 
   function apiRequest(
     path: string,
-    opts: { method?: string; body?: unknown; cookie?: string } = {}
+    opts: { method?: string; body?: unknown; cookie?: string } = {},
   ) {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (opts.cookie) headers["cookie"] = opts.cookie;
     return new Request(`http://localhost:8722${path}`, {
       method: opts.method ?? "GET",
       headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      // Conditional spread, not `body: … : undefined`: under `exactOptionalPropertyTypes` a
+      // present-but-undefined `body` is not the same as an absent one, and RequestInit wants absent.
+      ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
     }) as any;
   }
 
@@ -61,7 +64,13 @@ describe("Control-plane API routes", () => {
         `insert into app.trusted_issuers (org_id, issuer, jwks_uri, audience, subject_claim)
          values ($1, $2, $3, $4, $5)
          returning id`,
-        [org, "https://issuer.example.com", "https://issuer.example.com/.well-known/jwks.json", "my-app", "sub"]
+        [
+          org,
+          "https://issuer.example.com",
+          "https://issuer.example.com/.well-known/jwks.json",
+          "my-app",
+          "sub",
+        ],
       );
       const issuerId = issuerRes.rows[0].id;
 
@@ -93,7 +102,7 @@ describe("Control-plane API routes", () => {
           mode: "headless",
         },
       });
-      const res = await POST(req as any);
+      const res = await POST(req);
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.error).toBe("headless_mode_requires_robot_user_id");
@@ -109,7 +118,7 @@ describe("Control-plane API routes", () => {
           mode: "delegated",
         },
       });
-      const res = await POST(req as any);
+      const res = await POST(req);
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.error).toBe("delegated_mode_requires_trusted_issuer");
@@ -122,7 +131,7 @@ describe("Control-plane API routes", () => {
         cookie: memberCookie,
         body: { name: "Test", mode: "headless", robotUserId: "robot" },
       });
-      const res = await POST(req as any);
+      const res = await POST(req);
       expect(res.status).toBe(403);
       const data = await res.json();
       expect(data.error).toBe("forbidden");
@@ -141,11 +150,11 @@ describe("Control-plane API routes", () => {
           robotUserId: "robot-list",
         },
       });
-      await POST(req as any);
+      await POST(req);
 
       const { GET } = await import("../app/api/api-keys/route");
       const getReq = apiRequest("/api/api-keys", { cookie: adminCookie });
-      const res = await GET(getReq as any);
+      const res = await GET(getReq);
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(Array.isArray(data.keys)).toBe(true);
@@ -166,7 +175,7 @@ describe("Control-plane API routes", () => {
     it("rejects non-admin", async () => {
       const { GET } = await import("../app/api/api-keys/route");
       const req = apiRequest("/api/api-keys", { cookie: memberCookie });
-      const res = await GET(req as any);
+      const res = await GET(req);
       expect(res.status).toBe(403);
     });
   });
@@ -184,12 +193,12 @@ describe("Control-plane API routes", () => {
           robotUserId: "robot-rotate",
         },
       });
-      const createRes = await create(createReq as any);
+      const createRes = await create(createReq);
       const { clientId, secret: oldSecret } = await createRes.json();
 
       // Get the old secret id
       const secrets = await listClientSecrets(app, clientId, "default");
-      const oldSecretId = secrets[0].id;
+      const oldSecretId = must(secrets[0], "a client secret for the new key").id;
 
       const { POST } = await import("../app/api/api-keys/[id]/rotate/route");
       const rotateReq = apiRequest(`/api/api-keys/${clientId}/rotate`, {
@@ -197,7 +206,7 @@ describe("Control-plane API routes", () => {
         cookie: adminCookie,
         body: { oldSecretId, expiresAt: new Date(Date.now() + 86_400_000).toISOString() },
       });
-      const res = await POST(rotateReq as any, { params: Promise.resolve({ id: clientId }) } as any);
+      const res = await POST(rotateReq, { params: Promise.resolve({ id: clientId }) });
       expect(res.status).toBe(201);
       const data = await res.json();
       expect(data.secret).toBeDefined();
@@ -222,7 +231,7 @@ describe("Control-plane API routes", () => {
           robotUserId: "robot-secret",
         },
       });
-      const createRes = await create(createReq as any);
+      const createRes = await create(createReq);
       const createData = await createRes.json();
       const secret = createData.secret;
 
@@ -232,7 +241,7 @@ describe("Control-plane API routes", () => {
       // Get the key and verify the secret is NOT in the metadata
       const { GET } = await import("../app/api/api-keys/route");
       const getReq = apiRequest("/api/api-keys", { cookie: adminCookie });
-      const getRes = await GET(getReq as any);
+      const getRes = await GET(getReq);
       const data = await getRes.json();
       const key = data.keys.find((k: any) => k.displayName === "Key for Secret Test");
       expect(key.secrets[0].secret).toBeUndefined();
@@ -246,7 +255,7 @@ describe("Control-plane API routes", () => {
         cookie: memberCookie,
         body: { oldSecretId: "fake" },
       });
-      const res = await POST(req as any, { params: Promise.resolve({ id: "fake-id" }) } as any);
+      const res = await POST(req, { params: Promise.resolve({ id: "fake-id" }) });
       expect(res.status).toBe(403);
     });
   });
@@ -264,11 +273,11 @@ describe("Control-plane API routes", () => {
           robotUserId: "robot-revoke",
         },
       });
-      const createRes = await create(createReq as any);
+      const createRes = await create(createReq);
       const { clientId } = await createRes.json();
 
       const secrets = await listClientSecrets(app, clientId, "default");
-      const secretId = secrets[0].id;
+      const secretId = must(secrets[0], "a client secret for the new key").id;
 
       const { POST } = await import("../app/api/api-keys/[id]/revoke/route");
       const revokeReq = apiRequest(`/api/api-keys/${clientId}/revoke`, {
@@ -276,7 +285,7 @@ describe("Control-plane API routes", () => {
         cookie: adminCookie,
         body: { secretId },
       });
-      const res = await POST(revokeReq as any, { params: Promise.resolve({ id: clientId }) } as any);
+      const res = await POST(revokeReq, { params: Promise.resolve({ id: clientId }) });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.ok).toBe(true);
@@ -294,7 +303,7 @@ describe("Control-plane API routes", () => {
         cookie: memberCookie,
         body: { secretId: "fake" },
       });
-      const res = await POST(req as any, { params: Promise.resolve({ id: "fake-id" }) } as any);
+      const res = await POST(req, { params: Promise.resolve({ id: "fake-id" }) });
       expect(res.status).toBe(403);
     });
 
@@ -303,26 +312,33 @@ describe("Control-plane API routes", () => {
       const { POST: create } = await import("../app/api/api-keys/route");
 
       const req1 = apiRequest("/api/api-keys", {
-        method: "POST", cookie: adminCookie,
+        method: "POST",
+        cookie: adminCookie,
         body: { name: "Owner A", mode: "headless", robotUserId: "robot-a" },
       });
-      const { clientId: clientA } = await (await create(req1 as any)).json();
+      const { clientId: clientA } = await (await create(req1)).json();
 
       const req2 = apiRequest("/api/api-keys", {
-        method: "POST", cookie: adminCookie,
+        method: "POST",
+        cookie: adminCookie,
         body: { name: "Owner B", mode: "headless", robotUserId: "robot-b" },
       });
-      const { clientId: clientB } = await (await create(req2 as any)).json();
+      const { clientId: clientB } = await (await create(req2)).json();
 
       const secretsB = await listClientSecrets(app, clientB, "default");
-      const secretIdB = secretsB[0].id;
+      const secretIdB = must(secretsB[0], "a client secret for owner B's key").id;
 
       // Revoke B's secret through A's URL — must refuse, not silently revoke a secret it
       // doesn't own.
       const { POST } = await import("../app/api/api-keys/[id]/revoke/route");
       const res = await POST(
-        apiRequest(`/api/api-keys/${clientA}/revoke`, { method: "POST", cookie: adminCookie, body: { secretId: secretIdB } }) as any,
-        { params: Promise.resolve({ id: clientA }) } as any);
+        apiRequest(`/api/api-keys/${clientA}/revoke`, {
+          method: "POST",
+          cookie: adminCookie,
+          body: { secretId: secretIdB },
+        }),
+        { params: Promise.resolve({ id: clientA }) },
+      );
       expect(res.status).toBe(404);
 
       const stillLive = await listClientSecrets(app, clientB, "default");
@@ -344,7 +360,7 @@ describe("Control-plane API routes", () => {
           allowedCollections: ["col1"],
         },
       });
-      const createRes = await create(createReq as any);
+      const createRes = await create(createReq);
       const { clientId } = await createRes.json();
 
       const { PATCH } = await import("../app/api/api-keys/[id]/route");
@@ -353,13 +369,13 @@ describe("Control-plane API routes", () => {
         cookie: adminCookie,
         body: { allowedCollections: ["col1", "col2", "col3"] },
       });
-      const res = await PATCH(patchReq as any, { params: Promise.resolve({ id: clientId }) } as any);
+      const res = await PATCH(patchReq, { params: Promise.resolve({ id: clientId }) });
       expect(res.status).toBe(200);
 
       // Verify the update
       const r = await app.query(
         `select allowed_collections from app.client_policies where client_id=$1`,
-        [clientId]
+        [clientId],
       );
       expect(r.rows[0].allowed_collections).toEqual(["col1", "col2", "col3"]);
     });
@@ -371,7 +387,7 @@ describe("Control-plane API routes", () => {
         cookie: memberCookie,
         body: { allowedCollections: ["col1"] },
       });
-      const res = await PATCH(req as any, { params: Promise.resolve({ id: "fake-id" }) } as any);
+      const res = await PATCH(req, { params: Promise.resolve({ id: "fake-id" }) });
       expect(res.status).toBe(403);
     });
   });
@@ -388,7 +404,7 @@ describe("Control-plane API routes", () => {
           audience: "my-app",
         },
       });
-      const res = await POST(req as any);
+      const res = await POST(req);
       expect(res.status).toBe(201);
       const data = await res.json();
       expect(data.issuer).toBeDefined();
@@ -399,7 +415,7 @@ describe("Control-plane API routes", () => {
     it("lists trusted issuers", async () => {
       const { GET } = await import("../app/api/trusted-issuers/route");
       const req = apiRequest("/api/trusted-issuers", { cookie: adminCookie });
-      const res = await GET(req as any);
+      const res = await GET(req);
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(Array.isArray(data.issuers)).toBe(true);
@@ -408,7 +424,7 @@ describe("Control-plane API routes", () => {
     it("rejects non-admin", async () => {
       const { GET } = await import("../app/api/trusted-issuers/route");
       const req = apiRequest("/api/trusted-issuers", { cookie: memberCookie });
-      const res = await GET(req as any);
+      const res = await GET(req);
       expect(res.status).toBe(403);
     });
   });
@@ -417,7 +433,7 @@ describe("Control-plane API routes", () => {
     it("requires session auth", async () => {
       const { GET } = await import("../app/api/proposals/route");
       const req = apiRequest("/api/proposals", {});
-      const res = await GET(req as any);
+      const res = await GET(req);
       expect(res.status).toBe(401);
     });
   });
@@ -426,14 +442,14 @@ describe("Control-plane API routes", () => {
     it("requires session auth", async () => {
       const { POST } = await import("../app/api/proposals/[id]/approve/route");
       const req = apiRequest("/api/proposals/fake-id/approve", { method: "POST" });
-      const res = await POST(req as any, { params: Promise.resolve({ id: "fake-id" }) } as any);
+      const res = await POST(req, { params: Promise.resolve({ id: "fake-id" }) });
       expect(res.status).toBe(401);
     });
 
     it("requires valid session for reject", async () => {
       const { POST } = await import("../app/api/proposals/[id]/reject/route");
       const req = apiRequest("/api/proposals/fake-id/reject", { method: "POST" });
-      const res = await POST(req as any, { params: Promise.resolve({ id: "fake-id" }) } as any);
+      const res = await POST(req, { params: Promise.resolve({ id: "fake-id" }) });
       expect(res.status).toBe(401);
     });
   });
@@ -444,7 +460,7 @@ describe("Control-plane API routes", () => {
     it("requires session auth", async () => {
       const { GET } = await import("../app/api/proposals/[id]/route");
       const req = apiRequest("/api/proposals/fake-id", {});
-      const res = await GET(req as any, { params: Promise.resolve({ id: "fake-id" }) } as any);
+      const res = await GET(req, { params: Promise.resolve({ id: "fake-id" }) });
       expect(res.status).toBe(401);
     });
   });
@@ -453,7 +469,7 @@ describe("Control-plane API routes", () => {
     it("requires session auth", async () => {
       const { GET } = await import("../app/api/collections/[c]/documents/[id]/route");
       const req = apiRequest("/api/collections/people/documents/fake-id", {});
-      const res = await GET(req as any, { params: Promise.resolve({ c: "people", id: "fake-id" }) } as any);
+      const res = await GET(req, { params: Promise.resolve({ c: "people", id: "fake-id" }) });
       expect(res.status).toBe(401);
     });
   });

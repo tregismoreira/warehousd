@@ -9,12 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Mono } from "@/components/common/Mono";
 import { EmptyState } from "@/components/common/EmptyState";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { ApiKeyDetail } from "./ApiKeyDetail";
@@ -41,12 +39,20 @@ export type ApiKey = {
   secrets: ClientSecretInfo[];
 };
 
-export function ApiKeysTable({ keys, loading, onRefresh }: { keys: ApiKey[]; loading: boolean; onRefresh: () => Promise<void> }) {
+export function ApiKeysTable({
+  keys,
+  loading,
+  onRefresh,
+}: {
+  keys: ApiKey[];
+  loading: boolean;
+  onRefresh: () => Promise<void>;
+}) {
   const [actionId, setActionId] = useState<string | null>(null);
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
   // Derived from `keys` (not a snapshot) so ApiKeyDetail always sees the post-onRefresh state —
   // no need for it to hand-patch fields locally after rotate/promote/revoke.
-  const selectedKey = keys.find(k => k.clientId === selectedKeyId) ?? null;
+  const selectedKey = keys.find((k) => k.clientId === selectedKeyId) ?? null;
 
   async function revokeSecret(clientId: string, secretId: string, secretPrefix: string) {
     setActionId(secretId);
@@ -78,11 +84,11 @@ export function ApiKeysTable({ keys, loading, onRefresh }: { keys: ApiKey[]; loa
   }
 
   function hasUnusedSecrets(key: ApiKey): boolean {
-    return key.secrets.some(s => !s.revokedAt && !s.lastUsedAt);
+    return key.secrets.some((s) => !s.revokedAt && !s.lastUsedAt);
   }
 
   function getLatestActiveSecret(key: ApiKey): ClientSecretInfo | undefined {
-    return key.secrets.find(s => !s.revokedAt);
+    return key.secrets.find((s) => !s.revokedAt);
   }
 
   const columns: ColumnDef<ApiKey, unknown>[] = [
@@ -106,10 +112,11 @@ export function ApiKeysTable({ keys, loading, onRefresh }: { keys: ApiKey[]; loa
       cell: ({ row }) => (
         <div className="flex flex-wrap gap-1">
           {row.original.allowedScopes.map((scope) => (
-            <Badge key={scope} variant="outline" className={cn(
-              "font-mono text-xs",
-              scope === "env:live" ? "text-allow" : undefined,
-            )}>
+            <Badge
+              key={scope}
+              variant="outline"
+              className={cn("font-mono text-xs", scope === "env:live" ? "text-allow" : undefined)}
+            >
               {scope}
             </Badge>
           ))}
@@ -120,7 +127,8 @@ export function ApiKeysTable({ keys, loading, onRefresh }: { keys: ApiKey[]; loa
       id: "ceiling",
       header: "Collections",
       cell: ({ row }) => {
-        if (!row.original.allowedCollections) return <span className="text-xs text-muted-foreground">—</span>;
+        if (!row.original.allowedCollections)
+          return <span className="text-xs text-muted-foreground">—</span>;
         return <Mono className="text-xs">{`[${row.original.allowedCollections.join(", ")}]`}</Mono>;
       },
     },
@@ -134,10 +142,16 @@ export function ApiKeysTable({ keys, loading, onRefresh }: { keys: ApiKey[]; loa
         const isExp = isExpired(expiresAt);
         const isSoon = isExpiringSoon(expiresAt);
         return (
-          <span className={cn(
-            "text-xs",
-            isExp ? "text-destructive font-medium" : isSoon ? "text-pending font-medium" : "text-muted-foreground",
-          )}>
+          <span
+            className={cn(
+              "text-xs",
+              isExp
+                ? "text-destructive font-medium"
+                : isSoon
+                  ? "text-pending font-medium"
+                  : "text-muted-foreground",
+            )}
+          >
             {expiresAt.toLocaleDateString()}
           </span>
         );
@@ -148,20 +162,42 @@ export function ApiKeysTable({ keys, loading, onRefresh }: { keys: ApiKey[]; loa
       header: "Status",
       cell: ({ row }) => {
         const secret = getLatestActiveSecret(row.original);
-        if (!secret) return <Badge variant="secondary" className="text-xs">No active secret</Badge>;
+        if (!secret)
+          return (
+            <Badge variant="secondary" className="text-xs">
+              No active secret
+            </Badge>
+          );
 
         const expiresAt = new Date(secret.expiresAt);
         const isExp = isExpired(expiresAt);
-        if (isExp) return <Badge variant="destructive" className="text-xs">Expired</Badge>;
+        if (isExp)
+          return (
+            <Badge variant="destructive" className="text-xs">
+              Expired
+            </Badge>
+          );
 
         const isSoon = isExpiringSoon(expiresAt);
-        if (isSoon) return <Badge variant="secondary" className="text-xs bg-pending/10 text-pending">Expiring soon</Badge>;
+        if (isSoon)
+          return (
+            <Badge variant="secondary" className="text-xs bg-pending/10 text-pending">
+              Expiring soon
+            </Badge>
+          );
 
         const hasUnused = hasUnusedSecrets(row.original);
-        if (hasUnused) return <Badge variant="secondary" className="text-xs">Unused</Badge>;
+        if (hasUnused)
+          return (
+            <Badge variant="secondary" className="text-xs">
+              Unused
+            </Badge>
+          );
 
         if (secret.lastUsedAt) {
-          const daysAgo = Math.floor((Date.now() - new Date(secret.lastUsedAt).getTime()) / (1000 * 60 * 60 * 24));
+          const daysAgo = Math.floor(
+            (Date.now() - new Date(secret.lastUsedAt).getTime()) / (1000 * 60 * 60 * 24),
+          );
           return <span className="text-xs text-muted-foreground">Used {daysAgo}d ago</span>;
         }
         return <span className="text-xs text-muted-foreground">—</span>;
@@ -173,23 +209,27 @@ export function ApiKeysTable({ keys, loading, onRefresh }: { keys: ApiKey[]; loa
       cell: ({ row }) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm"><MoreVertical size={16} /></Button>
+            <Button variant="ghost" size="sm">
+              <MoreVertical size={16} />
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setSelectedKeyId(row.original.clientId)}>
               Manage
             </DropdownMenuItem>
-            {row.original.secrets.find(s => !s.revokedAt) && (
+            {row.original.secrets.find((s) => !s.revokedAt) && (
               <DropdownMenuItem
                 className="text-destructive"
                 onClick={() => {
                   const secret = getLatestActiveSecret(row.original);
                   if (secret) {
-                    revokeSecret(row.original.clientId, secret.id, secret.prefix);
+                    void revokeSecret(row.original.clientId, secret.id, secret.prefix);
                   }
                 }}
               >
-                {actionId === getLatestActiveSecret(row.original)?.id && <Loader2 size={16} className="mr-2 animate-spin" />}
+                {actionId === getLatestActiveSecret(row.original)?.id && (
+                  <Loader2 size={16} className="mr-2 animate-spin" />
+                )}
                 Revoke secret
               </DropdownMenuItem>
             )}
@@ -200,7 +240,13 @@ export function ApiKeysTable({ keys, loading, onRefresh }: { keys: ApiKey[]; loa
   ];
 
   if (selectedKey) {
-    return <ApiKeyDetail keyData={selectedKey} onClose={() => setSelectedKeyId(null)} onRefresh={onRefresh} />;
+    return (
+      <ApiKeyDetail
+        keyData={selectedKey}
+        onClose={() => setSelectedKeyId(null)}
+        onRefresh={onRefresh}
+      />
+    );
   }
 
   return (

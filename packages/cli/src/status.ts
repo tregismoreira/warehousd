@@ -1,8 +1,8 @@
 import { resolveProject } from "./project";
 import { tryRun } from "./docker";
-import { readOutputs } from "./state";
+import { readOutputs, type Outputs } from "./state";
 
-export type StatusResult = { healthy: boolean; outputs: any | null };
+export type StatusResult = { healthy: boolean; outputs: Outputs | null };
 
 export async function runStatus(dir: string): Promise<StatusResult> {
   const p = resolveProject(dir);
@@ -22,7 +22,12 @@ export async function runStatus(dir: string): Promise<StatusResult> {
   if (outputs) {
     try {
       const url = new URL("/api/health", outputs.apiUrl);
-      const response = await fetch(url.toString(), { timeout: 5000 });
+      // `timeout` is not a RequestInit option, so this call had no timeout at all and a hung
+      // server made `warehousd status` hang with it. AbortSignal.timeout is the real one, and the
+      // abort surfaces as a rejection the catch below already handles.
+      const response = await fetch(url.toString(), {
+        signal: AbortSignal.timeout(5000),
+      });
       healthy = response.ok;
     } catch {
       healthy = false;

@@ -4,11 +4,16 @@
   "description": "Governed MCP data platform — CLI",
   "license": "MIT",
   "author": "Thiago Régis",
-  "keywords": ["mcp", "claude", "data-governance", "postgres"],
+  "keywords": [
+    "mcp",
+    "claude",
+    "data-governance",
+    "postgres"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tregismoreira/warehousd.git",
-    "directory": "mvp/packages/cli"
+    "directory": "packages/cli"
   },
   "homepage": "https://github.com/tregismoreira/warehousd#readme",
   "bugs": {
@@ -18,7 +23,10 @@
   "bin": {
     "warehousd": "./dist/index.cjs"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -34,6 +42,8 @@
     "pg": "^8.13.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/pg": "^8.20.0",
     "@warehousd/broker": "workspace:*",
     "commander": "^12.1.0",
     "tsup": "^8"

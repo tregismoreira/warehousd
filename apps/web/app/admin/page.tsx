@@ -5,48 +5,49 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { RegenSynthCard } from "./RegenSynthCard";
 
+// Only the fields this page counts. The two endpoints return more; naming what is read keeps a
+// renamed field a compile error rather than a tile that quietly reports zero.
+type CollectionSummary = { status?: string };
+type UserSummary = { role?: string };
+
 export default function AdminOverview() {
-  const [collections, setCollections] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
+  const [collections, setCollections] = useState<CollectionSummary[]>([]);
+  const [users, setUsers] = useState<UserSummary[]>([]);
   const [pendingGrantCount, setPendingGrantCount] = useState(0);
   const [auditTotal, setAuditTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // No try/finally: it existed only to clear a `loading` flag nothing rendered.
     async function load() {
-      try {
-        const [collectionsRes, usersRes, grantsRes, auditRes] = await Promise.all([
-          fetch("/api/admin/collections"),
-          fetch("/api/admin/users"),
-          fetch("/api/grants"),
-          fetch("/api/audit?limit=1"),
-        ]);
+      const [collectionsRes, usersRes, grantsRes, auditRes] = await Promise.all([
+        fetch("/api/admin/collections"),
+        fetch("/api/admin/users"),
+        fetch("/api/grants"),
+        fetch("/api/audit?limit=1"),
+      ]);
 
-        if (collectionsRes.ok) {
-          const data = await collectionsRes.json();
-          setCollections(data.collections);
-        }
+      if (collectionsRes.ok) {
+        const data = await collectionsRes.json();
+        setCollections(data.collections);
+      }
 
-        if (usersRes.ok) {
-          const data = await usersRes.json();
-          setUsers(data.users);
-        }
+      if (usersRes.ok) {
+        const data = await usersRes.json();
+        setUsers(data.users);
+      }
 
-        if (grantsRes.ok) {
-          const data = await grantsRes.json();
-          setPendingGrantCount(data.pending?.length ?? 0);
-        }
+      if (grantsRes.ok) {
+        const data = await grantsRes.json();
+        setPendingGrantCount(data.pending?.length ?? 0);
+      }
 
-        if (auditRes.ok) {
-          const data = await auditRes.json();
-          setAuditTotal(data.total ?? 0);
-        }
-      } finally {
-        setLoading(false);
+      if (auditRes.ok) {
+        const data = await auditRes.json();
+        setAuditTotal(data.total ?? 0);
       }
     }
 
-    load();
+    void load();
   }, []);
 
   const driftedCollections = collections.filter((c) => c.status === "drifted");
@@ -80,7 +81,9 @@ export default function AdminOverview() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Users by Role</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Users by Role
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{users.length}</div>
@@ -92,21 +95,23 @@ export default function AdminOverview() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Pending Grants</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Pending Grants
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{pendingGrantCount}</div>
             {pendingGrantCount > 0 && (
-              <p className="text-xs text-orange-600 mt-1">
-                Awaiting approval
-              </p>
+              <p className="text-xs text-orange-600 mt-1">Awaiting approval</p>
             )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Audit Events</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Audit Events
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{auditTotal}</div>

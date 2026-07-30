@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { BASE, ADMIN, cloneTemplate, runDbName, templateName } from "./templates";
+import { BASE, ADMIN, runDbName, cloneTemplate, templateName } from "./templates";
 
 // Roles are cluster-global, so they outlive a cached template. bootstrap.test.ts rotates
 // warehousd_dev's password and puts it back in a finally; a crash in between would otherwise
@@ -13,7 +13,14 @@ export async function ensureRoles(): Promise<void> {
 
 export type Provisioned = {
   dbName: string;
-  urls: { admin: string; dev: string; live: string; imp: string; devWrite?: string; liveWrite?: string };
+  urls: {
+    admin: string;
+    dev: string;
+    live: string;
+    imp: string;
+    devWrite?: string;
+    liveWrite?: string;
+  };
   end: () => Promise<void>;
 };
 
@@ -61,7 +68,10 @@ export async function bootstrapBrokerDb(appUrl: string): Promise<void> {
 // Provision a fresh database named after the caller, copied from the template globalSetup
 // built. `bare` skips the template and hands back an empty database — for the tests that
 // exercise the bootstrap itself and need a virgin cluster to run against.
-export async function provision(label: string, opts: { bare?: boolean } = {}): Promise<Provisioned> {
+export async function provision(
+  label: string,
+  opts: { bare?: boolean } = {},
+): Promise<Provisioned> {
   const dbName = runDbName(label);
 
   if (opts.bare) {

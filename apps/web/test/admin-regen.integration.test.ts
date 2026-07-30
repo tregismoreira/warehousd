@@ -10,13 +10,17 @@ beforeAll(async () => {
   anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
   marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(cookie?: string, body?: unknown) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (cookie) headers["cookie"] = cookie;
   return new Request("http://localhost:8722/api/admin/regen-synth", {
-    method: "POST", headers, body: JSON.stringify(body ?? {}),
+    method: "POST",
+    headers,
+    body: JSON.stringify(body ?? {}),
   });
 }
 
@@ -38,16 +42,19 @@ describe("POST /api/admin/regen-synth", () => {
 
   it("writes one audit event per regenerated collection", async () => {
     const before = await getAppPool().query(
-      `select count(*)::int as n from app.audit_events where intent->>'op' = 'regen_synth'`);
+      `select count(*)::int as n from app.audit_events where intent->>'op' = 'regen_synth'`,
+    );
     const { POST } = await import("../app/api/admin/regen-synth/route");
     await POST(req(anaCookie, { seed: 12 }) as any);
     const after = await getAppPool().query(
-      `select count(*)::int as n from app.audit_events where intent->>'op' = 'regen_synth'`);
+      `select count(*)::int as n from app.audit_events where intent->>'op' = 'regen_synth'`,
+    );
     expect(after.rows[0].n).toBeGreaterThan(before.rows[0].n);
 
     const one = await getAppPool().query(
       `select user_id, env, outcome from app.audit_events
-       where intent->>'op' = 'regen_synth' order by at desc limit 1`);
+       where intent->>'op' = 'regen_synth' order by at desc limit 1`,
+    );
     expect(one.rows[0]).toMatchObject({ user_id: "ana", env: "dev", outcome: "allowed" });
   });
 

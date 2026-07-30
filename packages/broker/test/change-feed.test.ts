@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool, PoolClient } from "pg";
+import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import type { BrokerContext } from "../src/types";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
 
 let p: Provisioned, app: Pool, pools: any;
 
@@ -42,22 +43,36 @@ beforeAll(async () => {
   app = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(app);
   await applyConfig(app, cfg);
-  pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live, devWrite: p.urls.devWrite, liveWrite: p.urls.liveWrite });
+  pools = createPools({
+    app: p.urls.admin,
+    dev: p.urls.dev,
+    live: p.urls.live,
+    devWrite: p.urls.devWrite,
+    liveWrite: p.urls.liveWrite,
+  });
   broker = makeBroker(pools, cfg);
 }, 60_000);
 
-afterAll(async () => { await app.end(); await pools.end(); await p.end(); });
+afterAll(async () => {
+  await app.end();
+  await pools.end();
+  await p.end();
+});
 
 describe("broker.changes() change feed", () => {
   describe("single mutations write exactly one entry", () => {
     it("create writes one entry with op='create' status='approved'", async () => {
       const grantId = await requestGrant(app, {
-        userId: "user1_create", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user1_create",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-      const ctx: BrokerContext = { userId: "user1_create", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user1_create" });
       const result = await broker.mutate(ctx, {
         collection: "docs",
         op: "create",
@@ -72,19 +87,23 @@ describe("broker.changes() change feed", () => {
 
       const entries = feed.entries.filter((e) => e.collection === "docs");
       expect(entries).toHaveLength(1);
-      expect(entries[0].op).toBe("create");
-      expect(entries[0].status).toBe("approved");
-      expect(entries[0].rev).toBe((result as any).rev);
+      expect(entries[0]!.op).toBe("create");
+      expect(entries[0]!.status).toBe("approved");
+      expect(entries[0]!.rev).toBe((result as any).rev);
     });
 
     it("update writes one entry with op='update' status='approved'", async () => {
       const grantId = await requestGrant(app, {
-        userId: "user2_update", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user2_update",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create", "update"] });
 
-      const ctx: BrokerContext = { userId: "user2_update", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user2_update" });
       // Create a doc first
       const createResult = await broker.mutate(ctx, {
         collection: "docs",
@@ -109,9 +128,11 @@ describe("broker.changes() change feed", () => {
       expect(feed.ok).toBe(true);
       if (!feed.ok) throw new Error("changes failed");
 
-      const updateEntries = feed.entries.filter((e) => e.collection === "docs" && e.op === "update");
+      const updateEntries = feed.entries.filter(
+        (e) => e.collection === "docs" && e.op === "update",
+      );
       expect(updateEntries.length).toBeGreaterThanOrEqual(1);
-      const entry = updateEntries[updateEntries.length - 1];
+      const entry = updateEntries[updateEntries.length - 1]!;
       expect(entry.op).toBe("update");
       expect(entry.status).toBe("approved");
       expect(entry.rev).toBe((updateResult as any).rev);
@@ -119,12 +140,16 @@ describe("broker.changes() change feed", () => {
 
     it("delete writes one entry with op='delete' status='approved'", async () => {
       const grantId = await requestGrant(app, {
-        userId: "user3_delete", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user3_delete",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create", "delete"] });
 
-      const ctx: BrokerContext = { userId: "user3_delete", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user3_delete" });
       const createResult = await broker.mutate(ctx, {
         collection: "docs",
         op: "create",
@@ -146,21 +171,27 @@ describe("broker.changes() change feed", () => {
       expect(feed.ok).toBe(true);
       if (!feed.ok) throw new Error("changes failed");
 
-      const deleteEntries = feed.entries.filter((e) => e.collection === "docs" && e.op === "delete");
+      const deleteEntries = feed.entries.filter(
+        (e) => e.collection === "docs" && e.op === "delete",
+      );
       expect(deleteEntries.length).toBeGreaterThanOrEqual(1);
-      const entry = deleteEntries[deleteEntries.length - 1];
+      const entry = deleteEntries[deleteEntries.length - 1]!;
       expect(entry.op).toBe("delete");
       expect(entry.status).toBe("approved");
     });
 
     it("file create writes one entry with op='create' status='approved'", async () => {
       const grantId = await requestGrant(app, {
-        userId: "user4_file", collection: "files", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["path", "title", "content"],
+        userId: "user4_file",
+        collection: "files",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["path", "title", "content"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-      const ctx: BrokerContext = { userId: "user4_file", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user4_file" });
       const result = await broker.mutate(ctx, {
         collection: "files",
         op: "create",
@@ -175,19 +206,26 @@ describe("broker.changes() change feed", () => {
 
       const entries = feed.entries.filter((e) => e.collection === "files");
       expect(entries.length).toBeGreaterThanOrEqual(1);
-      const entry = entries[entries.length - 1];
+      const entry = entries[entries.length - 1]!;
       expect(entry.op).toBe("create");
       expect(entry.status).toBe("approved");
     });
 
     it("pending proposal writes one entry with op='create/update/delete' status='pending'", async () => {
       const proposerGrantId = await requestGrant(app, {
-        userId: "user5_proposal", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user5_proposal",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
-      await approveGrant(app, cfg, proposerGrantId, "admin", { verbs: ["read", "create"], mode: "proposal_only" });
+      await approveGrant(app, cfg, proposerGrantId, "admin", {
+        verbs: ["read", "create"],
+        mode: "proposal_only",
+      });
 
-      const ctx: BrokerContext = { userId: "user5_proposal", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user5_proposal" });
       const result = await broker.mutate(ctx, {
         collection: "docs",
         op: "create",
@@ -203,24 +241,35 @@ describe("broker.changes() change feed", () => {
 
       const entries = feed.entries.filter((e) => e.collection === "docs" && e.status === "pending");
       expect(entries.length).toBeGreaterThanOrEqual(1);
-      const entry = entries[entries.length - 1];
+      const entry = entries[entries.length - 1]!;
       expect(entry.status).toBe("pending");
     });
 
     it("approval writes one entry for the merged revision", async () => {
       const proposerGrantId = await requestGrant(app, {
-        userId: "user6_approve", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user6_approve",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
-      await approveGrant(app, cfg, proposerGrantId, "admin", { verbs: ["read", "create"], mode: "proposal_only" });
+      await approveGrant(app, cfg, proposerGrantId, "admin", {
+        verbs: ["read", "create"],
+        mode: "proposal_only",
+      });
 
       const approverGrantId = await requestGrant(app, {
-        userId: "user6_approver", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user6_approver",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, approverGrantId, "admin", { verbs: ["read", "approve"] });
 
-      const proposerCtx: BrokerContext = { userId: "user6_approve", env: "dev", orgId: "default" };
+      const proposerCtx: BrokerContext = makeCtx({ userId: "user6_approve" });
       const propResult = await broker.mutate(proposerCtx, {
         collection: "docs",
         op: "create",
@@ -230,13 +279,13 @@ describe("broker.changes() change feed", () => {
       if (!propResult.ok) throw new Error("proposal failed");
       const proposalId = (propResult as any).proposalId;
 
-      const approverCtx: BrokerContext = { userId: "user6_approver", env: "dev", orgId: "default" };
+      const approverCtx: BrokerContext = makeCtx({ userId: "user6_approver" });
       // Take a cursor BEFORE approving. Other tests in this file also produce approved
       // 'create' entries on `docs`, so reading from 0 and taking the last match is a race
       // against them rather than an assertion about this approval.
       const before = await broker.changes(approverCtx, { since: 0 });
       if (!before.ok) throw new Error("changes failed");
-      const cursor = before.entries.length ? before.entries[before.entries.length - 1].seq : 0;
+      const cursor = before.entries.length ? before.entries[before.entries.length - 1]!.seq : 0;
 
       const approveResult = await broker.approveProposal(approverCtx, proposalId);
       expect(approveResult.ok).toBe(true);
@@ -247,24 +296,30 @@ describe("broker.changes() change feed", () => {
       if (!feed.ok) throw new Error("changes failed");
 
       const approvedEntries = feed.entries.filter(
-        (e) => e.collection === "docs" && e.op === "create" && e.status === "approved");
+        (e) => e.collection === "docs" && e.op === "create" && e.status === "approved",
+      );
       expect(approvedEntries.length).toBe(1);
-      expect(approvedEntries[0].rev).toBe(approveResult.rev);
+      expect(approvedEntries[0]!.rev).toBe(approveResult.rev);
     });
   });
 
   describe("rolled-back mutations write no entries", () => {
     it("a failed feed insert rolls the revision back with it", async () => {
       const grantId = await requestGrant(app, {
-        userId: "user7_rollback", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user7_rollback",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
-      const ctx: BrokerContext = { userId: "user7_rollback", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user7_rollback" });
 
       const before = await broker.changes(ctx, { since: 0 });
       if (!before.ok) throw new Error("changes failed");
-      const rowsBefore = (await app.query(`select count(*)::int as n from data_synth.docs`)).rows[0].n;
+      const rowsBefore = (await app.query(`select count(*)::int as n from data_synth.docs`)).rows[0]
+        .n;
 
       // Break the feed insert specifically, leaving the revision insert able to succeed. If
       // the two were in separate transactions the revision would survive and the feed would
@@ -272,7 +327,9 @@ describe("broker.changes() change feed", () => {
       await app.query(`revoke insert on app.change_log from warehousd_dev_write`);
       try {
         const r = await broker.mutate(ctx, {
-          collection: "docs", op: "create", values: { title: "Doomed", body: "Body" },
+          collection: "docs",
+          op: "create",
+          values: { title: "Doomed", body: "Body" },
         });
         expect(r.ok).toBe(false);
       } finally {
@@ -283,19 +340,25 @@ describe("broker.changes() change feed", () => {
       if (!after.ok) throw new Error("changes failed");
       expect(after.entries.length).toBe(before.entries.length);
       // and the revision itself is gone too, not merely unfeeded
-      expect((await app.query(`select count(*)::int as n from data_synth.docs`)).rows[0].n).toBe(rowsBefore);
+      expect((await app.query(`select count(*)::int as n from data_synth.docs`)).rows[0].n).toBe(
+        rowsBefore,
+      );
     });
   });
 
   describe("feed carries no field data", () => {
     it("entries have no field values or names in payload", async () => {
       const grantId = await requestGrant(app, {
-        userId: "user8_nodata", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user8_nodata",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-      const ctx: BrokerContext = { userId: "user8_nodata", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user8_nodata" });
       await broker.mutate(ctx, {
         collection: "docs",
         op: "create",
@@ -321,12 +384,16 @@ describe("broker.changes() change feed", () => {
   describe("cursor ordering and exclusivity", () => {
     it("since is exclusive: entries with seq <= since are excluded", async () => {
       const grantId = await requestGrant(app, {
-        userId: "user9_cursor", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user9_cursor",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-      const ctx: BrokerContext = { userId: "user9_cursor", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user9_cursor" });
 
       // Get initial feed
       const feed1 = await broker.changes(ctx, { since: 0, limit: 1 });
@@ -341,7 +408,7 @@ describe("broker.changes() change feed", () => {
       });
 
       // Get feed with since = last seq
-      const lastSeq = feed1.entries.length > 0 ? feed1.entries[0].seq : 0;
+      const lastSeq = feed1.entries.length > 0 ? feed1.entries[0]!.seq : 0;
       const feed2 = await broker.changes(ctx, { since: lastSeq });
       expect(feed2.ok).toBe(true);
       if (!feed2.ok) throw new Error("changes failed");
@@ -358,12 +425,16 @@ describe("broker.changes() change feed", () => {
 
     it("feed is strictly ordered by seq", async () => {
       const grantId = await requestGrant(app, {
-        userId: "user10_order", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user10_order",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-      const ctx: BrokerContext = { userId: "user10_order", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user10_order" });
 
       // Create multiple docs
       for (let i = 0; i < 3; i++) {
@@ -380,7 +451,7 @@ describe("broker.changes() change feed", () => {
 
       // Verify strict ordering
       for (let i = 1; i < feed.entries.length; i++) {
-        expect(feed.entries[i].seq).toBeGreaterThan(feed.entries[i - 1].seq);
+        expect(feed.entries[i]!.seq).toBeGreaterThan(feed.entries[i - 1]!.seq);
       }
     });
   });
@@ -391,13 +462,17 @@ describe("broker.changes() change feed", () => {
       const ungrantedUserId = "user11_no_grant";
 
       const grantId = await requestGrant(app, {
-        userId: grantedUserId, collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: grantedUserId,
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-      const grantedCtx: BrokerContext = { userId: grantedUserId, env: "dev", orgId: "default" };
-      const ungrantedCtx: BrokerContext = { userId: ungrantedUserId, env: "dev", orgId: "default" };
+      const grantedCtx: BrokerContext = makeCtx({ userId: grantedUserId });
+      const ungrantedCtx: BrokerContext = makeCtx({ userId: ungrantedUserId });
 
       // Granted user creates a doc
       await broker.mutate(grantedCtx, {
@@ -422,12 +497,16 @@ describe("broker.changes() change feed", () => {
       // This test is implicit in our use of ctx.orgId; all tests use 'default' org
       // A true multi-org test would require provisioning users in different orgs
       const grantId = await requestGrant(app, {
-        userId: "user12_org", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user12_org",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-      const ctx: BrokerContext = { userId: "user12_org", env: "dev", orgId: "default" };
+      const ctx: BrokerContext = makeCtx({ userId: "user12_org" });
       await broker.mutate(ctx, {
         collection: "docs",
         op: "create",
@@ -446,19 +525,27 @@ describe("broker.changes() change feed", () => {
 
     it("caller sees only their own env's entries", async () => {
       const grantDev = await requestGrant(app, {
-        userId: "user13_env", collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user13_env",
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantDev, "admin", { verbs: ["read", "create"] });
 
       const grantLive = await requestGrant(app, {
-        userId: "user13_env", collection: "docs", env: "live", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: "user13_env",
+        collection: "docs",
+        env: "live",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grantLive, "admin", { verbs: ["read", "create"] });
 
-      const ctxDev: BrokerContext = { userId: "user13_env", env: "dev", orgId: "default" };
-      const ctxLive: BrokerContext = { userId: "user13_env", env: "live", orgId: "default" };
+      const ctxDev: BrokerContext = makeCtx({ userId: "user13_env" });
+      const ctxLive: BrokerContext = makeCtx({ userId: "user13_env", env: "live" });
 
       // Create in dev
       await broker.mutate(ctxDev, {
@@ -493,19 +580,27 @@ describe("broker.changes() change feed", () => {
       const user2Id = "user14_tx2";
 
       const grant1 = await requestGrant(app, {
-        userId: user1Id, collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: user1Id,
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grant1, "admin", { verbs: ["read", "create"] });
 
       const grant2 = await requestGrant(app, {
-        userId: user2Id, collection: "docs", env: "dev", orgId: "default",
-        purposeLabel: "test", allowedFields: ["id", "title", "body"],
+        userId: user2Id,
+        collection: "docs",
+        env: "dev",
+        orgId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "title", "body"],
       });
       await approveGrant(app, cfg, grant2, "admin", { verbs: ["read", "create"] });
 
-      const ctx1: BrokerContext = { userId: user1Id, env: "dev", orgId: "default" };
-      const ctx2: BrokerContext = { userId: user2Id, env: "dev", orgId: "default" };
+      const ctx1: BrokerContext = makeCtx({ userId: user1Id });
+      const ctx2: BrokerContext = makeCtx({ userId: user2Id });
 
       // Create docs in rapid succession (simulating concurrent writes)
       const promises = [];
@@ -515,7 +610,7 @@ describe("broker.changes() change feed", () => {
             collection: "docs",
             op: "create",
             values: { title: `Doc1-${i}`, body: `Body1-${i}` },
-          })
+          }),
         );
       }
       for (let i = 0; i < 5; i++) {
@@ -524,7 +619,7 @@ describe("broker.changes() change feed", () => {
             collection: "docs",
             op: "create",
             values: { title: `Doc2-${i}`, body: `Body2-${i}` },
-          })
+          }),
         );
       }
       await Promise.all(promises);

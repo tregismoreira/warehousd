@@ -3,13 +3,11 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { writeAudit } from "../src/audit/write";
-import { loadConfig, ConfigSchema } from "../src/config/schema";
-import { applyConfig } from "../src/apply/apply";
-import { createPools } from "../src/db/pools";
-import { makeBroker } from "../src/broker";
 
 let p: Provisioned;
-afterAll(async () => { await p?.end(); });
+afterAll(async () => {
+  await p?.end();
+});
 
 describe("audit via", () => {
   it("every outcome records via", async () => {
@@ -54,5 +52,4 @@ describe("audit via", () => {
 
     await db.end();
   });
-
 });

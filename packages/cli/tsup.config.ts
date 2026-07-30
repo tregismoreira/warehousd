@@ -8,7 +8,7 @@ export default defineConfig({
   platform: "node",
   clean: true,
   // Inline every dependency, including the unpublished @warehousd/broker workspace package
-  // and its yaml/zod/drizzle deps. `pg` stays external: it does runtime feature detection and
+  // and its yaml/zod deps. `pg` stays external: it does runtime feature detection and
   // optional native lookups that do not survive bundling.
   noExternal: [/.*/],
   external: ["pg"],

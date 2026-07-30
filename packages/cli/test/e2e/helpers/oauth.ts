@@ -6,12 +6,16 @@ export function pkcePair() {
   return { verifier, challenge };
 }
 
-export async function signInViaHttp(apiUrl: string, email: string, password: string): Promise<string> {
+export async function signInViaHttp(
+  apiUrl: string,
+  email: string,
+  password: string,
+): Promise<string> {
   const res = await fetch(`${apiUrl}/api/auth/sign-in/email`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Origin": apiUrl,
+      Origin: apiUrl,
     },
     body: JSON.stringify({ email, password }),
     redirect: "manual",
@@ -25,12 +29,16 @@ export async function signInViaHttp(apiUrl: string, email: string, password: str
   const setCookie = res.headers.get("set-cookie") ?? "";
   if (!setCookie) {
     const body = await res.text();
-    throw new Error(`No set-cookie header in sign-in response. Status: ${res.status}, Body: ${body}`);
+    throw new Error(
+      `No set-cookie header in sign-in response. Status: ${res.status}, Body: ${body}`,
+    );
   }
-  // Reduce "name=value; attrs" to just "name=value" pairs joined for a Cookie header.
+  // Reduce "name=value; attrs" to just "name=value" pairs joined for a Cookie header. The `?? c`
+  // is for the checker only: `String.split` always yields at least one element, which
+  // `noUncheckedIndexedAccess` cannot see.
   return setCookie
     .split(/,(?=[^;]+?=)/)
-    .map((c: string) => c.split(";")[0].trim())
+    .map((c: string) => (c.split(";")[0] ?? c).trim())
     .join("; ");
 }
 
@@ -42,7 +50,7 @@ export async function authorizeAndGetCode(
     scope: string;
     cookie: string;
     challenge: string;
-  }
+  },
 ): Promise<{ code: string | null; location: string }> {
   const url = new URL(`${apiUrl}/api/auth/mcp/authorize`);
   url.searchParams.set("client_id", opts.clientId);
@@ -61,7 +69,9 @@ export async function authorizeAndGetCode(
   const location = res.headers.get("location") ?? "";
   if (!location) {
     const body = await res.text();
-    throw new Error(`No location header in authorize response. Status: ${res.status}, Body: ${body.substring(0, 500)}`);
+    throw new Error(
+      `No location header in authorize response. Status: ${res.status}, Body: ${body.substring(0, 500)}`,
+    );
   }
   const code = location ? new URL(location, "http://localhost").searchParams.get("code") : null;
   return { code, location };
@@ -75,7 +85,7 @@ export async function exchangeCodeForToken(
     code: string;
     verifier: string;
     redirectUri: string;
-  }
+  },
 ): Promise<{ access_token: string; scope: string }> {
   const res = await fetch(`${apiUrl}/api/auth/mcp/token`, {
     method: "POST",

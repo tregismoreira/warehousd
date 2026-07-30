@@ -2,9 +2,15 @@ import { mcp } from "better-auth/plugins";
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { Pool } from "pg";
-import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy, DEFAULT_ORG_ID, resolveEnvScopes, recomputeEnvScope, pickEnvScope } from "@warehousd/broker";
-
-const ENV_SCOPES = ["env:dev", "env:live"] as const;
+import {
+  getClientPolicy,
+  hasApprovedLiveGrant,
+  upsertClientPolicy,
+  DEFAULT_ORG_ID,
+  resolveEnvScopes,
+  recomputeEnvScope,
+  pickEnvScope,
+} from "@warehousd/broker";
 
 // env:dev / env:live are the ONLY scopes this plugin adds beyond Better Auth's OIDC defaults
 // (openid, profile, email, offline_access). Rule enforcement (client policy intersection,
@@ -20,6 +26,22 @@ export const mcpPlugin = mcp({
     scopes: ["env:dev", "env:live"],
     accessTokenExpiresIn: 900, // 15 min, per §6.1 rule 4
     allowDynamicClientRegistration: true,
+    // `storeClientSecret: "hashed"` belongs here on the face of it — Better Auth defaults to
+    // "plain", so client secrets sit in app."oauthApplication" in cleartext and a database dump is
+    // a set of working credentials. It is deliberately NOT set, because in this version of
+    // better-auth (1.4.21) the option does not reach the endpoints warehousd actually uses:
+    //
+    //   * The mcp plugin's own token endpoint compares the column verbatim —
+    //     `client.clientSecret === client_secret` (dist/plugins/mcp/index.mjs) — rather than
+    //     going through the oidc provider's verifyStoredClientSecret. Storing a hash therefore
+    //     makes every /api/auth/mcp/token exchange fail with `invalid client_secret`.
+    //   * The mcp plugin's DCR handler writes the generated secret straight to the column and
+    //     never calls the provider's storeClientSecret, so setting this would not have hashed
+    //     dynamically registered secrets anyway — which was the reason for setting it.
+    //
+    // So the option would have bought nothing and broken the MCP flow. Recorded in SECURITY.md as
+    // a known limitation rather than left as a silent surprise; revisit when the mcp plugin routes
+    // client authentication through the provider.
   },
 });
 
@@ -28,14 +50,13 @@ export const mcpPlugin = mcp({
 // Rule 3 ensures exactly-one-env (via env-picker if needed).
 // Rule 4 re-evaluates on token refresh.
 //
-// The three hook handlers below take `ctx: any` deliberately. The context type that
-// createAuthMiddleware infers for its callback does not describe the fields these handlers
-// legitimately read at runtime, so annotating them narrowly does not type-check: dropping
-// the `: any` produces "ctx.query is possibly undefined" and "Property 'scopes' does not
-// exist on type '{}'" against ctx.query / ctx.body / ctx.context.returned / ctx.context.adapter.
-// Verified by removing the annotations and running tsc. Revisit if Better Auth ever exports
-// a per-endpoint context type. (Unrelated to the `satisfies` at the end of this function,
-// which addresses a different problem — see its own comment.)
+// The three hook handlers below used to take `ctx: any`, on the grounds that the context type
+// createAuthMiddleware infers does not describe what they read. Two of the three complaints that
+// produced were real type errors the `any` was hiding rather than working around: `ctx.query` is
+// genuinely optional (held as a local and null-checked below), and `adapter.findOne` is generic
+// with a `{}` default (given its row shape at the call site). Neither needed an escape hatch.
+// (Unrelated to the `satisfies` at the end of this function, which addresses a different
+// problem — see its own comment.)
 export function envScopePlugin(app: Pool) {
   return {
     id: "env-scope",
@@ -43,7 +64,7 @@ export function envScopePlugin(app: Pool) {
       before: [
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/mcp/authorize",
-          handler: createAuthMiddleware(async (ctx: any) => {
+          handler: createAuthMiddleware(async (ctx) => {
             // Intercept the unauthenticated case before Better Auth's authorize handler can arm its
             // `oidc_login_prompt` cookie-resume (better-auth/plugins/mcp/authorize.mjs sets the cookie;
             // mcp/index.mjs re-enters authorizeMCPOAuth from a `matcher: () => true` after-hook on ANY
@@ -56,8 +77,16 @@ export function envScopePlugin(app: Pool) {
               throw ctx.redirect(`/login?${qs}`);
             }
 
-            const clientId = String(ctx.query?.client_id ?? "");
-            const requested = String(ctx.query?.scope ?? "").split(" ").filter(Boolean);
+            // Held as a local because the scope narrowing below mutates it in place (see the
+            // comment at the assignment). No query string means no `scope` to narrow, which the
+            // requestedEnv guard three lines down would have caught anyway.
+            const query = ctx.query;
+            if (!query) return;
+
+            const clientId = String(query.client_id ?? "");
+            const requested = String(query.scope ?? "")
+              .split(" ")
+              .filter(Boolean);
             const requestedEnv = requested.filter((s) => ["env:dev", "env:live"].includes(s));
             if (requestedEnv.length === 0) return;
 
@@ -76,12 +105,12 @@ export function envScopePlugin(app: Pool) {
             // Rule 3: exactly-one-env picker. When both env:dev and env:live survive,
             // redirect to the picker unless wh_env is set to a valid value.
             if (survivors.includes("env:dev") && survivors.includes("env:live")) {
-              const picked = ctx.query?.wh_env;
+              const picked = query.wh_env;
               survivors = pickEnvScope(survivors, picked);
               if (survivors.length === 2) {
                 // Still both; redirect to picker
                 const params = new URLSearchParams(
-                  Object.entries(ctx.query ?? {}).map(([k, v]) => [k, String(v)]),
+                  Object.entries(query).map(([k, v]) => [k, String(v)]),
                 );
                 throw ctx.redirect(`/oauth/env-picker?${params.toString()}`);
               }
@@ -93,26 +122,35 @@ export function envScopePlugin(app: Pool) {
             // Better Auth's dispatch holds a reference to the original query object, and only
             // in-place mutation of that object is guaranteed visible downstream.
             const others = requested.filter((s) => !["env:dev", "env:live"].includes(s));
-            ctx.query.scope = [...others, ...survivors].join(" ");
+            query.scope = [...others, ...survivors].join(" ");
           }),
         },
       ],
       after: [
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/mcp/token",
-          handler: createAuthMiddleware(async (ctx: any) => {
+          handler: createAuthMiddleware(async (ctx) => {
             const grantType = ctx.body?.grant_type;
             if (grantType !== "refresh_token") return;
-            const returned = ctx.context.returned as { access_token?: string; scope?: string } | undefined;
+            const returned = ctx.context.returned as
+              { access_token?: string; scope?: string } | undefined;
             if (!returned?.access_token) return;
 
-            const row = await ctx.context.adapter.findOne({
+            // findOne is generic and defaults to `{}`; naming the three columns this handler
+            // reads is what makes `row.userId` a checked property rather than a hopeful one.
+            const row = await ctx.context.adapter.findOne<{
+              scopes: string | null;
+              clientId: string;
+              userId: string;
+            }>({
               model: "oauthAccessToken",
               where: [{ field: "accessToken", value: returned.access_token }],
             });
             if (!row) return;
 
-            const current: string[] = String(row.scopes ?? "").split(" ").filter(Boolean);
+            const current: string[] = String(row.scopes ?? "")
+              .split(" ")
+              .filter(Boolean);
             const currentEnv = current.filter((s) => ["env:dev", "env:live"].includes(s));
             if (currentEnv.length === 0) return;
 
@@ -131,7 +169,10 @@ export function envScopePlugin(app: Pool) {
             // `requested` would make a promotion permanently invisible to an existing token.
             const allowed = recomputeEnvScope({ policy, liveEligible });
 
-            const recomputed = [...current.filter((s) => !["env:dev", "env:live"].includes(s)), ...allowed].join(" ");
+            const recomputed = [
+              ...current.filter((s) => !["env:dev", "env:live"].includes(s)),
+              ...allowed,
+            ].join(" ");
             if (recomputed === row.scopes) return;
 
             await ctx.context.adapter.update({
@@ -144,12 +185,15 @@ export function envScopePlugin(app: Pool) {
         },
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/mcp/register",
-          handler: createAuthMiddleware(async (ctx: any) => {
+          handler: createAuthMiddleware(async (ctx) => {
             const returned = ctx.context.returned;
             if (!(returned instanceof Response)) return;
             const body = await returned.clone().json();
             if (!body?.client_id) return;
-            await upsertClientPolicy(app, body.client_id, body.client_name ?? null, ["env:dev", "env:live"]);
+            await upsertClientPolicy(app, body.client_id, body.client_name ?? null, [
+              "env:dev",
+              "env:live",
+            ]);
           }),
         },
       ],

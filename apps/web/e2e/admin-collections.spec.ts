@@ -2,10 +2,26 @@ import { test, expect } from "@playwright/test";
 import { as } from "./helpers/auth";
 
 const COLLECTIONS = [
-  "announcements", "case_files", "clients", "conflict_checks", "court_deadlines",
-  "departments", "expenses", "invoices", "matter_tasks", "matters", "metrics", "people",
-  "performance_reviews", "policies", "precedents", "pto_requests", "salaries", "time_entries",
-  "trust_accounts", "vendors"
+  "announcements",
+  "case_files",
+  "clients",
+  "conflict_checks",
+  "court_deadlines",
+  "departments",
+  "expenses",
+  "invoices",
+  "matter_tasks",
+  "matters",
+  "metrics",
+  "people",
+  "performance_reviews",
+  "policies",
+  "precedents",
+  "pto_requests",
+  "salaries",
+  "time_entries",
+  "trust_accounts",
+  "vendors",
 ];
 
 test.describe("collections", () => {

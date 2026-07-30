@@ -1,14 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { TOOLS, toolByName } from "../lib/mcp-tools";
 import { setupWebDb } from "./helpers/web-db";
+import { makeCtx } from "./helpers/ctx";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
-const ctx = { userId: "mia", orgId: "default", env: "dev" as const };
+const c = makeCtx({ userId: "mia" });
 
 beforeAll(async () => {
   db = await setupWebDb("mcptools");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 describe("mcp-tools: list_collections", () => {
   it("is registered with an empty-object input schema", () => {
@@ -19,7 +22,7 @@ describe("mcp-tools: list_collections", () => {
 
   it("delegates to broker.listCollections", async () => {
     const tool = toolByName("list_collections")!;
-    const out = await tool.handler(ctx, {});
+    const out = await tool.handler(c, {});
     expect(Array.isArray(out)).toBe(true);
   });
 });
@@ -36,7 +39,11 @@ describe("mcp-tools: describe_collection", () => {
 
   it("adds a request_access hint to a no_grant refusal", async () => {
     const tool = toolByName("describe_collection")!;
-    const out = await tool.handler(ctx, { name: "does_not_exist" }) as { ok: boolean; reason: string; hint?: string };
+    const out = (await tool.handler(c, { name: "does_not_exist" })) as {
+      ok: boolean;
+      reason: string;
+      hint?: string;
+    };
     expect(out.ok).toBe(false);
     expect(out.reason).toBe("unknown_collection");
     expect(out.hint).toContain("request_access");
@@ -47,7 +54,11 @@ describe("mcp-tools: query_collection", () => {
   it("is registered and rejects unknown collections with a hint", async () => {
     const tool = toolByName("query_collection")!;
     expect(tool.inputSchema.required).toEqual(["collection"]);
-    const out = await tool.handler(ctx, { collection: "does_not_exist" }) as { ok: boolean; reason: string; hint?: string };
+    const out = (await tool.handler(c, { collection: "does_not_exist" })) as {
+      ok: boolean;
+      reason: string;
+      hint?: string;
+    };
     expect(out.ok).toBe(false);
     expect(out.reason).toBe("unknown_collection");
     expect(out.hint).toContain("request_access");
@@ -62,16 +73,69 @@ describe("mcp-tools: search_documents", () => {
 
   it("rejects unknown collections with a hint", async () => {
     const tool = toolByName("search_documents")!;
-    const out = await tool.handler(ctx, { collection: "does_not_exist", q: "x" }) as { ok: boolean; hint?: string };
+    const out = (await tool.handler(c, { collection: "does_not_exist", q: "x" })) as {
+      ok: boolean;
+      hint?: string;
+    };
     expect(out.ok).toBe(false);
     expect(out.hint).toContain("request_access");
   });
 });
 
-describe("DATA_TOOL_NAMES", () => {
-  it("includes data-returning tools: query, search, and get", async () => {
-    const { DATA_TOOL_NAMES } = await import("../lib/mcp-tools");
-    expect(DATA_TOOL_NAMES).toEqual(["query_collection", "search_documents", "get_document"]);
+// The `enum`s in each tool's inputSchema are advertised to the client, not enforced by it: the
+// SDK's low-level CallToolRequestSchema handler validates the JSON-RPC envelope and hands
+// `arguments` straight to the handler. The model is the untrusted party, so the handler parses.
+describe("mcp-tools: tool arguments are validated, not trusted", () => {
+  it("refuses an injected aggregate fn on query_collection", async () => {
+    const tool = toolByName("query_collection")!;
+    const out = (await tool.handler(c, {
+      collection: "people",
+      aggregate: [
+        {
+          fn: "count(id) as z, (select current_setting('is_superuser')) as leak, count",
+          field: "id",
+        },
+      ],
+    })) as { ok: boolean; reason: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("invalid_intent");
+  });
+
+  it("refuses a prototype-chain filter operator on query_collection", async () => {
+    const tool = toolByName("query_collection")!;
+    const out = (await tool.handler(c, {
+      collection: "people",
+      fields: ["id"],
+      filters: [{ field: "id", op: "constructor", value: "x" }],
+    })) as { ok: boolean; reason: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("invalid_intent");
+  });
+
+  it("refuses a field name that is not an identifier", async () => {
+    const tool = toolByName("query_collection")!;
+    const out = (await tool.handler(c, {
+      collection: "people",
+      fields: ["id; drop table people --"],
+    })) as { ok: boolean; reason: string };
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("invalid_intent");
+  });
+
+  it("refuses get_document naming neither id nor path", async () => {
+    const out = (await toolByName("get_document")!.handler(c, { collection: "policies" })) as {
+      ok: boolean;
+      reason: string;
+    };
+    expect(out).toMatchObject({ ok: false, reason: "invalid_intent" });
+  });
+
+  it("refuses update_document with no id — the union requires one per op", async () => {
+    const out = (await toolByName("update_document")!.handler(c, {
+      collection: "people",
+      values: { full_name: "x" },
+    })) as { ok: boolean; reason: string };
+    expect(out).toMatchObject({ ok: false, reason: "invalid_intent" });
   });
 });
 
@@ -83,9 +147,11 @@ describe("mcp-tools: request_access", () => {
 
   it("creates a pending grant row via requestGrant and returns its id", async () => {
     const tool = toolByName("request_access")!;
-    const out = await tool.handler(ctx, {
-      collection: "people", purpose: "quarterly headcount review", fields: ["id", "department_name"],
-    }) as { ok: boolean; requestId: string };
+    const out = (await tool.handler(c, {
+      collection: "people",
+      purpose: "quarterly headcount review",
+      fields: ["id", "department_name"],
+    })) as { ok: boolean; requestId: string };
     expect(out.ok).toBe(true);
     expect(out.requestId).toBeTruthy();
 
@@ -95,16 +161,21 @@ describe("mcp-tools: request_access", () => {
       [out.requestId],
     );
     expect(row.rows[0]).toMatchObject({
-      status: "pending", user_id: "mia", collection: "people", org_id: "default", env: "dev",
+      status: "pending",
+      user_id: "mia",
+      collection: "people",
+      org_id: "default",
+      env: "dev",
       allowed_fields: ["id", "department_name"],
     });
   });
 
   it("rejects an unknown collection with a hint and creates no row", async () => {
     const tool = toolByName("request_access")!;
-    const out = await tool.handler(ctx, {
-      collection: "does_not_exist", purpose: "test",
-    }) as { ok: boolean; reason: string; hint?: string };
+    const out = (await tool.handler(c, {
+      collection: "does_not_exist",
+      purpose: "test",
+    })) as { ok: boolean; reason: string; hint?: string };
     expect(out.ok).toBe(false);
     expect(out.reason).toBe("unknown_collection");
     expect(out.hint).toContain("request_access");
@@ -119,9 +190,10 @@ describe("mcp-tools: request_access", () => {
 
   it("rejects an empty purpose with a hint and creates no row", async () => {
     const tool = toolByName("request_access")!;
-    const out = await tool.handler(ctx, {
-      collection: "people", purpose: "",
-    }) as { ok: boolean; reason: string; hint?: string };
+    const out = (await tool.handler(c, {
+      collection: "people",
+      purpose: "",
+    })) as { ok: boolean; reason: string; hint?: string };
     expect(out.ok).toBe(false);
     expect(out.reason).toBe("purpose_required");
     expect(out.hint).toContain("request_access");
@@ -131,14 +203,18 @@ describe("mcp-tools: request_access", () => {
       `select * from app.grants where collection = $1 and user_id = $2 and status = 'pending'`,
       ["people", "mia"],
     );
-    expect(row.rows.filter((r: any) => !r.purpose_label || !r.purpose_label.trim())).toHaveLength(0);
+    expect(row.rows.filter((r: any) => !r.purpose_label || !r.purpose_label.trim())).toHaveLength(
+      0,
+    );
   });
 
   it("rejects a posture:deny field with a hint and creates no row", async () => {
     const tool = toolByName("request_access")!;
-    const out = await tool.handler(ctx, {
-      collection: "salaries", purpose: "compensation review", fields: ["id", "ssn"],
-    }) as { ok: boolean; reason: string; hint?: string };
+    const out = (await tool.handler(c, {
+      collection: "salaries",
+      purpose: "compensation review",
+      fields: ["id", "ssn"],
+    })) as { ok: boolean; reason: string; hint?: string };
     expect(out.ok).toBe(false);
     expect(out.reason).toBe("field_not_grantable");
     expect(out.hint).toContain("request_access");
@@ -149,7 +225,9 @@ describe("mcp-tools: request_access", () => {
       ["salaries", "mia"],
     );
     // Filter out any rows that include ssn — they should be none because the request was rejected
-    const rowsWithSsn = row.rows.filter((r: any) => r.allowed_fields && r.allowed_fields.includes("ssn"));
+    const rowsWithSsn = row.rows.filter(
+      (r: any) => r.allowed_fields && r.allowed_fields.includes("ssn"),
+    );
     expect(rowsWithSsn).toHaveLength(0);
   });
 });

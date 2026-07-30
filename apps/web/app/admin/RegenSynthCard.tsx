@@ -6,8 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
@@ -48,7 +54,9 @@ export function RegenSynthCard() {
         <CardTitle>Regenerate Synthetic Data</CardTitle>
         <CardDescription>
           Synthetic data is generated from the schema alone — never sampled from real data.
-          Regenerating discards every row in <code className="text-xs bg-muted px-1 py-0.5 rounded">data_synth</code> and rebuilds it from the seed.
+          Regenerating discards every row in{" "}
+          <code className="text-xs bg-muted px-1 py-0.5 rounded">data_synth</code> and rebuilds it
+          from the seed.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -72,7 +80,8 @@ export function RegenSynthCard() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Regenerate synthetic data?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Every synthetic row is discarded and rebuilt. Grants, audit history and live data are untouched.
+                  Every synthetic row is discarded and rebuilt. Grants, audit history and live data
+                  are untouched.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

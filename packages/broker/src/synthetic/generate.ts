@@ -4,7 +4,11 @@ import { loadTaxonomyBindings, syncDatasetTerms } from "../taxonomy";
 import { makeRng, genValue } from "./generators";
 
 // Generates in FK dependency order so parent ids exist before children reference them.
-export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: number): Promise<void> {
+export async function generateSynthetic(
+  db: Pool,
+  cfg: WarehousdConfig,
+  seed: number,
+): Promise<void> {
   const rng = makeRng(seed);
   const idsByCollection: Record<string, string[]> = {};
   const pkByCollection: Record<string, string> = {};
@@ -37,17 +41,29 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
     // Find the primary key field
     let pkField = "";
     for (const [fname, f] of storedFields) {
-      if (f.pk) { pkField = fname; break; }
+      if (f.pk) {
+        pkField = fname;
+        break;
+      }
     }
     if (pkField) pkByCollection[name] = pkField;
     for (let i = 0; i < n; i++) {
-      const cols: string[] = [], vals: unknown[] = [];
+      const cols: string[] = [],
+        vals: unknown[] = [];
       for (const [fname, f] of storedFields) {
         cols.push(`"${fname}"`);
-        if (f.pk) { const id = genValue(rng, "uuid", fname, { i, project: cfg.project, gen: f.gen }) as string; ids.push(id); vals.push(id); }
-        else if (f.fk) {
+        if (f.pk) {
+          const id = genValue(rng, "uuid", fname, {
+            i,
+            project: cfg.project,
+            gen: f.gen,
+          }) as string;
+          ids.push(id);
+          vals.push(id);
+        } else if (f.fk) {
           const [parent] = f.fk.split("."); // "people.id"
-          const parentExists = parent && Object.prototype.hasOwnProperty.call(idsByCollection, parent);
+          const parentExists =
+            parent && Object.prototype.hasOwnProperty.call(idsByCollection, parent);
           const parentIds = parentExists ? (idsByCollection[parent] ?? []) : [];
           if (!parentIds.length && parent && !parentExists) {
             // Parent hasn't been visited yet — defer this FK for backfill
@@ -56,7 +72,9 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
               // The backfill addresses rows by primary key, so without one it would emit
               // `where ""=$2`. Fail here, naming the collection, rather than at query time.
               if (!pkField)
-                throw new Error(`collection "${name}" needs a pk to back-fill the deferred fk "${fname}"`);
+                throw new Error(
+                  `collection "${name}" needs a pk to back-fill the deferred fk "${fname}"`,
+                );
               deferred.push({ collection: name, column: fname, parent, pk: pkField });
             }
             vals.push(null);
@@ -86,7 +104,16 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
           }
         } else if (f.nullable && rng() < 0.05) vals.push(null);
         // type is guaranteed by CollectionSchema refinement for structured collections; file collections have types filled in by transform
-        else vals.push(genValue(rng, f.type!, fname, { min: f.min, max: f.max, gen: f.gen, i, project: cfg.project }));
+        else
+          vals.push(
+            genValue(rng, f.type!, fname, {
+              min: f.min,
+              max: f.max,
+              gen: f.gen,
+              i,
+              project: cfg.project,
+            }),
+          );
       }
       const ph = vals.map((_, k) => `$${k + 1}`).join(",");
       await db.query(`insert into data_synth.${name} (${cols.join(",")}) values (${ph})`, vals);
@@ -102,8 +129,10 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
     for (const rowId of rowIds) {
       const pick = parentIds[Math.floor(rng() * parentIds.length)];
       if (!pick || pick === rowId) continue; // nobody is their own manager/head
-      await db.query(
-        `update data_synth.${d.collection} set "${d.column}"=$1 where "${d.pk}"=$2`, [pick, rowId]);
+      await db.query(`update data_synth.${d.collection} set "${d.column}"=$1 where "${d.pk}"=$2`, [
+        pick,
+        rowId,
+      ]);
     }
   }
 
@@ -117,8 +146,9 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
   // ordering constraint.
   const datasetSourced = order.filter((name) => {
     const c = cfg.collections[name];
-    return !!c && c.type !== "file"
-      && (c.taxonomies ?? []).some((slug) => cfg.taxonomies[slug]?.source);
+    return (
+      !!c && c.type !== "file" && (c.taxonomies ?? []).some((slug) => cfg.taxonomies[slug]?.source)
+    );
   });
   if (datasetSourced.length) {
     await syncDatasetTerms(db, cfg, "dev");
@@ -131,7 +161,9 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
         // The back-fill addresses rows by primary key, exactly as the FK pass does. Fail here,
         // naming the collection, rather than emitting `where ""=$2`.
         if (!pk)
-          throw new Error(`collection "${name}" needs a pk to back-fill the dataset-sourced vocabulary "${b.field}"`);
+          throw new Error(
+            `collection "${name}" needs a pk to back-fill the dataset-sourced vocabulary "${b.field}"`,
+          );
         if (!b.slugs.length || !rowIds.length) continue;
         for (const rowId of rowIds) {
           let value: string | string[];
@@ -140,13 +172,16 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
             // stable for a seed, with repeats dropped rather than re-rolled.
             const count = Math.floor(rng() * 3) + 1;
             const selected = new Set<string>();
-            for (let j = 0; j < count; j++) selected.add(b.slugs[Math.floor(rng() * b.slugs.length)]!);
+            for (let j = 0; j < count; j++)
+              selected.add(b.slugs[Math.floor(rng() * b.slugs.length)]!);
             value = [...selected];
           } else {
             value = b.slugs[Math.floor(rng() * b.slugs.length)]!;
           }
-          await db.query(
-            `update data_synth.${name} set "${b.field}"=$1 where "${pk}"=$2`, [value, rowId]);
+          await db.query(`update data_synth.${name} set "${b.field}"=$1 where "${pk}"=$2`, [
+            value,
+            rowId,
+          ]);
         }
       }
     }
@@ -155,10 +190,18 @@ export async function generateSynthetic(db: Pool, cfg: WarehousdConfig, seed: nu
 
 function topoSort(cfg: WarehousdConfig): string[] {
   const names = Object.keys(cfg.collections);
-  const deps = (n: string) => Object.values(cfg.collections[n]?.fields ?? {})
-    .map((f) => f.fk?.split(".")[0]).filter((x): x is string => !!x && names.includes(x));
-  const out: string[] = [], seen = new Set<string>();
-  const visit = (n: string) => { if (seen.has(n)) return; seen.add(n); deps(n).forEach(visit); out.push(n); };
+  const deps = (n: string) =>
+    Object.values(cfg.collections[n]?.fields ?? {})
+      .map((f) => f.fk?.split(".")[0])
+      .filter((x): x is string => !!x && names.includes(x));
+  const out: string[] = [],
+    seen = new Set<string>();
+  const visit = (n: string) => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    deps(n).forEach(visit);
+    out.push(n);
+  };
   names.forEach(visit);
   return out;
 }

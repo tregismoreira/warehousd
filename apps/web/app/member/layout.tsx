@@ -11,10 +11,7 @@ export default async function MemberLayout({ children }: { children: React.React
   if (!atLeast(role, "member")) redirect("/403");
   const env = (await cookies()).get("wh_env")?.value === "live" ? "live" : "dev";
   return (
-    <AppShell
-      surface="member" role={role} email={session.user.email} env={env}
-      showConsole={process.env.NODE_ENV !== "production" || process.env.WAREHOUSD_DEMO === "true"}
-    >
+    <AppShell surface="member" role={role} email={session.user.email} env={env}>
       {children}
     </AppShell>
   );

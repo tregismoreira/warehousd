@@ -14,7 +14,10 @@ export async function GET(req: NextRequest) {
 
   const where: string[] = [];
   const values: unknown[] = [];
-  const add = (sql: string, v: unknown) => { values.push(v); where.push(sql.replace("$?", `$${values.length}`)); };
+  const add = (sql: string, v: unknown) => {
+    values.push(v);
+    where.push(sql.replace("$?", `$${values.length}`));
+  };
 
   // Org first, and unconditionally: the audit trail names users, collections and purposes, so
   // an admin browsing it must never see another tenant's. This is the one filter no query
@@ -62,7 +65,8 @@ export async function GET(req: NextRequest) {
     app.query(
       `select id, at, user_id, env, collection, intent, fields_returned, grant_id, outcome, reason, via
        from app.audit_events ${clause} order by at desc limit $${values.length + 1} offset $${values.length + 2}`,
-      [...values, limit, offset]),
+      [...values, limit, offset],
+    ),
     app.query(`select count(*)::int as n from app.audit_events ${clause}`, values),
   ]);
 

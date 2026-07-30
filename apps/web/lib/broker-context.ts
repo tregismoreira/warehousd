@@ -1,6 +1,7 @@
 import type { BrokerContext } from "@warehousd/broker";
 import { DEFAULT_ORG_ID } from "@warehousd/broker";
 import { auth } from "./auth";
+import { envFromScopes, scopesOf } from "./env-scope";
 import { getAppPool } from "../app/lib/broker";
 
 // The ONLY place BrokerContext is constructed for MCP/OAuth token-authenticated paths.
@@ -18,8 +19,7 @@ import { getAppPool } from "../app/lib/broker";
 export async function deriveTokenContext(req: Request): Promise<BrokerContext | null> {
   const session = await auth.api.getMcpSession({ headers: req.headers });
   if (!session) return null;
-  const scopes = (session.scopes ?? "").split(" ").filter(Boolean);
-  const env = scopes.includes("env:live") ? "live" : "dev";
+  const env = envFromScopes(scopesOf(session.scopes));
   const pool = getAppPool();
   const r = await pool.query(`select "orgId" from app."user" where id=$1`, [session.userId]);
   const orgId = r.rows[0]?.orgId ?? DEFAULT_ORG_ID;
@@ -27,7 +27,8 @@ export async function deriveTokenContext(req: Request): Promise<BrokerContext | 
   // Load client policy to get the collection ceiling
   const cp = await pool.query(
     `select allowed_collections from app.client_policies where client_id=$1`,
-    [session.clientId || ""]);
+    [session.clientId || ""],
+  );
   const allowedCollections = cp.rows[0]?.allowed_collections ?? null;
 
   return {

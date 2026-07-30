@@ -87,7 +87,10 @@ test.describe("governed write path", () => {
     expect(documents[0].title).toBe("Proposed task");
   });
 
-  test("revoking the approver's grant removes the queue item and refuses approval", async ({ page, context }) => {
+  test("revoking the approver's grant removes the queue item and refuses approval", async ({
+    page,
+    context,
+  }) => {
     await context.clearCookies({ name: "wh_env" });
 
     await as(page, "admin");

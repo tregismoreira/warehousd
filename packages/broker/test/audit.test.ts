@@ -4,7 +4,9 @@ import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 
 let p: Provisioned;
-afterAll(async () => { await p?.end(); });
+afterAll(async () => {
+  await p?.end();
+});
 
 it("data roles cannot UPDATE or DELETE audit_events (test 9)", async () => {
   p = await provision("auditro");

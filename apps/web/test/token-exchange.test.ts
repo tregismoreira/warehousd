@@ -1,36 +1,45 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { setupWebDb, signIn } from "./helpers/web-db";
-import {
-  createClientSecret,
-  createTrustedIssuer,
-  loadConfig,
-} from "@warehousd/broker";
+import { setupWebDb } from "./helpers/web-db";
+import { createClientSecret, loadConfig } from "@warehousd/broker";
 import { getAppPool } from "../app/lib/broker";
-import { randomBytes } from "node:crypto";
 
-const harborCfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
+const _harborCfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
 
 beforeAll(async () => {
   db = await setupWebDb("tokenexchange");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
-async function req(url: string, opts: { method?: string; body?: string; headers?: Record<string, string> } = {}) {
-  const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded", ...opts.headers };
+// eslint-disable-next-line @typescript-eslint/require-await -- callers await this; see await-thenable
+async function req(
+  url: string,
+  opts: { method?: string; body?: string; headers?: Record<string, string> } = {},
+) {
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+    ...opts.headers,
+  };
   return new Request(`http://localhost:8722${url}`, {
     method: opts.method ?? "POST",
     headers,
-    body: opts.body,
+    // Conditional spread: RequestInit's `body` must be absent, not present-and-undefined.
+    ...(opts.body !== undefined ? { body: opts.body } : {}),
   });
 }
 
 describe("POST /v1/token — RFC 8693 token exchange", () => {
   it("rejects unknown client", async () => {
-    const body = new URLSearchParams({ grant_type: "client_credentials", client_id: "unknown", client_secret: "whd_dev_x_y_z" }).toString();
+    const body = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: "unknown",
+      client_secret: "whd_dev_x_y_z",
+    }).toString();
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", { body }) as any);
+    const res = await POST((await req("/v1/token", { body })) as any);
     expect(res.status).toBe(401);
     const data = await res.json();
     expect(data.error).toBe("invalid_client");
@@ -49,12 +58,19 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     // Update client policy (registerMcpClient already created one)
     await pool.query(
       `update app.client_policies set mode=$2, robot_user_id=$3 where client_id=$1`,
-      [clientId, "headless", "mia"]
+      [clientId, "headless", "mia"],
     );
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 365);
-    const { secret } = await createClientSecret(pool, clientId, "default", expiryDate, "ana", "dev");
+    const { secret } = await createClientSecret(
+      pool,
+      clientId,
+      "default",
+      expiryDate,
+      "ana",
+      "dev",
+    );
 
     // Request token
     const body = new URLSearchParams({
@@ -65,7 +81,7 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     }).toString();
 
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", { body }) as any);
+    const res = await POST((await req("/v1/token", { body })) as any);
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.access_token).toBeTruthy();
@@ -86,14 +102,21 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     const { client_id: clientId } = await reg.json();
 
     // Update client policy to delegated mode
-    await pool.query(
-      `update app.client_policies set mode=$2 where client_id=$1`,
-      [clientId, "delegated"]
-    );
+    await pool.query(`update app.client_policies set mode=$2 where client_id=$1`, [
+      clientId,
+      "delegated",
+    ]);
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 365);
-    const { secret } = await createClientSecret(pool, clientId, "default", expiryDate, "ana", "dev");
+    const { secret } = await createClientSecret(
+      pool,
+      clientId,
+      "default",
+      expiryDate,
+      "ana",
+      "dev",
+    );
 
     // Try client_credentials flow (should fail)
     const body = new URLSearchParams({
@@ -103,7 +126,7 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     }).toString();
 
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", { body }) as any);
+    const res = await POST((await req("/v1/token", { body })) as any);
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe("unauthorized_client");
@@ -122,12 +145,19 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     // Update client policy to headless mode
     await pool.query(
       `update app.client_policies set mode=$2, robot_user_id=$3 where client_id=$1`,
-      [clientId, "headless", "mia"]
+      [clientId, "headless", "mia"],
     );
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 365);
-    const { secret } = await createClientSecret(pool, clientId, "default", expiryDate, "ana", "dev");
+    const { secret } = await createClientSecret(
+      pool,
+      clientId,
+      "default",
+      expiryDate,
+      "ana",
+      "dev",
+    );
 
     // Try token-exchange flow (should fail)
     const body = new URLSearchParams({
@@ -139,7 +169,7 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     }).toString();
 
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", { body }) as any);
+    const res = await POST((await req("/v1/token", { body })) as any);
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe("unauthorized_client");
@@ -156,14 +186,21 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     const { client_id: clientId } = await reg.json();
 
     // Update client policy to headless mode WITHOUT robot_user_id
-    await pool.query(
-      `update app.client_policies set mode=$2 where client_id=$1`,
-      [clientId, "headless"]
-    );
+    await pool.query(`update app.client_policies set mode=$2 where client_id=$1`, [
+      clientId,
+      "headless",
+    ]);
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 365);
-    const { secret } = await createClientSecret(pool, clientId, "default", expiryDate, "ana", "dev");
+    const { secret } = await createClientSecret(
+      pool,
+      clientId,
+      "default",
+      expiryDate,
+      "ana",
+      "dev",
+    );
 
     const body = new URLSearchParams({
       grant_type: "client_credentials",
@@ -172,7 +209,7 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     }).toString();
 
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", { body }) as any);
+    const res = await POST((await req("/v1/token", { body })) as any);
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe("invalid_request");
@@ -191,12 +228,19 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     // Update client policy to headless mode
     await pool.query(
       `update app.client_policies set mode=$2, robot_user_id=$3 where client_id=$1`,
-      [clientId, "headless", "mia"]
+      [clientId, "headless", "mia"],
     );
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 365);
-    const { secret } = await createClientSecret(pool, clientId, "default", expiryDate, "ana", "dev");
+    const { secret } = await createClientSecret(
+      pool,
+      clientId,
+      "default",
+      expiryDate,
+      "ana",
+      "dev",
+    );
 
     const basicAuth = Buffer.from(`${clientId}:${secret}`).toString("base64");
     const body = new URLSearchParams({
@@ -206,10 +250,12 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     }).toString();
 
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", {
-      body,
-      headers: { authorization: `Basic ${basicAuth}` },
-    }) as any);
+    const res = await POST(
+      (await req("/v1/token", {
+        body,
+        headers: { authorization: `Basic ${basicAuth}` },
+      })) as any,
+    );
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe("invalid_request");
@@ -228,12 +274,19 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     // Update client policy (registerMcpClient already created one)
     await pool.query(
       `update app.client_policies set mode=$2, robot_user_id=$3 where client_id=$1`,
-      [clientId, "headless", "mia"]
+      [clientId, "headless", "mia"],
     );
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 365);
-    const { secret } = await createClientSecret(pool, clientId, "default", expiryDate, "ana", "dev");
+    const { secret } = await createClientSecret(
+      pool,
+      clientId,
+      "default",
+      expiryDate,
+      "ana",
+      "dev",
+    );
 
     const basicAuth = Buffer.from(`${clientId}:${secret}`).toString("base64");
     const body = new URLSearchParams({
@@ -242,10 +295,12 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     }).toString();
 
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", {
-      body,
-      headers: { authorization: `Basic ${basicAuth}` },
-    }) as any);
+    const res = await POST(
+      (await req("/v1/token", {
+        body,
+        headers: { authorization: `Basic ${basicAuth}` },
+      })) as any,
+    );
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.access_token).toBeTruthy();
@@ -264,12 +319,19 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     // Update client policy (registerMcpClient already created one)
     await pool.query(
       `update app.client_policies set mode=$2, robot_user_id=$3 where client_id=$1`,
-      [clientId, "headless", "mia"]
+      [clientId, "headless", "mia"],
     );
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 365);
-    const { secret } = await createClientSecret(pool, clientId, "default", expiryDate, "ana", "dev");
+    const { secret } = await createClientSecret(
+      pool,
+      clientId,
+      "default",
+      expiryDate,
+      "ana",
+      "dev",
+    );
 
     const body = new URLSearchParams({
       grant_type: "client_credentials",
@@ -278,7 +340,7 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     }).toString();
 
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", { body }) as any);
+    const res = await POST((await req("/v1/token", { body })) as any);
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
@@ -295,12 +357,19 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     // Update client policy (registerMcpClient already created one)
     await pool.query(
       `update app.client_policies set mode=$2, robot_user_id=$3, allowed_scopes=$4 where client_id=$1`,
-      [clientId, "headless", "mia", ["env:dev", "env:live"]]
+      [clientId, "headless", "mia", ["env:dev", "env:live"]],
     );
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 365);
-    const { secret } = await createClientSecret(pool, clientId, "default", expiryDate, "ana", "dev");
+    const { secret } = await createClientSecret(
+      pool,
+      clientId,
+      "default",
+      expiryDate,
+      "ana",
+      "dev",
+    );
 
     // Request both scopes but user has no live grant
     const body = new URLSearchParams({
@@ -311,7 +380,7 @@ describe("POST /v1/token — RFC 8693 token exchange", () => {
     }).toString();
 
     const { POST } = await import("../app/v1/token/route");
-    const res = await POST(await req("/v1/token", { body }) as any);
+    const res = await POST((await req("/v1/token", { body })) as any);
     expect(res.status).toBe(200);
     const data = await res.json();
     // Should only get env:dev since no live grant

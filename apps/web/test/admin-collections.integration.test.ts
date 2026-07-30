@@ -11,7 +11,9 @@ beforeAll(async () => {
   anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
   marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(cookie?: string) {
   const headers: Record<string, string> = {};
@@ -27,10 +29,12 @@ describe("applyStatus", () => {
     expect(applyStatus({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe("applied");
   });
   it("reports drifted when a posture changed", () => {
-    expect(applyStatus(
-      { fields: { email: { posture: "deny" } } },
-      { fields: { email: { posture: "allow" } } },
-    )).toBe("drifted");
+    expect(
+      applyStatus(
+        { fields: { email: { posture: "deny" } } },
+        { fields: { email: { posture: "allow" } } },
+      ),
+    ).toBe("drifted");
   });
 });
 
@@ -50,7 +54,10 @@ describe("GET /api/admin/collections", () => {
     // returned by this route — it reads app.collections, never a data schema.
     // Postures are normalized to {read, write} form in Phase 2.
     expect(home.posture).toEqual({ read: "deny", write: "deny" });
-    expect(people.fields.find((f: any) => f.name === "full_name").posture).toEqual({ read: "allow", write: "deny" });
+    expect(people.fields.find((f: any) => f.name === "full_name").posture).toEqual({
+      read: "allow",
+      write: "deny",
+    });
   });
 
   it("marks a collection applied after applyConfig ran in the fixture", async () => {
@@ -61,7 +68,8 @@ describe("GET /api/admin/collections", () => {
 
   it("marks a collection drifted once the stored config diverges", async () => {
     await getAppPool().query(
-      `update app.collections set config = jsonb_set(config, '{description}', '"stale"') where name='metrics'`);
+      `update app.collections set config = jsonb_set(config, '{description}', '"stale"') where name='metrics'`,
+    );
     const { GET } = await import("../app/api/admin/collections/route");
     const body = await (await GET(req(anaCookie) as any)).json();
     expect(body.collections.find((c: any) => c.name === "metrics").status).toBe("drifted");
@@ -71,6 +79,8 @@ describe("GET /api/admin/collections", () => {
     await getAppPool().query(`delete from app.collections where name='announcements'`);
     const { GET } = await import("../app/api/admin/collections/route");
     const body = await (await GET(req(anaCookie) as any)).json();
-    expect(body.collections.find((c: any) => c.name === "announcements").status).toBe("not_applied");
+    expect(body.collections.find((c: any) => c.name === "announcements").status).toBe(
+      "not_applied",
+    );
   });
 });

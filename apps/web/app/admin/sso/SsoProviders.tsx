@@ -9,8 +9,14 @@ import { Mono } from "@/components/common/Mono";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -24,8 +30,11 @@ type Provider = {
   type: "oidc" | "saml";
 };
 
+// /api/sso/status is the unauthenticated endpoint and returns less than /api/sso/providers: no
+// issuer, and no domain. This page reads issuer and domain from the admin route above and uses
+// status only for the count and the local-login flag, so the narrower shape is the accurate one.
 type StatusInfo = {
-  providers: Provider[];
+  providers: Pick<Provider, "providerId" | "type">[];
   localLoginEnabled: boolean;
 };
 
@@ -59,7 +68,7 @@ export function SsoProviders() {
   }
 
   useEffect(() => {
-    loadProviders();
+    void loadProviders();
   }, []);
 
   async function deleteProvider(providerId: string) {
@@ -177,7 +186,8 @@ export function SsoProviders() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete {row.original.providerId}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Users who signed in through this provider will lose their linked accounts and must sign in again.
+                  Users who signed in through this provider will lose their linked accounts and must
+                  sign in again.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -200,12 +210,14 @@ export function SsoProviders() {
   return (
     <div className="space-y-4">
       {statusCard && (
-        <div className={cn(
-          "rounded-lg border p-4",
-          statusCard.color === "text-allow" && "bg-allow/5 border-allow/20",
-          statusCard.color === "text-pending" && "bg-pending/5 border-pending/20",
-          statusCard.color === "text-deny" && "bg-deny/5 border-deny/20",
-        )}>
+        <div
+          className={cn(
+            "rounded-lg border p-4",
+            statusCard.color === "text-allow" && "bg-allow/5 border-allow/20",
+            statusCard.color === "text-pending" && "bg-pending/5 border-pending/20",
+            statusCard.color === "text-deny" && "bg-deny/5 border-deny/20",
+          )}
+        >
           <div className="flex items-start gap-3">
             <statusCard.icon size={20} className={cn("mt-0.5 shrink-0", statusCard.color)} />
             <div>

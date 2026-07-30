@@ -1,18 +1,22 @@
 {
   "name": "@warehousd/broker",
   "version": "0.0.0",
+  "private": true,
   "type": "module",
-  "main": "./src/broker.ts",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "build": "tsc -p tsconfig.json" },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
   "dependencies": {
     "pg": "^8.13.0",
     "yaml": "^2.6.0",
-    "zod": "^3.23.0",
-    "drizzle-orm": "^0.36.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.0",
-    "drizzle-kit": "^0.28.0"
+    "@types/pg": "^8.11.0"
   }
 }

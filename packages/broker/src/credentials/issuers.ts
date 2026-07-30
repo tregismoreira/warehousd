@@ -22,7 +22,8 @@ export async function createTrustedIssuer(
     `insert into app.trusted_issuers (org_id, issuer, jwks_uri, audience, subject_claim)
      values ($1, $2, $3, $4, $5)
      returning id, org_id, issuer, jwks_uri, audience, subject_claim, created_at`,
-    [orgId, issuer, jwksUri, audience, subjectClaim]);
+    [orgId, issuer, jwksUri, audience, subjectClaim],
+  );
 
   const row = r.rows[0];
   return {
@@ -42,7 +43,8 @@ export async function listTrustedIssuers(db: Pool, orgId: string): Promise<Trust
      from app.trusted_issuers
      where org_id=$1
      order by created_at desc`,
-    [orgId]);
+    [orgId],
+  );
 
   return r.rows.map((row) => ({
     id: row.id,
@@ -55,12 +57,17 @@ export async function listTrustedIssuers(db: Pool, orgId: string): Promise<Trust
   }));
 }
 
-export async function getTrustedIssuer(db: Pool, id: string, orgId: string): Promise<TrustedIssuer | null> {
+export async function getTrustedIssuer(
+  db: Pool,
+  id: string,
+  orgId: string,
+): Promise<TrustedIssuer | null> {
   const r = await db.query(
     `select id, org_id, issuer, jwks_uri, audience, subject_claim, created_at
      from app.trusted_issuers
      where id=$1 and org_id=$2`,
-    [id, orgId]);
+    [id, orgId],
+  );
 
   if (r.rowCount === 0) return null;
 

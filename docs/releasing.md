@@ -9,6 +9,43 @@ They are coupled: `warehousd start` pulls `ghcr.io/tregismoreira/warehousd:<cli-
 where `<cli-version>` is baked into the bundle by tsup at build time. **The Docker tag the
 release pushes is bare — `0.2.0`, not `v0.2.0`.** The `v` prefix lives only on the git tag.
 
+## Versioning policy
+
+warehousd follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). One version
+number covers both artifacts, because they are pulled as a pair.
+
+**The public surface** — what a version number makes a promise about:
+
+| Surface                                                                       | Documented in            |
+| ----------------------------------------------------------------------------- | ------------------------ |
+| The MCP tool set: names, input schemas, and refusal reason codes              | `docs/connect-claude.md` |
+| The REST API under `/v1/**`: paths, request and response shapes, status codes | `docs/rest-api.md`       |
+| The `warehousd.yml` schema                                                    | `docs/configuration.md`  |
+| The CLI's commands and flags, and `.warehousd/outputs.json`                   | `docs/cli.md`            |
+| The OAuth and token-exchange endpoints, scopes, and grant types               | `docs/configure-sso.md`  |
+
+Everything else is internal and may change in a patch: `@warehousd/broker`'s exports (a private
+workspace package — see `packages/broker/README.md`), the `app` schema's table layout, the web
+UI, and anything under `test/`, `scripts/` or `examples/`.
+
+**What each bump means**
+
+- **Major** — a removal from, or an incompatible change to, anything in the table above. Also
+  any change that makes a previously-refused request succeed: in a governed system the refusals
+  are part of the contract, not the gaps in it.
+- **Minor** — a tool, endpoint, config key or CLI flag added compatibly. A new _refusal_ that
+  closes a hole is a minor bump, recorded under **Security** in `CHANGELOG.md`.
+- **Patch** — a fix that leaves all of the above unchanged.
+
+**Before 1.0.0**, minor bumps may carry breaking changes; that is SemVer's `0.y.z` clause and it
+is in force here. `CHANGELOG.md` marks every such change explicitly under **Changed**, whatever
+the digit says.
+
+**Deprecation.** A public-surface item is marked deprecated in `CHANGELOG.md` and in its own
+documentation for at least one minor release before removal, and keeps working throughout. The
+stated exception is security: a surface that cannot be made safe is removed in the release that
+discovers it, and the changelog names that release.
+
 ## Cutting a release
 
 ```bash
@@ -25,11 +62,11 @@ refuses to run otherwise.
 
 ## What `.github/workflows/release.yml` does
 
-| Job | Needs | What it does |
-|---|---|---|
-| `verify` | — | Rejects non-tag refs (so a stray `workflow_dispatch` can't publish), asserts the tag matches the package version, and emits `version` (bare) plus `prerelease`. Holds no permissions. |
-| `image` | `verify` | Builds `apps/web/Dockerfile` for amd64 + arm64 and pushes `:<version>` (what the CLI pulls), `:v<version>` (for humans), and `:latest` — the last only when the version has no prerelease suffix. |
-| `npm` | `verify`, `image` | Builds and publishes the CLI with `--provenance`. Requires the `NPM_TOKEN` secret. |
+| Job      | Needs             | What it does                                                                                                                                                                                      |
+| -------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `verify` | —                 | Rejects non-tag refs (so a stray `workflow_dispatch` can't publish), asserts the tag matches the package version, and emits `version` (bare) plus `prerelease`. Holds no permissions.             |
+| `image`  | `verify`          | Builds `apps/web/Dockerfile` for amd64 + arm64 and pushes `:<version>` (what the CLI pulls), `:v<version>` (for humans), and `:latest` — the last only when the version has no prerelease suffix. |
+| `npm`    | `verify`, `image` | Builds and publishes the CLI with `--provenance`. Requires the `NPM_TOKEN` secret.                                                                                                                |
 
 Ordering matters: the version check used to live in the npm job, so a bad run could move
 `:latest` before anything validated it.
@@ -69,15 +106,15 @@ Before the first tag push:
 
 1. **The repo must be public.** npm dropped provenance support for private repos in 2023, so
    `--provenance` hard-fails otherwise.
-2. **`NPM_TOKEN` repo secret** — an npm Granular Access Token, type *Automation*, permission
-   *Read and write*.
+2. **`NPM_TOKEN` repo secret** — an npm Granular Access Token, type _Automation_, permission
+   _Read and write_.
 
 Immediately after the first release:
 
 3. **Make the GHCR package public.**
    `github.com/users/tregismoreira/packages/container/warehousd/settings` → Change visibility →
    Public. A package first pushed from a private repo is private, so anonymous `docker pull`
-   fails until you flip it. Under *Manage Actions access*, also add the `warehousd` repo with
+   fails until you flip it. Under _Manage Actions access_, also add the `warehousd` repo with
    **Write** so later releases can push. ⚠️ Public is irreversible for that package.
 4. **Switch to npm Trusted Publishing (OIDC)** and delete `NPM_TOKEN` — this can only be
    configured once the package exists.

@@ -10,15 +10,15 @@ const BASE = process.env.BETTER_AUTH_URL ?? "http://localhost:8722";
 export async function GET(req: NextRequest) {
   const guard = await requireSession(req);
   if (!guard.ok) return guard.response;
-  const r = await getAppPool().query(
-    `select "providerId", "samlConfig" from app."ssoProvider"`);
+  const r = await getAppPool().query(`select "providerId", "samlConfig" from app."ssoProvider"`);
   return Response.json({
     mcpUrl: `${BASE}/mcp`,
     apiUrl: BASE,
     issuer: BASE,
     scopes: ["env:dev", "env:live"],
     ssoProviders: r.rows.map((x) => ({
-      providerId: x.providerId, type: x.samlConfig ? "saml" : "oidc",
+      providerId: x.providerId,
+      type: x.samlConfig ? "saml" : "oidc",
     })),
     localLoginEnabled: !LOCAL_LOGIN_DISABLED,
   });

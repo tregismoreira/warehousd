@@ -6,6 +6,12 @@ import { ssoPlugin, ssoAdminPlugin, trustedOrigins } from "./sso";
 
 export const LOCAL_LOGIN_DISABLED = process.env.WAREHOUSD_DISABLE_LOCAL_LOGIN === "true";
 
+// The demo personas' password is literally "demo", and the test suite seeds them whether or not
+// demo mode is on — so the floor has to be relaxed for anything that is not a production
+// deployment, plus a deliberate demo deployment, rather than for demo mode alone.
+const SHORT_PASSWORDS_OK =
+  process.env.NODE_ENV !== "production" || process.env.WAREHOUSD_DEMO === "true";
+
 const appPool = new Pool({
   connectionString: process.env.APP_DATABASE_URL,
   options: "-c search_path=app",
@@ -26,7 +32,10 @@ export const auth = betterAuth({
     // Local credentials are the bootstrap/demo fallback (see docs/architecture.md). Kill switch disables them entirely.
     enabled: !LOCAL_LOGIN_DISABLED,
     requireEmailVerification: false,
-    minPasswordLength: 4,
+    // 4 exists only so the demo personas can hold the password "demo". Applying it unconditionally
+    // meant a production deployment accepted four-character passwords — a floor set by a fixture.
+    // A real deployment falls through to Better Auth's default of 8.
+    ...(SHORT_PASSWORDS_OK ? { minPasswordLength: 4 } : {}),
   },
   user: {
     additionalFields: {

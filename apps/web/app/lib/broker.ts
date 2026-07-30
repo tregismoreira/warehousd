@@ -1,4 +1,10 @@
-import { createPools, makeBroker, loadConfig, type Pools, type WarehousdConfig } from "@warehousd/broker";
+import {
+  createPools,
+  makeBroker,
+  loadConfig,
+  type Pools,
+  type WarehousdConfig,
+} from "@warehousd/broker";
 import { statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -46,14 +52,20 @@ function ensureConfigAndBroker(dir: string): CachedState {
     // all, which is the safer default. broker.mutate reports that as not_writable rather
     // than failing at connect time.
     const pools = createPools({
-      app:  process.env.APP_DATABASE_URL!,
-      dev:  process.env.DEV_DATABASE_URL!,
+      app: process.env.APP_DATABASE_URL!,
+      dev: process.env.DEV_DATABASE_URL!,
       live: process.env.LIVE_DATABASE_URL!,
-      imp:  process.env.IMPORT_DATABASE_URL,
-      devWrite:  process.env.DEV_WRITE_DATABASE_URL,
+      imp: process.env.IMPORT_DATABASE_URL,
+      devWrite: process.env.DEV_WRITE_DATABASE_URL,
       liveWrite: process.env.LIVE_WRITE_DATABASE_URL,
     });
-    cached = { pools, broker: makeBroker(pools, cfg), cfg, baselineMtime: mtimes.base, localMtime: mtimes.local };
+    cached = {
+      pools,
+      broker: makeBroker(pools, cfg),
+      cfg,
+      baselineMtime: mtimes.base,
+      localMtime: mtimes.local,
+    };
   } else {
     // Config changed: rebuild broker with same pools
     cached.broker = makeBroker(cached.pools, cfg);
@@ -79,4 +91,6 @@ export function getBroker() {
   return ensureConfigAndBroker(dir);
 }
 
-export function getAppPool() { return getBroker().pools.app; }
+export function getAppPool() {
+  return getBroker().pools.app;
+}

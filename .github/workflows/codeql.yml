@@ -1,0 +1,77 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, because most CodeQL findings arrive as new *queries* rather than as new code — a
+    # repository that only scans on push stops learning the moment it stops changing.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  # Code scanning needs GitHub Advanced Security on a private repository, and this one does not
+  # have it — the upload fails with "Code scanning is not enabled for this repository" *after* a
+  # full analysis has run. Skipping is the honest outcome: a red X on every pull request teaches
+  # people to ignore the check, and a green one that uploaded nothing is worse than either.
+  #
+  # Visibility is read at run time rather than from `github.event.repository.visibility`, which is
+  # not populated on `schedule` runs. That expression would leave the weekly re-scan permanently
+  # skipped even after the repository goes public — and the weekly run is the one this workflow can
+  # least afford to lose, since most CodeQL findings arrive as new queries rather than as new code.
+  #
+  # Nothing here needs changing when that happens. Flip the repository to public and the next run
+  # analyses.
+  visibility:
+    runs-on: ubuntu-latest
+    outputs:
+      public: ${{ steps.check.outputs.public }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          public="$(gh api "repos/${{ github.repository }}" --jq '.private | not')"
+          echo "public=$public" >> "$GITHUB_OUTPUT"
+          if [ "$public" = "true" ]; then
+            echo "Repository is public — running CodeQL analysis." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Repository is private and code scanning is unavailable, so the analysis was skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "Make the repository public, or enable GitHub Advanced Security, to turn it back on." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  analyze:
+    needs: visibility
+    if: needs.visibility.outputs.public == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Read-only, and required rather than optional: on a *private* repository the analyze step
+      # reads its own workflow run to build the upload metadata, and without this it fails with
+      # "Resource not accessible by integration" *after* a full successful analysis — SARIF
+      # exported and fingerprinted, then dropped at the last step. Public repositories get this
+      # implicitly, which is why the omission survives review.
+      actions: read
+      # The one write this repository's CI grants, and only here: it is how findings reach the
+      # Security tab.
+      security-events: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: github/codeql-action/init@a2983b8bed1923f44751c5c43237f479442827b3 # v3
+        with:
+          languages: javascript-typescript
+          # security-extended over the default: this repository's headline promise is that
+          # client-supplied input never reaches SQL except as a bound parameter, and the extra
+          # queries are largely injection and taint-tracking ones. See SECURITY.md.
+          queries: security-extended
+
+      # No build step: javascript-typescript is analysed from source. Skipping autobuild keeps this
+      # job from trying to run `pnpm build` and needing a database.
+      - uses: github/codeql-action/analyze@a2983b8bed1923f44751c5c43237f479442827b3 # v3
+        with:
+          category: /language:javascript-typescript

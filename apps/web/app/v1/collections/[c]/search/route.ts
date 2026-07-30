@@ -11,8 +11,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ c: s
   const { c } = await params;
   const url = new URL(req.url);
   const q = url.searchParams.get("q") || "";
-  const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!) : undefined;
-  const offset = url.searchParams.get("offset") ? parseInt(url.searchParams.get("offset")!) : undefined;
+  const limit = url.searchParams.get("limit")
+    ? parseInt(url.searchParams.get("limit")!)
+    : undefined;
+  const offset = url.searchParams.get("offset")
+    ? parseInt(url.searchParams.get("offset")!)
+    : undefined;
   const fields = url.searchParams.getAll("fields");
 
   const intent: DocSearchIntent = {

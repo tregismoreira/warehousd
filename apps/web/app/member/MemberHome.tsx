@@ -20,7 +20,7 @@ export function MemberHome() {
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   return (

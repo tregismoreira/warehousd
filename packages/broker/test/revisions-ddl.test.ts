@@ -7,33 +7,51 @@ import { tableDDL, viewDDL } from "../src/apply/ddl";
 import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
 
 let p: Provisioned;
-afterAll(async () => { await p?.end(); });
+afterAll(async () => {
+  await p?.end();
+});
 
 // Parsed through ConfigSchema, not hand-built: a hand-built literal skips the refinements, so
 // a test could assert against a configuration the loader would actually reject.
 const nonWritableCfg: WarehousdConfig = ConfigSchema.parse({
   project: "t",
   collections: {
-    people: { description: "dir", fields: {
-      id: { type: "uuid", posture: "allow", pk: true },
-      email: { type: "text", posture: "allow" },
-    }},
+    people: {
+      description: "dir",
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        email: { type: "text", posture: "allow" },
+      },
+    },
   },
 });
 
 const writableCfg: WarehousdConfig = ConfigSchema.parse({
   project: "t",
   collections: {
-    pages: { description: "d", writable: true, fields: {
-      id: { type: "uuid", posture: "allow", pk: true },
-      title: { type: "text", posture: { read: "allow", write: "allow" } },
-      body: { type: "text", posture: { read: "allow", write: "allow" } },
-    }},
+    pages: {
+      description: "d",
+      writable: true,
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        title: { type: "text", posture: { read: "allow", write: "allow" } },
+        body: { type: "text", posture: { read: "allow", write: "allow" } },
+      },
+    },
   },
 });
 
-const REV_COLS = ["_rev", "_rev_seq", "_rev_at", "_rev_by", "_rev_op",
-  "_rev_status", "_rev_fields", "_rev_base", "_current"];
+const REV_COLS = [
+  "_rev",
+  "_rev_seq",
+  "_rev_at",
+  "_rev_by",
+  "_rev_op",
+  "_rev_status",
+  "_rev_fields",
+  "_rev_base",
+  "_current",
+];
 
 describe("dataset revision DDL", () => {
   it("a writable: true dataset gets _rev*, _current, and the partial unique index", async () => {
@@ -46,7 +64,9 @@ describe("dataset revision DDL", () => {
       for (const col of REV_COLS) {
         const r = await db.query(
           `select 1 from information_schema.columns
-           where table_schema=$1 and table_name='pages' and column_name=$2`, [schema, col]);
+           where table_schema=$1 and table_name='pages' and column_name=$2`,
+          [schema, col],
+        );
         expect(r.rowCount, `${schema}.pages should have ${col}`).toBe(1);
       }
       // The declared pk is document identity now, not row identity: many revisions share it.
@@ -54,14 +74,17 @@ describe("dataset revision DDL", () => {
         `select 1 from information_schema.table_constraints tc
            join information_schema.key_column_usage k using (constraint_name, table_schema)
          where tc.table_schema=$1 and tc.table_name='pages'
-           and tc.constraint_type='PRIMARY KEY' and k.column_name='id'`, [schema]);
+           and tc.constraint_type='PRIMARY KEY' and k.column_name='id'`,
+        [schema],
+      );
       expect(pkOnId.rowCount, `${schema}.pages id must not be the primary key`).toBe(0);
     }
 
     // Exactly-one-current is a database guarantee, not an ordering convention.
     const idx = await db.query(
       `select indexdef from pg_indexes
-       where schemaname='data_live' and tablename='pages' and indexname='pages_current_idx'`);
+       where schemaname='data_live' and tablename='pages' and indexname='pages_current_idx'`,
+    );
     expect(idx.rowCount).toBe(1);
     expect(idx.rows[0].indexdef.toLowerCase()).toContain("unique");
     expect(idx.rows[0].indexdef.toLowerCase()).toContain("(org_id, id)");
@@ -76,11 +99,14 @@ describe("dataset revision DDL", () => {
     await createAppSchema(db);
     await applyConfig(db, writableCfg);
 
-    const insert = (current: boolean) => db.query(
-      `insert into data_live.pages
+    const insert = (current: boolean) =>
+      db.query(
+        `insert into data_live.pages
          (_rev_seq,_rev_by,_rev_op,_rev_status,_rev_fields,_current,org_id,id,title)
        values (1,'u','create','approved','{title}',$1,'default',
-               '11111111-1111-1111-1111-111111111111','t')`, [current]);
+               '11111111-1111-1111-1111-111111111111','t')`,
+        [current],
+      );
 
     await insert(true);
     await expect(insert(true)).rejects.toThrow(/duplicate key|unique/i);
@@ -90,7 +116,7 @@ describe("dataset revision DDL", () => {
     await db.end();
   });
 
-  it("a non-writable dataset gains no revision machinery at all", async () => {
+  it("a non-writable dataset gains no revision machinery at all", () => {
     const ddl = tableDDL("live", "people", nonWritableCfg);
     expect(ddl).not.toContain("_rev");
     expect(ddl).not.toContain("_current");
@@ -112,17 +138,21 @@ describe("dataset revision DDL", () => {
     expect(view).toContain("_current");
     expect(view).toContain("_rev_op <> 'delete'");
 
-    const rev = (seq: number, op: string, current: boolean, title: string) => db.query(
-      `insert into data_live.pages
+    const rev = (seq: number, op: string, current: boolean, title: string) =>
+      db.query(
+        `insert into data_live.pages
          (_rev_seq,_rev_by,_rev_op,_rev_status,_rev_fields,_current,org_id,id,title)
        values ($1,'u',$2,'approved','{title}',$3,'default',
-               '22222222-2222-2222-2222-222222222222',$4)`, [seq, op, current, title]);
+               '22222222-2222-2222-2222-222222222222',$4)`,
+        [seq, op, current, title],
+      );
 
     await db.query(`select set_config('warehousd.org_id','default',false)`);
     await rev(1, "create", false, "superseded");
     await rev(2, "update", true, "current");
-    expect((await db.query(`select title from data_live.v_pages`)).rows)
-      .toEqual([{ title: "current" }]);
+    expect((await db.query(`select title from data_live.v_pages`)).rows).toEqual([
+      { title: "current" },
+    ]);
 
     // A delete is a tombstone: the document leaves the view, the history stays in the table.
     await db.query(`update data_live.pages set _current=false where _rev_seq=2`);
@@ -154,10 +184,14 @@ describe("dataset revision DDL", () => {
     const migrated = ConfigSchema.parse({
       project: "t",
       collections: {
-        people: { description: "dir", writable: true, fields: {
-          id: { type: "uuid", posture: "allow", pk: true },
-          email: { type: "text", posture: { read: "allow", write: "allow" } },
-        }},
+        people: {
+          description: "dir",
+          writable: true,
+          fields: {
+            id: { type: "uuid", posture: "allow", pk: true },
+            email: { type: "text", posture: { read: "allow", write: "allow" } },
+          },
+        },
       },
     });
     await expect(applyConfig(db, migrated)).rejects.toThrow(/writable/i);
@@ -170,7 +204,10 @@ describe("file collection storage", () => {
     project: "t",
     collections: {
       policies: {
-        type: "file", description: "d", source: "./x", writable: true,
+        type: "file",
+        description: "d",
+        source: "./x",
+        writable: true,
         fields: {
           title: { posture: { read: "allow", write: "allow" } },
           content: { posture: { read: "allow", write: "allow" } },
@@ -187,16 +224,21 @@ describe("file collection storage", () => {
     await applyConfig(db, fileCfg);
 
     for (const t of ["policies__files", "policies__documents"]) {
-      const cols = (await db.query(
-        `select column_name from information_schema.columns
-         where table_schema='data_live' and table_name=$1`, [t])).rows.map((r) => r.column_name);
+      const cols = (
+        await db.query(
+          `select column_name from information_schema.columns
+         where table_schema='data_live' and table_name=$1`,
+          [t],
+        )
+      ).rows.map((r) => r.column_name);
       for (const c of REV_COLS) expect(cols, `${t} must not carry ${c}`).not.toContain(c);
     }
 
     // path stays unique, which is what makes create idempotent and a repeat a conflict.
     const uniq = await db.query(
       `select 1 from pg_indexes where schemaname='data_live'
-       and tablename='policies__files' and indexdef ilike '%unique%path%'`);
+       and tablename='policies__files' and indexdef ilike '%unique%path%'`,
+    );
     expect(uniq.rowCount).toBe(1);
 
     await db.end();

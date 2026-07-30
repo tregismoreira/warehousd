@@ -1,0 +1,18 @@
+{
+  // `next build` typechecks tsconfig.json's program (app/components/lib). This one adds everything
+  // else that is real TypeScript in this package and was previously checked nowhere: the vitest
+  // suite, the Playwright specs, the container entrypoint, and the Playwright config itself.
+  "extends": "./tsconfig.json",
+  "include": [
+    "app",
+    "components",
+    "lib",
+    "middleware.ts",
+    "next-env.d.ts",
+    "test",
+    "e2e",
+    "scripts",
+    "playwright.config.ts",
+    ".next/types/**/*.ts"
+  ]
+}

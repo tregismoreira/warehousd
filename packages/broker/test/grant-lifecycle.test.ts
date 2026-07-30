@@ -9,39 +9,66 @@ import { makeBroker } from "../src/broker";
 import { requestGrant, approveGrant, revokeGrant, denyGrant } from "../src/grants/manage";
 import { loadActiveGrant } from "../src/grants/eval";
 import type { WarehousdConfig } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
+import { ConfigSchema } from "../src/config/schema";
 
-const cfg: WarehousdConfig = {
-  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: { people: 8 } },
-  collections: { people: { description: "d", fields: {
-    id: { type: "uuid", posture: "allow", pk: true },
-    full_name: { type: "text", posture: "allow" },
-    email: { type: "text", posture: "allow" },
-  }}},
-};
+const cfg: WarehousdConfig = ConfigSchema.parse({
+  project: "t",
+  server: { port: 1 },
+  synthetic: { documents_per_collection: { people: 8 } },
+  collections: {
+    people: {
+      description: "d",
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        full_name: { type: "text", posture: "allow" },
+        email: { type: "text", posture: "allow" },
+      },
+    },
+  },
+});
 let p: Provisioned, admin: Pool, pools: Pools, broker: ReturnType<typeof makeBroker>;
 beforeAll(async () => {
-  p = await provision("lifecycle"); admin = new Pool({ connectionString: p.urls.admin });
-  await createAppSchema(admin); await applyConfig(admin, cfg); await generateSynthetic(admin, cfg, 1);
+  p = await provision("lifecycle");
+  admin = new Pool({ connectionString: p.urls.admin });
+  await createAppSchema(admin);
+  await applyConfig(admin, cfg);
+  await generateSynthetic(admin, cfg, 1);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
 });
-afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
+afterAll(async () => {
+  await admin.end();
+  await pools.end();
+  await p.end();
+});
 
 it("request→pending→approve(trim+expiry)→query ok→revoke→immediately no_grant", async () => {
-  const ctx = { userId: "mia", orgId: "default", env: "dev", via: "session" as const };
+  const ctx = makeCtx({ userId: "mia" });
   // before approval → no_grant
   const before = await broker.query(ctx, { collection: "people" });
   expect(before.ok).toBe(false);
 
-  const id = await requestGrant(admin, { userId: "mia", collection: "people", orgId: "default", env: "dev",
-    purposeLabel: "onboarding", allowedFields: ["id", "full_name", "email"] });
+  const id = await requestGrant(admin, {
+    userId: "mia",
+    collection: "people",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "onboarding",
+    allowedFields: ["id", "full_name", "email"],
+  });
   // trim email off on approval, set future expiry
-  await approveGrant(admin, cfg, id, "marcus",
-    { allowedFields: ["id", "full_name"], expiresAt: new Date(Date.parse("2099-01-01")).toISOString() });
+  await approveGrant(admin, cfg, id, "marcus", {
+    allowedFields: ["id", "full_name"],
+    expiresAt: new Date(Date.parse("2099-01-01")).toISOString(),
+  });
 
   const ok = await broker.query(ctx, { collection: "people", limit: 2 });
   expect(ok.ok).toBe(true);
-  if (ok.ok) { expect("email" in ok.documents[0]).toBe(false); expect("full_name" in ok.documents[0]).toBe(true); }
+  if (ok.ok) {
+    expect("email" in ok.documents[0]!).toBe(false);
+    expect("full_name" in ok.documents[0]!).toBe(true);
+  }
 
   // requesting the trimmed field is denied
   const denied = await broker.query(ctx, { collection: "people", fields: ["email"] });
@@ -55,16 +82,41 @@ it("request→pending→approve(trim+expiry)→query ok→revoke→immediately n
 });
 
 it("approving a second grant for the same (user, collection, env) fails (design test 10)", async () => {
-  const id1 = await requestGrant(admin, { userId: "u", collection: "people", orgId: "default", env: "dev", purposeLabel: "a", allowedFields: ["id"] });
+  const id1 = await requestGrant(admin, {
+    userId: "u",
+    collection: "people",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "a",
+    allowedFields: ["id"],
+  });
   await approveGrant(admin, cfg, id1, "marcus");
-  const id2 = await requestGrant(admin, { userId: "u", collection: "people", orgId: "default", env: "dev", purposeLabel: "b", allowedFields: ["id"] });
-  await expect(approveGrant(admin, cfg, id2, "marcus")).rejects.toThrow(/grants_one_active|duplicate key/);
+  const id2 = await requestGrant(admin, {
+    userId: "u",
+    collection: "people",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "b",
+    allowedFields: ["id"],
+  });
+  await expect(approveGrant(admin, cfg, id2, "marcus")).rejects.toThrow(
+    /grants_one_active|duplicate key/,
+  );
 });
 
 it("approveGrant persists documentFilters array", async () => {
-  const id = await requestGrant(admin, { userId: "u2", collection: "people", orgId: "default", env: "dev", purposeLabel: "p", allowedFields: ["title","content"] });
-  await approveGrant(admin, cfg, id, "marcus", { documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md"] }] });
-  const g = await loadActiveGrant(admin, { userId: "u2", env: "dev", orgId: "default" }, "people");
+  const id = await requestGrant(admin, {
+    userId: "u2",
+    collection: "people",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "p",
+    allowedFields: ["title", "content"],
+  });
+  await approveGrant(admin, cfg, id, "marcus", {
+    documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md"] }],
+  });
+  const g = await loadActiveGrant(admin, makeCtx({ userId: "u2" }), "people");
   expect(g?.documentFilter?.[0]?.op).toBe("in");
 });
 
@@ -74,7 +126,14 @@ it("denyGrant returns false for nonexistent grant", async () => {
 });
 
 it("denyGrant returns false for already-denied grant", async () => {
-  const id = await requestGrant(admin, { userId: "u3", collection: "people", orgId: "default", env: "dev", purposeLabel: "test", allowedFields: ["id"] });
+  const id = await requestGrant(admin, {
+    userId: "u3",
+    collection: "people",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "test",
+    allowedFields: ["id"],
+  });
   const denied1 = await denyGrant(admin, id, "marcus");
   expect(denied1).toBe(true);
   const denied2 = await denyGrant(admin, id, "marcus");
@@ -87,13 +146,27 @@ it("revokeGrant returns false for nonexistent grant", async () => {
 });
 
 it("revokeGrant returns false for pending grant (not approved)", async () => {
-  const id = await requestGrant(admin, { userId: "u4", collection: "people", orgId: "default", env: "dev", purposeLabel: "test", allowedFields: ["id"] });
+  const id = await requestGrant(admin, {
+    userId: "u4",
+    collection: "people",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "test",
+    allowedFields: ["id"],
+  });
   const revoked = await revokeGrant(admin, id, "marcus");
   expect(revoked).toBe(false);
 });
 
 it("denyGrant returns false for approved grant", async () => {
-  const id = await requestGrant(admin, { userId: "u5", collection: "people", orgId: "default", env: "dev", purposeLabel: "test", allowedFields: ["id"] });
+  const id = await requestGrant(admin, {
+    userId: "u5",
+    collection: "people",
+    orgId: "default",
+    env: "dev",
+    purposeLabel: "test",
+    allowedFields: ["id"],
+  });
   await approveGrant(admin, cfg, id, "marcus");
   const denied = await denyGrant(admin, id, "marcus");
   expect(denied).toBe(false);

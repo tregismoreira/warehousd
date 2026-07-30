@@ -63,19 +63,19 @@ is testable on its own and identical no matter which adapter called it.
 **A Collection holds Documents; each Document has Fields.** See
 [glossary.md](glossary.md) for why those words and not "table", "row", "item".
 
-| Concept | Definition |
-|---|---|
-| **Collection** | A named, governed set of documents. `type: dataset` (default) for queryable tables, `type: file` for indexed files. Backed by Postgres tables, one set per environment. |
-| **Document** | One governed, queryable record. For dataset collections, one table row. For file collections, one indexed segment of a parsed file. |
-| **Field** | A document's governed attribute. Postures and grants operate on fields. |
-| **Field posture** | Per-field, two-axis: `{ read, write }`, each `allow` or `deny`, declared in `warehousd.yml`. `deny` means that axis can *never* be granted. `allow` only makes a field **grantable** on that axis — it stays denied per user until a grant covers it. No posture means denied on both. A bare `posture: allow` is read-allow, **write-deny**. |
-| **Grant** | `(org, user, collection, purpose, verbs, allowed fields ⊆ grantable fields, env, mode, expires_at, optional document filter)`. Requested by a user, approved by a manager or admin, evaluated at query time. |
-| **Verb** | `read`, `create`, `update`, `delete`, `approve`. A grant carries a set. Which verbs a collection can support at all is **structural** — it follows from its type, not from the grant. |
-| **Environment** | `dev` or `live`. Dev resolves to synthetic data, live to real data. Carried in the access token, never in a request. |
-| **Organization** | The tenant. Every grant, audit event and document belongs to exactly one. Derived from the authenticated user, never from a request. |
-| **Purpose** | A short label plus free text, stated at request time and stamped on every audit event the grant produces. |
-| **Role** | `admin` (collections, SSO, users, clients, import, audit), `manager` (approves grants, promotes clients), `member` (requests grants, queries). |
-| **Audit event** | Immutable record of every broker decision: who, org, env, collection, intent, fields returned, grant id, outcome, timestamp. |
+| Concept           | Definition                                                                                                                                                                                                                                                                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Collection**    | A named, governed set of documents. `type: dataset` (default) for queryable tables, `type: file` for indexed files. Backed by Postgres tables, one set per environment.                                                                                                                                                                       |
+| **Document**      | One governed, queryable record. For dataset collections, one table row. For file collections, one indexed segment of a parsed file.                                                                                                                                                                                                           |
+| **Field**         | A document's governed attribute. Postures and grants operate on fields.                                                                                                                                                                                                                                                                       |
+| **Field posture** | Per-field, two-axis: `{ read, write }`, each `allow` or `deny`, declared in `warehousd.yml`. `deny` means that axis can _never_ be granted. `allow` only makes a field **grantable** on that axis — it stays denied per user until a grant covers it. No posture means denied on both. A bare `posture: allow` is read-allow, **write-deny**. |
+| **Grant**         | `(org, user, collection, purpose, verbs, allowed fields ⊆ grantable fields, env, mode, expires_at, optional document filter)`. Requested by a user, approved by a manager or admin, evaluated at query time.                                                                                                                                  |
+| **Verb**          | `read`, `create`, `update`, `delete`, `approve`. A grant carries a set. Which verbs a collection can support at all is **structural** — it follows from its type, not from the grant.                                                                                                                                                         |
+| **Environment**   | `dev` or `live`. Dev resolves to synthetic data, live to real data. Carried in the access token, never in a request.                                                                                                                                                                                                                          |
+| **Organization**  | The tenant. Every grant, audit event and document belongs to exactly one. Derived from the authenticated user, never from a request.                                                                                                                                                                                                          |
+| **Purpose**       | A short label plus free text, stated at request time and stamped on every audit event the grant produces.                                                                                                                                                                                                                                     |
+| **Role**          | `admin` (collections, SSO, users, clients, import, audit), `manager` (approves grants, promotes clients), `member` (requests grants, queries).                                                                                                                                                                                                |
+| **Audit event**   | Immutable record of every broker decision: who, org, env, collection, intent, fields returned, grant id, outcome, timestamp.                                                                                                                                                                                                                  |
 
 Configuration is declarative and lives in the consuming project's repo — see
 [configuration.md](configuration.md).
@@ -94,6 +94,27 @@ tests in the suite.
    re-validates every one against the grant before constructing SQL, which it
    builds server-side from named views and a fixed operator whitelist. No
    client-supplied SQL fragment reaches the database.
+
+   The enforcement point is `packages/broker/src/intents/schema.ts`, applied at
+   the _top of every broker verb_ rather than in the adapters. That placement is
+   what makes the invariant hold rather than merely be true today: both adapters
+   parse as well, so a malformed body answers 400 before it costs a grant lookup,
+   but a new adapter that forgets cannot reintroduce the hole — it has to pass
+   through the verb. A parse failure returns `invalid_intent` through the normal
+   refusal path, so the probe is audited (invariant 7).
+
+   `fn` and `op` are the only intent values that reach the SQL text as syntax
+   rather than as bound parameters; both are `z.enum`, and `sql/build.ts` re-checks
+   them against the same lists rather than trusting the parse. Field names are only
+   ever identifiers, quoted through `sql/ident.ts`, drawn from the collection's
+   declared set.
+
+   Covered by `packages/broker/test/sql-build.test.ts` — the injection payload for
+   `fn`, `op: "constructor"`, and a non-integer `limit`, each asserting a refusal
+   rather than a driver error — and over the wire by
+   `apps/web/test/rest-api.integration.test.ts` and
+   `apps/web/test/mcp-tools.test.ts`.
+
 4. **Denied means absent.** Denied fields are excluded at SQL construction — they
    are never selected, so they cannot appear in a response payload, an error
    message, or a log line. Not filtered out afterwards: never fetched.
@@ -170,13 +191,13 @@ row.** That is deliberate: an aggregate can then never reveal anything new, so n
 minimum-group-size or differential-privacy machinery is needed. An
 "aggregate-only" posture — compute `avg(base_salary)` without row access — is
 explicitly future work, because doing it safely needs inference-leak protection
-(an average over a group of one *is* the value).
+(an average over a group of one _is_ the value).
 
 **Natural language is deliberately absent from the broker.** The MCP client is
 the natural-language layer: it turns "average salary for a senior accountant over
 the past five years" into a `QueryIntent`. Embedding our own NL→query model would
 place an untrusted LLM inside the trust boundary and add a network dependency to
-an otherwise offline core. The broker's job is to make the *structured* intent
+an otherwise offline core. The broker's job is to make the _structured_ intent
 expressive enough that the assistant can ask real questions.
 
 ## Named views
@@ -188,7 +209,7 @@ For each collection and environment there is a Postgres view
 surface stays flat. The broker only ever selects from views, never base tables, and the
 env roles hold `SELECT` on the view only.
 
-Views are intentionally *flat*: every field appears regardless of posture. Access
+Views are intentionally _flat_: every field appears regardless of posture. Access
 control is enforced at the grant and query layer, not by omitting columns, which
 keeps one view valid for every caller. This is why the view's owner role — not
 the caller's — is what reads the base tables.
@@ -221,17 +242,17 @@ returns before anything is attempted, so those four carry no audit row.
 A refusal carries a `reason`, and the admin UI shows it verbatim, so these are
 the codes to look up:
 
-| `reason` | HTTP | Meaning |
-|---|---|---|
-| `unsupported_format` | 400 | Not `csv` or `json`. |
-| `no_file` | 400 | No file part, or an empty one. |
-| `file_too_large` | 413 | Over 5 MB. |
-| `parse_failed` | 400 | Malformed CSV or JSON. |
-| `validation_failed` | 400 | The payload was checked against the config and rejected. Carries a per-row `errors` list — see below. |
-| `constraint_violation` | 400 | Postgres refused a row (`23xxx`): duplicate key, missing FK, failed check. Nothing was written. |
-| `write_failed` | 400 | Any other database error during the insert. |
-| `import_not_configured` | 503 | `IMPORT_DATABASE_URL` is unset, so there is no write path at all. |
-| `taxonomy_unavailable` | 503 | A bound vocabulary's terms could not be read. Distinct from the config being wrong: the file may be fine and worth retrying. |
+| `reason`                | HTTP | Meaning                                                                                                                      |
+| ----------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `unsupported_format`    | 400  | Not `csv` or `json`.                                                                                                         |
+| `no_file`               | 400  | No file part, or an empty one.                                                                                               |
+| `file_too_large`        | 413  | Over 5 MB.                                                                                                                   |
+| `parse_failed`          | 400  | Malformed CSV or JSON.                                                                                                       |
+| `validation_failed`     | 400  | The payload was checked against the config and rejected. Carries a per-row `errors` list — see below.                        |
+| `constraint_violation`  | 400  | Postgres refused a row (`23xxx`): duplicate key, missing FK, failed check. Nothing was written.                              |
+| `write_failed`          | 400  | Any other database error during the insert.                                                                                  |
+| `import_not_configured` | 503  | `IMPORT_DATABASE_URL` is unset, so there is no write path at all.                                                            |
+| `taxonomy_unavailable`  | 503  | A bound vocabulary's terms could not be read. Distinct from the config being wrong: the file may be fine and worth retrying. |
 
 The two 503s mean the stack cannot serve the request; the file itself may be
 perfectly good. That distinction is the point — an admin should never be sent to
@@ -270,7 +291,7 @@ warehousd builds authorization, not authentication.
    (`app.client_policies`). A client whose policy lacks `env:live` can ask for it
    all day and will only ever receive `env:dev`. Escalation is impossible by
    construction, not by validation.
-2. `env:live` is additionally intersected with the *user's* eligibility: at least
+2. `env:live` is additionally intersected with the _user's_ eligibility: at least
    one approved, unexpired `env='live'` grant. Otherwise it is silently dropped,
    even for a live-allowed client.
 3. If both survive, the consent step shows an env picker. Exactly one env scope
@@ -289,9 +310,9 @@ next refresh.
 Adapters derive the context in exactly one place:
 
 ```ts
-const token = await auth.verifyAccessToken(req);        // signature + expiry
+const token = await auth.verifyAccessToken(req); // signature + expiry
 const env = token.scopes.includes("env:live") ? "live" : "dev";
-const orgId = await orgOfUser(token.sub);               // from the user row, not the token
+const orgId = await orgOfUser(token.sub); // from the user row, not the token
 const ctx: BrokerContext = { userId: token.sub, orgId, env };
 // Any env-like or org-like value in the request body or params is ignored and never read.
 ```
@@ -317,7 +338,7 @@ these tables.
 extracts text (title from the first heading or the filename, owner from
 frontmatter, updated_at from mtime), segments it into documents, and upserts —
 skipping unchanged files by checksum and deleting rows for files removed from
-disk. `source` is *dev* content by definition; live content is indexed only by an
+disk. `source` is _dev_ content by definition; live content is indexed only by an
 explicit `--env live` with `source_live` or `--source`. The CLI never indexes one
 directory into both environments.
 
@@ -333,7 +354,7 @@ for free.
 **Document-level scoping.** A grant may carry a `document_filter` —
 a **list** of `{ field, op: "eq" | "in", value }` predicates, ANDed — restricting
 which documents it reaches. Every predicate's field is validated against the
-collection's *YAML field set*, not the user's allowed fields: that is what lets a
+collection's _YAML field set_, not the user's allowed fields: that is what lets a
 denied field like `path` gate documents without ever being readable, and equally
 what lets a plain metadata field like `confidentiality` gate them. The list is
 author-supplied at approval time, never client-supplied — the approver picks
@@ -352,13 +373,42 @@ document_filter: [{ field: owner, op: eq, value: $self }]
 ```
 
 That makes "lower-level roles see and edit only what is assigned to them" a
-property of the *grant* rather than of application logic. Binding happens in
+property of the _grant_ rather than of application logic. Binding happens in
 `loadActiveGrant`, per predicate and per element inside an `in` list, so no
 caller can forget it and the SQL builder still sees a plain literal. Only the
 exact string `$self` is a sentinel — `$self-service` is a literal, and there is
 no substring interpolation. A partial unique index guarantees at most one approved grant per
 `(user, collection, env)`, so a second, broader grant can never silently override
 the restriction.
+
+**One rule, two evaluators.** A document filter is evaluated in SQL on the read
+path (`sql/build.ts`, appended to the WHERE clause) and in process on the write
+path (`grants/filters.ts`, against a row already fetched). The write path cannot
+reuse the read path's SQL: it reads base tables for the `_rev*` bookkeeping
+columns, and the view deliberately hides pending and deleted revisions. Two
+evaluators for one rule is a correctness hazard — whenever they disagree, the same
+grant admits a row on read and refuses it on write — so the invariant is stated
+narrowly and tested directly:
+
+> For every filter `validateDocumentFilters` admits, the in-process evaluator
+> returns exactly what `col = $1` returns in the database.
+
+The guarantee is _not_ that JavaScript reproduces Postgres's input parsing, which
+is not tractable: `'tr'::boolean` is true, `'1e2'::numeric` is 100, and a
+timestamp carrying no zone is resolved in the server's timezone rather than the
+broker process's. Instead both sides are canonicalised to a string that compares
+exactly, and a value that cannot be canonicalised with certainty is **refused on
+both paths** as `invalid_intent` rather than evaluated by one and not the other.
+So the set of filters that can exist is the set the two paths provably agree on.
+`packages/broker/test/filter-parity.test.ts` asserts the agreement case by case
+against a live Postgres, and separately asserts it end to end — one grant, one
+row, `query` and `mutate` reaching the same verdict.
+
+Refused for that reason: a `json` field (jsonb equality is structural, and the
+previous string coercion made such a filter match _every_ row), a `view_join`
+field (computed by the view, absent from the base table the write path reads), a
+zone-less timestamp, and any value that is not a valid instance of its column's
+declared type.
 
 ## Organizations and tenant isolation
 
@@ -415,7 +465,7 @@ denied, so every configuration written before the write path existed stays valid
 and nothing becomes writable by accident:
 
 ```yaml
-email:       { type: text,    posture: allow }                        # read allow, write deny
+email: { type: text, posture: allow } # read allow, write deny
 base_salary: { type: numeric, posture: { read: deny, write: allow } }
 ```
 
@@ -433,13 +483,13 @@ Two rules are enforced at approval time, in one place
 
 - **`approve` requires `read`.** You cannot approve what you cannot see; without
   this, "approve, then read the diff" is a privilege-escalation path around field
-  postures. Read is *not* required in general — an append-only ingestion grant
+  postures. Read is _not_ required in general — an append-only ingestion grant
   (`create`, no `read`) is legitimate and forcing `read` onto it would widen
   access rather than narrow it.
 - **Verb support is structural.** It follows from the collection's type, so
   `update` on a file collection is refused regardless of what an approver asks
-  for. File collections are a record of what was *ingested*; dataset collections
-  are a record of what is currently *true*. You append to the former and revise
+  for. File collections are a record of what was _ingested_; dataset collections
+  are a record of what is currently _true_. You append to the former and revise
   the latter.
 
 `writable: true` on a collection opts it into the write path. Collections that do
@@ -520,12 +570,18 @@ mutation path at all, which is the safer default.
 ```ts
 type MutationIntent =
   | { collection: string; op: "create"; values: Record<string, unknown> }
-  | { collection: string; op: "update"; id: string; expect?: string; values: Record<string, unknown> }
+  | {
+      collection: string;
+      op: "update";
+      id: string;
+      expect?: string;
+      values: Record<string, unknown>;
+    }
   | { collection: string; op: "delete"; id: string; expect?: string };
 
 type MutationResult =
-  | { ok: true;  status: "applied"; documentId: string; rev: string; auditId: string }
-  | { ok: true;  status: "pending"; proposalId: string; auditId: string }
+  | { ok: true; status: "applied"; documentId: string; rev: string; auditId: string }
+  | { ok: true; status: "pending"; proposalId: string; auditId: string }
   | { ok: false; reason: MutationRefusalReason; auditId: string };
 ```
 
@@ -549,7 +605,7 @@ on `create` — a create must be able to name what it creates. Requiring
 identity may later be changed. On `update` and `delete` they are refused
 outright: changing identity is not an edit.
 
-**The audit intent records the op and the field *names*, never the values.** A
+**The audit intent records the op and the field _names_, never the values.** A
 write payload can carry real personal data and an audit row is readable by every
 admin — a deliberate departure from `query`, whose intent is safe to store
 verbatim.
@@ -560,14 +616,14 @@ granular type codes are collapsed to `invalid_value` at the broker boundary,
 since naming a type is itself a small disclosure.
 
 **Concurrency.** `expect` is the `_rev` the caller last saw; a mismatch is
-`conflict`. On promotion the old revision is demoted *before* the new one is
+`conflict`. On promotion the old revision is demoted _before_ the new one is
 inserted — both would otherwise be `_current` between the two statements and the
 partial unique index would reject the write.
 
 ## Proposals
 
 `request_access → pending grant → manager approval` was already a
-proposal/approval engine. Pointed at *mutations* instead of *access*, it becomes
+proposal/approval engine. Pointed at _mutations_ instead of _access_, it becomes
 the governed write path: **an agent may propose; only an authenticated human may
 approve.**
 
@@ -575,7 +631,7 @@ Whether a write applies directly or becomes a proposal is a property of the
 **grant**, not of the caller: `mode: direct | proposal_only`. An agent-driven
 integration gets `proposal_only`; a trusted back-office tool gets `direct`.
 
-A `proposal_only` write runs the *identical* validation chain and then, instead
+A `proposal_only` write runs the _identical_ validation chain and then, instead
 of promoting, stores the revision with `_rev_status = 'pending'` and
 `_current = false`, returning `{ status: "pending", proposalId }`. Two properties
 follow from the storage model rather than from code:
@@ -587,9 +643,9 @@ follow from the storage model rather than from code:
 
 ### Promotion is a merge, not a replace
 
-Replacing the current row would make two agents editing *disjoint* fields collide
+Replacing the current row would make two agents editing _disjoint_ fields collide
 spuriously. Instead, promoting a pending revision writes a new current revision
-whose values are *current values, overwritten by the proposal's `_rev_fields`*.
+whose values are _current values, overwritten by the proposal's `_rev_fields`_.
 Two disjoint proposals both apply cleanly, in approval order.
 
 **Conflict is detected semantically.** A proposal carries `_rev_base`, the
@@ -600,7 +656,31 @@ was also changed by an approved revision after `_rev_base`, it refuses with
 The merged revision records the **proposer** as `_rev_by`: that column is who
 authored the content. Who approved it is in the audit row.
 
-`broker.listProposals` returns metadata and the *names* of the fields a proposal
+**The consumed proposal becomes `superseded`, not `approved`.** Because promotion
+writes a _new_ row, the pending row it merged from is still there, and marking it
+`approved` left two approved rows carrying the same `_rev_fields` and `_rev_by` —
+so a document's history showed every approval twice, and the merged row's
+`_rev_seq` (taken from `max(_rev_seq)`, which counted the pending row) skipped a
+number each time. A document with three revisions reported sequence 1, 2, 3, 4, 5.
+
+The pending row is now marked `superseded` and the merged row's sequence comes
+from the revision it replaces, so the history is one entry per approval with a
+contiguous sequence. `listRevisions` excludes superseded rows: they record what
+was _proposed_, not a state the document ever held. They are kept rather than
+deleted — the write role holds no `DELETE`, and once a merge has pulled in a
+concurrent change the merged row no longer shows what was actually proposed.
+
+A superseded proposal deliberately shares the `_rev_seq` of the revision that
+consumed it: the sequence was assigned at proposal time as the slot it expected to
+occupy, and unless a concurrent write intervened that is the slot it got.
+
+`superseded` is a storage detail, not API vocabulary. A proposal's lifecycle is
+pending → approved | rejected, so `listProposals({ status: "approved" })` matches
+superseded rows. Querying the column directly for `approved` would return the
+merged _revisions_ instead — and before the two were distinguished it matched both,
+which is why that listing was doubled.
+
+`broker.listProposals` returns metadata and the _names_ of the fields a proposal
 touches — **never their values**. A reviewer fetches content through
 `getDocument`, where postures are already enforced; duplicating values into the
 listing would be a posture bypass. It reads through the write pool, the only role
@@ -666,7 +746,7 @@ existence oracle for collections.
 
 **A grant's document filter is not applied**, because the feed holds no field
 data to test a predicate against. The consequence is deliberate and bounded: such
-a caller learns that *some* document in that collection changed, and its id, but
+a caller learns that _some_ document in that collection changed, and its id, but
 not which fields moved or what they hold. `getDocument` then refuses the ones
 outside the filter.
 
@@ -695,14 +775,14 @@ system — a parallel system is precisely how the two sets of rules drift apart.
 - **Shown once at creation**, never retrievable. Only a salted scrypt hash is
   stored, compared in constant time.
 - **Rotation without downtime** — a client may hold two live secrets at once, and
-  the old one is revoked *explicitly*. Revoking on rotation would make every
+  the old one is revoked _explicitly_. Revoking on rotation would make every
   rotation an outage. A third unrevoked secret is refused.
 - **Mandatory expiry with a ceiling** (365 days). A never-expiring credential is
   philosophically opposite to purpose-bound expiring grants.
 - `last_used_at`, `created_by`, `created_at` recorded per key.
 
 **The collection ceiling.** `client_policies.allowed_collections` lets IT declare
-*"the Marketing Dashboard may touch `campaigns` and `accounts`."* Even if a user
+_"the Marketing Dashboard may touch `campaigns` and `accounts`."_ Even if a user
 personally holds a grant on `salaries`, that app cannot reach it as them. A
 ceiling **only ever narrows** — it can never widen a grant.
 
@@ -712,8 +792,17 @@ can forget it. A collection outside the ceiling returns null, so every verb
 refuses `no_grant` uniformly: a distinguishable code would tell an app exactly
 which collections it is missing.
 
+`listCollections` is the exception that has to apply the ceiling itself, because
+discovery answers before any grant is loaded. It intersects with the ceiling for
+the same reason every other verb does: otherwise a restricted client can read
+back the name and description of every collection in the config — a catalogue of
+exactly what it is not allowed to ask about. Within the ceiling, names and
+descriptions stay visible to any authenticated caller whether or not they hold a
+grant; that is deliberate, and it is what makes `request_access` usable — you
+cannot ask for access to a collection you cannot see exists.
+
 **Audit `via`.** Every audit row records which credential produced it —
-`session | oauth | token_exchange | api_key:<id>`. *"Which credential did this"*
+`session | oauth | token_exchange | api_key:<id>`. _"Which credential did this"_
 is a compliance question the previous audit row could not answer.
 
 ### One implementation of the env rules
@@ -722,7 +811,7 @@ The §6.1 scope rules were inline in the OAuth plugin. They are now a pure broke
 function, because **if a key can reach `env:live` by any path an OAuth token
 cannot, invariant 5 is dead** — and two implementations is how that happens.
 
-Issuance and refresh are deliberately *different questions* and have separate
+Issuance and refresh are deliberately _different questions_ and have separate
 entry points:
 
 - `resolveEnvScopes` answers **"what may this request have"** — intersect with
@@ -746,7 +835,7 @@ from one that does not exist: a distinct code would be an existence oracle.
 `path` addresses a source file and is file-collections-only; on a dataset it is
 `invalid_intent`. Because one file yields many documents, the file form fetches
 every chunk in `document_seq` order and rejoins them, undoing the indexer's
-overlap. That reconstructs the *chunked* text, not the source file byte-for-byte
+overlap. That reconstructs the _chunked_ text, not the source file byte-for-byte
 — chunking trims and rejoins paragraphs, and nothing stores the original body.
 A caller needing the exact source must keep it.
 
@@ -842,13 +931,13 @@ old column stays as it was. Those are the cases versioned migrations are for.
 
 One OAuth-protected endpoint at `/mcp`, streamable HTTP.
 
-| Tool | Behavior |
-|---|---|
-| `list_collections` | Names and descriptions only — no schema, no counts. |
-| `describe_collection` | Only the fields visible under the caller's grants. |
-| `query_collection` | Filters, ordering, limits, aggregation — re-validated, then executed. |
-| `search_documents` | Ranked full-text search over a file collection, grant-filtered. |
-| `request_access` | Opens a pending grant request for a manager to approve. |
+| Tool                  | Behavior                                                              |
+| --------------------- | --------------------------------------------------------------------- |
+| `list_collections`    | Names and descriptions only — no schema, no counts.                   |
+| `describe_collection` | Only the fields visible under the caller's grants.                    |
+| `query_collection`    | Filters, ordering, limits, aggregation — re-validated, then executed. |
+| `search_documents`    | Ranked full-text search over a file collection, grant-filtered.       |
+| `request_access`      | Opens a pending grant request for a manager to approve.               |
 
 Refusals return a reason code plus a request-access hint — never a denied value,
 never SQL. Tool descriptions state the governance model plainly: the model
@@ -866,18 +955,28 @@ Nothing. Two failure modes are handled separately.
 **Its tool calls are untrusted proposals**, re-validated by the broker like any
 other caller's. That is the whole architecture above.
 
-**Its final text answer is untrusted output too.** Observed in practice: asked
-for salary data with no grant, a model ignored the `no_grant` tool result and
-produced a plausible table of invented salaries, admitting they were fabricated
-only when challenged. The built-in chat console defends against this in two
-layers: the system prompt forbids fabricating, guessing, or simulating data
-absent from a tool result even under repeated pressure; and a server-side guard
-scans the conversation for `query_collection` results with `ok: true`, and if the
-model's final text contains a table or multiple currency figures while that set
-is empty, injects a corrective message rather than streaming the fabrication.
-This is a targeted heuristic, not a grounding check — it catches the observed
-failure mode cheaply. Any adapter that puts an LLM in front of the broker should
-assume it needs its own version.
+**Its final text answer is untrusted output too**, and warehousd does not try to
+police it. Observed in practice: asked for salary data with no grant, a model
+ignored the `no_grant` tool result and produced a plausible table of invented
+salaries, admitting they were fabricated only when challenged. Nothing the broker
+enforces prevents that — no field was disclosed, no grant was bypassed, and the
+audit log correctly records a refusal. The failure is entirely in the answer the
+model composed on top of it.
+
+warehousd therefore ships **no LLM-facing surface of its own**. It earlier
+included a chat console with a fabrication heuristic — a system prompt forbidding
+invented data, plus a server-side scan for tables or currency figures in turns
+where no `query_collection` had returned `ok: true`. Both were removed. The
+heuristic was a demo bench, its state was reconstructed from a client-supplied
+conversation history and so was forgeable by the client it was meant to check,
+and it put a live model API key behind an endpoint that every authenticated
+member could reach. A governance layer should not be the thing that also holds
+the model credential.
+
+Grounding an answer is the adapter's problem, and any adapter that puts an LLM in
+front of the broker needs its own defence. The broker gives it what it needs to
+build one: `fieldsReturned` on every allowed result, and a reason code with no
+data on every refusal.
 
 ## Adding an adapter
 

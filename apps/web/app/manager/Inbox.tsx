@@ -21,37 +21,50 @@ export function Inbox() {
     try {
       const res = await fetch("/api/grants");
       const data = await res.json();
-      setGrants((data.pending ?? []).map((g: GrantRow) => ({
-        ...g,
-        collectionType: g.collectionType || "dataset",
-      })));
+      setGrants(
+        (data.pending ?? []).map((g: GrantRow) => ({
+          ...g,
+          collectionType: g.collectionType || "dataset",
+        })),
+      );
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   const columns: ColumnDef<GrantRow, unknown>[] = [
-    { accessorKey: "user_id", header: "Requester",
-      cell: ({ row }) => <Mono>{row.original.user_id}</Mono> },
-    { accessorKey: "collection", header: "Collection",
-      cell: ({ row }) => <span className="font-medium">{row.original.collection}</span> },
-    { accessorKey: "env", header: "Env",
-      cell: ({ row }) => <Mono>{row.original.env}</Mono> },
-    { accessorKey: "purpose_label", header: "Purpose",
-      cell: ({ row }) => (
-        <span className="text-sm">{row.original.purpose_label || "—"}</span>
-      ) },
-    { accessorKey: "requested_at", header: "Requested",
+    {
+      accessorKey: "user_id",
+      header: "Requester",
+      cell: ({ row }) => <Mono>{row.original.user_id}</Mono>,
+    },
+    {
+      accessorKey: "collection",
+      header: "Collection",
+      cell: ({ row }) => <span className="font-medium">{row.original.collection}</span>,
+    },
+    { accessorKey: "env", header: "Env", cell: ({ row }) => <Mono>{row.original.env}</Mono> },
+    {
+      accessorKey: "purpose_label",
+      header: "Purpose",
+      cell: ({ row }) => <span className="text-sm">{row.original.purpose_label || "—"}</span>,
+    },
+    {
+      accessorKey: "requested_at",
+      header: "Requested",
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground">
           {new Date(row.original.requested_at).toLocaleString()}
         </span>
-      ) },
-    { id: "review", header: "",
+      ),
+    },
+    {
+      id: "review",
+      header: "",
       cell: ({ row }) => (
         <Button
           size="sm"
@@ -63,13 +76,16 @@ export function Inbox() {
         >
           Review
         </Button>
-      ) },
+      ),
+    },
   ];
 
   return (
     <>
       <DataTable
-        columns={columns} data={grants} loading={loading}
+        columns={columns}
+        data={grants}
+        loading={loading}
         empty={
           <EmptyState
             icon={InboxIcon}
@@ -78,12 +94,7 @@ export function Inbox() {
           />
         }
       />
-      <ApproveSheet
-        grant={selected}
-        open={sheetOpen}
-        onOpenChange={setSheetOpen}
-        onDone={load}
-      />
+      <ApproveSheet grant={selected} open={sheetOpen} onOpenChange={setSheetOpen} onDone={load} />
     </>
   );
 }

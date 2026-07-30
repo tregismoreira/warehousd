@@ -9,9 +9,9 @@ export type ClientPolicy = {
 };
 
 export function resolveEnvScopes(options: {
-  requested: string[];          // scopes requested in the auth flow
-  policy: ClientPolicy;          // client's allowed scopes (policy.allowedScopes)
-  liveEligible: boolean;         // user has an approved live grant
+  requested: string[]; // scopes requested in the auth flow
+  policy: ClientPolicy; // client's allowed scopes (policy.allowedScopes)
+  liveEligible: boolean; // user has an approved live grant
 }): string[] {
   const { requested, policy, liveEligible } = options;
 
@@ -41,6 +41,36 @@ export function resolveEnvScopes(options: {
   return survivors;
 }
 
+// The same rules, for a caller that must end up with exactly one env or refuse.
+//
+// resolveEnvScopes returns [] for a request that named no env scope, which is right for the OAuth
+// authorize hook — it means "leave this token's scopes alone". It was wrong for /v1/token, which
+// mints the token itself: an empty scope string was stored, and both context constructors read a
+// missing env as dev. So omitting `scope` produced a working dev token no matter what the client
+// policy allowed, and the policy's env list was not the gate it is documented to be.
+//
+// Absence is treated as asking for the floor, not as asking for nothing. That keeps a client that
+// never sent a scope working, while making the env it gets an explicit property of the token
+// rather than a default applied later by whoever happens to read it.
+export function resolveIssuedEnvScope(options: {
+  requested: string[];
+  policy: ClientPolicy;
+  liveEligible: boolean;
+}): "env:dev" | "env:live" | null {
+  const { requested, policy, liveEligible } = options;
+  const requestedEnv = requested.filter((s) => (ENV_SCOPES as readonly string[]).includes(s));
+  const survivors =
+    requestedEnv.length === 0
+      ? recomputeEnvScope({ policy, liveEligible })
+      : resolveEnvScopes({ requested, policy, liveEligible });
+
+  // Exactly one, and live wins only if it survived the rules above. A client whose policy allows
+  // neither env gets null, and the caller refuses rather than falling back to dev.
+  if (survivors.includes("env:live")) return "env:live";
+  if (survivors.includes("env:dev")) return "env:dev";
+  return null;
+}
+
 // Rule 4, the refresh path. It re-derives from the CURRENT policy and eligibility rather than
 // narrowing the scopes the token already has — a narrow-only recompute could never widen
 // env:dev back up to env:live after a promotion, because env:live was stripped at issuance and
@@ -61,10 +91,7 @@ export function recomputeEnvScope(options: {
 
 // Policy intersection for dual-mode (both dev and live eligible).
 // Used by the env-picker UI to enforce exactly-one-env selection.
-export function pickEnvScope(
-  survivors: string[],
-  picked: string | null | undefined,
-): string[] {
+export function pickEnvScope(survivors: string[], picked: string | null | undefined): string[] {
   // Rule 4: exactly-one-env picker. When both env:dev and env:live survive
   // rules 1-3, the caller (UI or API) must pick one.
   if (survivors.includes("env:dev") && survivors.includes("env:live")) {

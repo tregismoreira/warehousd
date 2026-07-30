@@ -6,11 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
 } from "@/components/ui/sheet";
-import {
-  Tabs, TabsContent, TabsList, TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = useState(false);
@@ -35,7 +39,13 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
   const [samlAssertionSigned, setSamlAssertionSigned] = useState(true);
 
   async function submitOidc() {
-    if (!oidcProviderId.trim() || !oidcIssuer.trim() || !oidcDomain.trim() || !oidcClientId.trim() || !oidcClientSecret.trim()) {
+    if (
+      !oidcProviderId.trim() ||
+      !oidcIssuer.trim() ||
+      !oidcDomain.trim() ||
+      !oidcClientId.trim() ||
+      !oidcClientSecret.trim()
+    ) {
       toast.error("All fields are required");
       return;
     }
@@ -75,7 +85,13 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
   }
 
   async function submitSaml() {
-    if (!samlProviderId.trim() || !samlIssuer.trim() || !samlDomain.trim() || !samlEntryPoint.trim() || !samlCert.trim()) {
+    if (
+      !samlProviderId.trim() ||
+      !samlIssuer.trim() ||
+      !samlDomain.trim() ||
+      !samlEntryPoint.trim() ||
+      !samlCert.trim()
+    ) {
       toast.error("All fields are required");
       return;
     }
@@ -154,7 +170,10 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetTrigger asChild>
-        <Button><Plus size={16} className="mr-2" />Add provider</Button>
+        <Button>
+          <Plus size={16} className="mr-2" />
+          Add provider
+        </Button>
       </SheetTrigger>
       <SheetContent side="right" className="flex flex-col sm:max-w-lg">
         <SheetHeader>
@@ -164,7 +183,11 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
           </SheetDescription>
         </SheetHeader>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "oidc" | "saml")} className="flex-1 flex flex-col">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as "oidc" | "saml")}
+          className="flex-1 flex flex-col"
+        >
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="oidc">OIDC</TabsTrigger>
             <TabsTrigger value="saml">SAML</TabsTrigger>
@@ -173,40 +196,57 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
           <div className="flex-1 overflow-y-auto px-4">
             <TabsContent value="oidc" className="space-y-4 mt-4">
               <div className="space-y-2">
-                <Label htmlFor="oidc-provider-id">Provider ID <span className="text-destructive">*</span></Label>
+                <Label htmlFor="oidc-provider-id">
+                  Provider ID <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="oidc-provider-id"
                   placeholder="acme-oidc"
                   value={oidcProviderId}
-                  onChange={(e) => setOidcProviderId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+                  onChange={(e) =>
+                    setOidcProviderId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))
+                  }
                 />
-                <p className="text-xs text-muted-foreground">An internal id. Appears in the sign-in button and cannot be changed later.</p>
+                <p className="text-xs text-muted-foreground">
+                  An internal id. Appears in the sign-in button and cannot be changed later.
+                </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="oidc-issuer">Issuer URL <span className="text-destructive">*</span></Label>
+                <Label htmlFor="oidc-issuer">
+                  Issuer URL <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="oidc-issuer"
                   placeholder="https://oidc.example.com"
                   value={oidcIssuer}
                   onChange={(e) => setOidcIssuer(e.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">Your IdP's issuer URL. Discovery runs against {`{issuer}/.well-known/openid-configuration`}.</p>
+                <p className="text-xs text-muted-foreground">
+                  Your IdP's issuer URL. Discovery runs against{" "}
+                  {`{issuer}/.well-known/openid-configuration`}.
+                </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="oidc-domain">Email domain <span className="text-destructive">*</span></Label>
+                <Label htmlFor="oidc-domain">
+                  Email domain <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="oidc-domain"
                   placeholder="example.com"
                   value={oidcDomain}
                   onChange={(e) => setOidcDomain(e.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">Email domain routed to this provider.</p>
+                <p className="text-xs text-muted-foreground">
+                  Email domain routed to this provider.
+                </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="oidc-client-id">Client ID <span className="text-destructive">*</span></Label>
+                <Label htmlFor="oidc-client-id">
+                  Client ID <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="oidc-client-id"
                   placeholder="warehousd"
@@ -216,7 +256,9 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="oidc-client-secret">Client secret <span className="text-destructive">*</span></Label>
+                <Label htmlFor="oidc-client-secret">
+                  Client secret <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="oidc-client-secret"
                   type="password"
@@ -229,18 +271,26 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
 
             <TabsContent value="saml" className="space-y-4 mt-4">
               <div className="space-y-2">
-                <Label htmlFor="saml-provider-id">Provider ID <span className="text-destructive">*</span></Label>
+                <Label htmlFor="saml-provider-id">
+                  Provider ID <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="saml-provider-id"
                   placeholder="acme-saml"
                   value={samlProviderId}
-                  onChange={(e) => setSamlProviderId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+                  onChange={(e) =>
+                    setSamlProviderId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))
+                  }
                 />
-                <p className="text-xs text-muted-foreground">An internal id. Appears in the sign-in button and cannot be changed later.</p>
+                <p className="text-xs text-muted-foreground">
+                  An internal id. Appears in the sign-in button and cannot be changed later.
+                </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="saml-issuer">Issuer URL <span className="text-destructive">*</span></Label>
+                <Label htmlFor="saml-issuer">
+                  Issuer URL <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="saml-issuer"
                   placeholder="https://saml.example.com"
@@ -250,18 +300,24 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="saml-domain">Email domain <span className="text-destructive">*</span></Label>
+                <Label htmlFor="saml-domain">
+                  Email domain <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="saml-domain"
                   placeholder="example.com"
                   value={samlDomain}
                   onChange={(e) => setSamlDomain(e.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">Email domain routed to this provider.</p>
+                <p className="text-xs text-muted-foreground">
+                  Email domain routed to this provider.
+                </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="saml-entry-point">Entry Point <span className="text-destructive">*</span></Label>
+                <Label htmlFor="saml-entry-point">
+                  Entry Point <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="saml-entry-point"
                   placeholder="https://saml.example.com/sso"
@@ -271,7 +327,9 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="saml-cert">X.509 Certificate <span className="text-destructive">*</span></Label>
+                <Label htmlFor="saml-cert">
+                  X.509 Certificate <span className="text-destructive">*</span>
+                </Label>
                 <textarea
                   id="saml-cert"
                   className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono text-xs"
@@ -299,7 +357,9 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
                     onChange={(e) => setSamlAuthnSigned(e.target.checked)}
                     className="rounded border-gray-300"
                   />
-                  <Label htmlFor="saml-authn-signed" className="font-normal cursor-pointer">Sign authentication requests</Label>
+                  <Label htmlFor="saml-authn-signed" className="font-normal cursor-pointer">
+                    Sign authentication requests
+                  </Label>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -309,7 +369,9 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
                     onChange={(e) => setSamlAssertionSigned(e.target.checked)}
                     className="rounded border-gray-300"
                   />
-                  <Label htmlFor="saml-assertion-signed" className="font-normal cursor-pointer">Require signed assertions</Label>
+                  <Label htmlFor="saml-assertion-signed" className="font-normal cursor-pointer">
+                    Require signed assertions
+                  </Label>
                 </div>
               </div>
             </TabsContent>
@@ -318,11 +380,16 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
           <div className="border-t px-4 py-3 space-y-3">
             <div className="flex items-start gap-2 rounded-md border border-pending/40 p-3 text-xs text-muted-foreground">
               <AlertTriangle size={14} className="mt-0.5 shrink-0 text-pending" />
-              <p>Private and loopback issuers are rejected by discovery unless the host is listed in <span className="font-mono">WAREHOUSD_TRUSTED_ORIGINS</span>.</p>
+              <p>
+                Private and loopback issuers are rejected by discovery unless the host is listed in{" "}
+                <span className="font-mono">WAREHOUSD_TRUSTED_ORIGINS</span>.
+              </p>
             </div>
 
             <SheetFooter className="gap-2">
-              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
               <Button
                 onClick={activeTab === "oidc" ? submitOidc : submitSaml}
                 disabled={submitting}

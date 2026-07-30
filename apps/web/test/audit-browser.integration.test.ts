@@ -17,7 +17,9 @@ beforeAll(async () => {
       ('marcus','live','people','allowed',null,array['id']),
       ('marcus','dev','metrics','refused','field_denied','{}')`);
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(qs: string, cookie: string) {
   return new Request(`http://localhost:8722/api/audit${qs}`, { headers: { cookie } });

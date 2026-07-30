@@ -24,7 +24,7 @@ export function AdminClientsHome() {
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   return (

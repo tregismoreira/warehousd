@@ -15,7 +15,8 @@ export async function GET(req: NextRequest) {
   const existing = await getAppPool().query(
     `select collection from app.grants
      where org_id=$3 and user_id=$1 and env=$2 and status in ('pending','approved')`,
-    [guard.user.id, env, orgOf(guard.user)]);
+    [guard.user.id, env, orgOf(guard.user)],
+  );
   const taken = new Set(existing.rows.map((r) => r.collection));
 
   return Response.json({

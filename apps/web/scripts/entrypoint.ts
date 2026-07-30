@@ -15,6 +15,7 @@ import {
   ensureDevClient,
   dataRoleUrl,
   grantableFields,
+  type WarehousdConfig,
 } from "@warehousd/broker";
 import { auth } from "../lib/auth.js";
 
@@ -66,7 +67,7 @@ async function ensureAdminUser(db: Pool): Promise<string> {
 // Seed demo personas (ana/marcus/mia with appropriate roles and grants, plus the extra
 // personas LoginForm.tsx offers behind its "more personas" disclosure — ungranted here just
 // like mia, since the richer grant matrix is dev-bootstrap.ts's job, not this production path)
-async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
+async function seedDemoPersonas(db: Pool, cfg: WarehousdConfig): Promise<void> {
   const personas = [
     { id: "ana", email: "ana@demo.local", name: "Ana", role: "admin" },
     { id: "marcus", email: "marcus@demo.local", name: "Marcus", role: "manager" },
@@ -97,7 +98,7 @@ async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
     // "demo login works" (this file's whole point) silently never works again.
     const account = await db.query(
       `select * from app."account" where "userId" = $1 and "providerId" = 'credential'`,
-      [generatedId]
+      [generatedId],
     );
     await db.query(`delete from app."session" where "userId" = $1`, [generatedId]);
     await db.query(`delete from app."account" where "userId" = $1`, [generatedId]);
@@ -112,17 +113,14 @@ async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
         `insert into app."account"
            ("id","accountId","providerId","userId","password","createdAt","updatedAt")
          values ($1,$2,$3,$4,$5,$6,$7)`,
-        [a.id, a.accountId, a.providerId, p.id, a.password, a.createdAt, a.updatedAt]
+        [a.id, a.accountId, a.providerId, p.id, a.password, a.createdAt, a.updatedAt],
       );
     }
   }
 
   // Create grants for ana and marcus (they see everything)
   for (const user of ["ana", "marcus"]) {
-    const existing = await db.query(
-      `select 1 from app.grants where user_id = $1 limit 1`,
-      [user]
-    );
+    const existing = await db.query(`select 1 from app.grants where user_id = $1 limit 1`, [user]);
     if (existing.rowCount === 0) {
       for (const collName of Object.keys(cfg.collections)) {
         // File collections are granted too. Indexing puts documents in the database; it does not
@@ -133,7 +131,7 @@ async function seedDemoPersonas(db: Pool, cfg: any): Promise<void> {
           await db.query(
             `insert into app.grants (user_id, collection, allowed_fields, env, status)
              values ($1, $2, $3, 'dev', 'approved')`,
-            [user, collName, fields]
+            [user, collName, fields],
           );
         }
       }
@@ -202,7 +200,10 @@ export async function bootstrap(): Promise<void> {
       if (c.type !== "file") continue;
       const metadata = fileMetadataFields(c);
       const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
-      await indexCollection(db, "dev", name, resolve(dir, c.source!), { taxonomies: devTaxonomies, metadata });
+      await indexCollection(db, "dev", name, resolve(dir, c.source!), {
+        taxonomies: devTaxonomies,
+        metadata,
+      });
       if (c.source_live) {
         const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
         // indexCollection throws on a term its bindings don't know, and a dataset-sourced
@@ -211,17 +212,24 @@ export async function bootstrap(): Promise<void> {
         // skip and say why — dev content is already indexed and the app comes up.
         const unpopulated = liveTaxonomies.filter((t) => t.slugs.length === 0);
         if (unpopulated.length) {
-          console.warn(`[entrypoint] skipping live index of "${name}": no live terms for `
-            + `${unpopulated.map((t) => `"${t.field}"`).join(", ")}. `
-            + `Import rows into data_live for the source collection, then re-run.`);
+          console.warn(
+            `[entrypoint] skipping live index of "${name}": no live terms for ` +
+              `${unpopulated.map((t) => `"${t.field}"`).join(", ")}. ` +
+              `Import rows into data_live for the source collection, then re-run.`,
+          );
           continue;
         }
-        await indexCollection(db, "live", name, resolve(dir, c.source_live), { taxonomies: liveTaxonomies, metadata });
+        await indexCollection(db, "live", name, resolve(dir, c.source_live), {
+          taxonomies: liveTaxonomies,
+          metadata,
+        });
       }
     }
 
-    // 10. The outputs-contract OAuth client
-    await ensureDevClient(db, adminId);
+    // 10. The outputs-contract OAuth client. The CLI generates the secret and holds the only
+    // plaintext copy (.warehousd/state.json, mode 0600); this stores a hash of it, so `start` can
+    // still print it on a later run without the database being able to.
+    await ensureDevClient(db, adminId, process.env.WAREHOUSD_DEV_CLIENT_SECRET);
 
     // Inject the role-scoped URLs for the app to use. The write roles are separate
     // principals from the read roles — a read pool can never write, whatever the broker does.

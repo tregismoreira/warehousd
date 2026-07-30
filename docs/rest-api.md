@@ -17,7 +17,7 @@ A thin HTTP adapter for programmatic access to collections, governed by the same
 | POST | `/v1/collections/{c}/query` | `query` | Structured query: filters, ordering, aggregation, grouping | 200 |
 | GET | `/v1/collections/{c}/search` | `searchDocuments` | Full-text search over a file collection (query params: `q`, `limit`, `offset`, `fields`) | 200 |
 | GET | `/v1/proposals` | `listProposals` | List pending/approved/rejected proposals (query params: `status`, `collection`) | 200 |
-| POST | `/v1/proposals/{id}/approve` | `approveProposal` | Approve a proposal | 200 |
+| POST | `/v1/proposals/{id}/approve` | `approveProposal` | Approve a proposal | 200, 409 (conflict) |
 | POST | `/v1/proposals/{id}/reject` | `rejectProposal` | Reject a proposal | 200 |
 | GET | `/v1/changes` | `changes` | Change feed: document mutations for this org/env (query params: `since`, `limit`) | 200 |
 | GET | `/v1/grants` | (custom) | List grants for the authenticated user | 200 |
@@ -67,6 +67,11 @@ broker refusal reasons below — the two tables do not share a mapping function.
 | 500 | `server_error` | Token could not be minted; reason code only — no details exposed. |
 
 **Special case: conflict detection.** A mutation with an `If-Match: "{rev}"` header that conflicts returns 412 (Precondition Failed), while a conflict without the header returns 409 (Conflict). Both carry `reason: "conflict"` in the JSON response body.
+
+Approving a proposal can also return 409: either the proposal overlaps a field
+changed since it was derived, or the document it creates came into existence in the
+meantime and the promotion lost the race for the current-revision index. Both are
+retriable by re-reading and re-proposing, which is why they are not 500.
 
 ## Authentication: client_credentials flow (headless applications)
 

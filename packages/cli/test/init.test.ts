@@ -92,7 +92,7 @@ describe("runInit", () => {
     const gitignorePath = join(projectDir, ".gitignore");
     writeFileSync(gitignorePath, ".warehousd/\n");
 
-    const r = await runInit(projectDir);
+    const _r = await runInit(projectDir);
     const content = readFileSync(gitignorePath, "utf8");
 
     // Should have both entries
@@ -105,7 +105,7 @@ describe("runInit", () => {
   });
 
   it("overwrites warehousd.yml with --force", async () => {
-    const r1 = await runInit(projectDir);
+    const _r1 = await runInit(projectDir);
     const ymlPath = join(projectDir, "warehousd.yml");
     const originalContent = readFileSync(ymlPath, "utf8");
     const modifiedContent = originalContent.replace("my-app", "modified-app");

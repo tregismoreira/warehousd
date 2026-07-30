@@ -35,7 +35,9 @@ test.describe("manager review", () => {
     await signOut(page);
 
     await as(page, "member");
-    await expect(page.getByRole("row", { name: new RegExp(DENIED) }).last()).toContainText("Denied");
+    await expect(page.getByRole("row", { name: new RegExp(DENIED) }).last()).toContainText(
+      "Denied",
+    );
   });
 
   test("approval trims fields and can attach an expiry", async ({ page }) => {

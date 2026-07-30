@@ -11,7 +11,9 @@ beforeAll(async () => {
   marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
 }, 60_000);
 
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(url: string, opts: { method?: string; cookie?: string; body?: unknown } = {}) {
   const headers: Record<string, string> = { "content-type": "application/json" };
@@ -19,7 +21,9 @@ function req(url: string, opts: { method?: string; cookie?: string; body?: unkno
   return new Request(`http://localhost:8722${url}`, {
     method: opts.method ?? "GET",
     headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    // Conditional spread, not `body: … : undefined`: under `exactOptionalPropertyTypes` a
+    // present-but-undefined `body` is not the same as an absent one, and RequestInit wants absent.
+    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
   });
 }
 
@@ -42,19 +46,25 @@ describe("auth gate", () => {
   it("member approve → 403", async () => {
     const { POST } = await import("../app/api/grants/route");
     // mia (member) tries to approve her own pending salaries grant
-    const res = await POST(req("/api/grants", {
-      method: "POST", cookie: miaCookie,
-      body: { action: "approve", id: "00000000-0000-0000-0000-000000000000" },
-    }) as any);
+    const res = await POST(
+      req("/api/grants", {
+        method: "POST",
+        cookie: miaCookie,
+        body: { action: "approve", id: "00000000-0000-0000-0000-000000000000" },
+      }) as any,
+    );
     expect(res.status).toBe(403);
   });
 
   it("manager approve → not 403 (authorized role passes the check)", async () => {
     const { POST } = await import("../app/api/grants/route");
-    const res = await POST(req("/api/grants", {
-      method: "POST", cookie: marcusCookie,
-      body: { action: "revoke", id: "00000000-0000-0000-0000-000000000000" },
-    }) as any);
+    const res = await POST(
+      req("/api/grants", {
+        method: "POST",
+        cookie: marcusCookie,
+        body: { action: "revoke", id: "00000000-0000-0000-0000-000000000000" },
+      }) as any,
+    );
     // A non-existent id returns 404 (not 403), confirming the role check passed.
     expect(res.status).toBe(404);
   });

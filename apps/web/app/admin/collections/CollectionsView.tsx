@@ -4,7 +4,14 @@ import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
 import { Mono } from "@/components/common/Mono";
 
 type ApplyStatus = "not_applied" | "applied" | "drifted";
@@ -41,8 +48,13 @@ interface Collection {
 function PostureBadge({ posture }: { posture: Posture }) {
   return (
     <div className="flex gap-1.5">
-      <Badge variant="outline" className={cn("gap-1.5 font-mono text-xs",
-        posture.read === "allow" ? "text-allow" : "text-deny")}>
+      <Badge
+        variant="outline"
+        className={cn(
+          "gap-1.5 font-mono text-xs",
+          posture.read === "allow" ? "text-allow" : "text-deny",
+        )}
+      >
         <span aria-hidden>{posture.read === "allow" ? "✓" : "✗"}</span>
         {posture.read}
       </Badge>
@@ -57,8 +69,8 @@ function PostureBadge({ posture }: { posture: Posture }) {
 
 function ApplyBadge({ status }: { status: ApplyStatus }) {
   const map = {
-    applied:     { label: "Applied",     dot: "bg-allow" },
-    drifted:     { label: "Drifted",     dot: "bg-pending" },
+    applied: { label: "Applied", dot: "bg-allow" },
+    drifted: { label: "Drifted", dot: "bg-pending" },
     not_applied: { label: "Not applied", dot: "bg-muted-foreground" },
   } as const;
   return (
@@ -87,13 +99,13 @@ export function CollectionsView() {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, []);
 
   if (loading) return <div className="text-muted-foreground">Loading...</div>;
   if (error) return <div className="text-destructive">Error: {error}</div>;
 
-  const hasDrift = collections.some(c => c.status !== "applied");
+  const hasDrift = collections.some((c) => c.status !== "applied");
 
   return (
     <div className="space-y-6">
@@ -104,8 +116,7 @@ export function CollectionsView() {
             <p className="font-medium">Configuration drift detected</p>
             <p className="mt-1 text-muted-foreground">
               The configuration on disk differs from what is deployed. Run{" "}
-              <Mono copyable>warehousd apply</Mono>
-              {" "}to reconcile.
+              <Mono copyable>warehousd apply</Mono> to reconcile.
             </p>
           </div>
         </div>
@@ -113,12 +124,11 @@ export function CollectionsView() {
 
       <div className="text-xs text-muted-foreground italic">
         A field with posture <Mono>deny</Mono> can never be granted to anyone. Change it in{" "}
-        <Mono>warehousd.yml</Mono>
-        {" "}and re-apply.
+        <Mono>warehousd.yml</Mono> and re-apply.
       </div>
 
       <div className="grid gap-6">
-        {collections.map(collection => (
+        {collections.map((collection) => (
           <Card key={collection.name}>
             <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
               <div>
@@ -143,7 +153,7 @@ export function CollectionsView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {collection.fields.map(field => (
+                  {collection.fields.map((field) => (
                     <TableRow key={field.name}>
                       <TableCell className="font-mono text-xs">{field.name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
@@ -153,7 +163,13 @@ export function CollectionsView() {
                         <PostureBadge posture={field.posture} />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {field.pk ? "pk" : field.fk ? `fk:${field.fk}` : field.view_join ? `join:${field.view_join.table}.${field.view_join.column}` : "—"}
+                        {field.pk
+                          ? "pk"
+                          : field.fk
+                            ? `fk:${field.fk}`
+                            : field.view_join
+                              ? `join:${field.view_join.table}.${field.view_join.column}`
+                              : "—"}
                       </TableCell>
                     </TableRow>
                   ))}

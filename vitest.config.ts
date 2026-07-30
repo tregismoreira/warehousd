@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { coverage } from "./vitest.coverage";
 
 // Suites that depend on cluster-global state and so cannot share a Postgres with anything
 // running concurrently. They run alone in a second pass — see vitest.serial.config.ts.
@@ -7,18 +8,30 @@ import { defineConfig } from "vitest/config";
 //   Roles are cluster-global, so a parallel worker's pool hits that window and fails to
 //   authenticate.
 // - change-feed.test.ts asserts that an entry is visible immediately after the write. The feed
-//   withholds rows until `pg_snapshot_xmin` passes their `xmin` (broker.ts:1087) so that `seq`
-//   can never be handed out non-monotonically. Transaction ids are cluster-global, so an
+//   withholds rows until `pg_snapshot_xmin` passes their `xmin` (see `changes` in
+//   packages/broker/src/verbs/history.ts) so that `seq` can never be handed out
+//   non-monotonically. Transaction ids are cluster-global, so an
 //   in-flight transaction in *any other database* on this server holds that watermark down and
 //   the entry is — correctly — not yet returned. The feed is right; the assertion needs a quiet
 //   cluster.
-export const SERIAL_TESTS = ["**/test/bootstrap.test.ts", "**/test/change-feed.test.ts"];
+// - rest-api.integration.test.ts reaches the same feed through `GET /v1/changes` and asserts a
+//   just-written entry is present, so it carries change-feed.test.ts's dependency on a quiet
+//   cluster without being obviously about the feed. It was missed here and failed roughly one
+//   run in two in the parallel pass while passing every time on its own.
+export const SERIAL_TESTS = [
+  "**/test/bootstrap.test.ts",
+  "**/test/change-feed.test.ts",
+  "**/test/rest-api.integration.test.ts",
+];
 
 export default defineConfig({
   test: {
     include: ["packages/**/test/**/*.test.ts", "apps/**/test/**/*.test.ts"],
     exclude: ["**/e2e/**", "**/node_modules/**", ...SERIAL_TESTS],
     globalSetup: ["./vitest.global-setup.ts"],
+    // Options only — `coverage.enabled` stays false until `--coverage` is passed, so a plain
+    // `pnpm test` pays nothing. See vitest.coverage.ts and scripts/run-tests.ts.
+    coverage,
     hookTimeout: 60_000,
     testTimeout: 30_000,
     // Every test file provisions its own database (label + pid) and the role DDL that used to

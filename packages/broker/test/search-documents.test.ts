@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,8 +10,10 @@ import { createPools, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import { indexCollection } from "../src/indexing";
 import type { WarehousdConfig } from "../src/config/schema";
+import { ConfigSchema } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
 
-const docCfg: WarehousdConfig = {
+const docCfg: WarehousdConfig = ConfigSchema.parse({
   project: "t",
   server: { port: 1 },
   synthetic: { documents_per_collection: {} },
@@ -35,7 +37,7 @@ const docCfg: WarehousdConfig = {
       },
     },
   },
-};
+});
 
 let p: Provisioned;
 let db: Pool;
@@ -45,18 +47,9 @@ let brokerAsTitleOnly: ReturnType<typeof makeBroker>;
 let ctx: ReturnType<typeof makeCtx>;
 let ctxNoGrant: ReturnType<typeof makeCtx>;
 
-function makeCtx(userId: string, env: "dev" | "live" = "dev") {
-  return { userId, orgId: "default", env };
-}
-
 async function countAudit(db: Pool): Promise<number> {
   const r = await db.query("select count(*) as cnt from app.audit_events");
   return parseInt(r.rows[0].cnt, 10);
-}
-
-async function setupBrokerWithTitleOnly(pools: Pools, cfg: WarehousdConfig): Promise<ReturnType<typeof makeBroker>> {
-  // Create a broker that operates via a different user with only title allowed
-  return makeBroker(pools, cfg);
 }
 
 beforeAll(async () => {
@@ -69,15 +62,21 @@ beforeAll(async () => {
   broker = makeBroker(pools, docCfg);
   brokerAsTitleOnly = makeBroker(pools, docCfg);
 
-  ctx = makeCtx("u1");
-  ctxNoGrant = makeCtx("u_no_grant");
+  ctx = makeCtx({ userId: "u1" });
+  ctxNoGrant = makeCtx({ userId: "u_no_grant" });
 
   // Seed 3 fixture documents with "remote work" text in at least one
   // Absolute prefix: a bare one resolves against the CWD and leaks into the repo root.
   const tmpDir = mkdtempSync(join(tmpdir(), "search-docs-"));
-  writeFileSync(join(tmpDir, "remote-policy.md"), "# Remote Work Policy\n\nEmployees can work remotely.");
+  writeFileSync(
+    join(tmpDir, "remote-policy.md"),
+    "# Remote Work Policy\n\nEmployees can work remotely.",
+  );
   writeFileSync(join(tmpDir, "office-policy.md"), "# Office Policy\n\nOffice hours are 9-5.");
-  writeFileSync(join(tmpDir, "benefits.md"), "# Benefits\n\nHealth insurance and remote work stipends.");
+  writeFileSync(
+    join(tmpDir, "benefits.md"),
+    "# Benefits\n\nHealth insurance and remote work stipends.",
+  );
 
   await indexCollection(db, "dev", "policies", tmpDir);
   rmSync(tmpDir, { recursive: true });
@@ -86,14 +85,14 @@ beforeAll(async () => {
   await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5)`,
-    ["u1", "policies", ["title", "content"], "dev", "approved"]
+    ["u1", "policies", ["title", "content"], "dev", "approved"],
   );
 
   // Approve grant for brokerAsTitleOnly user (title only, no content)
   await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5)`,
-    ["u2", "policies", ["title"], "dev", "approved"]
+    ["u2", "policies", ["title"], "dev", "approved"],
   );
 });
 
@@ -121,7 +120,10 @@ it("returns ranked documents with _rank + document_seq, granted fields only (des
 });
 
 it("grant excluding content → content key absent (design test 2)", async () => {
-  const r = await brokerAsTitleOnly.searchDocuments(makeCtx("u2"), { collection: "policies", q: "remote" });
+  const r = await brokerAsTitleOnly.searchDocuments(makeCtx({ userId: "u2" }), {
+    collection: "policies",
+    q: "remote",
+  });
   if (r.ok) {
     for (const row of r.documents) {
       expect(row).not.toHaveProperty("content");
@@ -130,7 +132,7 @@ it("grant excluding content → content key absent (design test 2)", async () =>
 });
 
 it("explicitly requesting an ungranted field → field_denied", async () => {
-  const r = await brokerAsTitleOnly.searchDocuments(makeCtx("u2"), {
+  const r = await brokerAsTitleOnly.searchDocuments(makeCtx({ userId: "u2" }), {
     collection: "policies",
     q: "remote",
     fields: ["content"],
@@ -172,7 +174,10 @@ it("document_filter applies to search too (design test 3 over the search path)",
   fs.mkdirSync(join(tmpDir, "finance"), { recursive: true });
 
   writeFileSync(join(tmpDir, "hr", "pto.md"), "# PTO Policy\n\nRemote work is allowed for PTO.");
-  writeFileSync(join(tmpDir, "finance", "expenses.md"), "# Expenses\n\nRemote work expenses are reimbursed.");
+  writeFileSync(
+    join(tmpDir, "finance", "expenses.md"),
+    "# Expenses\n\nRemote work expenses are reimbursed.",
+  );
 
   await indexCollection(db, "dev", "policies", tmpDir);
   rmSync(tmpDir, { recursive: true });
@@ -181,7 +186,7 @@ it("document_filter applies to search too (design test 3 over the search path)",
   const grantRes = await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5) returning id`,
-    ["u3", "policies", ["title", "content"], "dev", "pending"]
+    ["u3", "policies", ["title", "content"], "dev", "pending"],
   );
   const grantId = grantRes.rows[0].id;
   const { approveGrant } = await import("../src/grants/manage");
@@ -190,7 +195,10 @@ it("document_filter applies to search too (design test 3 over the search path)",
   });
 
   // Search with the filtered grant
-  const r = await broker.searchDocuments(makeCtx("u3"), { collection: "policies", q: "remote work" });
+  const r = await broker.searchDocuments(makeCtx({ userId: "u3" }), {
+    collection: "policies",
+    q: "remote work",
+  });
   expect(r.ok).toBe(true);
   if (r.ok) {
     // All returned documents should only be from hr/pto.md (check via path if available, but it won't be in fieldsReturned)

@@ -28,14 +28,7 @@ describe("buildOutputs", () => {
   it("produces exactly the six §11 keys", () => {
     const o = buildOutputs(mockProject, dbUrl, devClient);
     const keys = Object.keys(o).sort();
-    expect(keys).toEqual([
-      "adminUrl",
-      "apiUrl",
-      "databaseUrl",
-      "devClient",
-      "env",
-      "mcpUrl",
-    ]);
+    expect(keys).toEqual(["adminUrl", "apiUrl", "databaseUrl", "devClient", "env", "mcpUrl"]);
   });
 
   it("honours a non-default server port", () => {

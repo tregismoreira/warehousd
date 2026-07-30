@@ -4,7 +4,7 @@ import type { Outputs } from "./state";
 export function buildOutputs(
   p: Project,
   dbUrl: string,
-  devClient: { clientId: string; clientSecret: string }
+  devClient: { clientId: string; clientSecret: string },
 ): Outputs {
   return {
     mcpUrl: `http://localhost:${p.ports.server}/mcp`,
@@ -18,7 +18,7 @@ export function buildOutputs(
 
 export function formatOutputs(
   o: Outputs,
-  extra?: { adminEmail: string; adminPassword: string }
+  extra?: { adminEmail: string; adminPassword: string },
 ): string {
   const lines: string[] = [
     "═══════════════════════════════════════════════════════════",

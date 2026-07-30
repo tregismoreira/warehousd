@@ -16,22 +16,36 @@ beforeAll(async () => {
   db = await setupWebDb("mcpendpoint");
   miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 async function mintAccessToken(scope: string) {
   const app = getAppPool();
   const reg = await db.auth.api.registerMcpClient({
-    body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "MCP Endpoint Test Client" },
+    body: {
+      redirect_uris: ["http://localhost:9999/callback"],
+      client_name: "MCP Endpoint Test Client",
+    },
     asResponse: true,
   } as any);
   const { client_id, client_secret } = await reg.json();
   await upsertClientPolicy(app, client_id, "MCP Endpoint Test Client", ["env:dev", "env:live"]);
   const { verifier, challenge } = pkcePair();
-  const { code } = await authorizeAndGetCode(db.auth, { clientId: client_id, scope, cookie: miaCookie, challenge });
+  const { code } = await authorizeAndGetCode(db.auth, {
+    clientId: client_id,
+    scope,
+    cookie: miaCookie,
+    challenge,
+  });
   const tokenRes = await db.auth.api.mcpOAuthToken({
     body: {
-      grant_type: "authorization_code", code, redirect_uri: "http://localhost:9999/callback",
-      client_id, client_secret, code_verifier: verifier,
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: "http://localhost:9999/callback",
+      client_id,
+      client_secret,
+      code_verifier: verifier,
     },
     asResponse: true,
   } as any);
@@ -56,20 +70,29 @@ async function rpc(token: string, method: string, params?: unknown) {
   const text = await res.text();
   // enableJsonResponse defaults to false (SSE), so a JSON-response client still gets a single
   // "data: {...}" event for a non-streaming call; parse whichever shape comes back.
-  const jsonLine = text.startsWith("{") ? text : text.split("\n").find((l) => l.startsWith("data: "))?.slice(6);
+  const jsonLine = text.startsWith("{")
+    ? text
+    : text
+        .split("\n")
+        .find((l) => l.startsWith("data: "))
+        ?.slice(6);
   return { status: res.status, body: jsonLine ? JSON.parse(jsonLine) : null };
 }
 
 describe("/mcp endpoint", () => {
   it("rejects requests with no token", async () => {
     const { POST } = await import("../app/mcp/route");
-    const res = await POST(new Request("http://localhost:8722/mcp", { method: "POST", body: "{}" }));
+    const res = await POST(
+      new Request("http://localhost:8722/mcp", { method: "POST", body: "{}" }),
+    );
     expect(res.status).toBe(401);
   });
 
   it("returns 401 with WWW-Authenticate header when unauthenticated", async () => {
     const { POST } = await import("../app/mcp/route");
-    const res = await POST(new Request("http://localhost:8722/mcp", { method: "POST", body: "{}" }));
+    const res = await POST(
+      new Request("http://localhost:8722/mcp", { method: "POST", body: "{}" }),
+    );
     expect(res.status).toBe(401);
     const wwwAuth = res.headers.get("WWW-Authenticate");
     expect(wwwAuth).toBeDefined();
@@ -79,7 +102,9 @@ describe("/mcp endpoint", () => {
 
   it("/.well-known/oauth-protected-resource returns 200 with valid metadata", async () => {
     const { GET } = await import("../app/.well-known/oauth-protected-resource/route");
-    const res = await GET(new Request("http://localhost:8722/.well-known/oauth-protected-resource"));
+    const res = await GET(
+      new Request("http://localhost:8722/.well-known/oauth-protected-resource"),
+    );
     expect(res.status).toBe(200);
     const metadata = await res.json();
     expect(metadata.resource).toBeDefined();
@@ -90,7 +115,9 @@ describe("/mcp endpoint", () => {
 
   it("/.well-known/oauth-authorization-server returns 200 with valid OIDC metadata", async () => {
     const { GET } = await import("../app/.well-known/oauth-authorization-server/route");
-    const res = await GET(new Request("http://localhost:8722/.well-known/oauth-authorization-server"));
+    const res = await GET(
+      new Request("http://localhost:8722/.well-known/oauth-authorization-server"),
+    );
     expect(res.status).toBe(200);
     const metadata = await res.json();
     expect(metadata).toBeDefined();
@@ -102,7 +129,10 @@ describe("/mcp endpoint", () => {
 
   it("list_collections returns names+descriptions only", async () => {
     const token = await mintAccessToken("env:dev");
-    const { status, body } = await rpc(token, "tools/call", { name: "list_collections", arguments: {} });
+    const { status, body } = await rpc(token, "tools/call", {
+      name: "list_collections",
+      arguments: {},
+    });
     expect(status).toBe(200);
     const out = JSON.parse(body.result.content[0].text);
     expect(Array.isArray(out)).toBe(true);
@@ -111,10 +141,22 @@ describe("/mcp endpoint", () => {
 
   it("describe_collection is grant-filtered", async () => {
     const app = getAppPool();
-    const g = await requestGrant(app, { userId: "mia", collection: "people", orgId: "default", env: "dev", purposeLabel: "t", allowedFields: ["id"] });
-    await approveGrant(app, harborCfg, g, "marcus", { expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    const g = await requestGrant(app, {
+      userId: "mia",
+      collection: "people",
+      orgId: "default",
+      env: "dev",
+      purposeLabel: "t",
+      allowedFields: ["id"],
+    });
+    await approveGrant(app, harborCfg, g, "marcus", {
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
     const token = await mintAccessToken("env:dev");
-    const { body } = await rpc(token, "tools/call", { name: "describe_collection", arguments: { name: "people" } });
+    const { body } = await rpc(token, "tools/call", {
+      name: "describe_collection",
+      arguments: { name: "people" },
+    });
     const out = JSON.parse(body.result.content[0].text);
     expect(out.fields.map((f: { name: string }) => f.name)).toEqual(["id"]);
   });
@@ -143,7 +185,8 @@ describe("/mcp endpoint", () => {
     // DEV_DATABASE_URL/LIVE_DATABASE_URL or seeded data (see packages/broker's own
     // search-documents.test.ts for full data-correctness coverage of _rank/document_seq).
     const { body } = await rpc(token, "tools/call", {
-      name: "search_documents", arguments: { collection: "policies", q: "policy" },
+      name: "search_documents",
+      arguments: { collection: "policies", q: "policy" },
     });
     const out = JSON.parse(body.result.content[0].text);
     expect(out.ok).toBe(false);
@@ -155,11 +198,14 @@ describe("/mcp endpoint", () => {
     // `salaries` is a real, sensitive collection in the fixture — requestGrant itself does not
     // validate the collection against config, but using a real name keeps the test realistic.
     const { body } = await rpc(token, "tools/call", {
-      name: "request_access", arguments: { collection: "salaries", purpose: "budget review" },
+      name: "request_access",
+      arguments: { collection: "salaries", purpose: "budget review" },
     });
     const out = JSON.parse(body.result.content[0].text);
     expect(out.ok).toBe(true);
-    const row = await getAppPool().query(`select status from app.grants where id = $1`, [out.requestId]);
+    const row = await getAppPool().query(`select status from app.grants where id = $1`, [
+      out.requestId,
+    ]);
     expect(row.rows[0].status).toBe("pending");
   });
 
@@ -168,8 +214,15 @@ describe("/mcp endpoint", () => {
     const { body } = await rpc(token, "tools/list");
     const names = body.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
-      "create_document", "delete_document", "describe_collection", "get_document",
-      "list_collections", "query_collection", "request_access", "search_documents", "update_document",
+      "create_document",
+      "delete_document",
+      "describe_collection",
+      "get_document",
+      "list_collections",
+      "query_collection",
+      "request_access",
+      "search_documents",
+      "update_document",
     ]);
   });
 });

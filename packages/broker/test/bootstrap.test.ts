@@ -25,13 +25,13 @@ describe("bootstrap", () => {
 
     // Verify schemas exist
     const schemas = await db.query(
-      `select schema_name from information_schema.schemata where schema_name in ('app', 'data_synth', 'data_live')`
+      `select schema_name from information_schema.schemata where schema_name in ('app', 'data_synth', 'data_live')`,
     );
     expect(schemas.rowCount).toBe(3);
 
     // Verify roles exist
     const roles = await db.query(
-      `select rolname from pg_roles where rolname in ('warehousd_dev', 'warehousd_live')`
+      `select rolname from pg_roles where rolname in ('warehousd_dev', 'warehousd_live')`,
     );
     expect(roles.rowCount).toBe(2);
 
@@ -40,12 +40,12 @@ describe("bootstrap", () => {
 
     // Schemas/roles still exist
     const schemas2 = await db.query(
-      `select schema_name from information_schema.schemata where schema_name in ('app', 'data_synth', 'data_live')`
+      `select schema_name from information_schema.schemata where schema_name in ('app', 'data_synth', 'data_live')`,
     );
     expect(schemas2.rowCount).toBe(3);
 
     const roles2 = await db.query(
-      `select rolname from pg_roles where rolname in ('warehousd_dev', 'warehousd_live')`
+      `select rolname from pg_roles where rolname in ('warehousd_dev', 'warehousd_live')`,
     );
     expect(roles2.rowCount).toBe(2);
   });

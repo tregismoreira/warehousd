@@ -82,10 +82,9 @@ describe("Local login disabled", () => {
     await ssoSignIn(db.auth, "test-oidc", "/");
 
     // Query the database for the new user
-    const result = await appPool.query(
-      `select id, email, role from app."user" where email = $1`,
-      ["newssoaccount@test.demo"],
-    );
+    const result = await appPool.query(`select id, email, role from app."user" where email = $1`, [
+      "newssoaccount@test.demo",
+    ]);
 
     expect(result.rows).toHaveLength(1);
     const user = result.rows[0];

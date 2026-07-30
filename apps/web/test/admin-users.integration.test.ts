@@ -3,22 +3,26 @@ import { setupWebDb, signIn } from "./helpers/web-db";
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
-let anaCookie: string, marcusCookie: string, miaCookie: string;
+let anaCookie: string, marcusCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDb("adminusers");
   anaCookie = await signIn(db.auth, "ana@harbor.demo", "demo");
   marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
-  miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(url: string, opts: { method?: string; cookie?: string; body?: unknown } = {}) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.cookie) headers["cookie"] = opts.cookie;
   return new Request(`http://localhost:8722${url}`, {
-    method: opts.method ?? "GET", headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    method: opts.method ?? "GET",
+    headers,
+    // Conditional spread, not `body: … : undefined`: under `exactOptionalPropertyTypes` a
+    // present-but-undefined `body` is not the same as an absent one, and RequestInit wants absent.
+    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
   });
 }
 const params = (userId: string) => ({ params: Promise.resolve({ userId }) });
@@ -46,8 +50,13 @@ describe("PATCH /api/admin/users/[userId]", () => {
   it("403s for a manager", async () => {
     const { PATCH } = await import("../app/api/admin/users/[userId]/route");
     const res = await PATCH(
-      req("/api/admin/users/mia", { method: "PATCH", cookie: marcusCookie, body: { role: "admin" } }) as any,
-      params("mia"));
+      req("/api/admin/users/mia", {
+        method: "PATCH",
+        cookie: marcusCookie,
+        body: { role: "admin" },
+      }) as any,
+      params("mia"),
+    );
     expect(res.status).toBe(403);
     expect(await roleOf("mia")).toBe("member");
   });
@@ -55,8 +64,13 @@ describe("PATCH /api/admin/users/[userId]", () => {
   it("promotes a member to manager", async () => {
     const { PATCH } = await import("../app/api/admin/users/[userId]/route");
     const res = await PATCH(
-      req("/api/admin/users/mia", { method: "PATCH", cookie: anaCookie, body: { role: "manager" } }) as any,
-      params("mia"));
+      req("/api/admin/users/mia", {
+        method: "PATCH",
+        cookie: anaCookie,
+        body: { role: "manager" },
+      }) as any,
+      params("mia"),
+    );
     expect(res.status).toBe(200);
     expect(await roleOf("mia")).toBe("manager");
   });
@@ -64,8 +78,13 @@ describe("PATCH /api/admin/users/[userId]", () => {
   it("rejects a role outside the three", async () => {
     const { PATCH } = await import("../app/api/admin/users/[userId]/route");
     const res = await PATCH(
-      req("/api/admin/users/mia", { method: "PATCH", cookie: anaCookie, body: { role: "superuser" } }) as any,
-      params("mia"));
+      req("/api/admin/users/mia", {
+        method: "PATCH",
+        cookie: anaCookie,
+        body: { role: "superuser" },
+      }) as any,
+      params("mia"),
+    );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("invalid_role");
   });
@@ -73,8 +92,13 @@ describe("PATCH /api/admin/users/[userId]", () => {
   it("refuses to let an admin demote themselves", async () => {
     const { PATCH } = await import("../app/api/admin/users/[userId]/route");
     const res = await PATCH(
-      req("/api/admin/users/ana", { method: "PATCH", cookie: anaCookie, body: { role: "member" } }) as any,
-      params("ana"));
+      req("/api/admin/users/ana", {
+        method: "PATCH",
+        cookie: anaCookie,
+        body: { role: "member" },
+      }) as any,
+      params("ana"),
+    );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("cannot_demote_self");
     expect(await roleOf("ana")).toBe("admin");
@@ -83,14 +107,33 @@ describe("PATCH /api/admin/users/[userId]", () => {
   it("refuses to demote the last admin", async () => {
     // Promote Mia so there are two admins, demote Ana (allowed), then try to demote Mia.
     const { PATCH } = await import("../app/api/admin/users/[userId]/route");
-    await PATCH(req("/api/admin/users/mia", { method: "PATCH", cookie: anaCookie, body: { role: "admin" } }) as any, params("mia"));
+    await PATCH(
+      req("/api/admin/users/mia", {
+        method: "PATCH",
+        cookie: anaCookie,
+        body: { role: "admin" },
+      }) as any,
+      params("mia"),
+    );
     const miaAdminCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
-    await PATCH(req("/api/admin/users/ana", { method: "PATCH", cookie: miaAdminCookie, body: { role: "member" } }) as any, params("ana"));
+    await PATCH(
+      req("/api/admin/users/ana", {
+        method: "PATCH",
+        cookie: miaAdminCookie,
+        body: { role: "member" },
+      }) as any,
+      params("ana"),
+    );
     expect(await roleOf("ana")).toBe("member");
 
     const res = await PATCH(
-      req("/api/admin/users/mia", { method: "PATCH", cookie: miaAdminCookie, body: { role: "member" } }) as any,
-      params("mia"));
+      req("/api/admin/users/mia", {
+        method: "PATCH",
+        cookie: miaAdminCookie,
+        body: { role: "member" },
+      }) as any,
+      params("mia"),
+    );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("cannot_demote_self");
   });
@@ -99,8 +142,13 @@ describe("PATCH /api/admin/users/[userId]", () => {
     const { PATCH } = await import("../app/api/admin/users/[userId]/route");
     const miaAdminCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
     const res = await PATCH(
-      req("/api/admin/users/nobody", { method: "PATCH", cookie: miaAdminCookie, body: { role: "member" } }) as any,
-      params("nobody"));
+      req("/api/admin/users/nobody", {
+        method: "PATCH",
+        cookie: miaAdminCookie,
+        body: { role: "member" },
+      }) as any,
+      params("nobody"),
+    );
     expect(res.status).toBe(404);
   });
 });

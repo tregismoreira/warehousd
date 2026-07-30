@@ -14,24 +14,37 @@ const BASE = process.env.BETTER_AUTH_URL ?? "http://localhost:8722";
 async function handle(req: Request): Promise<Response> {
   const ctx = await deriveTokenContext(req);
   if (!ctx) {
-    return Response.json({ error: "unauthenticated" }, {
-      status: 401,
-      headers: {
-        "WWW-Authenticate": `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource"`,
+    return Response.json(
+      { error: "unauthenticated" },
+      {
+        status: 401,
+        headers: {
+          "WWW-Authenticate": `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource"`,
+        },
       },
-    });
+    );
   }
 
-  const server = new Server({ name: "warehousd", version: "0.1.0" }, { capabilities: { tools: {} } });
+  const server = new Server(
+    { name: "warehousd", version: "0.1.0" },
+    { capabilities: { tools: {} } },
+  );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: TOOLS.map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    })),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const tool = toolByName(req.params.name);
     if (!tool) {
-      return { content: [{ type: "text", text: JSON.stringify({ ok: false, reason: "unknown_tool" }) }], isError: true };
+      return {
+        content: [{ type: "text", text: JSON.stringify({ ok: false, reason: "unknown_tool" }) }],
+        isError: true,
+      };
     }
     try {
       const out = await tool.handler(ctx, req.params.arguments ?? {});
@@ -40,15 +53,26 @@ async function handle(req: Request): Promise<Response> {
       // Never surface a raw error: prevent leaking schema details, stack traces, etc.
       // Log server-side for debugging, but return a generic error to the client.
       console.error("[mcp] tool handler failed", { tool: req.params.name, err });
-      return { content: [{ type: "text", text: JSON.stringify({ ok: false, reason: "internal_error" }) }], isError: true };
+      return {
+        content: [{ type: "text", text: JSON.stringify({ ok: false, reason: "internal_error" }) }],
+        isError: true,
+      };
     }
   });
 
-  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  // No options: omitting sessionIdGenerator is how the SDK spells stateless mode. It used to be
+  // passed explicitly as `undefined`, which meant the same thing but claimed to be a choice.
+  const transport = new WebStandardStreamableHTTPServerTransport();
   await server.connect(transport);
   return transport.handleRequest(req);
 }
 
-export async function POST(req: Request) { return handle(req); }
-export async function GET(req: Request) { return handle(req); }
-export async function DELETE(req: Request) { return handle(req); }
+export async function POST(req: Request) {
+  return handle(req);
+}
+export async function GET(req: Request) {
+  return handle(req);
+}
+export async function DELETE(req: Request) {
+  return handle(req);
+}

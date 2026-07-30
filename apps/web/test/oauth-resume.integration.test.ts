@@ -9,14 +9,25 @@ let db: Awaited<ReturnType<typeof setupWebDb>>;
 beforeAll(async () => {
   db = await setupWebDb("oauthresume");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 // Exchanges an authorization code for a token, returning the granted scope.
-async function exchangeCodeForScope(clientId: string, clientSecret: string, code: string, verifier: string) {
+async function exchangeCodeForScope(
+  clientId: string,
+  clientSecret: string,
+  code: string,
+  verifier: string,
+) {
   const tokenRes = await db.auth.api.mcpOAuthToken({
     body: {
-      grant_type: "authorization_code", code, redirect_uri: "http://localhost:9999/callback",
-      client_id: clientId, client_secret: clientSecret, code_verifier: verifier,
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: "http://localhost:9999/callback",
+      client_id: clientId,
+      client_secret: clientSecret,
+      code_verifier: verifier,
     },
     asResponse: true,
   } as any);
@@ -28,7 +39,10 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
   it("case 1: dev-only client requesting env:live gets dev-only scope after redirect-login flow", async () => {
     // Register a client with default policy {env:dev, env:live}.
     const reg = await db.auth.api.registerMcpClient({
-      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "Dev Only Resume Client" },
+      body: {
+        redirect_uris: ["http://localhost:9999/callback"],
+        client_name: "Dev Only Resume Client",
+      },
       asResponse: true,
     } as any);
     const { client_id, client_secret } = await reg.json();
@@ -47,9 +61,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
     // Step 1: GET /mcp/authorize with NO cookie → 302 to /login with original query string intact.
-    const authorizeRes = await db.auth.handler(
-      new Request(authorizeUrl, { method: "GET" })
-    );
+    const authorizeRes = await db.auth.handler(new Request(authorizeUrl, { method: "GET" }));
     expect(authorizeRes.status).toBe(302);
     const authorizeLocation = authorizeRes.headers.get("location");
     expect(authorizeLocation).toContain("/login");
@@ -68,7 +80,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
         headers: {
           cookie: sessionCookie,
         },
-      })
+      }),
     );
     // This second response should be the final authorize call, resulting in a 302 callback redirect.
     expect(authorizeRes2.status).toBe(302);
@@ -89,10 +101,13 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
   it("case 2: live-allowed client with eligible user gets env-picker redirect on second request", async () => {
     // Register a client with default policy {env:dev, env:live}.
     const reg = await db.auth.api.registerMcpClient({
-      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "Live Allowed Resume Client" },
+      body: {
+        redirect_uris: ["http://localhost:9999/callback"],
+        client_name: "Live Allowed Resume Client",
+      },
       asResponse: true,
     } as any);
-    const { client_id, client_secret } = await reg.json();
+    const { client_id } = await reg.json();
     // Keep the default policy (both env:dev and env:live allowed).
 
     // Grant mia an approved live grant so she becomes eligible.
@@ -100,10 +115,10 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
     await app.query(
       `insert into app.grants (user_id, collection, allowed_fields, env, status, expires_at) values
        ($1, 'people', array['id'], 'live', 'approved', now() + interval '1 day')`,
-      ["mia"]
+      ["mia"],
     );
 
-    const { verifier, challenge } = pkcePair();
+    const { challenge } = pkcePair();
     const authorizeUrl = new URL("http://localhost:8722/api/auth/mcp/authorize");
     authorizeUrl.searchParams.set("client_id", client_id);
     authorizeUrl.searchParams.set("response_type", "code");
@@ -114,9 +129,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
     // Step 1: GET /mcp/authorize with NO cookie → 302 to /login with original query string intact.
-    const authorizeRes = await db.auth.handler(
-      new Request(authorizeUrl, { method: "GET" })
-    );
+    const authorizeRes = await db.auth.handler(new Request(authorizeUrl, { method: "GET" }));
     expect(authorizeRes.status).toBe(302);
     const authorizeLocation = authorizeRes.headers.get("location");
     expect(authorizeLocation).toContain("/login");
@@ -136,7 +149,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
         headers: {
           cookie: sessionCookie,
         },
-      })
+      }),
     );
     // Case 2: This second request should redirect to /oauth/env-picker because:
     // - Client policy allows both env:dev and env:live
@@ -157,7 +170,10 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
   it("case 3: live-allowed client with no approved live grant gets dev-only scope after redirect-login flow", async () => {
     // Register a client with default policy {env:dev, env:live}.
     const reg = await db.auth.api.registerMcpClient({
-      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "No Grant Resume Client" },
+      body: {
+        redirect_uris: ["http://localhost:9999/callback"],
+        client_name: "No Grant Resume Client",
+      },
       asResponse: true,
     } as any);
     const { client_id, client_secret } = await reg.json();
@@ -175,9 +191,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
     // Step 1: GET /mcp/authorize with NO cookie → 302 to /login with original query string intact.
-    const authorizeRes = await db.auth.handler(
-      new Request(authorizeUrl, { method: "GET" })
-    );
+    const authorizeRes = await db.auth.handler(new Request(authorizeUrl, { method: "GET" }));
     expect(authorizeRes.status).toBe(302);
     const authorizeLocation = authorizeRes.headers.get("location");
     expect(authorizeLocation).toContain("/login");
@@ -194,7 +208,7 @@ describe("env-scope redirect-to-login before cookie-resume can arm", () => {
         headers: {
           cookie: sessionCookie,
         },
-      })
+      }),
     );
     // Rule 1: both env:dev and env:live are in policy and requested, survivors = [env:dev, env:live].
     // Rule 2: marcus has no approved live grant, so env:live is filtered out, survivors = [env:dev].

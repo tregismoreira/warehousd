@@ -11,18 +11,23 @@ beforeAll(async () => {
     idp = createServer((rq, rs) => {
       if (rq.url === "/.well-known/openid-configuration") {
         rs.writeHead(200, { "content-type": "application/json" });
-        rs.end(JSON.stringify({
-          issuer: idpUrl,
-          authorization_endpoint: `${idpUrl}/authorize`,
-          token_endpoint: `${idpUrl}/token`,
-          jwks_uri: `${idpUrl}/jwks`,
-          userinfo_endpoint: `${idpUrl}/userinfo`,
-          scopes_supported: ["openid", "profile", "email"],
-        }));
+        rs.end(
+          JSON.stringify({
+            issuer: idpUrl,
+            authorization_endpoint: `${idpUrl}/authorize`,
+            token_endpoint: `${idpUrl}/token`,
+            jwks_uri: `${idpUrl}/jwks`,
+            userinfo_endpoint: `${idpUrl}/userinfo`,
+            scopes_supported: ["openid", "profile", "email"],
+          }),
+        );
       } else if (rq.url === "/jwks") {
         rs.writeHead(200, { "content-type": "application/json" });
         rs.end(JSON.stringify({ keys: [{ kty: "RSA", use: "sig", kid: "k", n: "t", e: "AQAB" }] }));
-      } else { rs.writeHead(404); rs.end(); }
+      } else {
+        rs.writeHead(404);
+        rs.end();
+      }
     }).listen(0, "127.0.0.1", () => {
       const a = idp.address();
       if (a && typeof a !== "string") idpUrl = `http://127.0.0.1:${a.port}`;
@@ -44,23 +49,33 @@ function req(url: string, opts: { method?: string; cookie?: string; body?: unkno
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.cookie) headers["cookie"] = opts.cookie;
   return new Request(`http://localhost:8722${url}`, {
-    method: opts.method ?? "GET", headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    method: opts.method ?? "GET",
+    headers,
+    // Conditional spread, not `body: … : undefined`: under `exactOptionalPropertyTypes` a
+    // present-but-undefined `body` is not the same as an absent one, and RequestInit wants absent.
+    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
   });
 }
 
 describe("SSO admin contract used by the UI", () => {
   it("accepts the exact OIDC payload the form sends", async () => {
     const { POST } = await import("../app/api/sso/providers/route");
-    const res = await POST(req("/api/sso/providers", {
-      method: "POST", cookie: anaCookie,
-      body: {
-        providerId: "acme-oidc",
-        issuer: idpUrl,
-        domain: "acme.example",
-        oidcConfig: { clientId: "warehousd", clientSecret: "s3cret", discoveryEndpoint: `${idpUrl}/.well-known/openid-configuration` },
-      },
-    }) as any);
+    const res = await POST(
+      req("/api/sso/providers", {
+        method: "POST",
+        cookie: anaCookie,
+        body: {
+          providerId: "acme-oidc",
+          issuer: idpUrl,
+          domain: "acme.example",
+          oidcConfig: {
+            clientId: "warehousd",
+            clientSecret: "s3cret",
+            discoveryEndpoint: `${idpUrl}/.well-known/openid-configuration`,
+          },
+        },
+      }) as any,
+    );
     expect(res.status).toBe(200);
   });
 
@@ -70,12 +85,16 @@ describe("SSO admin contract used by the UI", () => {
     const raw = await res.text();
     expect(raw).not.toContain("s3cret");
     const body = JSON.parse(raw);
-    expect(body.providers.some((p: any) => p.providerId === "acme-oidc" && p.type === "oidc")).toBe(true);
+    expect(body.providers.some((p: any) => p.providerId === "acme-oidc" && p.type === "oidc")).toBe(
+      true,
+    );
   });
 
   it("is invisible to a manager", async () => {
     const { GET } = await import("../app/api/sso/providers/route");
-    expect((await GET(req("/api/sso/providers", { cookie: marcusCookie }) as any)).status).toBe(403);
+    expect((await GET(req("/api/sso/providers", { cookie: marcusCookie }) as any)).status).toBe(
+      403,
+    );
   });
 
   it("status is readable without a session so the login page can render", async () => {
@@ -89,7 +108,8 @@ describe("SSO admin contract used by the UI", () => {
     const { DELETE } = await import("../app/api/sso/providers/[providerId]/route");
     const res = await DELETE(
       req("/api/sso/providers/acme-oidc", { method: "DELETE", cookie: anaCookie }) as any,
-      { params: Promise.resolve({ providerId: "acme-oidc" }) });
+      { params: Promise.resolve({ providerId: "acme-oidc" }) },
+    );
     expect(res.status).toBe(200);
     const { GET } = await import("../app/api/sso/providers/route");
     const body = await (await GET(req("/api/sso/providers", { cookie: anaCookie }) as any)).json();

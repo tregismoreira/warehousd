@@ -8,7 +8,10 @@ export default async function EnvPickerPage({
 }) {
   const resolvedSearchParams = await searchParams;
   const params = new URLSearchParams(
-    Object.entries(resolvedSearchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] ?? "" : v ?? ""]),
+    Object.entries(resolvedSearchParams).map(([k, v]) => [
+      k,
+      Array.isArray(v) ? (v[0] ?? "") : (v ?? ""),
+    ]),
   );
   return (
     <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "system-ui" }}>
@@ -22,7 +25,8 @@ export default async function EnvPickerPage({
           <input key={k} type="hidden" name={k} value={v} />
         ))}
         <label style={{ display: "block", marginBottom: 8 }}>
-          <input type="radio" name="wh_env" value="dev" defaultChecked /> Development (synthetic data)
+          <input type="radio" name="wh_env" value="dev" defaultChecked /> Development (synthetic
+          data)
         </label>
         <label style={{ display: "block", marginBottom: 16 }}>
           <input type="radio" name="wh_env" value="live" /> Live (real data)

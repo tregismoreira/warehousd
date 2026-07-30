@@ -27,13 +27,24 @@ export async function importCollection(
   payload: { text: string; format: "csv" | "json" },
   orgId: string = DEFAULT_ORG_ID,
 ): Promise<ImportResult> {
-  const audit = (outcome: "allowed" | "refused", reason: string | null, extra: Record<string, unknown>) =>
+  const audit = (
+    outcome: "allowed" | "refused",
+    reason: string | null,
+    extra: Record<string, unknown>,
+  ) =>
     writeAudit(pools.app, {
-      userId: actor, env: "live", collection, orgId,
+      userId: actor,
+      env: "live",
+      collection,
+      orgId,
       // Column names and counts only — never a cell value. An import file may carry real
       // personal data and the audit log is queryable by every admin.
-      intent: { op: "import", format: payload.format, ...extra } as never,
-      fieldsReturned: [], grantId: null, outcome, reason, via: "session",
+      intent: { op: "import", format: payload.format, ...extra },
+      fieldsReturned: [],
+      grantId: null,
+      outcome,
+      reason,
+      via: "session",
     });
 
   if (!pools.imp) {
@@ -93,7 +104,9 @@ export async function importCollection(
         const values = [orgId, ...row];
         const holes = values.map((_, i) => `$${i + 1}`).join(", ");
         await client.query(
-          `insert into data_live.${collection} (${cols}) values (${holes})`, values);
+          `insert into data_live.${collection} (${cols}) values (${holes})`,
+          values,
+        );
       }
     });
   } catch (e) {

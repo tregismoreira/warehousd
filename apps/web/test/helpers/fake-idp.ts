@@ -10,7 +10,7 @@ interface OIDCUser {
   name: string;
 }
 
-export async function startFakeIdp(opts: { users: OIDCUser[] }) {
+export async function startFakeIdp(_opts: { users: OIDCUser[] }) {
   // An ephemeral port, like the other in-test servers (sso-admin, admin-sso-ui,
   // token-exchange): two suites use this helper, and with test files running in parallel a
   // fixed port makes whichever one starts second fail with EADDRINUSE. Assigned once the
@@ -20,7 +20,13 @@ export async function startFakeIdp(opts: { users: OIDCUser[] }) {
   let currentUser: OIDCUser | null = null;
   const codeToUser = new Map<string, OIDCUser>();
 
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  // node:http never awaits its handler, so a throw inside `handle` used to become an unhandled
+  // rejection and leave the request hanging until the client timed out. Wrapping it turns the same
+  // failure into a 500 the test can see.
+  // Async even though no branch awaits today: the wrapper's `.catch` below is then the single
+  // failure path, and stays so when one of them does.
+  // eslint-disable-next-line @typescript-eslint/require-await
+  const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || "/", issuer);
     const path = url.pathname;
 
@@ -60,8 +66,10 @@ export async function startFakeIdp(opts: { users: OIDCUser[] }) {
       res.writeHead(302, { location: callbackUrl.toString() });
       res.end();
     } else if (path === "/token" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk) => { body += chunk; });
+      // The body is accumulated nowhere on purpose — this endpoint ignores the PKCE verifier (see
+      // below) and nothing else in it is read. `resume()` is still required: without a consumer the
+      // request stream stays paused and `end` never fires.
+      req.resume();
       req.on("end", () => {
         // Ignore PKCE verifier, just return token
         const token = {
@@ -81,12 +89,14 @@ export async function startFakeIdp(opts: { users: OIDCUser[] }) {
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({
-        sub: currentUser.sub || currentUser.email,
-        email: currentUser.email,
-        email_verified: currentUser.email_verified ?? true,
-        name: currentUser.name,
-      }));
+      res.end(
+        JSON.stringify({
+          sub: currentUser.sub || currentUser.email,
+          email: currentUser.email,
+          email_verified: currentUser.email_verified ?? true,
+          name: currentUser.name,
+        }),
+      );
     } else if (path === "/jwks" && req.method === "GET") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ keys: [] }));
@@ -94,6 +104,14 @@ export async function startFakeIdp(opts: { users: OIDCUser[] }) {
       res.writeHead(404);
       res.end("Not found");
     }
+  };
+
+  const server = createServer((req, res) => {
+    handle(req, res).catch((err: unknown) => {
+      console.error("[fake-idp] handler failed", err);
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
+    });
   });
 
   return new Promise<{
@@ -114,8 +132,10 @@ export async function startFakeIdp(opts: { users: OIDCUser[] }) {
           currentUser = u;
         },
         close() {
-          return new Promise((done) => {
-            server.close(done);
+          // `server.close(cb)` hands its callback an optional Error, which is not a Promise
+          // resolution value — wrap rather than pass `resolve` straight through.
+          return new Promise<void>((resolve) => {
+            server.close(() => resolve());
           });
         },
       });

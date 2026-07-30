@@ -1,12 +1,15 @@
-import { existsSync, writeFileSync, readFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const WAREHOUSD_TEMPLATE = `project: my-app
+const WAREHOUSD_TEMPLATE =
+  `project: my-app
 server:
   port: 8722
 # database:
 #   managed: true                 # default — the CLI runs Postgres in Docker
-#   url: ` + '${env:DATABASE_URL}' + `      # alternative: bring your own Postgres
+#   url: ` +
+  "${env:DATABASE_URL}" +
+  `      # alternative: bring your own Postgres
 
 collections:
   announcements:
@@ -54,6 +57,7 @@ collections:
 #   documents_per_collection: { announcements: 25 }
 `;
 
+// eslint-disable-next-line @typescript-eslint/require-await -- keeps the runX signatures uniform
 export async function runInit(
   dir: string,
   opts?: { force?: boolean },
@@ -72,9 +76,7 @@ export async function runInit(
 
   // Ensure .gitignore exists and append entries
   const gitignorePath = join(dir, ".gitignore");
-  let gitignoreContent = existsSync(gitignorePath)
-    ? readFileSync(gitignorePath, "utf8")
-    : "";
+  let gitignoreContent = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
 
   // Append warehousd.local.yml if not present
   if (!gitignoreContent.includes("warehousd.local.yml")) {

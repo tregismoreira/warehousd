@@ -10,7 +10,10 @@ const UUID2 = "4a9c1f5b-2d3e-4f60-9b0c-1d2e3f4a5b6c";
 
 describe("parseCsv", () => {
   it("parses a simple sheet with a header row", () => {
-    expect(parseCsv("a,b\n1,2\n3,4")).toEqual([{ a: "1", b: "2" }, { a: "3", b: "4" }]);
+    expect(parseCsv("a,b\n1,2\n3,4")).toEqual([
+      { a: "1", b: "2" },
+      { a: "3", b: "4" },
+    ]);
   });
   it("honours quoted fields containing commas", () => {
     expect(parseCsv(`a,b\n"x,y",z`)).toEqual([{ a: "x,y", b: "z" }]);
@@ -61,7 +64,14 @@ describe("validateImportRows", () => {
 
   it("accepts posture:deny columns — postures govern reading, not writing", () => {
     const r = validateImportRows(cfg, "people", [
-      { id: UUID, full_name: "A B", email: "a@b.c", department_id: UUID2, home_address: "1 Main St", phone: "555" },
+      {
+        id: UUID,
+        full_name: "A B",
+        email: "a@b.c",
+        department_id: UUID2,
+        home_address: "1 Main St",
+        phone: "555",
+      },
     ]);
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("unreachable");
@@ -81,21 +91,21 @@ describe("validateImportRows", () => {
     ]);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
-    expect(r.errors[0].reason).toBe("derived_column");
+    expect(r.errors[0]!.reason).toBe("derived_column");
   });
 
   it("rejects a file collection outright", () => {
     const r = validateImportRows(cfg, "policies", [{ title: "x" }]);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
-    expect(r.errors[0].reason).toBe("file_collection");
+    expect(r.errors[0]!.reason).toBe("file_collection");
   });
 
   it("rejects an unknown collection", () => {
     const r = validateImportRows(cfg, "nope", [{ a: 1 }]);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
-    expect(r.errors[0].reason).toBe("unknown_collection");
+    expect(r.errors[0]!.reason).toBe("unknown_collection");
   });
 
   // `cfg.collections["constructor"]` is truthy on any object literal, so a name inherited
@@ -142,7 +152,7 @@ describe("validateImportRows", () => {
     ]);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
-    expect(r.errors[0].reason).toBe("invalid_date");
+    expect(r.errors[0]!.reason).toBe("invalid_date");
   });
 
   it("rejects a missing primary key", () => {
@@ -154,7 +164,8 @@ describe("validateImportRows", () => {
 
   it("rejects a duplicate primary key inside one payload", () => {
     const r = validateImportRows(cfg, "departments", [
-      { id: UUID, name: "A" }, { id: UUID, name: "B" },
+      { id: UUID, name: "A" },
+      { id: UUID, name: "B" },
     ]);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -162,34 +173,45 @@ describe("validateImportRows", () => {
   });
 
   it("treats an empty string as null on a nullable column and as an error otherwise", () => {
-    const ok = validateImportRows(cfg, "people", [
-      { id: UUID, full_name: "A", email: "" },
-    ]);
+    const ok = validateImportRows(cfg, "people", [{ id: UUID, full_name: "A", email: "" }]);
     // `email` has no `nullable: true` in the Harbor YAML, so an empty value is an error.
     expect(ok.ok).toBe(false);
     if (ok.ok) throw new Error("unreachable");
-    expect(ok.errors[0].reason).toBe("missing_required");
+    expect(ok.errors[0]!.reason).toBe("missing_required");
   });
 
   it("validates a taxonomy value against the bound vocabulary", () => {
     const bad = validateImportRows(cfg, "announcements", [
-      { id: UUID, title: "T", department: "not-a-term", summary: "s", owner: "o",
-        updated_at: "2026-01-01T00:00:00Z" },
+      {
+        id: UUID,
+        title: "T",
+        department: "not-a-term",
+        summary: "s",
+        owner: "o",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
     ]);
     expect(bad.ok).toBe(false);
     if (bad.ok) throw new Error("unreachable");
     expect(bad.errors[0]).toMatchObject({ column: "department", reason: "unknown_term" });
 
     const good = validateImportRows(cfg, "announcements", [
-      { id: UUID, title: "T", department: "hr", summary: "s", owner: "o",
-        updated_at: "2026-01-01T00:00:00Z" },
+      {
+        id: UUID,
+        title: "T",
+        department: "hr",
+        summary: "s",
+        owner: "o",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
     ]);
     expect(good.ok).toBe(true);
   });
 
   it("collects every error, not just the first", () => {
     const r = validateImportRows(cfg, "departments", [
-      { id: "bad", name: "A" }, { id: "worse", name: "B" },
+      { id: "bad", name: "A" },
+      { id: "worse", name: "B" },
     ]);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -209,7 +231,7 @@ describe("validateImportRows", () => {
     const r = validateImportRows(cfg, "departments", rows, { maxRows: 10 });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
-    expect(r.errors[0].reason).toBe("too_many_rows");
+    expect(r.errors[0]!.reason).toBe("too_many_rows");
   });
 
   it("never echoes an offending value back in an error", () => {
@@ -220,9 +242,7 @@ describe("validateImportRows", () => {
   });
 
   it("requires a consistent column set across rows", () => {
-    const r = validateImportRows(cfg, "departments", [
-      { id: UUID, name: "A" }, { id: UUID2 },
-    ]);
+    const r = validateImportRows(cfg, "departments", [{ id: UUID, name: "A" }, { id: UUID2 }]);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
     expect(r.errors[0]).toMatchObject({ row: 1, reason: "ragged_rows" });
@@ -232,28 +252,50 @@ describe("validateImportRows", () => {
 describe("validateImportRows: dataset-sourced vocabularies", () => {
   // Harbor binds `client` to a file collection only, so this shape needs its own config.
   const dsCfg = ConfigSchema.parse({
-    project: "t", server: { port: 1 },
+    project: "t",
+    server: { port: 1 },
     taxonomies: {
-      client: { label: "Client", source: { collection: "clients", slug: "client_number", label: "name" } },
-      tag: { label: "Tag", multiple: true, source: { collection: "clients", slug: "client_number", label: "name" } },
+      client: {
+        label: "Client",
+        source: { collection: "clients", slug: "client_number", label: "name" },
+      },
+      tag: {
+        label: "Tag",
+        multiple: true,
+        source: { collection: "clients", slug: "client_number", label: "name" },
+      },
     },
     collections: {
-      clients: { description: "d", fields: {
-        id: { type: "uuid", posture: "allow", pk: true },
-        client_number: { type: "text", posture: "allow" },
-        name: { type: "text", posture: "allow" },
-      }},
-      matters: { description: "d", taxonomies: ["client"], fields: {
-        id: { type: "uuid", posture: "allow", pk: true },
-        matter_number: { type: "text", posture: "allow" },
-      }},
-      briefs: { description: "d", taxonomies: ["tag"], fields: {
-        id: { type: "uuid", posture: "allow", pk: true },
-      }},
+      clients: {
+        description: "d",
+        fields: {
+          id: { type: "uuid", posture: "allow", pk: true },
+          client_number: { type: "text", posture: "allow" },
+          name: { type: "text", posture: "allow" },
+        },
+      },
+      matters: {
+        description: "d",
+        taxonomies: ["client"],
+        fields: {
+          id: { type: "uuid", posture: "allow", pk: true },
+          matter_number: { type: "text", posture: "allow" },
+        },
+      },
+      briefs: {
+        description: "d",
+        taxonomies: ["tag"],
+        fields: {
+          id: { type: "uuid", posture: "allow", pk: true },
+        },
+      },
     },
   });
   const binding = (field: string, slugs: string[], multiple = false) => ({
-    field, label: field, multiple, slugs,
+    field,
+    label: field,
+    multiple,
+    slugs,
     terms: slugs.map((slug) => ({ slug, label: slug })),
   });
 
@@ -267,18 +309,24 @@ describe("validateImportRows: dataset-sourced vocabularies", () => {
   });
 
   it("accepts a value present in the supplied slugs", () => {
-    const r = validateImportRows(dsCfg, "matters", [
-      { id: UUID, matter_number: "M-1", client: "c-0001" },
-    ], { taxonomies: [binding("client", ["c-0001", "c-0002"])] });
+    const r = validateImportRows(
+      dsCfg,
+      "matters",
+      [{ id: UUID, matter_number: "M-1", client: "c-0001" }],
+      { taxonomies: [binding("client", ["c-0001", "c-0002"])] },
+    );
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("unreachable");
     expect(r.values[0]![r.columns.indexOf("client")]).toBe("c-0001");
   });
 
   it("rejects a value absent from the supplied slugs", () => {
-    const r = validateImportRows(dsCfg, "matters", [
-      { id: UUID, matter_number: "M-1", client: "c-9999" },
-    ], { taxonomies: [binding("client", ["c-0001", "c-0002"])] });
+    const r = validateImportRows(
+      dsCfg,
+      "matters",
+      [{ id: UUID, matter_number: "M-1", client: "c-9999" }],
+      { taxonomies: [binding("client", ["c-0001", "c-0002"])] },
+    );
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
     expect(r.errors[0]).toMatchObject({ column: "client", reason: "unknown_term" });
@@ -298,9 +346,12 @@ describe("validateImportRows: dataset-sourced vocabularies", () => {
   });
 
   it("rejects every value when the supplied binding has no terms yet", () => {
-    const r = validateImportRows(dsCfg, "matters", [
-      { id: UUID, matter_number: "M-1", client: "c-0001" },
-    ], { taxonomies: [binding("client", [])] });
+    const r = validateImportRows(
+      dsCfg,
+      "matters",
+      [{ id: UUID, matter_number: "M-1", client: "c-0001" }],
+      { taxonomies: [binding("client", [])] },
+    );
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
     expect(r.errors[0]).toMatchObject({ column: "client", reason: "unknown_term" });

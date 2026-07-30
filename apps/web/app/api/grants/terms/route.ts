@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const c = findCollection(cfg, collection);
   if (!c || c.taxonomies.length === 0) return Response.json({ vocabularies: [] });
 
-  const env = readEnvCookie(req) as "dev" | "live";
+  const env = readEnvCookie(req);
   const db = getAppPool();
   const bindings = await loadTaxonomyBindings(db, cfg, collection, env);
 

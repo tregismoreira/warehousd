@@ -1,14 +1,25 @@
+// The control-plane read surface: listRevisions, getClientPolicy, the trusted-issuer registry,
+// and getProposal. Grouped because none of them touches collection data — they answer questions
+// about grants, clients and history, which is the half of the broker the data-path suites do not
+// reach.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import {
-  createAppSchema, applyConfig, createPools, makeBroker, withOrg, getClientPolicy,
-  createTrustedIssuer, listTrustedIssuers, getTrustedIssuer,
+  createAppSchema,
+  applyConfig,
+  createPools,
+  makeBroker,
+  getClientPolicy,
+  createTrustedIssuer,
+  listTrustedIssuers,
+  getTrustedIssuer,
 } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import type { BrokerContext } from "../src/types";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
 
 let p: Provisioned, app: Pool, pools: any;
 
@@ -31,22 +42,36 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
 let broker: ReturnType<typeof makeBroker>;
 
 beforeAll(async () => {
-  p = await provision("task-8-1");
+  p = await provision("control-plane-reads");
   app = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(app);
   await applyConfig(app, cfg);
-  pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live, devWrite: p.urls.devWrite, liveWrite: p.urls.liveWrite });
+  pools = createPools({
+    app: p.urls.admin,
+    dev: p.urls.dev,
+    live: p.urls.live,
+    devWrite: p.urls.devWrite,
+    liveWrite: p.urls.liveWrite,
+  });
   broker = makeBroker(pools, cfg);
 }, 60_000);
 
-afterAll(async () => { await app.end(); await pools.end(); await p.end(); });
+afterAll(async () => {
+  await app.end();
+  await pools.end();
+  await p.end();
+});
 
 describe("listRevisions", () => {
   it("returns multiple revisions in order", async () => {
     const userId = "rev_list_user";
     const grantId = await requestGrant(app, {
-      userId, collection: "people", env: "live", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "owner"],
+      userId,
+      collection: "people",
+      env: "live",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "owner"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["read"] });
 
@@ -54,34 +79,44 @@ describe("listRevisions", () => {
     // Insert 3 revisions for the same document
     const revIds: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const revId = await app.query(
-        `select gen_random_uuid() as id`
-      ).then(r => r.rows[0].id);
+      const revId = await app.query(`select gen_random_uuid() as id`).then((r) => r.rows[0].id);
       revIds.push(revId);
       await app.query(
         `insert into data_live.people (org_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
          values ('default', $1, $2, $3, $4, $5, now(), $6, $7, $8, $9, $10)`,
-        [docId, `user${i}@ex.com`, `owner${i}`, revId, i + 1, userId, "update", "approved", ["email"], i === 2]);
+        [
+          docId,
+          `user${i}@ex.com`,
+          `owner${i}`,
+          revId,
+          i + 1,
+          userId,
+          "update",
+          "approved",
+          ["email"],
+          i === 2,
+        ],
+      );
     }
 
-    const ctx: BrokerContext = { userId, env: "live", orgId: "default", via: "session" };
+    const ctx: BrokerContext = makeCtx({ userId, env: "live" });
     const result = await broker.listRevisions(ctx, { collection: "people", id: docId });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.revisions).toHaveLength(3);
-      expect(result.revisions[0].seq).toBe(1);
-      expect(result.revisions[1].seq).toBe(2);
-      expect(result.revisions[2].seq).toBe(3);
-      expect(result.revisions[0].op).toBe("update");
-      expect(result.revisions[0].fields).toEqual(["email"]);
-      expect(result.revisions[0].status).toBe("approved");
+      expect(result.revisions[0]!.seq).toBe(1);
+      expect(result.revisions[1]!.seq).toBe(2);
+      expect(result.revisions[2]!.seq).toBe(3);
+      expect(result.revisions[0]!.op).toBe("update");
+      expect(result.revisions[0]!.fields).toEqual(["email"]);
+      expect(result.revisions[0]!.status).toBe("approved");
     }
   });
 
   it("refuses with no_grant when user has no grant", async () => {
     const docId = "00000000-0000-0000-0000-000000000000";
-    const ctx: BrokerContext = { userId: "no_grant_user", env: "live", orgId: "default", via: "session" };
+    const ctx: BrokerContext = makeCtx({ userId: "no_grant_user", env: "live" });
     const result = await broker.listRevisions(ctx, { collection: "people", id: docId });
 
     expect(result.ok).toBe(false);
@@ -91,13 +126,17 @@ describe("listRevisions", () => {
   it("refuses with no_grant when read verb is denied", async () => {
     const userId = "no_read_verb_user";
     const grantId = await requestGrant(app, {
-      userId, collection: "people", env: "live", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email"],
+      userId,
+      collection: "people",
+      env: "live",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["update"] });
 
     const docId = "00000000-0000-0000-0000-000000000001";
-    const ctx: BrokerContext = { userId, env: "live", orgId: "default", via: "session" };
+    const ctx: BrokerContext = makeCtx({ userId, env: "live" });
     const result = await broker.listRevisions(ctx, { collection: "people", id: docId });
 
     expect(result.ok).toBe(false);
@@ -107,13 +146,17 @@ describe("listRevisions", () => {
   it("returns not_found when document does not exist", async () => {
     const userId = "not_found_user";
     const grantId = await requestGrant(app, {
-      userId, collection: "people", env: "live", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email"],
+      userId,
+      collection: "people",
+      env: "live",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["read"] });
 
     const docId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
-    const ctx: BrokerContext = { userId, env: "live", orgId: "default", via: "session" };
+    const ctx: BrokerContext = makeCtx({ userId, env: "live" });
     const result = await broker.listRevisions(ctx, { collection: "people", id: docId });
 
     expect(result.ok).toBe(false);
@@ -123,8 +166,12 @@ describe("listRevisions", () => {
   it("returns not_found when document is excluded by filter", async () => {
     const userId = "filtered_user";
     const grantId = await requestGrant(app, {
-      userId, collection: "people", env: "live", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "owner"],
+      userId,
+      collection: "people",
+      env: "live",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "owner"],
     });
     await approveGrant(app, cfg, grantId, "admin", {
       verbs: ["read"],
@@ -136,9 +183,10 @@ describe("listRevisions", () => {
     await app.query(
       `insert into data_live.people (org_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', $1, 'user@ex.com', 'other_user', $2, 1, now(), $3, 'create', 'approved', '{}', true)`,
-      [docId, revId, userId]);
+      [docId, revId, userId],
+    );
 
-    const ctx: BrokerContext = { userId, env: "live", orgId: "default", via: "session" };
+    const ctx: BrokerContext = makeCtx({ userId, env: "live" });
     const result = await broker.listRevisions(ctx, { collection: "people", id: docId });
 
     expect(result.ok).toBe(false);
@@ -165,7 +213,15 @@ describe("getClientPolicy", () => {
       `insert into app.client_policies
        (client_id, allowed_scopes, allowed_collections, mode, robot_user_id, trusted_issuer_id)
        values ($1, $2, $3, $4, $5, $6)`,
-      [clientId, ["env:live"], ["collection1", "collection2"], "headless", "robot_123", trustedIssuerId]);
+      [
+        clientId,
+        ["env:live"],
+        ["collection1", "collection2"],
+        "headless",
+        "robot_123",
+        trustedIssuerId,
+      ],
+    );
 
     const policy = await getClientPolicy(app, clientId);
 
@@ -181,11 +237,12 @@ describe("getClientPolicy", () => {
 describe("trusted issuers", () => {
   it("creates and retrieves issuer", async () => {
     const issuer = await createTrustedIssuer(
-      app, "default",
+      app,
+      "default",
       "https://issuer.example.com",
       "https://issuer.example.com/.well-known/jwks.json",
       "https://api.example.com",
-      "sub"
+      "sub",
     );
 
     expect(issuer.id).toBeDefined();
@@ -206,40 +263,46 @@ describe("trusted issuers", () => {
   it("lists issuers for org only", async () => {
     // Create issuer for default org
     const issuer1 = await createTrustedIssuer(
-      app, "default",
+      app,
+      "default",
       "https://issuer1.example.com",
       "https://issuer1.example.com/.well-known/jwks.json",
-      "https://api1.example.com"
+      "https://api1.example.com",
     );
 
     // Create issuer for other org
-    await app.query(`insert into app.organizations (id, name) values ($1, $2)`, ["other_org", "Other Org"]);
+    await app.query(`insert into app.organizations (id, name) values ($1, $2)`, [
+      "other_org",
+      "Other Org",
+    ]);
     const issuer2 = await createTrustedIssuer(
-      app, "other_org",
+      app,
+      "other_org",
       "https://issuer2.example.com",
       "https://issuer2.example.com/.well-known/jwks.json",
-      "https://api2.example.com"
+      "https://api2.example.com",
     );
 
     const defaultIssuers = await listTrustedIssuers(app, "default");
     const otherIssuers = await listTrustedIssuers(app, "other_org");
 
     // Filter to just the issuers we created (there might be others from other tests)
-    const defaultCreated = defaultIssuers.filter(i => i.id === issuer1.id);
-    const otherCreated = otherIssuers.filter(i => i.id === issuer2.id);
+    const defaultCreated = defaultIssuers.filter((i) => i.id === issuer1.id);
+    const otherCreated = otherIssuers.filter((i) => i.id === issuer2.id);
 
     expect(defaultCreated).toHaveLength(1);
     expect(otherCreated).toHaveLength(1);
-    expect(defaultCreated[0].orgId).toBe("default");
-    expect(otherCreated[0].orgId).toBe("other_org");
+    expect(defaultCreated[0]!.orgId).toBe("default");
+    expect(otherCreated[0]!.orgId).toBe("other_org");
   });
 
   it("returns null for issuer from another org", async () => {
     const issuer = await createTrustedIssuer(
-      app, "default",
+      app,
+      "default",
       "https://issuer3.example.com",
       "https://issuer3.example.com/.well-known/jwks.json",
-      "https://api3.example.com"
+      "https://api3.example.com",
     );
 
     const fromWrongOrg = await getTrustedIssuer(app, issuer.id, "other_org");
@@ -252,19 +315,23 @@ describe("getProposal", () => {
   // it is approved, so getDocument cannot show a reviewer what they are about to approve.
   async function proposeAs(userId: string, verbs: string[], allowedFields: string[]) {
     const grantId = await requestGrant(app, {
-      userId, collection: "people", env: "live", orgId: "default",
-      purposeLabel: "test", allowedFields,
+      userId,
+      collection: "people",
+      env: "live",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields,
     });
-    await approveGrant(app, cfg, grantId, "admin", { verbs: verbs as any, mode: "proposal_only" });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: verbs, mode: "proposal_only" });
   }
 
-  const ctx = (userId: string): BrokerContext =>
-    ({ userId, orgId: "default", env: "live", via: "session" });
+  const ctx = (userId: string): BrokerContext => makeCtx({ userId, env: "live" });
 
   it("returns the proposed values of a pending create", async () => {
     await proposeAs("gp_author", ["read", "create"], ["id", "email", "owner", "status"]);
     const created = await broker.mutate(ctx("gp_author"), {
-      collection: "people", op: "create",
+      collection: "people",
+      op: "create",
       values: { email: "proposed@example.com", owner: "gp_author", status: "new" },
     });
     expect(created.ok).toBe(true);
@@ -283,7 +350,8 @@ describe("getProposal", () => {
   it("omits values for fields outside the reviewer's grant", async () => {
     await proposeAs("gp_author2", ["read", "create"], ["id", "email", "owner", "status"]);
     const created = await broker.mutate(ctx("gp_author2"), {
-      collection: "people", op: "create",
+      collection: "people",
+      op: "create",
       values: { email: "secret@example.com", owner: "gp_author2", status: "new" },
     });
     const proposalId = (created as { proposalId: string }).proposalId;
@@ -302,7 +370,8 @@ describe("getProposal", () => {
   it("refuses a reader who does not hold approve", async () => {
     await proposeAs("gp_author3", ["read", "create"], ["id", "email", "owner", "status"]);
     const created = await broker.mutate(ctx("gp_author3"), {
-      collection: "people", op: "create",
+      collection: "people",
+      op: "create",
       values: { email: "x@example.com", owner: "gp_author3", status: "new" },
     });
     const proposalId = (created as { proposalId: string }).proposalId;

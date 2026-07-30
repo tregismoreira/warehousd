@@ -24,7 +24,7 @@ export function ReviewHome() {
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   return (

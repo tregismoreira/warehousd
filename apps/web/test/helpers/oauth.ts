@@ -20,7 +20,13 @@ export function pkcePair() {
 // generic OIDC consent screen — this helper never needs to touch /oauth2/consent.
 export async function authorizeAndGetCode(
   auth: { handler: (req: Request) => Promise<Response> },
-  opts: { clientId: string; scope: string; cookie: string; challenge: string; extraParams?: Record<string, string> },
+  opts: {
+    clientId: string;
+    scope: string;
+    cookie: string;
+    challenge: string;
+    extraParams?: Record<string, string>;
+  },
 ): Promise<{ res: Response; code: string | null; location: string }> {
   const url = new URL("http://localhost:8722/api/auth/mcp/authorize");
   url.searchParams.set("client_id", opts.clientId);
@@ -31,7 +37,9 @@ export async function authorizeAndGetCode(
   url.searchParams.set("code_challenge_method", "S256");
   for (const [k, v] of Object.entries(opts.extraParams ?? {})) url.searchParams.set(k, v);
 
-  const res = await auth.handler(new Request(url, { method: "GET", headers: { cookie: opts.cookie } }));
+  const res = await auth.handler(
+    new Request(url, { method: "GET", headers: { cookie: opts.cookie } }),
+  );
   const location = res.headers.get("location") ?? "";
   const code = location ? new URL(location, "http://localhost").searchParams.get("code") : null;
   return { res, code, location };

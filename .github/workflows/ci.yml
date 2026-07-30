@@ -5,18 +5,30 @@ on:
     branches: [main]
   pull_request:
 
-jobs:
-  # Lint runs on its own so a style failure does not sit in front of the test suite.
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+# Every job declares its own `permissions` as well. This is the floor: a job that forgets to narrow
+# still cannot write. release.yml has done this since it was written (`permissions: {}` on verify);
+# ci.yml declared nothing at all, so all five jobs ran with the repository default.
+permissions:
+  contents: read
 
-      - uses: pnpm/action-setup@v4
+# Actions are pinned by commit SHA, not by tag. A tag is mutable — whoever controls the action's
+# repository can move `v4` to any commit, and it would then run here with this workflow's token. The
+# trailing comment records which release each SHA is, so dependabot can bump both together.
+jobs:
+  # Quality gates run on their own and before the suite: a lint, type or format failure is seconds
+  # of feedback and should not sit behind twenty minutes of Postgres.
+  quality:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.33.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -26,16 +38,29 @@ jobs:
 
       - run: pnpm lint
 
+      # Covers test/, e2e/ and scripts/ as well as src — see scripts/typecheck.ts. Until this
+      # existed, ~16.7k lines of test code were type-checked nowhere and 436 type errors sat behind
+      # a green `pnpm test`.
+      - run: pnpm typecheck
+
+      - run: pnpm format:check
+
+      # --prod: a vulnerability in a dev dependency does not ship. Advisories appear between
+      # releases with no code change here, so only high and above fails the job.
+      - run: pnpm audit --prod --audit-level high
+
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.33.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -45,24 +70,45 @@ jobs:
 
       - run: pnpm test:up
 
-      - run: pnpm test
+      # `pnpm test` plus blob reports merged into one coverage report across both passes; see
+      # scripts/run-tests.ts. The threshold check runs on the merged report only, because the serial
+      # pass is three suites and a floor against its partial coverage would say nothing.
+      - run: pnpm test:coverage
         env:
           WAREHOUSD_PROJECT_DIR: examples/harbor
 
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e '
+              const t = require("./coverage/coverage-summary.json").total;
+              console.log("| metric | % | covered |");
+              console.log("| --- | --- | --- |");
+              for (const k of ["lines", "statements", "functions", "branches"])
+                console.log(`| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`);
+            ' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - run: pnpm build
+
+      - if: always()
+        run: pnpm test:down
 
   playwright:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.33.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -76,7 +122,8 @@ jobs:
 
       - run: pnpm e2e
 
-      - run: pnpm test:down
+      - if: always()
+        run: pnpm test:down
 
   # Packaging fidelity: installs the actual tarball outside the workspace, so a broken `bin`
   # path, a missing shebang, a `files` omission, or an unresolvable external `pg` fails here
@@ -84,14 +131,16 @@ jobs:
   pack:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.33.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -117,15 +166,17 @@ jobs:
   e2e:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.33.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -145,3 +196,8 @@ jobs:
           WAREHOUSD_IMAGE: warehousd:ci
 
       - run: pnpm test:e2e:sso
+
+      # This job never ran test:down at all, so its containers leaked between runs — the
+      # `playwright` job did and this one was simply missed.
+      - if: always()
+        run: pnpm test:down

@@ -12,15 +12,20 @@ beforeAll(async () => {
   const app = getAppPool();
   await app.query(
     `insert into app.grants (user_id,collection,env,status,allowed_fields,purpose_label)
-     values ('mia','announcements','dev','approved',array['id','title'],'newsletter')`);
+     values ('mia','announcements','dev','approved',array['id','title'],'newsletter')`,
+  );
   await app.query(
     `insert into app.grants (user_id,collection,env,status,allowed_fields,expires_at)
-     values ('mia','metrics','dev','approved',array['id','date'], now() - interval '1 day')`);
+     values ('mia','metrics','dev','approved',array['id','date'], now() - interval '1 day')`,
+  );
   await app.query(
     `insert into app.grants (user_id,collection,env,status,allowed_fields,purpose_label)
-     values ('marcus','salaries','dev','pending',array['id'],'comp review')`);
+     values ('marcus','salaries','dev','pending',array['id'],'comp review')`,
+  );
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(url: string, cookie?: string) {
   const headers: Record<string, string> = {};
@@ -61,7 +66,8 @@ describe("GET /api/me/grants", () => {
     const app = getAppPool();
     await app.query(
       `insert into app.grants (user_id,collection,env,status,allowed_fields)
-       values ('mia','policies','live','pending',array['title'])`);
+       values ('mia','policies','live','pending',array['title'])`,
+    );
     const { GET } = await import("../app/api/me/grants/route");
     const body = await (await GET(req("/api/me/grants", miaCookie) as any)).json();
     const policies = body.grants.find((g: any) => g.collection === "policies");

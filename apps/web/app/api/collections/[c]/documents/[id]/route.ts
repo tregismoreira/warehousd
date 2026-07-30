@@ -6,7 +6,7 @@ import { unauthenticated, refuse, ok } from "../../../../../../lib/rest";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ c: string; id: string }> }
+  { params }: { params: Promise<{ c: string; id: string }> },
 ) {
   const ctx = await deriveContext(req);
   if (!ctx) return unauthenticated();
