@@ -34,6 +34,9 @@ const ORIGIN = `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
+  // Runs after the webServer below is answering, and builds every page and route handler before
+  // the first assertion starts its clock. See the file for why that beats a longer timeout.
+  globalSetup: "./e2e/warm-routes.ts",
   timeout: 120_000,
   fullyParallel: false, // one database, one dev server
   workers: 1,
