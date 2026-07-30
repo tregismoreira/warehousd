@@ -1,8 +1,8 @@
 import { resolveProject } from "./project";
 import { tryRun } from "./docker";
-import { readOutputs } from "./state";
+import { readOutputs, type Outputs } from "./state";
 
-export type StatusResult = { healthy: boolean; outputs: any | null };
+export type StatusResult = { healthy: boolean; outputs: Outputs | null };
 
 export async function runStatus(dir: string): Promise<StatusResult> {
   const p = resolveProject(dir);

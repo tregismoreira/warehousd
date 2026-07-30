@@ -1,8 +1,21 @@
 import type { Pool } from "pg";
 import type { QueryIntent, DocSearchIntent, RefusalReason } from "../types";
 
+// What a mutation records in place of its intent: the op and the field NAMES it touched, never
+// the submitted values. Named here rather than cast away at the call site — the `as never` that
+// used to bridge it hid the fact that this column holds three different shapes.
+export type MutationAuditIntent = {
+  op: string; collection: string; id?: string | undefined; fields: string[];
+};
+
+// Operational events (import, regen) carry their own shape and their own reason codes.
+export type OperationalAuditIntent = { op: string } & Record<string, unknown>;
+
+export type AuditIntent =
+  | QueryIntent | DocSearchIntent | MutationAuditIntent | OperationalAuditIntent | null;
+
 export async function writeAudit(app: Pool, e: {
-  userId: string; env: "dev" | "live"; collection: string; orgId: string; intent: QueryIntent | DocSearchIntent | null;
+  userId: string; env: "dev" | "live"; collection: string; orgId: string; intent: AuditIntent;
   fieldsReturned: string[]; grantId: string | null;
   outcome: "allowed" | "refused"; reason: RefusalReason | string | null; via: string;
 }): Promise<string> {

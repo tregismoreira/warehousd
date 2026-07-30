@@ -157,7 +157,7 @@ export function canonicalize(type: FieldConfig["type"], v: unknown): string | nu
 export type FilterValidationError = { field: string; detail: string };
 
 // Every predicate a grant carries, checked before either evaluator runs. Called by the read path
-// (broker.ts, where it already walks the same list to check field existence) and by the write
+// (verbs/read.ts, where it already walks the same list to check field existence) and by the write
 // path, so the two agree on which filters are evaluable at all.
 //
 // A null filter value is *not* an error: it is a legal predicate that matches nothing, which is

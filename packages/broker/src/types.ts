@@ -2,7 +2,13 @@ export interface BrokerContext {
   userId: string;
   orgId: string; // from token/persona or session, never from request body — see docs/architecture.md
   env: "dev" | "live"; // from token/persona, never from request body
-  allowedCollections?: string[] | null; // collection ceiling; null = no limit (carry on context from client policy)
+  // Collection ceiling; null = no limit (carried on the context from the client policy).
+  //
+  // Required, not optional. The `?` was what let five call sites drop it while still
+  // type-checking — a context built without it is a context with no ceiling, which is the widest
+  // possible answer arrived at by omission rather than by decision. `null` still says "no
+  // ceiling"; it just has to be said.
+  allowedCollections: string[] | null;
   via: string; // 'session' | 'oauth' | 'token_exchange' | 'api_key:<id>' — audit trail of which credential authenticated this
 }
 
@@ -41,13 +47,18 @@ export type RefusalReason =
   | "no_grant" | "expired_grant" | "field_denied"
   | "unknown_collection" | "unknown_field" | "invalid_intent" | "internal_error" | "not_found";
 
+// `auditId` is null on exactly one path: the audit insert itself failed. It is never null on a
+// successful result — an allow whose decision could not be recorded is downgraded to an
+// `internal_error` refusal before it reaches a caller. See audit/decision.ts.
+export type AuditId = string | null;
+
 export type BrokerResult =
   | { ok: true; documents: Document[]; fieldsReturned: string[]; auditId: string }
-  | { ok: false; reason: RefusalReason; auditId: string };
+  | { ok: false; reason: RefusalReason; auditId: AuditId };
 
 export type GetDocumentResult =
   | { ok: true; document: Document; fieldsReturned: string[]; rev?: string; auditId: string }
-  | { ok: false; reason: RefusalReason; auditId: string };
+  | { ok: false; reason: RefusalReason; auditId: AuditId };
 
 export type MutationIntent =
   | { collection: string; op: "create"; values: Record<string, unknown> }
@@ -66,11 +77,12 @@ export type MutationRefusalReason =
 export type MutationResult =
   | { ok: true; status: "applied"; documentId: string; rev: string; auditId: string }
   | { ok: true; status: "pending"; proposalId: string; auditId: string }
-  | { ok: false; reason: MutationRefusalReason; auditId: string };
+  | { ok: false; reason: MutationRefusalReason; auditId: AuditId };
 
 export type VisibleField = { name: string; type: string; pk?: boolean };
 export type VisibleSchema = { collection: string; description: string; fields: VisibleField[] };
-export type Refusal = { ok: false; reason: RefusalReason; auditId: string };
+export type Refusal = { ok: false; reason: RefusalReason; auditId: AuditId };
+export type MutationRefusal = { ok: false; reason: MutationRefusalReason; auditId: AuditId };
 
 export const DEFAULT_LIMIT = 100;
 export const MAX_LIMIT = 500;

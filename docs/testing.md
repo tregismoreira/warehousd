@@ -82,9 +82,10 @@ Postgres *cluster* rather than to their own database:
   `password authentication failed`.
 - `change-feed.test.ts` expects an entry to be readable immediately after the write. The feed
   holds a row back until `pg_snapshot_xmin` passes its `xmin`, which is what stops `seq` from
-  being handed out non-monotonically (see the comment at `broker.ts:1087`). Transaction ids are
-  cluster-global, so an open transaction in *any other database on the same server* keeps that
-  watermark below the new row and the feed correctly returns nothing yet. Worth knowing beyond
+  being handed out non-monotonically (see `changes` in
+  `packages/broker/src/verbs/history.ts`). Transaction ids are cluster-global, so an open
+  transaction in *any other database on the same server* keeps that watermark below the new row
+  and the feed correctly returns nothing yet. Worth knowing beyond
   the tests: change-feed latency depends on the busiest writer in the cluster, not just on this
   application.
 

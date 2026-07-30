@@ -31,9 +31,9 @@ export async function runStop(dir: string, opts: { destroy?: boolean; yes?: bool
     const outputsPath = join(dir, ".warehousd", "outputs.json");
     try {
       unlinkSync(outputsPath);
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Ignore if file doesn't exist
-      if (err.code !== "ENOENT") throw err;
+      if ((err as { code?: string }).code !== "ENOENT") throw err;
     }
   }
 }

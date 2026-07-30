@@ -18,7 +18,7 @@ export function assertDocker(): void {
       encoding: "utf8",
     });
   } catch (err: unknown) {
-    const error = err as any;
+    const error = err as { code?: string };
     if (error.code === "ENOENT") {
       throw new DockerError(
         "docker not found on PATH. Install Docker Desktop (https://docs.docker.com/get-docker/) and retry."
@@ -35,7 +35,7 @@ export function run(args: string[]): string {
     const output = execFileSync("docker", args, { encoding: "utf8" });
     return output.trim();
   } catch (err: unknown) {
-    const error = err as any;
+    const error = err as { stderr?: string; message?: string };
     throw new DockerError(error.stderr || error.message);
   }
 }

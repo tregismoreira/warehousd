@@ -88,13 +88,16 @@ export function createPools(urls: { app: string; dev: string; live: string; imp?
 }
 
 // The ONLY place env maps to a data pool. A dev ctx can never reach the live pool.
-export function dataPool(pools: Pools, ctx: BrokerContext): Pool {
+//
+// `Pick<…, "env">` rather than the whole context: env is the only thing either of these reads, and
+// asking for the whole context made a caller that has no user or org fabricate one to get a pool.
+export function dataPool(pools: Pools, ctx: Pick<BrokerContext, "env">): Pool {
   return ctx.env === "live" ? pools.live : pools.dev;
 }
 
 // The ONLY place env maps to a write pool. Returns null if the deployment has no write path
 // configured for this env (safer default: opt-in to mutations).
-export function writePool(pools: Pools, ctx: BrokerContext): Pool | null {
+export function writePool(pools: Pools, ctx: Pick<BrokerContext, "env">): Pool | null {
   return ctx.env === "live" ? pools.liveWrite : pools.devWrite;
 }
 

@@ -6,10 +6,13 @@
 // that stops being true the first time a caller passes something else, so the check is applied at
 // the point of interpolation rather than trusted to hold upstream.
 //
-// Phase 4.1 folds the two remaining copies into this one: `q()` in sql/build.ts and `ident()` in
-// broker.ts. They are identical in behaviour; moving the query builder onto a shared helper is a
-// change to the file that generates every read statement, so it belongs with that phase's
-// extract-and-verify pass rather than alongside an unrelated fix.
+// This is the only copy. `q()` in sql/build.ts and `ident()` in broker.ts were byte-identical
+// third and second copies of the same rule, which is one rule too many for something whose whole
+// job is to be the place a name is checked before it becomes SQL text.
+//
+// A failure here is a broker bug, not a caller's: everything that reaches it is either a literal
+// in the source or a config-validated name. Throwing surfaces it as internal_error rather than
+// letting a malformed statement reach Postgres.
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
 
 export function ident(id: string): string {

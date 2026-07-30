@@ -29,8 +29,9 @@ export async function indexCollection(
   const filesT = `${schema}."${collection}__files"`;
   const documentsT = `${schema}."${collection}__documents"`;
   const existing = new Map<string, { id: string; checksum: string }>(
-    (await db.query(`select id, path, checksum from ${filesT}`)).rows
-      .map((r: any) => [r.path, { id: r.id, checksum: r.checksum }]));
+    (await db.query<{ id: string; path: string; checksum: string }>(
+      `select id, path, checksum from ${filesT}`)).rows
+      .map((r) => [r.path, { id: r.id, checksum: r.checksum }]));
   let indexed = 0, skipped = 0, deleted = 0;
   const seen = new Set<string>();
 

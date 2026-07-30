@@ -45,7 +45,7 @@ export const TOOLS: ToolDef[] = [
       "List collections (name + description only). Governance is deny-by-default and " +
       "purpose-bound: this list does not confer access to any collection's data or schema.",
     inputSchema: { type: "object", properties: {} },
-    handler: async (ctx) => getBroker().broker.listCollections(ctx),
+    handler: async (ctx) => withHint(await getBroker().broker.listCollections(ctx)),
   },
   {
     name: "describe_collection",

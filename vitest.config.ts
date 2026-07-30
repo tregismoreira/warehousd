@@ -7,8 +7,9 @@ import { defineConfig } from "vitest/config";
 //   Roles are cluster-global, so a parallel worker's pool hits that window and fails to
 //   authenticate.
 // - change-feed.test.ts asserts that an entry is visible immediately after the write. The feed
-//   withholds rows until `pg_snapshot_xmin` passes their `xmin` (broker.ts:1087) so that `seq`
-//   can never be handed out non-monotonically. Transaction ids are cluster-global, so an
+//   withholds rows until `pg_snapshot_xmin` passes their `xmin` (see `changes` in
+//   packages/broker/src/verbs/history.ts) so that `seq` can never be handed out
+//   non-monotonically. Transaction ids are cluster-global, so an
 //   in-flight transaction in *any other database* on this server holds that watermark down and
 //   the entry is — correctly — not yet returned. The feed is right; the assertion needs a quiet
 //   cluster.

@@ -23,9 +23,9 @@ import { z } from "zod";
 // `fn` and `op` are the only intent values that reach the SQL text as syntax, and a field name
 // is only ever a quoted identifier drawn from a closed set.
 
-// The identifier shape sql/build.ts's q() and broker.ts's ident() enforce. Checking it here as
-// well means a bad identifier is a 400 naming the field rather than an internal_error: those
-// quoting functions throw, and a throw is indistinguishable from a broker bug by design.
+// The identifier shape sql/ident.ts's ident() enforces. Checking it here as well means a bad
+// identifier is a 400 naming the field rather than an internal_error: that quoting function
+// throws, and a throw is indistinguishable from a broker bug by design.
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
 const Ident = z.string().regex(IDENT, "must match [a-z_][a-z0-9_]*");
 
@@ -114,4 +114,26 @@ export function describeIntentError(err: z.ZodError): string {
   return err.issues
     .map((i) => `${i.path.length ? i.path.join(".") : "(root)"}: ${i.message}`)
     .join("; ");
+}
+
+// Hold a client-supplied intent to its runtime shape before any of it is read.
+//
+// types.ts describes these shapes to the compiler, which says nothing about a JSON body or an
+// MCP tool argument — and `aggregate[].fn` reached the SQL text as syntax, not as a bound
+// parameter. The schemas above close that; parsing in the broker verbs rather than only in the
+// adapters means a new adapter cannot reintroduce it by forgetting.
+//
+// The failure answers `invalid_intent` through the normal refusal path so the probe is
+// audited — an unaudited probe leaves no trace, which is the worse half of the bug. Detail
+// goes to the log only: the reason codes deliberately carry nothing back to the caller.
+export function checkIntent<T>(
+  schema: z.ZodType<T>, raw: unknown, verb: string,
+): { ok: true; intent: T } | { ok: false; collection: string } {
+  const r = schema.safeParse(raw);
+  if (r.success) return { ok: true, intent: r.data };
+  // On a malformed intent `collection` may not be a string at all, and the audit row still
+  // has to name something. "*" is what the other collection-less verbs already record.
+  const c = (raw as { collection?: unknown } | null)?.collection;
+  console.warn(`[broker] ${verb} intent rejected`, { detail: describeIntentError(r.error) });
+  return { ok: false, collection: typeof c === "string" ? c : "*" };
 }

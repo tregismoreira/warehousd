@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import type { DocumentFilter } from "../types";
+import type { BrokerContext, DocumentFilter } from "../types";
 
 export type ActiveGrant = {
   id: string;
@@ -14,10 +14,11 @@ export type ActiveGrant = {
 // It takes the whole context rather than spread parameters on purpose. The collection ceiling
 // lives here so that no broker verb can forget it, and a trailing optional argument is exactly
 // how a caller forgets: five call sites had already dropped it while still type-checking.
-// Passing `ctx` means adding a future dimension cannot silently skip any of them.
+// Passing `ctx` means adding a future dimension cannot silently skip any of them — and the field
+// is now required on BrokerContext, so it cannot be dropped from the context either.
 export async function loadActiveGrant(
   db: Pool,
-  ctx: { userId: string; orgId: string; env: "dev" | "live"; allowedCollections?: string[] | null },
+  ctx: Pick<BrokerContext, "userId" | "orgId" | "env" | "allowedCollections">,
   collection: string,
 ): Promise<ActiveGrant | null> {
   const { userId, orgId, env, allowedCollections } = ctx;

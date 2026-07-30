@@ -44,14 +44,13 @@ export const mcpPlugin = mcp({
 // Rule 3 ensures exactly-one-env (via env-picker if needed).
 // Rule 4 re-evaluates on token refresh.
 //
-// The three hook handlers below take `ctx: any` deliberately. The context type that
-// createAuthMiddleware infers for its callback does not describe the fields these handlers
-// legitimately read at runtime, so annotating them narrowly does not type-check: dropping
-// the `: any` produces "ctx.query is possibly undefined" and "Property 'scopes' does not
-// exist on type '{}'" against ctx.query / ctx.body / ctx.context.returned / ctx.context.adapter.
-// Verified by removing the annotations and running tsc. Revisit if Better Auth ever exports
-// a per-endpoint context type. (Unrelated to the `satisfies` at the end of this function,
-// which addresses a different problem — see its own comment.)
+// The three hook handlers below used to take `ctx: any`, on the grounds that the context type
+// createAuthMiddleware infers does not describe what they read. Two of the three complaints that
+// produced were real type errors the `any` was hiding rather than working around: `ctx.query` is
+// genuinely optional (held as a local and null-checked below), and `adapter.findOne` is generic
+// with a `{}` default (given its row shape at the call site). Neither needed an escape hatch.
+// (Unrelated to the `satisfies` at the end of this function, which addresses a different
+// problem — see its own comment.)
 export function envScopePlugin(app: Pool) {
   return {
     id: "env-scope",
@@ -59,7 +58,7 @@ export function envScopePlugin(app: Pool) {
       before: [
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/mcp/authorize",
-          handler: createAuthMiddleware(async (ctx: any) => {
+          handler: createAuthMiddleware(async (ctx) => {
             // Intercept the unauthenticated case before Better Auth's authorize handler can arm its
             // `oidc_login_prompt` cookie-resume (better-auth/plugins/mcp/authorize.mjs sets the cookie;
             // mcp/index.mjs re-enters authorizeMCPOAuth from a `matcher: () => true` after-hook on ANY
@@ -72,8 +71,14 @@ export function envScopePlugin(app: Pool) {
               throw ctx.redirect(`/login?${qs}`);
             }
 
-            const clientId = String(ctx.query?.client_id ?? "");
-            const requested = String(ctx.query?.scope ?? "").split(" ").filter(Boolean);
+            // Held as a local because the scope narrowing below mutates it in place (see the
+            // comment at the assignment). No query string means no `scope` to narrow, which the
+            // requestedEnv guard three lines down would have caught anyway.
+            const query = ctx.query;
+            if (!query) return;
+
+            const clientId = String(query.client_id ?? "");
+            const requested = String(query.scope ?? "").split(" ").filter(Boolean);
             const requestedEnv = requested.filter((s) => ["env:dev", "env:live"].includes(s));
             if (requestedEnv.length === 0) return;
 
@@ -92,12 +97,12 @@ export function envScopePlugin(app: Pool) {
             // Rule 3: exactly-one-env picker. When both env:dev and env:live survive,
             // redirect to the picker unless wh_env is set to a valid value.
             if (survivors.includes("env:dev") && survivors.includes("env:live")) {
-              const picked = ctx.query?.wh_env;
+              const picked = query.wh_env;
               survivors = pickEnvScope(survivors, picked);
               if (survivors.length === 2) {
                 // Still both; redirect to picker
                 const params = new URLSearchParams(
-                  Object.entries(ctx.query ?? {}).map(([k, v]) => [k, String(v)]),
+                  Object.entries(query).map(([k, v]) => [k, String(v)]),
                 );
                 throw ctx.redirect(`/oauth/env-picker?${params.toString()}`);
               }
@@ -109,20 +114,24 @@ export function envScopePlugin(app: Pool) {
             // Better Auth's dispatch holds a reference to the original query object, and only
             // in-place mutation of that object is guaranteed visible downstream.
             const others = requested.filter((s) => !["env:dev", "env:live"].includes(s));
-            ctx.query.scope = [...others, ...survivors].join(" ");
+            query.scope = [...others, ...survivors].join(" ");
           }),
         },
       ],
       after: [
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/mcp/token",
-          handler: createAuthMiddleware(async (ctx: any) => {
+          handler: createAuthMiddleware(async (ctx) => {
             const grantType = ctx.body?.grant_type;
             if (grantType !== "refresh_token") return;
             const returned = ctx.context.returned as { access_token?: string; scope?: string } | undefined;
             if (!returned?.access_token) return;
 
-            const row = await ctx.context.adapter.findOne({
+            // findOne is generic and defaults to `{}`; naming the three columns this handler
+            // reads is what makes `row.userId` a checked property rather than a hopeful one.
+            const row = await ctx.context.adapter.findOne<{
+              scopes: string | null; clientId: string; userId: string;
+            }>({
               model: "oauthAccessToken",
               where: [{ field: "accessToken", value: returned.access_token }],
             });
@@ -160,7 +169,7 @@ export function envScopePlugin(app: Pool) {
         },
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/mcp/register",
-          handler: createAuthMiddleware(async (ctx: any) => {
+          handler: createAuthMiddleware(async (ctx) => {
             const returned = ctx.context.returned;
             if (!(returned instanceof Response)) return;
             const body = await returned.clone().json();

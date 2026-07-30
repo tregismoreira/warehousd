@@ -104,10 +104,10 @@ export async function loadTaxonomyBindings(
     // Load terms for this env
     // YAML vocabularies have env='all', dataset-sourced have env='dev' or 'live'
     const termEnv = vocab.terms ? 'all' : env;
-    const termRows = (await db.query(
+    const termRows = (await db.query<{ slug: string; label: string | null }>(
       `select slug, label from app.terms where vocabulary_id=$1 and env=$2 order by slug`,
       [vidRow.id, termEnv])).rows;
-    const terms = termRows.map((r: any) => ({ slug: r.slug, label: r.label ?? r.slug }));
+    const terms = termRows.map((r) => ({ slug: r.slug, label: r.label ?? r.slug }));
 
     bindings.push({
       field: vocabSlug,

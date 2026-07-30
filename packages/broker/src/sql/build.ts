@@ -1,5 +1,7 @@
 import type { QueryIntent, FilterOp, DocumentFilter, Aggregate } from "../types";
 import { MAX_LIMIT, DEFAULT_LIMIT } from "../types";
+import { ident } from "./ident";
+import { dataSchema } from "../config/collection";
 
 // A filter the builder can express no SQL for. Distinct from the generic Error below so the
 // broker can answer `invalid_intent` — a caller's mistake — rather than `internal_error`.
@@ -26,15 +28,11 @@ function lookup(table: object, key: unknown, kind: string): string {
 }
 // Identifiers reaching q() are drawn from the collection's YAML-defined field set:
 // granted fields for client intents, plus the grant-author-supplied document_filter.field
-// (validated against the same YAML set in broker.ts) — never from raw client input.
+// (validated against the same YAML set in verbs/read.ts) — never from raw client input.
 // Field names are validated at config load time, so invalid identifiers here indicate a broker bug.
 // If a bad identifier somehow reaches q(), it throws synchronously and is caught by try/catch
-// in broker.ts's query/searchDocuments, which wraps execution in audit logging and returns internal_error.
-const IDENT = /^[a-z_][a-z0-9_]*$/i;
-const q = (id: string) => {
-  if (!IDENT.test(id)) throw new Error(`unsafe identifier: ${id}`);
-  return `"${id}"`;
-};
+// in the read verbs, which wrap execution in audit logging and return internal_error.
+const q = ident;
 
 export function buildSelect(
   env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
@@ -44,7 +42,7 @@ export function buildSelect(
   opts: { documentFilters?: DocumentFilter[]; q?: string;
           isMultiValueField?: (field: string) => boolean; searchFields?: string[] } = {},
 ): { text: string; values: unknown[] } {
-  const schema = env === "dev" ? "data_synth" : "data_live";
+  const schema = dataSchema(env);
   const view = `${schema}.v_${intent.collection}`;
   const values: unknown[] = [];
   const param = (v: unknown) => { values.push(v); return `$${values.length}`; };
@@ -105,7 +103,7 @@ export function buildSelect(
     } else if (isMulti) {
       // Ordering and pattern operators have no defensible meaning against a set of terms, and
       // the scalar form below would compare text[] against text — a driver error the caller
-      // can do nothing with. Refuse the intent instead; broker.ts maps this to invalid_intent.
+      // can do nothing with. Refuse the intent instead; verbs/read.ts maps this to invalid_intent.
       throw new UnsupportedFilter(`operator "${f.op}" is not supported on multi-value field "${f.field}"`);
     } else {
       where.push(`${q(f.field)} ${lookup(OP_SQL, f.op, "operator")} ${param(f.value)}`);

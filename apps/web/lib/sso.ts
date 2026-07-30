@@ -36,7 +36,7 @@ export function ssoAdminPlugin() {
       before: [
         {
           matcher: (ctx: { path?: string }) => SSO_ADMIN_PATHS.has(ctx.path ?? ""),
-          handler: createAuthMiddleware(async (ctx: any) => {
+          handler: createAuthMiddleware(async (ctx) => {
             const session = await getSessionFromCtx(ctx);
             if (session?.user?.role !== "admin") {
               throw new APIError("FORBIDDEN", { message: "admin role required" });

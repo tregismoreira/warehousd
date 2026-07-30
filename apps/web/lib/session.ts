@@ -36,6 +36,10 @@ export async function deriveContext(req: Request): Promise<BrokerContext | null>
     userId: user.id,
     orgId: user.orgId ?? DEFAULT_ORG_ID,
     env: readEnvCookie(req),
+    // No ceiling, stated rather than omitted. A collection ceiling belongs to a *client* — it is
+    // read from the client policy in the other two constructors — and a browser session has no
+    // client. What bounds a console user is their grants, which every verb loads anyway.
+    allowedCollections: null,
     via: "session",
   };
 }

@@ -5,9 +5,14 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { RegenSynthCard } from "./RegenSynthCard";
 
+// Only the fields this page counts. The two endpoints return more; naming what is read keeps a
+// renamed field a compile error rather than a tile that quietly reports zero.
+type CollectionSummary = { status?: string };
+type UserSummary = { role?: string };
+
 export default function AdminOverview() {
-  const [collections, setCollections] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
+  const [collections, setCollections] = useState<CollectionSummary[]>([]);
+  const [users, setUsers] = useState<UserSummary[]>([]);
   const [pendingGrantCount, setPendingGrantCount] = useState(0);
   const [auditTotal, setAuditTotal] = useState(0);
   const [loading, setLoading] = useState(true);
