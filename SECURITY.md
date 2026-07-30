@@ -165,3 +165,19 @@ because it was judged unimportant. Re-check them whenever `next` or `vitest` mov
 
 Adding to this list is a deliberate act: state the reason in this table in the same
 change, or fix the advisory instead.
+
+One advisory is handled by an override rather than a suppression.
+[GHSA-gpj5-g38j-94v9](https://github.com/advisories/GHSA-gpj5-g38j-94v9)
+(`drizzle-orm <0.45.2`, SQL injection through improperly escaped identifiers) reached
+the production tree twice over. The first path was a direct dependency of
+`packages/broker` supporting a typed schema mirror that nothing imported; the file and
+both `drizzle` dependencies are gone, and `db/migrate-app.ts` remains the only
+definition of the `app` schema. The second path survives that removal:
+`@better-auth/cli` is still on 1.4.21 — there is no 1.6.x — and that older
+`better-auth` declares the optional peer as `>=0.41.0`, so pnpm resolved 0.41.0 and
+deduplicated it into the production `better-auth@1.6.25`, which asks for `^0.45.2`.
+The `pnpm.overrides` entry pinning `drizzle-orm` to `^0.45.2` patches the advisory and
+settles that peer conflict in favour of the version production actually wants. Nothing
+loads it either way: `apps/web/lib/auth.ts` passes `database: appPool`, so better-auth
+uses its `pg`/kysely adapter and the drizzle adapter is never constructed. Drop the
+override once `@better-auth/cli` ships a 1.6-compatible release.
