@@ -16,6 +16,9 @@ describe("token exchange (delegated flow)", () => {
   let jwksUrl: string;
   let keyPair: Awaited<ReturnType<typeof generateKeyPair>>;
   let trustedIssuer: { id: string; issuer: string; audience: string };
+  // Counts real hits on the JWKS endpoint, so the key-set cache can be asserted rather than
+  // assumed: a per-request createRemoteJWKSet threw its cache away and refetched every time.
+  let jwksFetches = 0;
 
   beforeAll(async () => {
     db = await setupWebDbWithConfig("tokenexchange", fixtureDir);
@@ -26,6 +29,7 @@ describe("token exchange (delegated flow)", () => {
 
     jwksServer = createServer((req, res) => {
       if (req.url === "/.well-known/jwks.json") {
+        jwksFetches++;
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ keys: [jwk] }));
       } else {
@@ -59,11 +63,23 @@ describe("token exchange (delegated flow)", () => {
     await db?.end();
   });
 
-  function signSubjectJwt(subject: string, issuer = trustedIssuer.issuer, audience = trustedIssuer.audience) {
-    return new SignJWT({})
+  // The subject lands in `sub` (the issuer's default subject_claim) and is matched against
+  // app."user".email, so a realistic token carries email_verified alongside it — the route
+  // requires it, because the address is the whole binding to a local user and an IdP that has
+  // not verified it has not established that this token's holder controls it.
+  function signSubjectJwt(
+    subject: string,
+    opts: { issuer?: string; audience?: string; emailVerified?: boolean; expires?: string | null } = {},
+  ) {
+    const {
+      issuer = trustedIssuer.issuer, audience = trustedIssuer.audience,
+      emailVerified = true, expires = "1h",
+    } = opts;
+    let jwt = new SignJWT({ email_verified: emailVerified })
       .setProtectedHeader({ alg: "RS256", kid: "test-key-1" })
-      .setIssuer(issuer).setAudience(audience).setSubject(subject)
-      .setExpirationTime("1h").sign(keyPair.privateKey);
+      .setIssuer(issuer).setAudience(audience).setSubject(subject);
+    if (expires !== null) jwt = jwt.setExpirationTime(expires);
+    return jwt.sign(keyPair.privateKey);
   }
 
   async function registerClient(name: string) {
@@ -107,6 +123,10 @@ describe("token exchange (delegated flow)", () => {
       expect(body.access_token).toBeDefined();
       expect(body.token_type).toBe("Bearer");
       expect(body.scope).toContain("env:dev");
+      // This endpoint issues no refresh token — both grant types it serves hold a credential they
+      // can present again (RFC 6749 §4.4.3). One used to be minted, stored already expired, and
+      // never returned: an unusable secret per exchange.
+      expect(body.refresh_token).toBeUndefined();
     });
 
     it("narrows scope to the client's allowed_collections ceiling, never widens", async () => {
@@ -182,6 +202,134 @@ describe("token exchange (delegated flow)", () => {
     const res = await delegatedExchange(clientId, secret, jwt);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("unauthorized_client");
+  });
+
+  // A token has to say which environment it reaches. This endpoint stored an empty scope string
+  // when the caller named no env scope, and every reader then supplied dev as a default — so the
+  // env a token reached was a property of whoever read it rather than of the token.
+  describe("issued scope", () => {
+    it("records the resolved env scope even when the caller requested none", async () => {
+      const app = getAppPool();
+      const clientId = await registerClient("TE NoScopeRequested");
+      await upsertClientPolicy(app, clientId, "TE NoScopeRequested", ["env:dev"]);
+      await app.query(
+        `update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`,
+        [trustedIssuer.id, clientId]);
+      const { secret } = await createClientSecret(
+        app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
+
+      const res = await exchange({
+        grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+        subject_token: await signSubjectJwt("mia@harbor.demo"),
+        subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+        client_id: clientId, client_secret: secret,
+        // no `scope` at all
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.scope).toBe("env:dev");
+
+      // and the stored row carries it too, not an empty string
+      const row = await app.query(
+        `select scopes from app."oauthAccessToken" where "accessToken"=$1`, [body.access_token]);
+      expect(row.rows[0].scopes).toBe("env:dev");
+    });
+
+    it("refuses to mint a token for a client whose policy allows no environment", async () => {
+      const app = getAppPool();
+      const clientId = await registerClient("TE NoEnvAllowed");
+      await upsertClientPolicy(app, clientId, "TE NoEnvAllowed", []);
+      await app.query(
+        `update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`,
+        [trustedIssuer.id, clientId]);
+      const { secret } = await createClientSecret(
+        app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
+
+      const res = await delegatedExchange(clientId, secret, await signSubjectJwt("mia@harbor.demo"));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_scope");
+    });
+  });
+
+  // The subject token is the whole identity claim in this flow: whatever it says, the exchange
+  // acts as that local user. These are the properties of it that were not being checked.
+  describe("subject token verification", () => {
+    async function delegatedClient(name: string) {
+      const app = getAppPool();
+      const clientId = await registerClient(name);
+      await upsertClientPolicy(app, clientId, name, ["env:dev"]);
+      await app.query(
+        `update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`,
+        [trustedIssuer.id, clientId]);
+      const { secret } = await createClientSecret(
+        app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
+      return { clientId, secret };
+    }
+
+    // An IdP that has not verified the address has not established that the token's holder
+    // controls it, and the address is the only thing binding this token to a local user. An IdP
+    // permitting signup with an unverified corporate address would otherwise hand out that
+    // user's grants to whoever claimed it.
+    it("refuses a subject token whose email is not verified", async () => {
+      const { clientId, secret } = await delegatedClient("TE Unverified");
+      const jwt = await signSubjectJwt("mia@harbor.demo", { emailVerified: false });
+      const res = await delegatedExchange(clientId, secret, jwt);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_grant");
+    });
+
+    it("refuses a subject token with no email_verified claim at all", async () => {
+      const { clientId, secret } = await delegatedClient("TE NoVerifiedClaim");
+      // Sign without the claim rather than with it set false — absent and false must agree.
+      const jwt = await new SignJWT({})
+        .setProtectedHeader({ alg: "RS256", kid: "test-key-1" })
+        .setIssuer(trustedIssuer.issuer).setAudience(trustedIssuer.audience)
+        .setSubject("mia@harbor.demo").setExpirationTime("1h").sign(keyPair.privateKey);
+      const res = await delegatedExchange(clientId, secret, jwt);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_grant");
+    });
+
+    // jose validates only the claims a token actually carries, so a subject token with no `exp`
+    // verified forever and a single captured token stayed usable indefinitely.
+    it("refuses a subject token with no exp", async () => {
+      const { clientId, secret } = await delegatedClient("TE NoExp");
+      const jwt = await signSubjectJwt("mia@harbor.demo", { expires: null });
+      const res = await delegatedExchange(clientId, secret, jwt);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_grant");
+    });
+
+    it("refuses an expired subject token", async () => {
+      const { clientId, secret } = await delegatedClient("TE Expired");
+      const jwt = await signSubjectJwt("mia@harbor.demo", { expires: "-1h" });
+      const res = await delegatedExchange(clientId, secret, jwt);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_grant");
+    });
+
+    // The subject is matched against app."user".email, so a claim carrying something that is not
+    // an address can never be a legitimate identity here. Refusing says so; the previous silent
+    // no-match looked identical to "no such user".
+    it("refuses a subject that is not an email address", async () => {
+      const { clientId, secret } = await delegatedClient("TE OpaqueSub");
+      const jwt = await signSubjectJwt("8f14e45f-ea6a-4c1f-9d0b-2b1c3d4e5f60");
+      const res = await delegatedExchange(clientId, secret, jwt);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_grant");
+    });
+
+    it("fetches the issuer's JWKS once across repeated exchanges, not once per request", async () => {
+      const { clientId, secret } = await delegatedClient("TE JwksCache");
+      // Warm the cache first so the count below cannot include a cold fetch.
+      await delegatedExchange(clientId, secret, await signSubjectJwt("mia@harbor.demo"));
+      const before = jwksFetches;
+      for (let i = 0; i < 3; i++) {
+        const res = await delegatedExchange(clientId, secret, await signSubjectJwt("mia@harbor.demo"));
+        expect(res.status).toBe(200);
+      }
+      expect(jwksFetches).toBe(before);
+    });
   });
 
   it("a revoked key fails the very next request, no expiry wait", async () => {

@@ -18,7 +18,7 @@ export { createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-ap
 export * from "./grants/manage";
 export { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy, setAllowedScopes, getDevClient, ensureDevClient, DEV_CLIENT_NAME } from "./oauth/client-policies";
 export type { ClientPolicy } from "./oauth/client-policies";
-export { resolveEnvScopes, recomputeEnvScope, pickEnvScope, type ClientPolicy as EnvScopeClientPolicy } from "./oauth/env-scope";
+export { resolveEnvScopes, resolveIssuedEnvScope, recomputeEnvScope, pickEnvScope, type ClientPolicy as EnvScopeClientPolicy } from "./oauth/env-scope";
 export * from "./db/bootstrap";
 export { indexCollection } from "./indexing";
 export { syncDatasetTerms, loadTaxonomyBindings, slugify, type TaxonomyBinding } from "./taxonomy";

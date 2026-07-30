@@ -1,6 +1,7 @@
 import type { BrokerContext } from "@warehousd/broker";
 import { DEFAULT_ORG_ID } from "@warehousd/broker";
 import { auth } from "./auth";
+import { envFromScopes, scopesOf } from "./env-scope";
 import { getAppPool } from "../app/lib/broker";
 
 // The ONLY place BrokerContext is constructed for REST API (`/v1/*`) token-authenticated
@@ -20,8 +21,7 @@ import { getAppPool } from "../app/lib/broker";
 export async function deriveRestContext(req: Request): Promise<BrokerContext | null> {
   const session = await auth.api.getMcpSession({ headers: req.headers });
   if (!session) return null;
-  const scopes = (session.scopes ?? "").split(" ").filter(Boolean);
-  const env = scopes.includes("env:live") ? "live" : "dev";
+  const env = envFromScopes(scopesOf(session.scopes));
   const pool = getAppPool();
 
   // Derive orgId from token's userId's user record

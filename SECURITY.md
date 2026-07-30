@@ -63,5 +63,27 @@ deployment that follows the expectations above, but each is worth knowing:
   what the config allows.
 - **No multi-tenancy.** One deployment is one organization. There is no boundary
   between tenants because there are no tenants.
-- **No write path through MCP.** Read and access-request only, by design. The
-  admin CSV/JSON import is append-only through an `INSERT`-only Postgres role.
+- **A token carrying no `env:` scope is read as `env:dev`.** The env rules leave a
+  caller that requested no env scope untouched, and the adapter supplies the
+  floor. Both token-issuing paths now resolve a concrete env and record it, so
+  this is a backstop rather than a normal outcome — but a token minted by some
+  other path with no env scope reads `data_synth`, and a client policy that allows
+  no environment does not stop it. The default is deliberately in the safe
+  direction: `env:dev` is generated data, and `env:live` is never implied — real
+  data requires the scope to be explicitly present, which requires both a policy
+  allowing it and a user with an approved, unexpired live grant.
+- **A trusted issuer's `subject_claim` is trusted as an identity.** In the
+  delegated (RFC 8693) flow the claim named by `subject_claim` is matched against
+  a local user's email address. warehousd requires that the value be a
+  well-formed address and that the subject token assert `email_verified: true`,
+  and it pins the accepted signing algorithms and requires an `exp`. It cannot
+  tell whether the claim an operator chose is one the IdP guarantees. Pointing
+  `subject_claim` at a user-editable claim — `preferred_username` on some
+  directories — makes account takeover an IdP profile edit. Use `email`, or a
+  claim your IdP documents as immutable.
+- **Write tools are exposed over MCP.** `create_document`, `update_document` and
+  `delete_document` are MCP tools, so the untrusted model can propose writes. It
+  cannot decide on them: `approve`/`reject` are not MCP tools, and the broker
+  refuses `self_approval_denied` when the approver is the proposal's author, so a
+  single credential cannot both propose and promote. The admin CSV/JSON import is
+  separate and append-only through an `INSERT`-only Postgres role.
