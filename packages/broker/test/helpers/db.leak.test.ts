@@ -4,7 +4,7 @@ import { provision } from "./db";
 import {
   ADMIN,
   SUFFIX,
-  cloneName,
+  runDbName,
   cloneLikePattern,
   dropStaleClones,
   templateName,
@@ -42,9 +42,9 @@ describe("test database lifecycle", () => {
 
   it("the sweep collects a database whose owner never cleaned up, and spares the templates", async () => {
     // Stands in for a suite whose `beforeAll` threw after `provision` returned: the database exists
-    // and no `end()` will ever be called on it. The tail is deliberately not a number — every real
-    // pid is one, and picking a specific "dead" pid is not something a test can guarantee.
-    const orphan = `wh_leaked_${SUFFIX}_orphan`;
+    // and no `end()` will ever be called on it. The pid slot is deliberately not a number — every
+    // real pid is one, and picking a specific "dead" pid is not something a test can guarantee.
+    const orphan = `wh_leaked_orphan_${SUFFIX}`;
     const admin = new Pool({ connectionString: ADMIN, max: 1 });
     await admin.query(`drop database if exists ${orphan} with (force)`);
     await admin.query(`create database ${orphan}`);
@@ -74,13 +74,17 @@ describe("test database lifecycle", () => {
   it("refuses a database name Postgres would silently truncate", () => {
     // Two names differing only past byte 63 become the same database, so a suite would run against
     // another suite's data rather than fail.
-    expect(() => cloneName("wh", "x".repeat(64))).toThrow(/truncates at 63/);
+    expect(() => runDbName("x".repeat(64))).toThrow(/truncates at 63/);
   });
 
-  it("scopes the sweep pattern to this checkout", () => {
+  it("scopes the sweep pattern to this checkout, suffix last", () => {
     // The suffix is the whole reason a sweep is safe to write at all: sibling checkouts share this
     // cluster. See the SUFFIX comment in templates.ts.
     expect(cloneLikePattern()).toContain(SUFFIX);
-    expect(cloneName("wh", "somelabel")).toContain(`_${SUFFIX}_`);
+    // Ends with the suffix, not merely contains it. scripts/agent/cleanup.sh sweeps
+    // `datname like '%\_<SUFFIX>'` and cannot import this module to find out; moving the suffix off
+    // the end would leave that script matching nothing, which is indistinguishable from a clean
+    // cluster. This assertion is the only thing holding the two in agreement.
+    expect(runDbName("somelabel")).toMatch(new RegExp(`_${SUFFIX}$`));
   });
 });

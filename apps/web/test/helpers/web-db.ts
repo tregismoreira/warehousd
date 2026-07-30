@@ -2,7 +2,7 @@ import { Pool } from "pg";
 import {
   ADMIN,
   BASE,
-  cloneName,
+  runDbName,
   cloneTemplate,
 } from "../../../../packages/broker/test/helpers/templates";
 import { cookieHeader } from "./cookies";
@@ -86,7 +86,7 @@ export async function bootstrapWebDb(appUrl: string): Promise<void> {
 }
 
 async function cloneAndOpen(kind: string, label: string, projectDir?: string) {
-  const dbName = cloneName("wh_web", label);
+  const dbName = runDbName(`web_${label}`);
   await cloneTemplate(kind, dbName);
 
   const appUrl = `${BASE}/${dbName}`;

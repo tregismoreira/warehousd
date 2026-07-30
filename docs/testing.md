@@ -130,10 +130,12 @@ Two things bound the sweep, and both matter:
 - **The checkout suffix is in the clone name.** Sibling workspaces share this
   Postgres, so "drop every `wh_%` that is not a template" would destroy another
   workspace's in-flight databases. The suffix is what makes a sweep addressable
-  to one checkout. Templates are excluded by name as well as by pattern.
+  to one checkout. Templates end in the suffix too, so they match the pattern and
+  are excluded by explicit name instead — losing one is a silent full rebuild.
 - **A live owning pid is skipped.** The suffix scopes to a checkout, not to a
   process, and `pnpm test` is two vitest passes with nothing stopping a third run
-  overlapping. The trailing pid in the name is checked for liveness first.
+  overlapping. The pid sits second-to-last in the name, ahead of the suffix, and
+  is checked for liveness first.
 
 `pnpm test:clean` does the same sweep by hand. It is the least important part of
 this: a cleanup command nobody remembers to run is how it reached 211.
@@ -207,11 +209,15 @@ start when something already answers on the origin, and
 `scripts/assert-port-free.mjs` runs ahead of `next dev` because `next dev -p N`
 does *not* fail on a busy port — it binds N+1 and carries on.
 
-Vitest names its databases `wh_<label>_<pid>` in
-`packages/broker/test/helpers/db.ts` and `apps/web/test/helpers/web-db.ts`, and
-its template databases carry a per-checkout suffix. The ~90 test files
-mentioning `http://localhost:8722` only build `Request` objects for route
-handlers; none binds a port.
+Vitest names its databases `wh_<label>_<pid>_<suffix>` through `runDbName` in
+`packages/broker/test/helpers/templates.ts`, called from
+`packages/broker/test/helpers/db.ts` and `apps/web/test/helpers/web-db.ts`. The
+suffix is the same per-checkout hash the template databases carry, and the pid
+alone was not enough: pids repeat across checkouts, so a leftover clone could not
+be told from a sibling's live one. With it, `scripts/agent/cleanup.sh` can drop
+this checkout's abandoned databases while another checkout's suite is still
+running. The ~90 test files mentioning `http://localhost:8722` only build
+`Request` objects for route handlers; none binds a port.
 
 The servers the suites *do* bind — the fake IdP in `helpers/fake-idp.ts` and the
 one-off ones in `sso-admin`, `admin-sso-ui` and `token-exchange` — all listen on

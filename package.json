@@ -23,7 +23,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsx scripts/typecheck.ts"
+    "typecheck": "tsx scripts/typecheck.ts",
+    "agent:guard": "bash scripts/agent/guard-heavy.sh",
+    "agent:cleanup": "bash scripts/agent/cleanup.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

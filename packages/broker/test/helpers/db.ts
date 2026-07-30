@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { BASE, ADMIN, cloneName, cloneTemplate, templateName } from "./templates";
+import { BASE, ADMIN, runDbName, cloneTemplate, templateName } from "./templates";
 
 // Roles are cluster-global, so they outlive a cached template. bootstrap.test.ts rotates
 // warehousd_dev's password and puts it back in a finally; a crash in between would otherwise
@@ -72,7 +72,7 @@ export async function provision(
   label: string,
   opts: { bare?: boolean } = {},
 ): Promise<Provisioned> {
-  const dbName = cloneName("wh", label);
+  const dbName = runDbName(label);
 
   if (opts.bare) {
     const admin = new Pool({ connectionString: ADMIN, max: 1 });

@@ -23,18 +23,21 @@ export function templateName(kind: string): string {
 // failing — assert rather than assume, as the plan's 5.4.1 asks.
 const MAX_IDENT = 63;
 
-// Every per-run clone goes through here, and the suffix in the middle is what makes the sweeps in
-// vitest.global-setup.ts addressable to *this* checkout.
+// Every per-run clone goes through here, and the suffix is what makes the sweeps addressable to
+// *this* checkout.
 //
 // Before this, clone names were `wh_<label>_<pid>` with no suffix, so the only sweep that could
 // have collected them — "drop every wh_% that is not a template" — would also have dropped a
 // sibling checkout's in-flight test databases. That is the exact failure the SUFFIX comment above
 // exists to prevent, which is why the leak went uncollected: 211 abandoned clones holding 1.68 GB,
 // with idle autovacuum on them costing ~27% CPU.
-export function cloneName(prefix: string, label: string): string {
-  const name = `${prefix}_${label}_${SUFFIX}_${process.pid}`
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "_");
+//
+// The suffix goes last and the pid second-to-last. That order is load-bearing in two places that
+// cannot see each other: `scripts/agent/cleanup.sh` sweeps `datname like '%\_<SUFFIX>'`, and
+// `ownerAlive` below reads the pid by position. Reordering the parts turns both into silent
+// no-ops — a sweep that matches nothing looks exactly like a sweep with nothing to collect.
+export function runDbName(label: string): string {
+  const name = `wh_${label}_${process.pid}_${SUFFIX}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
   if (Buffer.byteLength(name) > MAX_IDENT) {
     throw new Error(
       `test database name "${name}" is ${Buffer.byteLength(name)} bytes; Postgres truncates at ` +
@@ -44,12 +47,16 @@ export function cloneName(prefix: string, label: string): string {
   return name;
 }
 
-// `wh_%_<SUFFIX>_%` — every clone this checkout makes, and nothing another checkout made. The
-// templates are `wh_tmpl_<kind>_<SUFFIX>` with nothing after the suffix, so they do not match; they
-// are also excluded by name below, because losing one to a pattern change would mean a silent
-// full rebuild rather than an error.
+// `wh_%_<SUFFIX>` — every clone this checkout makes, and nothing another checkout made. It is the
+// same shape scripts/agent/cleanup.sh sweeps, deliberately: two sweeps disagreeing about which
+// databases are ours is how one of them starts dropping the other's.
+//
+// The templates are `wh_tmpl_<kind>_<SUFFIX>` and *do* match this, since everything ends in the
+// suffix now. They are excluded by explicit name in dropStaleClones rather than by shape, so a
+// template can never be lost to a pattern edit — losing one means a silent full rebuild rather
+// than an error.
 export function cloneLikePattern(): string {
-  return `wh\\_%\\_${SUFFIX}\\_%`;
+  return `wh\\_%\\_${SUFFIX}`;
 }
 
 // The suffix scopes a sweep to this checkout, but not to this *process*: `pnpm test` is two vitest
@@ -57,11 +64,12 @@ export function cloneLikePattern(): string {
 // with the first. A sweep that ignored that would drop the other run's in-flight databases, which
 // is the same failure as dropping a sibling checkout's, just harder to see.
 //
-// The trailing pid is what settles it. Names are `…_<SUFFIX>_<pid>` where pid is the vitest worker
+// The embedded pid is what settles it. Names are `…_<pid>_<SUFFIX>` where pid is the vitest worker
 // fork that provisioned the database, so a live pid means a live run. Pid reuse can make a dead
 // clone look alive; it is then collected on a later sweep, which is the safe direction to be wrong.
 function ownerAlive(datname: string): boolean {
-  const pid = Number(datname.slice(datname.lastIndexOf("_") + 1));
+  // Second-to-last segment, because the suffix is last — see runDbName.
+  const pid = Number(datname.split("_").at(-2));
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
