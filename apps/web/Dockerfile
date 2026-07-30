@@ -4,13 +4,13 @@
 # so the same Dockerfile built twice produced two different base images with no record of which —
 # and a released image could not be reproduced. Dependabot's docker ecosystem entry keeps this
 # current (see .github/dependabot.yml); the trailing comment says which tag the digest was.
-FROM node:22-slim@sha256:f32b81066cde10a75dbac96646099533316d94bac4150c55da1636e1f0ffdc46 AS builder
+FROM node:25-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS builder
 RUN corepack enable
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm --filter @warehousd/web build
 
-FROM node:22-slim@sha256:f32b81066cde10a75dbac96646099533316d94bac4150c55da1636e1f0ffdc46 AS runner
+FROM node:25-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS runner
 RUN npm install -g pnpm@10.33.0
 WORKDIR /app
 
