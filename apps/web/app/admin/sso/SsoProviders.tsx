@@ -24,8 +24,11 @@ type Provider = {
   type: "oidc" | "saml";
 };
 
+// /api/sso/status is the unauthenticated endpoint and returns less than /api/sso/providers: no
+// issuer, and no domain. This page reads issuer and domain from the admin route above and uses
+// status only for the count and the local-login flag, so the narrower shape is the accurate one.
 type StatusInfo = {
-  providers: Provider[];
+  providers: Pick<Provider, "providerId" | "type">[];
   localLoginEnabled: boolean;
 };
 

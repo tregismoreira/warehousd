@@ -12,7 +12,7 @@ export const TAXONOMY_RESERVED_SLUGS = new Set<string>([
 // identifier shape field names use. Nothing here may reach SQL unvalidated.
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
 
-export const TermSchema = z.object({ label: z.string() });
+export const TermSchema = z.object({ label: z.string() }).strict();
 export const VocabularySchema = z.object({
   label: z.string(),
   multiple: z.boolean().default(false),
@@ -24,7 +24,7 @@ export const VocabularySchema = z.object({
     slug: z.string().regex(IDENT),
     label: z.string().regex(IDENT),
   }).optional(),
-}).superRefine((v, ctx) => {
+}).strict().superRefine((v, ctx) => {
   const hasTerms = !!v.terms;
   const hasSource = !!v.source;
   if (!hasTerms && !hasSource)
@@ -37,7 +37,7 @@ export const ViewJoinSchema = z.object({
   table: z.string().regex(IDENT),
   column: z.string().regex(IDENT),
   on: z.string().regex(IDENT),
-});
+}).strict();
 export type ViewJoinConfig = z.infer<typeof ViewJoinSchema>;
 
 const PostureSchema = z.union([
@@ -45,6 +45,12 @@ const PostureSchema = z.union([
   z.object({ read: z.enum(["allow", "deny"]), write: z.enum(["allow", "deny"]) }),
 ]);
 
+// Every object in this file is strict: an unrecognised key in warehousd.yml is a typo, and the
+// cost of ignoring one is not a validation error but a silent policy change. `postur: deny` parses
+// as a field with no posture declared, and a field with no posture is not a field that denies —
+// it is a field whose posture came from somewhere else, or defaulted. The same reasoning does NOT
+// apply to the intent schemas in intents/schema.ts, which deliberately ignore unknown keys because
+// a client sending an extra key must not be able to tell the difference (see the comment there).
 export const FieldSchema = z.object({
   type: z.enum(["uuid", "text", "numeric", "int", "timestamptz", "date", "boolean", "json"]).optional(),
   posture: PostureSchema,
@@ -56,7 +62,7 @@ export const FieldSchema = z.object({
   max: z.number().optional(),
   gen: z.string().optional(),
   searchable: z.boolean().optional(),   // datasets only, text fields only
-});
+}).strict();
 export type FieldConfig = z.infer<typeof FieldSchema>;
 
 // The types a file collection's extra (metadata) fields may take. `uuid` and `json` are
@@ -95,7 +101,7 @@ export const CollectionSchema = z.object({
   taxonomies: z.array(z.string()).default([]),  // vocabulary slugs — validated against `taxonomies` at ConfigSchema level
   writable: z.boolean().optional(),     // opt-in to write path; verb support is structural
   fields: z.record(z.string(), FieldSchema),
-}).superRefine((c, ctx) => {
+}).strict().superRefine((c, ctx) => {
   const FIELD_NAME = /^[a-z_][a-z0-9_]*$/i;
   for (const name of Object.keys(c.fields))
     if (!FIELD_NAME.test(name))
@@ -233,7 +239,7 @@ export const ConfigSchema = z.object({
     }
   }),
   synthetic: z.object({ documents_per_collection: z.record(z.string(), z.number()).default({}) }).default({ documents_per_collection: {} }),
-}).superRefine((cfg, ctx) => {
+}).strict().superRefine((cfg, ctx) => {
   for (const [name, c] of Object.entries(cfg.collections)) {
     // Validate that each bound taxonomy exists
     for (const taxSlug of c.taxonomies) {

@@ -319,3 +319,58 @@ describe("broker.mutate proposals", () => {
     }
   });
 });
+
+describe("approveProposal reports a lost race as a conflict", () => {
+  it("maps a unique-violation on the current-revision index to conflict, not internal_error", async () => {
+    // The partial unique index is (org_id, pk) where _current (apply/ddl.ts). A create proposal
+    // does not demote anything — there is nothing current yet — so if the document comes into
+    // existence between propose and approve, the merged insert collides. That is a race lost to
+    // another writer, which is what `conflict` means; it was reported as internal_error, telling
+    // the caller there was nothing to retry and a bug to file. mutateFile already mapped 23505
+    // this way, so the two write paths disagreed about the same database error.
+    for (const u of ["race_proposer", "race_approver"]) {
+      const g = await requestGrant(app, {
+        userId: u, collection: "people", env: "dev", orgId: "default",
+        purposeLabel: "test", allowedFields: ["id", "email", "name", "owner"],
+      });
+      await approveGrant(app, cfg, g, "admin", {
+        verbs: ["read", "create", "approve"],
+        mode: u === "race_proposer" ? "proposal_only" : "direct",
+      });
+    }
+    const proposer: BrokerContext = { userId: "race_proposer", env: "dev", orgId: "default" };
+    const approver: BrokerContext = { userId: "race_approver", env: "dev", orgId: "default" };
+
+    const proposed = await broker.mutate(proposer,
+      { collection: "people", op: "create", values: { email: "race@ex.com", name: "Race" } });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    if (!proposed.ok || proposed.status !== "pending") throw new Error("expected a pending create");
+
+    // The pk the proposal reserved, which propose-time collision checks found free.
+    const pending = await app.query(
+      `select id from data_synth.people where _rev = $1`, [proposed.proposalId]);
+    const pk = pending.rows[0].id;
+
+    // Another writer lands that same document first: an approved, current revision under the pk
+    // the pending create is holding.
+    await app.query(
+      `insert into data_synth.people
+         (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+       values ('default', $1, 'other@ex.com', 'Other', gen_random_uuid(), 1, now(), 'someone', 'create', 'approved', '{}', true)`,
+      [pk]);
+
+    const approved = await broker.approveProposal(approver, proposed.proposalId!);
+    expect(approved.ok).toBe(false);
+    if (!approved.ok) expect(approved.reason).toBe("conflict");
+
+    // The refusal is audited, and the other writer's document is untouched.
+    if (!approved.ok) {
+      const audit = await app.query(`select reason from app.audit_events where id = $1`, [approved.auditId]);
+      expect(audit.rows[0].reason).toBe("conflict");
+    }
+    const survivors = await app.query(
+      `select email from data_synth.people where id = $1 and _current`, [pk]);
+    expect(survivors.rows.length).toBe(1);
+    expect(survivors.rows[0].email).toBe("other@ex.com");
+  });
+});

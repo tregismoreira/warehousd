@@ -1,10 +1,12 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { loadActiveGrant } from "../src/grants/eval";
 import { loadConfig, ConfigSchema } from "../src/config/schema";
 import { applyConfig } from "../src/apply/apply";
+import { createPools, makeBroker } from "../src/index";
+import type { BrokerContext } from "../src/types";
 
 let p: Provisioned;
 afterAll(async () => { await p?.end(); });
@@ -148,5 +150,68 @@ describe("collection ceiling", () => {
     expect(grant).toBeNull();
 
     await db.end();
+  });
+});
+
+// listCollections is the one verb that does not route through loadActiveGrant, so the ceiling had
+// to be applied to it by hand — and was not. A restricted client could read back the name and
+// description of every collection in the config, including ones no grant it holds can reach.
+describe("collection ceiling applies to discovery", () => {
+  let lp: Provisioned, db: Pool, pools: any, broker: ReturnType<typeof makeBroker>;
+
+  const config = ConfigSchema.parse({
+    project: "test",
+    collections: {
+      campaigns: { description: "Campaigns", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
+      salaries:  { description: "Salaries",  fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
+      policies:  { description: "Policies",  fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
+    },
+  });
+
+  beforeAll(async () => {
+    lp = await provision("ceiling-discovery");
+    db = new Pool({ connectionString: lp.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, config);
+    pools = createPools({ app: lp.urls.admin, dev: lp.urls.dev, live: lp.urls.live,
+      devWrite: lp.urls.devWrite, liveWrite: lp.urls.liveWrite });
+    broker = makeBroker(pools, config);
+  }, 60_000);
+
+  afterAll(async () => { await db.end(); await pools.end(); await lp.end(); });
+
+  const ctx = (allowedCollections?: string[] | null): BrokerContext =>
+    ({ userId: "u", env: "dev", orgId: "default", ...(allowedCollections !== undefined ? { allowedCollections } : {}) });
+
+  it("lists only collections inside the ceiling", async () => {
+    const names = (await broker.listCollections(ctx(["campaigns", "policies"]))).map((c) => c.name);
+    expect(names.sort()).toEqual(["campaigns", "policies"]);
+  });
+
+  it("does not leak the description of a collection outside the ceiling", async () => {
+    // The description is the part worth withholding: it is prose written for humans and says what
+    // the data is.
+    const listed = await broker.listCollections(ctx(["campaigns"]));
+    expect(JSON.stringify(listed)).not.toContain("Salaries");
+  });
+
+  it("lists nothing for an empty ceiling", async () => {
+    expect(await broker.listCollections(ctx([]))).toEqual([]);
+  });
+
+  it("lists everything when no ceiling is set, by either spelling", async () => {
+    // null and absent both mean "unrestricted", matching loadActiveGrant. A ceiling that defaulted
+    // to closed here would break every first-party session, which carries no ceiling at all.
+    for (const c of [ctx(null), ctx(undefined)])
+      expect((await broker.listCollections(c)).map((x) => x.name).sort())
+        .toEqual(["campaigns", "policies", "salaries"]);
+  });
+
+  it("still audits the call, ceiling or not", async () => {
+    // The ceiling narrows what is returned; it does not make the call unobserved.
+    const before = await db.query(`select count(*)::int as n from app.audit_events where collection = '*'`);
+    await broker.listCollections(ctx(["campaigns"]));
+    const after = await db.query(`select count(*)::int as n from app.audit_events where collection = '*'`);
+    expect(after.rows[0].n).toBe(before.rows[0].n + 1);
   });
 });

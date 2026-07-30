@@ -202,10 +202,22 @@ export async function rotateClientSecret(
   return createClientSecret(db, clientId, orgId, expiresAt, createdBy, env);
 }
 
-export async function revokeClientSecret(db: Pool, secretId: string): Promise<void> {
-  await db.query(
-    `update app.client_secrets set revoked_at=now() where id=$1`,
-    [secretId]);
+// Scoped by client and org, not by secret id alone.
+//
+// A secret id is a uuid the caller supplies, so `where id=$1` revokes any secret in any org for
+// anyone who can guess or observe one. The revoke route did check ownership first — but as its own
+// SELECT, which is a guarantee the caller provides rather than one this function enforces, and the
+// next caller is the one that forgets. Requiring the scope makes the safe call the only call.
+//
+// Returns whether a row matched, so a caller can answer `not_found` without a second query.
+export async function revokeClientSecret(
+  db: Pool, secretId: string, clientId: string, orgId: string,
+): Promise<boolean> {
+  const r = await db.query(
+    `update app.client_secrets set revoked_at=now()
+     where id=$1 and client_id=$2 and org_id=$3`,
+    [secretId, clientId, orgId]);
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function listClientSecrets(

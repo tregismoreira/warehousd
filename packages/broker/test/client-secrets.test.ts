@@ -39,7 +39,7 @@ describe("client secrets", () => {
       const dev = await createClientSecret(
         db, "test_client", "default", new Date(Date.now() + 86_400_000), "tester", "dev");
       expect(await verifyClientSecret(db, dev.secret)).toMatchObject({ env: "dev" });
-      await revokeClientSecret(db, dev.id);
+      await revokeClientSecret(db, dev.id, "test_client", "default");
 
       const live = await createClientSecret(
         db, "test_client", "default", new Date(Date.now() + 86_400_000), "tester", "live");
@@ -107,7 +107,7 @@ describe("client secrets", () => {
     expect(verified).not.toBeNull();
 
     // Revoke it
-    await revokeClientSecret(db, id);
+    await revokeClientSecret(db, id, "test_client", "default");
 
     // Should now fail
     verified = await verifyClientSecret(db, secret);
@@ -159,7 +159,7 @@ describe("client secrets", () => {
     expect(v2).not.toBeNull();
 
     // Revoke the old one
-    await revokeClientSecret(db, id1);
+    await revokeClientSecret(db, id1, "test_client", "default");
 
     // Now secret1 fails, secret2 still works
     v1 = await verifyClientSecret(db, secret1);
@@ -227,5 +227,33 @@ describe("client secrets", () => {
     expect(stringified).not.toContain("secret_hash");
 
     await db.end();
+  });
+});
+
+describe("revokeClientSecret scope", () => {
+  it("refuses to revoke a secret belonging to another client or org", async () => {
+    // The signature used to be (db, secretId) and matched on the id alone, so any caller holding
+    // a secret id could revoke it regardless of which client or tenant owned it. The route
+    // compensated with its own ownership SELECT; the library now enforces it.
+    p = await provision("clientsecrets");
+    const db = new Pool({ connectionString: p.urls.admin });
+    try {
+      await createAppSchema(db);
+      await seedClient(db);
+      const expiresAt = new Date(Date.now() + 86_400_000);
+      const { secret, id } = await createClientSecret(db, "test_client", "default", expiresAt, "admin");
+
+      expect(await revokeClientSecret(db, id, "other_client", "default")).toBe(false);
+      expect(await revokeClientSecret(db, id, "test_client", "other_org")).toBe(false);
+      // Still usable — a refused revoke must not half-apply.
+      expect(await verifyClientSecret(db, secret)).not.toBeNull();
+
+      expect(await revokeClientSecret(db, id, "test_client", "default")).toBe(true);
+      expect(await verifyClientSecret(db, secret)).toBeNull();
+      // Idempotence: revoking again matches the row but changes nothing meaningful.
+      expect(await revokeClientSecret(db, id, "test_client", "default")).toBe(true);
+    } finally {
+      await db.end();
+    }
   });
 });

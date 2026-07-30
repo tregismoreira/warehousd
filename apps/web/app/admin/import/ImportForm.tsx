@@ -64,11 +64,13 @@ export function ImportForm() {
   const [format, setFormat] = useState("csv");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  // `error` is the route's refusal field, matching the rest of /api. The per-row entries in
+  // `errors[]` keep their own `reason` — that is a different thing from why the request failed.
   const [result, setResult] = useState<{
     ok: boolean;
     imported?: number;
     columns?: string[];
-    reason?: string;
+    error?: string;
     errors?: ImportError[];
   } | null>(null);
 
@@ -150,10 +152,10 @@ export function ImportForm() {
           <Card className="border-deny/20 bg-deny/5">
             <CardHeader>
               <CardTitle className="text-deny">Import failed</CardTitle>
-              <CardDescription className="text-deny/80">{result.reason}</CardDescription>
+              <CardDescription className="text-deny/80">{result.error}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {result.reason === "validation_failed" && result.errors && result.errors.length > 0 && (
+              {result.error === "validation_failed" && result.errors && result.errors.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-semibold text-deny">Nothing was imported.</p>
                   <div className="overflow-auto rounded border border-deny/20 bg-card">

@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
 
 export const DEV_CLIENT_NAME = "warehousd dev client";
@@ -72,21 +72,9 @@ export async function hasApprovedLiveGrant(
   return (r.rowCount ?? 0) > 0;
 }
 
-// Better Auth's own client-secret hasher, reproduced: base64url(sha256(secret)), unpadded. It has
-// to match byte for byte, because Better Auth is what verifies this column — the oidc provider is
-// configured with storeClientSecret: "hashed" and compares defaultClientSecretHasher(presented)
-// against what is stored (better-auth/dist/plugins/oidc-provider/utils.mjs).
-//
-// SHA-256 with no salt or stretching is weak for a human password and right for this: a client
-// secret is 32 bytes of CSPRNG output, so there is no dictionary to run and nothing to slow down.
-// Matching the library's format matters more than choosing our own.
-export function hashOauthClientSecret(secret: string): string {
-  return createHash("sha256").update(secret).digest("base64url");
-}
-
-// Returns the client's id only. The secret is not readable: the column holds a hash, and this
-// used to hand back the plaintext it stored — which is why the column was plaintext at all.
-// A caller that needs the secret is the caller that supplied it (see ensureDevClient).
+// Returns the client's id only. A caller that needs the secret is the caller that supplied it
+// (see ensureDevClient) — nothing reads it back out of the database, which is what keeps the CLI
+// from having to re-read a credential it already holds.
 export async function getDevClient(app: Pool): Promise<{ clientId: string } | null> {
   const r = await app.query(
     `select "clientId" from app."oauthApplication" where name=$1 limit 1`,
@@ -96,15 +84,20 @@ export async function getDevClient(app: Pool): Promise<{ clientId: string } | nu
 }
 
 // `secret` is supplied by the caller rather than generated here, so that the process which has to
-// *print* it is the one that knows it: the database keeps only a hash, so nothing can read it back
-// on a later boot. The CLI generates it into .warehousd/state.json (mode 0600) alongside the other
-// secrets and passes it to the container as WAREHOUSD_DEV_CLIENT_SECRET.
+// *print* it is the one that knows it. The CLI generates it into .warehousd/state.json (mode 0600)
+// alongside the other secrets and passes it to the container as WAREHOUSD_DEV_CLIENT_SECRET.
 //
-// When a secret IS supplied the stored hash is (re)asserted every time. That is both idempotent —
-// the same value arrives on every boot — and self-healing: a row written when this column held
-// plaintext would now fail verification, and the next boot rewrites it.
+// The column holds the secret verbatim, because Better Auth's mcp plugin authenticates the token
+// endpoint by comparing this column to the presented value directly
+// (`client.clientSecret === client_secret`, dist/plugins/mcp/index.mjs) rather than through the
+// oidc provider's configurable verifier. Storing a hash here makes every /api/auth/mcp/token
+// exchange fail with `invalid client_secret` — which is exactly what it did, caught by the CLI
+// lifecycle e2e's Step 6. See the note in apps/web/lib/oauth.ts and SECURITY.md.
 //
-// When one is NOT supplied and a client already exists, the stored hash is left alone and
+// When a secret IS supplied the stored value is re-asserted every time: idempotent, since the same
+// value arrives on every boot, and self-healing for a row left holding a hash by an earlier build.
+//
+// When one is NOT supplied and a client already exists, the stored value is left alone and
 // `clientSecret` comes back null. Rewriting it would rotate the credential on every restart and
 // silently break whatever was configured with it — which is exactly what an earlier draft of this
 // did, caught by the entrypoint idempotency test.
@@ -118,7 +111,7 @@ export async function ensureDevClient(
     if (secret === undefined) return { clientId: existing.clientId, clientSecret: null };
     await app.query(
       `update app."oauthApplication" set "clientSecret"=$2, "updatedAt"=now() where "clientId"=$1`,
-      [existing.clientId, hashOauthClientSecret(secret)]);
+      [existing.clientId, secret]);
     return { clientId: existing.clientId, clientSecret: secret };
   }
 
@@ -132,7 +125,7 @@ export async function ensureDevClient(
     `insert into app."oauthApplication"
        ("id","clientId","clientSecret",name,type,"redirectUrls","userId","createdAt","updatedAt")
      values ($1,$2,$3,$4,'web',$5,$6,now(),now())`,
-    [id, clientId, hashOauthClientSecret(clientSecret), DEV_CLIENT_NAME,
+    [id, clientId, clientSecret, DEV_CLIENT_NAME,
      "http://localhost/callback", ownerUserId]);
   await upsertClientPolicy(app, clientId, DEV_CLIENT_NAME, ["env:dev"]);
   return { clientId, clientSecret };

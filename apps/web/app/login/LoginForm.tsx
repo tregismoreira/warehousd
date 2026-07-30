@@ -22,9 +22,10 @@ const MORE_DEMO_CREDS = [
   { email: "omar@demo.local", role: "member — HR" },
 ];
 
+// What /api/sso/status returns, which is only what an anonymous caller needs to render a button.
+// It deliberately excludes the provider's email domain — see that route.
 interface SSOProvider {
   providerId: string;
-  domain: string;
   type: string;
 }
 

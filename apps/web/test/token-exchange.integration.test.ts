@@ -397,7 +397,11 @@ describe("token exchange (delegated flow)", () => {
     const res1 = await delegatedExchange(clientId, secret, jwt);
     expect(res1.status).toBe(200);
 
-    await revokeClientSecret(app, secretId);
+    // revokeClientSecret is scoped by client and org, so no caller can revoke across tenants with
+    // a secret id alone. Its return value says whether a row matched — asserted here, because a
+    // revoke that silently matched nothing would leave the key live and make the 401 below the
+    // only symptom of it.
+    expect(await revokeClientSecret(app, secretId, clientId, "default")).toBe(true);
     const res2 = await delegatedExchange(clientId, secret, jwt);
     expect(res2.status).toBe(401);
   });

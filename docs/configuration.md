@@ -320,6 +320,30 @@ Set on the container or the dev process, not in YAML:
 | `WAREHOUSD_DEMO` | `true` behaves like `demo: true`. |
 | `WAREHOUSD_IMAGE` | Server image the CLI should run, if `server.image` is unset. |
 
+### Statement bounds
+
+Every pool carries a `statement_timeout`, so one slow scan cannot hold a
+connection indefinitely and exhaust the pool. Two budgets, because the pools do
+different work: the query and write pools serve single documents and pages of a
+view, while the app and import pools carry real batch work at request time —
+`regenerateSynthetic` behind `POST /api/admin/regen-synth`, and file imports.
+
+| Variable | Default | Applies to |
+|---|---|---|
+| `WAREHOUSD_STATEMENT_TIMEOUT_MS` | `30000` | The `dev` / `live` read pools and the two write pools. |
+| `WAREHOUSD_BULK_STATEMENT_TIMEOUT_MS` | `600000` | The `app` and import pools. |
+| `WAREHOUSD_CONNECT_TIMEOUT_MS` | `10000` | Acquiring a connection, on every pool. |
+
+`idle_in_transaction_session_timeout` is set to twice the statement bound and is
+not separately configurable. It covers the case a statement timeout cannot: every
+data-plane call runs inside a transaction, and if the broker stalls between
+`begin` and `commit` no statement is running, so the transaction would hold its
+locks — and hold back vacuum — indefinitely.
+
+`0` is Postgres's spelling of "no limit" and is accepted, for an operator who has
+decided to opt out. A value that is not a number is **ignored** rather than
+treated as zero, so a typo cannot silently remove the ceiling it meant to raise.
+
 ## A complete example
 
 [`examples/harbor/warehousd.yml`](../examples/harbor/warehousd.yml) is a

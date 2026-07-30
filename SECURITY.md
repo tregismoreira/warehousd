@@ -89,6 +89,42 @@ deployment that follows the expectations above, but each is worth knowing:
   `subject_claim` at a user-editable claim — `preferred_username` on some
   directories — makes account takeover an IdP profile edit. Use `email`, or a
   claim your IdP documents as immutable.
+- **A document filter's value must be exactly comparable, or the grant is
+  refused.** A filter is evaluated in SQL on the read path and in process on the
+  write path (the write path reads base tables for revision bookkeeping and cannot
+  reuse the read path's SQL). Rather than approximate Postgres's input parsing in
+  JavaScript — which cannot be done faithfully — warehousd canonicalises both sides
+  and refuses, on *both* paths, any filter it cannot compare with certainty: a
+  `json` field, a `view_join` field, a timestamp with no timezone, and any value
+  that is not a valid instance of its column's declared type. This narrows what a
+  grant author may write, and it is the deliberate trade: a filter that silently
+  means something different to the reader and the writer is worse than one that is
+  rejected outright. Filter values are still validated only when a grant is
+  *used*, not when it is approved, so a malformed filter surfaces as
+  `invalid_intent` on the next call rather than as an error at approval time.
+- **OAuth client secrets are stored in cleartext, and the library currently
+  requires it.** `app."oauthApplication"."clientSecret"` holds the secret verbatim
+  for the dev client and for every dynamically registered MCP client, so a database
+  dump of that table is a set of working client credentials. Treat it as
+  credential-bearing.
+
+  Better Auth's `oidcProvider` has a `storeClientSecret: "hashed"` option, and
+  setting it does not work here. In better-auth 1.4.21 the mcp plugin's own token
+  endpoint authenticates by comparing the column to the presented value directly
+  (`client.clientSecret === client_secret`, `dist/plugins/mcp/index.mjs`) rather
+  than through the provider's configurable verifier, so a hashed column makes every
+  `/api/auth/mcp/token` exchange fail with `invalid client_secret`. The same
+  plugin's dynamic-registration handler writes the generated secret straight to the
+  column without calling the provider's hasher, so the option would not have
+  protected DCR secrets — the case worth protecting — even where it did apply.
+
+  Turning it on was tried and reverted; the CLI lifecycle e2e (Step 6) is what
+  catches it, because the failure lives in the library's endpoint rather than in
+  any code here. What limits the exposure meanwhile: these secrets grant no data
+  access on their own — a token still needs a user session, a client policy
+  allowing the env, and an approved grant — and `client_policies.allowed_collections`
+  caps what any client can reach. Revisit when the mcp plugin routes client
+  authentication through the provider.
 - **Write tools are exposed over MCP.** `create_document`, `update_document` and
   `delete_document` are MCP tools, so the untrusted model can propose writes. It
   cannot decide on them: `approve`/`reject` are not MCP tools, and the broker

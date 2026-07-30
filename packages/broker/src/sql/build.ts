@@ -111,7 +111,14 @@ export function buildSelect(
       where.push(`${q(f.field)} ${lookup(OP_SQL, f.op, "operator")} ${param(f.value)}`);
     }
   }
-  // AND all grant-carried document filters
+  // AND all grant-carried document filters.
+  //
+  // This is one of two evaluators for the same rule: the write path cannot reuse this SQL (it
+  // reads base tables for the `_rev*` columns, which the view does not expose) and re-evaluates
+  // the filters in process in grants/filters.ts. The two must agree about every grant, so a
+  // change to the semantics here belongs there as well, and test/filter-parity.test.ts asserts
+  // their agreement against a live Postgres. Filters that could not be made to agree are
+  // rejected before either evaluator sees them, by validateDocumentFilters.
   for (const rf of opts.documentFilters ?? []) {
     const isMulti = opts.isMultiValueField?.(rf.field) ?? false;
     if (rf.op === "in") {

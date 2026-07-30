@@ -270,5 +270,55 @@ describe("broker.mutate refusals", () => {
     const ctx: BrokerContext = { userId: "user1", env: "dev", orgId: "default" };
     const result = await broker.mutate(ctx, { collection: "people", op: "create", values: {} } as any);
     expect(result.ok).toBe(false);
+    // Asserting the reason, not just the refusal. This test used to check `ok === false` alone and
+    // passed while the guard it names was unreachable — user1 holds no `create` verb, so it was
+    // really observing verb_denied. A caller that *can* create is the case below.
+    if (!result.ok) expect(result.reason).toBe("invalid_intent");
+  });
+
+  it("invalid_intent: an empty-values create is refused rather than writing an all-null row", async () => {
+    // The guard read `!fieldNames.length && !intent.values`, and `{}` is truthy, so it never
+    // fired: the create fell through to the insert and stored a row whose every column was null
+    // under a generated uuid pk. Verified against the pre-fix code, which answered
+    // ok:true/status:applied and left exactly that row behind.
+    const grantId = await requestGrant(app, {
+      userId: "emptycreate_user", collection: "testcol", env: "dev", orgId: "default",
+      purposeLabel: "test", allowedFields: ["id", "value"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
+    const ctx: BrokerContext = { userId: "emptycreate_user", env: "dev", orgId: "default" };
+
+    const before = await app.query(`select count(*)::int as n from data_synth.testcol`);
+    const result = await broker.mutate(ctx, { collection: "testcol", op: "create", values: {} });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("invalid_intent");
+    const after = await app.query(`select count(*)::int as n from data_synth.testcol`);
+    expect(after.rows[0].n, "no row may be written").toBe(before.rows[0].n);
+  });
+
+  it("an intent-shape refusal audits with the mutation shape, not the query shape", async () => {
+    // These two guards called refuse() — the query-shaped helper, which records `intent: null` —
+    // while every other mutation refusal calls refuseMutation(). Identical operations audited
+    // differently depending on which line rejected them, so an audit reader could not tell what
+    // was attempted.
+    const grantId = await requestGrant(app, {
+      userId: "auditshape_user", collection: "testcol", env: "dev", orgId: "default",
+      purposeLabel: "test", allowedFields: ["id", "value"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create", "update"] });
+    const ctx: BrokerContext = { userId: "auditshape_user", env: "dev", orgId: "default" };
+
+    const r = await broker.mutate(ctx, { collection: "testcol", op: "create", values: {} });
+    expect(r.ok).toBe(false);
+    const row = await app.query(`select intent, reason from app.audit_events where id = $1`, [r.auditId]);
+    expect(row.rows[0].reason).toBe("invalid_intent");
+    expect(row.rows[0].intent).toMatchObject({ op: "create", collection: "testcol" });
+
+    // An update with a blank id takes the sibling guard; it must audit the same way.
+    const u = await broker.mutate(ctx, { collection: "testcol", op: "update", id: "", values: { value: "x" } });
+    expect(u.ok).toBe(false);
+    const urow = await app.query(`select intent from app.audit_events where id = $1`, [u.auditId]);
+    expect(urow.rows[0].intent).toMatchObject({ op: "update", collection: "testcol" });
   });
 });

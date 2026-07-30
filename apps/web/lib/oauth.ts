@@ -20,12 +20,22 @@ export const mcpPlugin = mcp({
     scopes: ["env:dev", "env:live"],
     accessTokenExpiresIn: 900, // 15 min, per §6.1 rule 4
     allowDynamicClientRegistration: true,
-    // Better Auth defaults this to "plain", so every dynamically registered client's secret sat
-    // in app."oauthApplication" in cleartext — including the ones real MCP clients get from DCR.
-    // A database dump was a set of working client credentials. "hashed" stores
-    // base64url(sha256(secret)) and verifies with a constant-time compare; the dev client's own
-    // row is written with the same hasher (broker's hashOauthClientSecret), so both agree.
-    storeClientSecret: "hashed",
+    // `storeClientSecret: "hashed"` belongs here on the face of it — Better Auth defaults to
+    // "plain", so client secrets sit in app."oauthApplication" in cleartext and a database dump is
+    // a set of working credentials. It is deliberately NOT set, because in this version of
+    // better-auth (1.4.21) the option does not reach the endpoints warehousd actually uses:
+    //
+    //   * The mcp plugin's own token endpoint compares the column verbatim —
+    //     `client.clientSecret === client_secret` (dist/plugins/mcp/index.mjs) — rather than
+    //     going through the oidc provider's verifyStoredClientSecret. Storing a hash therefore
+    //     makes every /api/auth/mcp/token exchange fail with `invalid client_secret`.
+    //   * The mcp plugin's DCR handler writes the generated secret straight to the column and
+    //     never calls the provider's storeClientSecret, so setting this would not have hashed
+    //     dynamically registered secrets anyway — which was the reason for setting it.
+    //
+    // So the option would have bought nothing and broken the MCP flow. Recorded in SECURITY.md as
+    // a known limitation rather than left as a silent surprise; revisit when the mcp plugin routes
+    // client authentication through the provider.
   },
 });
 

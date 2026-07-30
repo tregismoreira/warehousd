@@ -11,6 +11,7 @@ import type { ActiveGrant } from "./grants/eval";
 import type { Pools } from "./db/pools";
 import { dataPool, withOrg, writePool } from "./db/pools";
 import { loadActiveGrant } from "./grants/eval";
+import { matchesFilters, validateDocumentFilters } from "./grants/filters";
 import { buildSelect, UnsupportedFilter } from "./sql/build";
 import { writeAudit } from "./audit/write";
 import { findCollection, supportedVerbs } from "./config/load";
@@ -35,11 +36,6 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       userId: ctx.userId, env: ctx.env, collection, orgId: ctx.orgId, intent,
       fieldsReturned: [], grantId, outcome: "refused", reason, via: ctx.via });
     return { ok: false, reason, auditId };
-  }
-
-  function fieldsOf(collection: string): string[] | null {
-    const c = findCollection(cfg, collection);
-    return c ? Object.keys(c.fields) : null;
   }
 
   // A term field bound to a `multiple: true` vocabulary is a text[] column (apply/ddl.ts), so
@@ -105,8 +101,9 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (intent.aggregate && intent.aggregate.length && intent.fields && intent.fields.length)
       return refuse(ctx, intent.collection, intent, "invalid_intent");
     // 2. collection exists
-    const all = fieldsOf(intent.collection);
-    if (!all) return refuse(ctx, intent.collection, intent, "unknown_collection");
+    const c = findCollection(cfg, intent.collection);
+    if (!c) return refuse(ctx, intent.collection, intent, "unknown_collection");
+    const all = Object.keys(c.fields);
     // every referenced field must exist on the collection at all
     const referenced = collectReferenced(intent);
     for (const f of referenced) if (!all.includes(f))
@@ -120,11 +117,11 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     for (const f of referenced) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
     // document_filter is grant-author-supplied; each predicate's field is validated against
-    // the collection's full YAML field set (NOT allowedFields) so denied fields like `path` can gate documents.
-    for (const f of grant.documentFilter) {
-      if (!all.includes(f.field))
-        return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
-    }
+    // the collection's full YAML field set (NOT allowedFields) so denied fields like `path` can
+    // gate documents. The same check runs on the write path, so a filter this rejects is rejected
+    // everywhere rather than being evaluated by one path and not the other — see grants/filters.ts.
+    if (validateDocumentFilters(grant.documentFilter, c))
+      return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
     // fields to select: explicit, else all granted fields present on the collection
     const selectFields = intent.fields && intent.fields.length
       ? intent.fields
@@ -175,7 +172,16 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   }
 
   async function listCollections(ctx: BrokerContext): Promise<{ name: string; description: string }[]> {
-    const collections = Object.entries(cfg.collections).map(([name, c]) => ({ name, description: c.description }));
+    // The client's collection ceiling applies to discovery too. loadActiveGrant enforces it on
+    // every other verb, so without this a restricted client could enumerate names and
+    // descriptions for collections no grant it holds can ever reach — a catalogue of what it is
+    // not allowed to ask about. Names and descriptions *within* the ceiling stay visible to any
+    // authenticated caller by design: that is what makes `request_access` usable.
+    // `null`/absent means no ceiling, matching grants/eval.ts.
+    const ceiling = ctx.allowedCollections;
+    const collections = Object.entries(cfg.collections)
+      .filter(([name]) => ceiling == null || ceiling.includes(name))
+      .map(([name, c]) => ({ name, description: c.description }));
     await writeAudit(app, {
       userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId, intent: null,
       fieldsReturned: [], grantId: null, outcome: "allowed", reason: null, via: ctx.via });
@@ -207,10 +213,8 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!grant.verbs.includes("read")) return refuse(ctx, intent.collection, intent, "no_grant");
     for (const f of intent.fields ?? []) if (!grant.allowedFields.includes(f))
       return refuse(ctx, intent.collection, intent, "field_denied", grant.id);
-    for (const f of grant.documentFilter) {
-      if (!all.includes(f.field))
-        return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
-    }
+    if (validateDocumentFilters(grant.documentFilter, c))
+      return refuse(ctx, intent.collection, intent, "invalid_intent", grant.id);
     const selectFields = intent.fields && intent.fields.length
       ? intent.fields : grant.allowedFields.filter((f) => all.includes(f));
     try {
@@ -254,10 +258,8 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!grant.verbs.includes("read")) return refuse(ctx, intent.collection, null, "no_grant");
 
     const all = Object.keys(c.fields);
-    for (const f of grant.documentFilter) {
-      if (!all.includes(f.field))
-        return refuse(ctx, intent.collection, null, "invalid_intent", grant.id);
-    }
+    if (validateDocumentFilters(grant.documentFilter, c))
+      return refuse(ctx, intent.collection, null, "invalid_intent", grant.id);
 
     // How the caller names the document. Like documentFilter this is broker-supplied rather
     // than client-supplied, so it may reference a column outside allowedFields — a file's
@@ -346,10 +348,20 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     const fieldNames = Object.keys(values);
 
     // 1. intent shape
-    if (intent.op === "create" && !fieldNames.length && !intent.values)
-      return refuse(ctx, intent.collection, null, "invalid_intent");
+    //
+    // `&& !intent.values` used to be a third clause on the create guard, which made it
+    // unreachable: MutationIntentSchema requires `values` on a create, so it is always an object,
+    // and `{}` is truthy. An empty-values create therefore fell through to the insert and wrote a
+    // row of all nulls under a generated uuid pk — a document with no content, which nothing
+    // further down the write path would have stopped either.
+    //
+    // Both refuse through refuseMutation rather than refuse: the latter is the query-shaped helper
+    // and records `intent: null`, so the same mutation audited differently depending on which of
+    // these two lines rejected it.
+    if (intent.op === "create" && !fieldNames.length)
+      return refuseMutation(ctx, intent, null, "invalid_intent");
     if ((intent.op === "update" || intent.op === "delete") && !intent.id)
-      return refuse(ctx, intent.collection, null, "invalid_intent");
+      return refuseMutation(ctx, intent, null, "invalid_intent");
 
     // 2. collection exists
     const c = findCollection(cfg, intent.collection);
@@ -388,6 +400,14 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "verb_denied", via: ctx.via });
       return { ok: false, reason: "verb_denied", auditId };
     }
+
+    // 6b. the grant's document filters must be evaluable. matchesFilters below fails closed on a
+    // filter it cannot interpret, so this is not what makes the write path safe — it is what makes
+    // the write path refuse for the *same reason* the read path does. Without it an unevaluable
+    // filter reads as `invalid_intent` and writes as `not_found`, and the grant looks broken in
+    // two different ways depending on which verb you try.
+    if (validateDocumentFilters(grant.documentFilter, c))
+      return refuseMutation(ctx, intent, grant.id, "invalid_intent");
 
     // Phase 5: proposal_only mode creates pending revisions for dataset collections.
     // File collections are append-only; they don't support this mode.
@@ -603,7 +623,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
         // A document the grant's filter excludes is not_found, never a distinct refusal —
         // the same rule as getDocument. $self is already bound by loadActiveGrant.
-        if (!matchesFilters(current, grant.documentFilter))
+        if (!matchesFilters(current, grant.documentFilter, c))
           return refuseMutation(ctx, intent, grant.id, "not_found");
 
         // Optimistic concurrency: `expect` is the _rev the caller last saw.
@@ -693,7 +713,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         if (cur.rowCount === 0) return refuseMutation(ctx, intent, grant.id, "not_found");
         const current = cur.rows[0]!;
 
-        if (!matchesFilters(current, grant.documentFilter))
+        if (!matchesFilters(current, grant.documentFilter, c))
           return refuseMutation(ctx, intent, grant.id, "not_found");
 
         const isDelete = intent.op === "delete";
@@ -831,6 +851,15 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
         const table = `${schema}.${ident(collectionName)}`;
 
+        // The filters must be evaluable before either branch below leans on them, and refused
+        // the same way the read path refuses them — see grants/filters.ts.
+        if (validateDocumentFilters(grant.documentFilter, c)) {
+          const auditId = await writeAudit(app, {
+            userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
+            intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "invalid_intent", via: ctx.via });
+          return { ok: false, reason: "invalid_intent", auditId };
+        }
+
         // Check document filter for approver
         let currentRev: any = null;
         if (proposal._rev_op === "create") {
@@ -840,7 +869,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           for (const f of Object.keys(c.fields)) {
             tempDoc[f] = proposal[f];
           }
-          if (!matchesFilters(tempDoc, grant.documentFilter)) {
+          if (!matchesFilters(tempDoc, grant.documentFilter, c)) {
             const auditId = await writeAudit(app, {
               userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
               intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found", via: ctx.via });
@@ -860,7 +889,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           currentRev = currentRev.rows[0];
 
           // Check document filter
-          if (!matchesFilters(currentRev, grant.documentFilter)) {
+          if (!matchesFilters(currentRev, grant.documentFilter, c)) {
             const auditId = await writeAudit(app, {
               userId: ctx.userId, env: ctx.env, collection: collectionName, orgId: ctx.orgId,
               intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "not_found", via: ctx.via });
@@ -911,18 +940,14 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           }
         }
 
-        // Determine the new _rev_seq: max(_rev_seq for that document) + 1
-        let newSeq: number;
-        if (proposal._rev_op === "create") {
-          newSeq = 1;
-        } else {
-          // For update/delete, find max _rev_seq and add 1
-          const maxSeqQ = await client.query(
-            `select max(_rev_seq) as max_seq from ${table} where ${ident(pk)} = $1`,
-            [proposal[pk]]);
-          const maxSeq = maxSeqQ.rows[0]?.max_seq ? Number(maxSeqQ.rows[0].max_seq) : 0;
-          newSeq = maxSeq + 1;
-        }
+        // _rev_seq counts the states the document actually held, so it comes from the revision
+        // being replaced rather than from max(_rev_seq).
+        //
+        // max() counted the pending row too — the proposal being approved is itself in this table —
+        // so every approval skipped a number: a document with two real revisions reported seqs 1
+        // and 3. Deriving it from the current revision keeps the sequence contiguous, and matches
+        // what mutateDataset does on the direct path (`Number(current._rev_seq) + 1`).
+        const newSeq = proposal._rev_op === "create" ? 1 : Number(currentRev!._rev_seq) + 1;
 
         // Write the new current revision
         const newRevId = randomUUID();
@@ -942,8 +967,15 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         await client.query(
           `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
 
-        // Mark the proposal as approved
-        await client.query(`update ${table} set _rev_status = 'approved' where _rev = $1`, [proposalId]);
+        // The pending row was consumed by the merged revision above, so it is marked `superseded`,
+        // not `approved`. Flipping it to `approved` left two approved rows carrying the same
+        // `_rev_fields` and `_rev_by`: the document's history showed every approval twice, and
+        // listRevisions could not tell which of the pair was the state the document held.
+        //
+        // It is kept rather than removed — the write role holds no DELETE, and the row is the
+        // record of what was *proposed*, which the merged row does not preserve when the merge
+        // pulled in concurrent changes.
+        await client.query(`update ${table} set _rev_status = 'superseded' where _rev = $1`, [proposalId]);
 
         // Get the document ID for the response
         const docId = String(merged[pk] ?? proposal[pk]);
@@ -957,6 +989,18 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
         return { ok: true as const, documentId: docId, rev: newRevId, auditId };
       });
     } catch (err) {
+      // 23505 here is the partial unique index on (org_id, pk) where _current (apply/ddl.ts):
+      // another revision became current between this transaction's demote and its insert, so two
+      // rows claimed _current at once. That is a lost race against a concurrent writer — the same
+      // situation `expect` reports on the direct path — not a server fault. mutateFile already
+      // maps it this way; reporting it as internal_error told the caller there was nothing to
+      // retry and a bug to file.
+      if ((err as { code?: string }).code === "23505") {
+        const auditId = await writeAudit(app, {
+          userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
+          intent: null, fieldsReturned: [], grantId: null, outcome: "refused", reason: "conflict", via: ctx.via });
+        return { ok: false, reason: "conflict", auditId };
+      }
       console.error("[broker] approveProposal failed", { proposalId, err });
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: "*", orgId: ctx.orgId,
@@ -1070,7 +1114,16 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
     if (!pool) return { ok: false, reason: "internal_error", auditId: await auditList("refused", "internal_error") };
 
     const schema = ctx.env === "live" ? "data_live" : "data_synth";
+    // A proposal's lifecycle is pending → approved | rejected, and that is the vocabulary the
+    // caller uses. `superseded` is how the approved case is *stored*: approveProposal writes a
+    // merged revision and marks the proposal row superseded, so asking the table for
+    // `_rev_status = 'approved'` would return the merged revisions — which are revisions, not
+    // proposals — and miss every proposal that was actually approved.
+    //
+    // Before the statuses were separated, `status=approved` matched both the proposal row and the
+    // revision that replaced it, so this listing returned every approval twice.
     const status = opts.status ?? "pending";
+    const storedStatus = status === "approved" ? "superseded" : status;
     const names = opts.collection ? [opts.collection] : Object.keys(cfg.collections);
 
     try {
@@ -1086,6 +1139,10 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           // which collections they cannot approve for is itself a disclosure.
           const grant = await loadActiveGrant(app, ctx, name);
           if (!grant || !grant.verbs.includes("approve")) continue;
+          // A grant whose filters cannot be evaluated contributes nothing, for the same reason a
+          // grant without `approve` does. matchesFilters would already drop every row; skipping
+          // here says so outright and spares the query.
+          if (validateDocumentFilters(grant.documentFilter, c)) continue;
 
           // Bookkeeping columns only, plus the document-filter field when one is set. Selecting
           // `*` would pull ungranted values into memory even if they were never returned, and
@@ -1098,10 +1155,10 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
 
           const q = await client.query(
             `select ${cols.map(ident).join(", ")} from ${schema}.${ident(name)}
-             where _rev_status = $1 order by _rev_at`, [status]);
+             where _rev_status = $1 order by _rev_at`, [storedStatus]);
 
           for (const row of q.rows) {
-            if (!matchesFilters(row, grant.documentFilter)) continue;
+            if (!matchesFilters(row, grant.documentFilter, c)) continue;
             out.push({
               proposalId: row._rev,
               collection: name,
@@ -1249,9 +1306,7 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       return { ok: false, reason: "no_grant", auditId };
     }
 
-    const all = Object.keys(c.fields);
-    for (const f of grant.documentFilter) {
-      if (all.includes(f.field)) continue;
+    if (validateDocumentFilters(grant.documentFilter, c)) {
       const auditId = await writeAudit(app, {
         userId: ctx.userId, env: ctx.env, collection: opts.collection, orgId: ctx.orgId,
         intent: null, fieldsReturned: [], grantId: grant.id, outcome: "refused", reason: "invalid_intent", via: ctx.via });
@@ -1282,14 +1337,20 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
           return null; // Document not found or filtered out
         }
         const currentRow = currentQ.rows[0];
-        if (!matchesFilters(currentRow, grant.documentFilter)) {
+        if (!matchesFilters(currentRow, grant.documentFilter, c)) {
           return null; // Document filtered out
         }
 
-        // Fetch all revisions for this document, ordered by seq
+        // Every revision of this document, in the order the document held them.
+        //
+        // `superseded` rows are excluded: they are pending revisions an approval merged into a new
+        // one, so they record what was proposed rather than a state the document was ever in.
+        // Including them showed each approval twice — and with the same `_rev_seq` as the revision
+        // that replaced them, so `order by _rev_seq` could not even put the pair in a stable order.
         const q = await client.query(
           `select ${cols.map(ident).join(", ")} from ${schema}.${ident(opts.collection)}
-           where org_id=$1 and ${ident(pk)}=$2 order by _rev_seq asc`, [ctx.orgId, opts.id]);
+           where org_id=$1 and ${ident(pk)}=$2 and _rev_status <> 'superseded'
+           order by _rev_seq asc`, [ctx.orgId, opts.id]);
 
         return q.rows.map((row) => ({
           rev: String(row._rev),
@@ -1370,7 +1431,12 @@ export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
       if (!grant || !grant.verbs.includes("read") || !grant.verbs.includes("approve"))
         return refuse("no_grant", found.coll, grant?.id ?? null);
 
-      if (!matchesFilters(found.row, grant.documentFilter))
+      // As in query and mutate: an unevaluable filter is the grant's problem, reported the same
+      // way everywhere rather than as a missing document.
+      if (validateDocumentFilters(grant.documentFilter, c))
+        return refuse("invalid_intent", found.coll, grant.id);
+
+      if (!matchesFilters(found.row, grant.documentFilter, c))
         return refuse("not_found", found.coll, grant.id);
 
       const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0];
@@ -1442,24 +1508,6 @@ async function writeChangeLog(
     `insert into app.change_log (org_id, env, collection, document_id, rev, op, status, by) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [ctx.orgId, ctx.env, collection, documentId, rev, op, status, ctx.userId],
   );
-}
-
-// The grant's document filters, ANDed, evaluated against a row the write path already holds.
-// Reading the row and testing in JS avoids a second round trip; `$self` is bound by
-// loadActiveGrant, so by here every value is a plain literal. An empty list scopes nothing,
-// which is the same thing buildSelect does with it.
-function matchesFilters(row: Record<string, unknown>, filters: DocumentFilter[]): boolean {
-  return filters.every((f) => matchesFilter(row, f));
-}
-
-function matchesFilter(row: Record<string, unknown>, f: DocumentFilter): boolean {
-  const actual = row[f.field];
-  const wanted = f.op === "in" && Array.isArray(f.value) ? f.value : [f.value];
-  // A field bound to a `multiple: true` vocabulary is a text[] column, which buildSelect
-  // matches with `&&`/`= any`. Test for overlap here too, or the in-process path and the SQL
-  // path disagree about the same grant.
-  const held = Array.isArray(actual) ? actual : [actual];
-  return wanted.some((v: unknown) => held.some((a: unknown) => String(v) === String(a)));
 }
 
 // Every field named anywhere in the intent (fields, filters, orderBy, aggregate, groupBy).

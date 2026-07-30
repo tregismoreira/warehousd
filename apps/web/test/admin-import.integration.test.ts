@@ -49,7 +49,7 @@ describe("POST /api/admin/import", () => {
     const raw = await res.text();
     expect(raw).not.toContain("Sensitive Dept Name");
     const body = JSON.parse(raw);
-    expect(body.reason).toBe("validation_failed");
+    expect(body.error).toBe("validation_failed");
     expect(body.errors[0]).toMatchObject({ row: 0, column: "id", reason: "invalid_uuid" });
   });
 
@@ -62,14 +62,14 @@ describe("POST /api/admin/import", () => {
       method: "POST", headers: { cookie: anaCookie }, body: fd,
     }) as any);
     expect(res.status).toBe(400);
-    expect((await res.json()).reason).toBe("no_file");
+    expect((await res.json()).error).toBe("no_file");
   });
 
   it("rejects an unsupported format", async () => {
     const { POST } = await import("../app/api/admin/import/route");
     const res = await POST(upload(anaCookie, "departments", "x", "xlsx") as any);
     expect(res.status).toBe(400);
-    expect((await res.json()).reason).toBe("unsupported_format");
+    expect((await res.json()).error).toBe("unsupported_format");
   });
 
   it("rejects an oversized upload before parsing it", async () => {
@@ -77,7 +77,7 @@ describe("POST /api/admin/import", () => {
     const huge = "id,name\n" + `${U(3)},x\n`.repeat(400_000);
     const res = await POST(upload(anaCookie, "departments", huge) as any);
     expect(res.status).toBe(413);
-    expect((await res.json()).reason).toBe("file_too_large");
+    expect((await res.json()).error).toBe("file_too_large");
   });
 
   it("audits the import against the acting admin", async () => {

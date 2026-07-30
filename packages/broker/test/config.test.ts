@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { loadConfig } from "../src/config/load";
-import { readPosture } from "../src/config/schema";
+import { readPosture, ConfigSchema } from "../src/config/schema";
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), "wh-cfg-")); });
@@ -231,4 +231,53 @@ collections:
   expect(cfg.server.image).toBeUndefined();
   expect(cfg.database?.port).toBeUndefined();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("config schema rejects unrecognised keys", () => {
+  // A typo in warehousd.yml used to parse cleanly and change policy. `postur: deny` left the field
+  // with no declared posture at all, which is not the same thing as a field that denies — so the
+  // config the operator wrote and the config the broker enforced were different documents.
+  const minimal = {
+    project: "t",
+    collections: { people: { description: "P", fields: { id: { type: "uuid", pk: true, posture: "allow" } } } },
+  };
+
+  it("refuses a misspelled field key", () => {
+    const cfg = structuredClone(minimal) as any;
+    cfg.collections.people.fields.email = { type: "text", postur: "deny" };
+    const r = ConfigSchema.safeParse(cfg);
+    expect(r.success).toBe(false);
+    // The message has to name the offending key, or a typo in a large file is unfindable.
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("postur");
+  });
+
+  it("refuses a misspelled collection key", () => {
+    const cfg = structuredClone(minimal) as any;
+    cfg.collections.people.writeable = true;   // the real key is `writable`
+    const r = ConfigSchema.safeParse(cfg);
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("writeable");
+  });
+
+  it("refuses a misspelled top-level key", () => {
+    const r = ConfigSchema.safeParse({ ...structuredClone(minimal), collectons: {} });
+    expect(r.success).toBe(false);
+  });
+
+  it("refuses an unrecognised key inside view_join", () => {
+    const cfg = structuredClone(minimal) as any;
+    cfg.collections.people.fields.dept_id = { type: "uuid", posture: "allow", fk: "departments.id" };
+    cfg.collections.people.fields.dept_name = {
+      type: "text", posture: "allow",
+      view_join: { table: "departments", column: "name", on: "dept_id", extra: 1 },
+    };
+    expect(ConfigSchema.safeParse(cfg).success).toBe(false);
+  });
+
+  it("still accepts every key the shipped example config uses", () => {
+    // The guard against over-tightening: examples/harbor exercises taxonomies, view_join, file
+    // collections, metadata fields, synthetic settings and the writable dataset.
+    const dir = resolve(__dirname, "../../../examples/harbor");
+    expect(() => loadConfig(dir)).not.toThrow();
+  });
 });

@@ -1,14 +1,11 @@
 import { NextRequest } from "next/server";
 import { getAppPool } from "../../../lib/broker";
-import { getSessionUser } from "../../../../lib/session";
+import { requireRole } from "../../../../lib/authz";
 import { auth } from "../../../../lib/auth";
 
 export async function GET(req: NextRequest) {
-  const sessionUser = await getSessionUser(req);
-  if (!sessionUser) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (sessionUser.role !== "admin") {
-    return Response.json({ error: "forbidden" }, { status: 403 });
-  }
+  const guard = await requireRole(req, "admin");
+  if (!guard.ok) return guard.response;
 
   const pool = getAppPool();
   const result = await pool.query(`
@@ -26,11 +23,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const sessionUser = await getSessionUser(req);
-  if (!sessionUser) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (sessionUser.role !== "admin") {
-    return Response.json({ error: "forbidden" }, { status: 403 });
-  }
+  const guard = await requireRole(req, "admin");
+  if (!guard.ok) return guard.response;
 
   try {
     const body = await req.json();

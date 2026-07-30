@@ -360,6 +360,35 @@ no substring interpolation. A partial unique index guarantees at most one approv
 `(user, collection, env)`, so a second, broader grant can never silently override
 the restriction.
 
+**One rule, two evaluators.** A document filter is evaluated in SQL on the read
+path (`sql/build.ts`, appended to the WHERE clause) and in process on the write
+path (`grants/filters.ts`, against a row already fetched). The write path cannot
+reuse the read path's SQL: it reads base tables for the `_rev*` bookkeeping
+columns, and the view deliberately hides pending and deleted revisions. Two
+evaluators for one rule is a correctness hazard — whenever they disagree, the same
+grant admits a row on read and refuses it on write — so the invariant is stated
+narrowly and tested directly:
+
+> For every filter `validateDocumentFilters` admits, the in-process evaluator
+> returns exactly what `col = $1` returns in the database.
+
+The guarantee is *not* that JavaScript reproduces Postgres's input parsing, which
+is not tractable: `'tr'::boolean` is true, `'1e2'::numeric` is 100, and a
+timestamp carrying no zone is resolved in the server's timezone rather than the
+broker process's. Instead both sides are canonicalised to a string that compares
+exactly, and a value that cannot be canonicalised with certainty is **refused on
+both paths** as `invalid_intent` rather than evaluated by one and not the other.
+So the set of filters that can exist is the set the two paths provably agree on.
+`packages/broker/test/filter-parity.test.ts` asserts the agreement case by case
+against a live Postgres, and separately asserts it end to end — one grant, one
+row, `query` and `mutate` reaching the same verdict.
+
+Refused for that reason: a `json` field (jsonb equality is structural, and the
+previous string coercion made such a filter match *every* row), a `view_join`
+field (computed by the view, absent from the base table the write path reads), a
+zone-less timestamp, and any value that is not a valid instance of its column's
+declared type.
+
 ## Organizations and tenant isolation
 
 Every deployment has at least one organization. An existing single-tenant install
@@ -600,6 +629,30 @@ was also changed by an approved revision after `_rev_base`, it refuses with
 The merged revision records the **proposer** as `_rev_by`: that column is who
 authored the content. Who approved it is in the audit row.
 
+**The consumed proposal becomes `superseded`, not `approved`.** Because promotion
+writes a *new* row, the pending row it merged from is still there, and marking it
+`approved` left two approved rows carrying the same `_rev_fields` and `_rev_by` —
+so a document's history showed every approval twice, and the merged row's
+`_rev_seq` (taken from `max(_rev_seq)`, which counted the pending row) skipped a
+number each time. A document with three revisions reported sequence 1, 2, 3, 4, 5.
+
+The pending row is now marked `superseded` and the merged row's sequence comes
+from the revision it replaces, so the history is one entry per approval with a
+contiguous sequence. `listRevisions` excludes superseded rows: they record what
+was *proposed*, not a state the document ever held. They are kept rather than
+deleted — the write role holds no `DELETE`, and once a merge has pulled in a
+concurrent change the merged row no longer shows what was actually proposed.
+
+A superseded proposal deliberately shares the `_rev_seq` of the revision that
+consumed it: the sequence was assigned at proposal time as the slot it expected to
+occupy, and unless a concurrent write intervened that is the slot it got.
+
+`superseded` is a storage detail, not API vocabulary. A proposal's lifecycle is
+pending → approved | rejected, so `listProposals({ status: "approved" })` matches
+superseded rows. Querying the column directly for `approved` would return the
+merged *revisions* instead — and before the two were distinguished it matched both,
+which is why that listing was doubled.
+
 `broker.listProposals` returns metadata and the *names* of the fields a proposal
 touches — **never their values**. A reviewer fetches content through
 `getDocument`, where postures are already enforced; duplicating values into the
@@ -711,6 +764,15 @@ takes the whole context rather than spread arguments precisely so that no verb
 can forget it. A collection outside the ceiling returns null, so every verb
 refuses `no_grant` uniformly: a distinguishable code would tell an app exactly
 which collections it is missing.
+
+`listCollections` is the exception that has to apply the ceiling itself, because
+discovery answers before any grant is loaded. It intersects with the ceiling for
+the same reason every other verb does: otherwise a restricted client can read
+back the name and description of every collection in the config — a catalogue of
+exactly what it is not allowed to ask about. Within the ceiling, names and
+descriptions stay visible to any authenticated caller whether or not they hold a
+grant; that is deliberate, and it is what makes `request_access` usable — you
+cannot ask for access to a collection you cannot see exists.
 
 **Audit `via`.** Every audit row records which credential produced it —
 `session | oauth | token_exchange | api_key:<id>`. *"Which credential did this"*

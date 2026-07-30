@@ -19,16 +19,10 @@ export async function POST(
     return Response.json({ error: "missing_secret_id" }, { status: 400 });
   }
 
-  const app = getAppPool();
-  // Verify the secret actually belongs to this client/org before revoking — otherwise a
-  // caller could revoke any secret in any org by id alone, since revokeClientSecret itself
-  // takes only a secretId.
-  const owned = await app.query(
-    `select 1 from app.client_secrets where id=$1 and client_id=$2 and org_id=$3`,
-    [secretId, clientId, org]);
-  if (owned.rowCount === 0) return Response.json({ error: "not_found" }, { status: 404 });
-
-  await revokeClientSecret(app, secretId);
+  // revokeClientSecret takes the client and org and matches on all three, so ownership is
+  // enforced by the update itself rather than by a check this route has to remember to do.
+  const revoked = await revokeClientSecret(getAppPool(), secretId, clientId, org);
+  if (!revoked) return Response.json({ error: "not_found" }, { status: 404 });
 
   return Response.json({ ok: true });
 }

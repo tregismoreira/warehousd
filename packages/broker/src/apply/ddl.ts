@@ -114,13 +114,23 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
       if (f.pk) { pkField = name; break; }
     }
 
+    // `superseded` is the status of a pending revision that an approval merged into a new one
+    // rather than promoting in place. approveProposal has to write a merged row — the current
+    // document may have moved on in fields the proposal did not touch, and per the design a stale
+    // base with no overlap still promotes — so the pending row it consumed has to be marked as
+    // something that is not history. It used to be flipped to `approved`, which left two approved
+    // rows carrying the same `_rev_fields`, duplicating the document's history and giving two rows
+    // the same `_rev_seq`. The row is kept rather than deleted: it is the immutable record of what
+    // was proposed, as distinct from what was applied, and the write role has no DELETE anyway.
+    const statusValues = `'pending','approved','rejected','superseded'`;
+    const statusCheck = `${collection}__rev_status_check`;
     const revCols = `
         _rev        uuid primary key default gen_random_uuid(),
         _rev_seq    bigint      not null,
         _rev_at     timestamptz not null default now(),
         _rev_by     text        not null,
         _rev_op     text        not null check (_rev_op in ('create','update','delete')),
-        _rev_status text        not null check (_rev_status in ('pending','approved','rejected')),
+        _rev_status text        not null constraint "${statusCheck}" check (_rev_status in (${statusValues})),
         _rev_fields text[]      not null,
         _rev_base   bigint,
         _current    boolean     not null default false,
@@ -129,6 +139,12 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
     const dataColsNoPk = cols.map(col => col.replace(/ primary key$/, ""));
     let ddl = `create table if not exists ${schema}.${collection} (${revCols} ${dataColsNoPk.join(", ")});`;
     ddl += ` alter table ${schema}.${collection} add column if not exists org_id text not null default 'default';`;
+    // `create table if not exists` is a no-op on a table that predates a value being added to the
+    // check, so the constraint is re-asserted explicitly. Naming it means the drop/add pair is
+    // idempotent whether the constraint was created inline here or auto-named by Postgres — the
+    // generated name for this column is the same string.
+    ddl += ` alter table ${schema}.${collection} drop constraint if exists "${statusCheck}";`;
+    ddl += ` alter table ${schema}.${collection} add constraint "${statusCheck}" check (_rev_status in (${statusValues}));`;
     ddl += ` create unique index if not exists "${collection}_current_idx" on ${schema}.${collection} (org_id, "${pkField}") where _current;`;
     ddl += fieldAlters.join("");
     ddl += vocabAlters;

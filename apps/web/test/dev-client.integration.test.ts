@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb } from "./helpers/web-db";
 import {
-  getClientPolicy, ensureDevClient, getDevClient, hashOauthClientSecret, DEV_CLIENT_NAME,
+  getClientPolicy, ensureDevClient, getDevClient, DEV_CLIENT_NAME,
 } from "@warehousd/broker";
 import { getAppPool } from "../app/lib/broker";
 
@@ -61,37 +61,45 @@ describe("ensureDevClient", () => {
     expect(parseInt(check2.rows[0].cnt)).toBe(1);
   });
 
-  // The column used to hold the plaintext, and getDevClient handed it back — so a database dump
-  // was a working credential. Better Auth verifies this column with
-  // base64url(sha256(presented)), so that is what has to be in it.
-  it("stores only a hash of the secret, never the plaintext", async () => {
+  // Stored verbatim, and this test exists to say why rather than to bless it.
+  //
+  // Better Auth's mcp plugin authenticates /mcp/token by comparing this column to the presented
+  // value directly — `client.clientSecret === client_secret`, dist/plugins/mcp/index.mjs — not
+  // through the oidc provider's configurable verifier. An earlier version of this file asserted
+  // the opposite (that the column holds base64url(sha256(secret))), which storing a hash did
+  // satisfy — while making every MCP token exchange fail with `invalid client_secret`. The unit
+  // level could not see that, because the thing it broke was in the library's endpoint.
+  //
+  // So: hashing this column is not an improvement that was skipped, it is one the library
+  // currently forecloses. SECURITY.md records it as a known limitation.
+  it("stores the secret in the form the mcp token endpoint compares against", async () => {
     const app = getAppPool();
-    const secret = "plaintext-must-not-be-stored";
-    const { clientId } = await ensureDevClient(app, null, secret);
+    const secret = "dev-client-secret-value";
+    const { clientId, clientSecret } = await ensureDevClient(app, null, secret);
 
     const row = await app.query(
       `select "clientSecret" from app."oauthApplication" where "clientId"=$1`, [clientId]);
-    const stored = row.rows[0].clientSecret;
-    expect(stored).not.toBe(secret);
-    expect(stored).not.toContain(secret);
-    expect(stored).toBe(hashOauthClientSecret(secret));
+    expect(row.rows[0].clientSecret).toBe(secret);
+    // The caller that supplied it gets it back, because nothing else can read it out later.
+    expect(clientSecret).toBe(secret);
   });
 
-  // An instance created before hashing was on carries a plaintext row that would now fail
-  // verification. The next boot has to fix it rather than leave the dev client unable to log in.
-  it("rewrites a legacy plaintext row to a hash on the next call", async () => {
+  // A row left holding a hash by a build that hashed it would fail every token exchange. Supplying
+  // the secret has to repair that rather than leave the dev client permanently unable to mint.
+  it("repairs a row left holding a hash by an earlier build", async () => {
     const app = getAppPool();
     const secret = "legacy-rotation-secret";
     const { clientId } = await ensureDevClient(app, null, secret);
-    // Simulate the pre-hash state.
+    const { createHash } = await import("node:crypto");
     await app.query(
-      `update app."oauthApplication" set "clientSecret"=$2 where "clientId"=$1`, [clientId, secret]);
+      `update app."oauthApplication" set "clientSecret"=$2 where "clientId"=$1`,
+      [clientId, createHash("sha256").update(secret).digest("base64url")]);
 
     await ensureDevClient(app, null, secret);
 
     const row = await app.query(
       `select "clientSecret" from app."oauthApplication" where "clientId"=$1`, [clientId]);
-    expect(row.rows[0].clientSecret).toBe(hashOauthClientSecret(secret));
+    expect(row.rows[0].clientSecret).toBe(secret);
   });
 
   it("after ensureDevClient, getClientPolicy returns exactly [\"env:dev\"]", async () => {
