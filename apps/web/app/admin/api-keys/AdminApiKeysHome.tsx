@@ -25,7 +25,7 @@ export function AdminApiKeysHome() {
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   return (

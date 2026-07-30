@@ -1,3 +1,5 @@
+import { cookieHeader, cookiePair } from "./cookies";
+
 // Sign in via SSO provider using the real Better Auth /sign-in/sso and /sso/callback endpoints.
 export async function ssoSignIn(
   auth: { handler: (req: Request) => Promise<Response> },
@@ -14,12 +16,12 @@ export async function ssoSignIn(
     }),
   );
 
-  const signInBody = await signInRes.json() as { url: string; redirect: boolean };
+  const signInBody = (await signInRes.json()) as { url: string; redirect: boolean };
   const authorizationUrl = signInBody.url;
 
   // Extract state cookie from Set-Cookie header
   const setCookieHeader = signInRes.headers.get("set-cookie") ?? "";
-  const stateCookie = setCookieHeader.split(";")[0].trim();
+  const stateCookie = cookiePair(setCookieHeader);
 
   // Step 2: Fetch the authorization URL (real HTTP to fake IdP)
   const idpRes = await fetch(authorizationUrl, { redirect: "manual" });
@@ -34,10 +36,7 @@ export async function ssoSignIn(
 
   // Extract session cookie from callback response (might have multiple Set-Cookie headers)
   const callbackSetCookie = callbackRes.headers.get("set-cookie") ?? "";
-  const sessionCookie = callbackSetCookie
-    .split(/,(?=[^;]+?=)/)
-    .map((c: string) => c.split(";")[0].trim())
-    .join("; ");
+  const sessionCookie = cookieHeader(callbackSetCookie);
 
   // Get the redirect location from /sso/callback
   let finalLocation = callbackRes.headers.get("location") ?? "";
@@ -55,10 +54,7 @@ export async function ssoSignIn(
     // Capture any additional cookies
     const followSetCookie = followRes.headers.get("set-cookie") ?? "";
     if (followSetCookie) {
-      sessionCookieToUse = followSetCookie
-        .split(/,(?=[^;]+?=)/)
-        .map((c: string) => c.split(";")[0].trim())
-        .join("; ");
+      sessionCookieToUse = cookieHeader(followSetCookie);
     }
 
     finalLocation = followRes.headers.get("location") ?? finalLocation;

@@ -3,19 +3,31 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import {
-  createClientSecret, verifyClientSecret, rotateClientSecret, revokeClientSecret,
-  listClientSecrets, MAX_KEY_LIFETIME_DAYS, envFromSecret, getDisplayPrefix,
-  CLIENT_SECRET_REGEX, validateSecretFormat, generateSecret,
+  createClientSecret,
+  verifyClientSecret,
+  rotateClientSecret,
+  revokeClientSecret,
+  listClientSecrets,
+  MAX_KEY_LIFETIME_DAYS,
+  envFromSecret,
+  getDisplayPrefix,
+  CLIENT_SECRET_REGEX,
+  validateSecretFormat,
+  generateSecret,
 } from "../src/credentials/keys";
 
 let p: Provisioned;
-afterAll(async () => { await p?.end(); });
+afterAll(async () => {
+  await p?.end();
+});
 
 // app.client_secrets has an FK to app.client_policies: a credential only exists for a client
 // IT has registered. Every test that provisions a database has to seed that parent row.
-const seedClient = (db: Pool) => db.query(
-  `insert into app.client_policies (client_id, display_name, org_id)
-   values ('test_client', 'Test Client', 'default') on conflict (client_id) do nothing`);
+const seedClient = (db: Pool) =>
+  db.query(
+    `insert into app.client_policies (client_id, display_name, org_id)
+   values ('test_client', 'Test Client', 'default') on conflict (client_id) do nothing`,
+  );
 
 describe("client secrets", () => {
   it("secret format: prefix reveals env and nothing else", async () => {
@@ -37,12 +49,24 @@ describe("client secrets", () => {
       await seedClient(db);
 
       const dev = await createClientSecret(
-        db, "test_client", "default", new Date(Date.now() + 86_400_000), "tester", "dev");
+        db,
+        "test_client",
+        "default",
+        new Date(Date.now() + 86_400_000),
+        "tester",
+        "dev",
+      );
       expect(await verifyClientSecret(db, dev.secret)).toMatchObject({ env: "dev" });
       await revokeClientSecret(db, dev.id, "test_client", "default");
 
       const live = await createClientSecret(
-        db, "test_client", "default", new Date(Date.now() + 86_400_000), "tester", "live");
+        db,
+        "test_client",
+        "default",
+        new Date(Date.now() + 86_400_000),
+        "tester",
+        "live",
+      );
       expect(live.secret.startsWith("whd_live_")).toBe(true);
       expect(await verifyClientSecret(db, live.secret)).toMatchObject({ env: "live" });
     } finally {
@@ -50,7 +74,7 @@ describe("client secrets", () => {
     }
   });
 
-  it("malformed checksum rejected without database round trip", async () => {
+  it("malformed checksum rejected without database round trip", () => {
     // A secret with invalid checksum should fail validation immediately
     const badSecret = "whd_live_abc123_xyz789_badchecksum";
     // It is shaped like a key, so the regex accepts it; only the checksum catches it, and it
@@ -70,7 +94,12 @@ describe("client secrets", () => {
     expiresAt.setDate(expiresAt.getDate() + 30);
 
     const { secret, id } = await createClientSecret(
-      db, "test_client", "default", expiresAt, "admin");
+      db,
+      "test_client",
+      "default",
+      expiresAt,
+      "admin",
+    );
 
     // Verify the secret works
     const verified = await verifyClientSecret(db, secret);
@@ -100,7 +129,12 @@ describe("client secrets", () => {
     expiresAt.setDate(expiresAt.getDate() + 30);
 
     const { secret, id } = await createClientSecret(
-      db, "test_client", "default", expiresAt, "admin");
+      db,
+      "test_client",
+      "default",
+      expiresAt,
+      "admin",
+    );
 
     // Verify before revocation
     let verified = await verifyClientSecret(db, secret);
@@ -125,8 +159,7 @@ describe("client secrets", () => {
     const expiresAt = new Date();
     expiresAt.setTime(expiresAt.getTime() - 1000); // Already expired
 
-    const { secret } = await createClientSecret(
-      db, "test_client", "default", expiresAt, "admin");
+    const { secret } = await createClientSecret(db, "test_client", "default", expiresAt, "admin");
 
     // Should fail verification
     const verified = await verifyClientSecret(db, secret);
@@ -146,11 +179,22 @@ describe("client secrets", () => {
 
     // Create first secret
     const { secret: secret1, id: id1 } = await createClientSecret(
-      db, "test_client", "default", expiresAt, "admin");
+      db,
+      "test_client",
+      "default",
+      expiresAt,
+      "admin",
+    );
 
     // Rotate (creates second secret)
-    const { secret: secret2, id: id2 } = await rotateClientSecret(
-      db, "test_client", "default", id1, expiresAt, "admin");
+    const { secret: secret2, id: _id2 } = await rotateClientSecret(
+      db,
+      "test_client",
+      "default",
+      id1,
+      expiresAt,
+      "admin",
+    );
 
     // Both should verify
     let v1 = await verifyClientSecret(db, secret1);
@@ -182,10 +226,11 @@ describe("client secrets", () => {
     // Create first
     const s1 = await createClientSecret(db, "test_client", "default", expiresAt, "admin");
     // Rotate to second
-    const s2 = await rotateClientSecret(db, "test_client", "default", s1.id, expiresAt, "admin");
+    const _s2 = await rotateClientSecret(db, "test_client", "default", s1.id, expiresAt, "admin");
     // Try to create third without revoking one
-    await expect(createClientSecret(db, "test_client", "default", expiresAt, "admin"))
-      .rejects.toThrow("Maximum 2 unrevoked secrets per client");
+    await expect(
+      createClientSecret(db, "test_client", "default", expiresAt, "admin"),
+    ).rejects.toThrow("Maximum 2 unrevoked secrets per client");
 
     await db.end();
   });
@@ -199,8 +244,9 @@ describe("client secrets", () => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + MAX_KEY_LIFETIME_DAYS + 1);
 
-    await expect(createClientSecret(db, "test_client", "default", expiresAt, "admin"))
-      .rejects.toThrow(`exceeds maximum ${MAX_KEY_LIFETIME_DAYS} days`);
+    await expect(
+      createClientSecret(db, "test_client", "default", expiresAt, "admin"),
+    ).rejects.toThrow(`exceeds maximum ${MAX_KEY_LIFETIME_DAYS} days`);
 
     await db.end();
   });
@@ -214,8 +260,7 @@ describe("client secrets", () => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    const { secret } = await createClientSecret(
-      db, "test_client", "default", expiresAt, "admin");
+    const { secret } = await createClientSecret(db, "test_client", "default", expiresAt, "admin");
 
     const list = await listClientSecrets(db, "test_client", "default");
     expect(list).toHaveLength(1);
@@ -241,7 +286,13 @@ describe("revokeClientSecret scope", () => {
       await createAppSchema(db);
       await seedClient(db);
       const expiresAt = new Date(Date.now() + 86_400_000);
-      const { secret, id } = await createClientSecret(db, "test_client", "default", expiresAt, "admin");
+      const { secret, id } = await createClientSecret(
+        db,
+        "test_client",
+        "default",
+        expiresAt,
+        "admin",
+      );
 
       expect(await revokeClientSecret(db, id, "other_client", "default")).toBe(false);
       expect(await revokeClientSecret(db, id, "test_client", "other_org")).toBe(false);

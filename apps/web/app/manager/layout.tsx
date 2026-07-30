@@ -11,9 +11,7 @@ export default async function ManagerLayout({ children }: { children: React.Reac
   if (!atLeast(role, "manager")) redirect("/403");
   const env = (await cookies()).get("wh_env")?.value === "live" ? "live" : "dev";
   return (
-    <AppShell
-      surface="manager" role={role} email={session.user.email} env={env}
-    >
+    <AppShell surface="manager" role={role} email={session.user.email} env={env}>
       {children}
     </AppShell>
   );

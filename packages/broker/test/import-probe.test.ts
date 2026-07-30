@@ -6,12 +6,13 @@ import { createAppSchema, applyConfig, makeBroker, createPools, type Pools } fro
 import { importCollection } from "../src/import/run";
 import { loadConfig } from "../src/config/load";
 import { IMPORT_CANARY, IMPORT_DENIED_CANARY } from "./fixtures/canaries";
+import { makeCtx } from "./helpers/ctx";
 
 let p: Provisioned, admin: Pool, pools: Pools, broker: ReturnType<typeof makeBroker>;
 const cfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
 const PERSON = "9a000001-0000-4000-8000-000000000001";
 const DEPT = "8b000001-0000-4000-8000-000000000001";
-const ctx = { userId: "mia", orgId: "default", env: "live", via: "session" as const };
+const ctx = makeCtx({ userId: "mia", env: "live" });
 
 beforeAll(async () => {
   p = await provision("importprobe");
@@ -32,8 +33,9 @@ beforeAll(async () => {
   // path itself is the leak, this test must see it.
   const r = await importCollection(pools, cfg, "ana", "people", {
     format: "csv",
-    text: `id,full_name,email,department_id,home_address,phone\n` +
-          `${PERSON},${IMPORT_CANARY},canary@x.test,${DEPT},${IMPORT_DENIED_CANARY},555-0000`,
+    text:
+      `id,full_name,email,department_id,home_address,phone\n` +
+      `${PERSON},${IMPORT_CANARY},canary@x.test,${DEPT},${IMPORT_DENIED_CANARY},555-0000`,
   });
   if (!r.ok) throw new Error(`fixture import failed: ${r.reason}`);
 
@@ -41,12 +43,18 @@ beforeAll(async () => {
   await admin.query(
     `insert into app.grants (user_id,collection,env,status,allowed_fields,expires_at)
      values ('mia','people','live','approved',
-             array['id','full_name','email'], now() + interval '1 day')`);
+             array['id','full_name','email'], now() + interval '1 day')`,
+  );
 }, 60_000);
-afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
+afterAll(async () => {
+  await admin.end();
+  await pools.end();
+  await p.end();
+});
 
-const probes: { name: string; intent: any; expect: string; surface?: string }[] =
-  JSON.parse(readFileSync(new URL("./fixtures/probes.json", import.meta.url), "utf8"));
+const probes: { name: string; intent: any; expect: string; surface?: string }[] = JSON.parse(
+  readFileSync(new URL("./fixtures/probes.json", import.meta.url), "utf8"),
+);
 
 describe("imported live data is subject to the same enforcement as seeded data", () => {
   it("a granted field imported through the admin path is readable", async () => {
@@ -72,7 +80,8 @@ describe("imported live data is subject to the same enforcement as seeded data",
 
   it("filtering on the imported denied field is refused", async () => {
     const r = await broker.query(ctx, {
-      collection: "people", fields: ["id"],
+      collection: "people",
+      fields: ["id"],
       filters: [{ field: "home_address", op: "eq", value: IMPORT_DENIED_CANARY }],
     });
     expect(r.ok).toBe(false);
@@ -87,8 +96,11 @@ describe("imported live data is subject to the same enforcement as seeded data",
 
       const intent = { ...probe.intent, collection: "people" };
       let out: unknown;
-      try { out = await broker.query(ctx, intent as never); }
-      catch (e) { out = { error: String(e) }; }
+      try {
+        out = await broker.query(ctx, intent as never);
+      } catch (e) {
+        out = { error: String(e) };
+      }
       expect(JSON.stringify(out), `probe: ${probe.name}`).not.toContain(IMPORT_DENIED_CANARY);
     }
   });
@@ -96,8 +108,9 @@ describe("imported live data is subject to the same enforcement as seeded data",
   it("a dev-context caller sees no imported live value at all", async () => {
     await admin.query(
       `insert into app.grants (user_id,collection,env,status,allowed_fields)
-       values ('mia','people','dev','approved', array['id','full_name','email'])`);
-    const r = await broker.query({ userId: "mia", orgId: "default", env: "dev", via: "session" }, { collection: "people" });
+       values ('mia','people','dev','approved', array['id','full_name','email'])`,
+    );
+    const r = await broker.query(makeCtx({ userId: "mia" }), { collection: "people" });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("unreachable");
     const body = JSON.stringify(r.documents);
@@ -107,7 +120,7 @@ describe("imported live data is subject to the same enforcement as seeded data",
 
   it("every probe above is audited", async () => {
     // Count applicable probes: non-searchDocuments that target people (or have no collection, which we override to people)
-    const applicableProbes = probes.filter(p => {
+    const applicableProbes = probes.filter((p) => {
       if (p.surface === "searchDocuments") return false;
       if (p.intent.collection && p.intent.collection !== "people") return false;
       return true;
@@ -115,7 +128,8 @@ describe("imported live data is subject to the same enforcement as seeded data",
     // 4 earlier queries + applicableProbes + 1 dev query
     const expectedMinimum = 4 + applicableProbes + 1;
     const n = await admin.query(
-      `select count(*)::int as n from app.audit_events where user_id='mia' and collection='people'`);
+      `select count(*)::int as n from app.audit_events where user_id='mia' and collection='people'`,
+    );
     expect(n.rows[0].n).toBeGreaterThanOrEqual(expectedMinimum);
   });
 });

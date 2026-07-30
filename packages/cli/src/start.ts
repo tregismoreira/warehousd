@@ -1,5 +1,4 @@
 import { Pool } from "pg";
-import { resolve } from "node:path";
 import {
   assertDocker,
   ensureImage,
@@ -10,9 +9,9 @@ import {
   runContainer,
   logs,
 } from "./docker";
-import { resolveProject, type Project } from "./project";
+import { resolveProject } from "./project";
 import { ensureState, writeOutputs, type Outputs } from "./state";
-import { buildOutputs, formatOutputs } from "./outputs";
+import { buildOutputs } from "./outputs";
 import { IMAGE_REPO } from "./image";
 import { getDevClient } from "@warehousd/broker";
 
@@ -45,7 +44,7 @@ async function pollHealth(url: string, timeoutMs: number): Promise<void> {
 
 export async function runStart(
   dir: string,
-  opts: { seed?: number; pull?: boolean; verbose?: boolean } = {}
+  opts: { seed?: number; pull?: boolean; verbose?: boolean } = {},
 ): Promise<Outputs> {
   // Step 1: Assert Docker is available
   assertDocker();
@@ -98,7 +97,8 @@ export async function runStart(
     appUrlHost = `postgres://warehousd:${st.dbPassword}@localhost:${p.ports.db}/warehousd`;
     appUrlContainer = `postgres://warehousd:${st.dbPassword}@${p.ns.db}:5432/warehousd`;
   } else {
-    appUrlHost = p.cfg.database.url!;
+    // `Project` is a union on `managed`, so the URL is here by type rather than by assertion.
+    appUrlHost = p.databaseUrl;
     appUrlContainer = appUrlHost;
   }
 
@@ -139,7 +139,8 @@ export async function runStart(
   } catch (err) {
     const containerLogs = logs(p.ns.server, 50);
     throw new Error(
-      `Container health check failed: ${String(err)}\n\nContainer logs:\n${containerLogs}`
+      `Container health check failed: ${String(err)}\n\nContainer logs:\n${containerLogs}`,
+      { cause: err },
     );
   }
 
@@ -149,9 +150,7 @@ export async function runStart(
     const devClient = await getDevClient(db);
     if (!devClient) {
       const containerLogs = logs(p.ns.server, 50);
-      throw new Error(
-        `Failed to retrieve dev client. Container logs:\n${containerLogs}`
-      );
+      throw new Error(`Failed to retrieve dev client. Container logs:\n${containerLogs}`);
     }
 
     // Step 10: Build and write outputs. The clientId comes from the database; the secret comes

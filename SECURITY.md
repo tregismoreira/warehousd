@@ -94,14 +94,26 @@ deployment that follows the expectations above, but each is worth knowing:
   write path (the write path reads base tables for revision bookkeeping and cannot
   reuse the read path's SQL). Rather than approximate Postgres's input parsing in
   JavaScript — which cannot be done faithfully — warehousd canonicalises both sides
-  and refuses, on *both* paths, any filter it cannot compare with certainty: a
+  and refuses, on _both_ paths, any filter it cannot compare with certainty: a
   `json` field, a `view_join` field, a timestamp with no timezone, and any value
   that is not a valid instance of its column's declared type. This narrows what a
   grant author may write, and it is the deliberate trade: a filter that silently
   means something different to the reader and the writer is worse than one that is
   rejected outright. Filter values are still validated only when a grant is
-  *used*, not when it is approved, so a malformed filter surfaces as
+  _used_, not when it is approved, so a malformed filter surfaces as
   `invalid_intent` on the next call rather than as an error at approval time.
+- **The change feed discloses document ids past a grant's document filter.**
+  `broker.changes` is filtered to collections the caller holds a `read` grant on,
+  but a grant's _document_ filter is not applied to it — the feed carries no field
+  data, so there is nothing to evaluate a predicate against. A caller therefore
+  learns that some document in a collection they can read changed, its id, the op,
+  and when; not which fields moved or what they hold. `getDocument` still refuses
+  the ones outside the filter. The bounded leak is a document-id enumeration and a
+  change-rate signal, which is the price of the feed existing at all: the
+  alternative — joining the base tables to test the filter — would put field data on
+  the control plane, which is the larger hole. Where document ids are themselves
+  sensitive, do not issue a document-filtered grant expecting the feed to honour it.
+  See [The change feed](docs/architecture.md#the-change-feed).
 - **OAuth client secrets are stored in cleartext, and the library currently
   requires it.** `app."oauthApplication"."clientSecret"` holds the secret verbatim
   for the dev client and for every dynamically registered MCP client, so a database
@@ -125,9 +137,31 @@ deployment that follows the expectations above, but each is worth knowing:
   allowing the env, and an approved grant — and `client_policies.allowed_collections`
   caps what any client can reach. Revisit when the mcp plugin routes client
   authentication through the provider.
+
 - **Write tools are exposed over MCP.** `create_document`, `update_document` and
   `delete_document` are MCP tools, so the untrusted model can propose writes. It
   cannot decide on them: `approve`/`reject` are not MCP tools, and the broker
   refuses `self_approval_denied` when the approver is the proposal's author, so a
   single credential cannot both propose and promote. The admin CSV/JSON import is
   separate and append-only through an `INSERT`-only Postgres role.
+
+## Dependency advisories
+
+CI runs `pnpm audit --prod --audit-level high` (the `quality` job in
+`.github/workflows/ci.yml`). It is a blocking gate: a new high or critical advisory
+in the production dependency tree fails the build.
+
+A short list of advisories is suppressed in `package.json` under
+`pnpm.auditConfig.ignoreGhsas`, because pnpm's config file is JSON and cannot carry
+the reasons. Each is here because it cannot be fixed from this repository, not
+because it was judged unimportant. Re-check them whenever `next` or `vitest` moves.
+
+| Advisory | Package | Why it is suppressed |
+|---|---|---|
+| [GHSA-5xrq-8626-4rwp](https://github.com/advisories/GHSA-5xrq-8626-4rwp) | `vitest` | Reachable only through `better-auth`'s *optional peer* declaration, which our own dev-time vitest satisfies — it is not a runtime dependency of anything this app serves. The vulnerability requires the Vitest UI server to be listening; nothing here starts it. Clearing it needs a vitest 3 major upgrade of the whole suite. |
+| [GHSA-fx2h-pf6j-xcff](https://github.com/advisories/GHSA-fx2h-pf6j-xcff) | `vite` | Transitive under the same vitest peer, and Windows-only (`server.fs.deny` bypass on alternate paths). Same upgrade clears it. |
+| [GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj) | `sharp` | Pinned by `next`. Needs either a Next upgrade or a `pnpm.overrides` entry, and an override on an image codec wants a full build and e2e run behind it. |
+| [GHSA-6g55-p6wh-862q](https://github.com/advisories/GHSA-6g55-p6wh-862q), [GHSA-r28c-9q8g-f849](https://github.com/advisories/GHSA-r28c-9q8g-f849) | `postcss` | Both are source-map disclosure through an attacker-controlled `sourceMappingURL` in CSS. Pinned by `next`; this project authors no CSS from untrusted input, and source maps are not served in production. |
+
+Adding to this list is a deliberate act: state the reason in this table in the same
+change, or fix the advisory instead.

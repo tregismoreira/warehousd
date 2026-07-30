@@ -15,7 +15,7 @@ import { LOCAL_LOGIN_DISABLED } from "../../../../lib/auth";
 // one organization (see SECURITY.md, "No multi-tenancy"). When a deployment can hold more than
 // one, this endpoint has to key on the request host or take an explicit hint — returning a
 // union across tenants would leak the tenant list.
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const pool = getAppPool();
   const result = await pool.query(`
     select "providerId", "samlConfig" from app."ssoProvider"

@@ -1,16 +1,19 @@
 import { resolveProject } from "./project";
-import { run, tryRun, removeVolume, removeNetwork } from "./docker";
-import { readState } from "./state";
+import { tryRun, removeVolume, removeNetwork } from "./docker";
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 
-export async function runStop(dir: string, opts: { destroy?: boolean; yes?: boolean } = {}): Promise<void> {
+// eslint-disable-next-line @typescript-eslint/require-await -- keeps the runX signatures uniform
+export async function runStop(
+  dir: string,
+  opts: { destroy?: boolean; yes?: boolean } = {},
+): Promise<void> {
   const p = resolveProject(dir);
 
   // Remove containers by label
   const listResult = tryRun(["ps", "-aq", "--filter", `label=${p.ns.label}`]);
   if (listResult.ok && listResult.out) {
-    const containerIds = listResult.out.split("\n").filter(id => id.trim());
+    const containerIds = listResult.out.split("\n").filter((id) => id.trim());
     for (const id of containerIds) {
       tryRun(["rm", "-f", id]);
     }

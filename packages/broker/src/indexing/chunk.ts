@@ -15,7 +15,10 @@ export function reassembleChunks(chunks: string[], opts: { overlap?: number } = 
     const window = Math.min(overlap, out.length, next.length);
     let matched = 0;
     for (let n = window; n > 0; n--) {
-      if (out.endsWith(next.slice(0, n))) { matched = n; break; }
+      if (out.endsWith(next.slice(0, n))) {
+        matched = n;
+        break;
+      }
     }
     out += next.slice(matched);
   }
@@ -24,10 +27,16 @@ export function reassembleChunks(chunks: string[], opts: { overlap?: number } = 
 
 // Paragraph-aware chunking: greedily pack paragraphs up to `max` chars,
 // carrying `overlap` chars of tail into the next chunk for context continuity.
-export function chunkText(content: string, opts: { max?: number; overlap?: number } = {}): string[] {
+export function chunkText(
+  content: string,
+  opts: { max?: number; overlap?: number } = {},
+): string[] {
   const max = opts.max ?? 1000;
   const overlap = opts.overlap ?? 100;
-  const paras = content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const paras = content
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
 
   if (paras.length === 0) return [];
 

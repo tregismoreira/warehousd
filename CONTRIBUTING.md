@@ -109,15 +109,21 @@ http://localhost:8722 — sign in as `ana@demo.local` (admin),
 ## Before you open a pull request
 
 ```bash
-pnpm lint
-WAREHOUSD_PROJECT_DIR=examples/harbor pnpm test   # unit + integration
-pnpm build                                          # production build + typecheck
+pnpm lint                                           # ESLint, type-checked rules
+pnpm typecheck                                      # src + test + e2e + scripts
+pnpm format:check                                   # Prettier, code only
+WAREHOUSD_PROJECT_DIR=examples/harbor pnpm test     # unit + integration
+pnpm build                                          # production build
 pnpm e2e                                            # Playwright, real browser
 ```
 
-All four must be clean. `pnpm test` does not typecheck — `pnpm build` is what
-catches type errors. Details and the slower suites (CLI end-to-end, Keycloak SSO)
-are in [docs/testing.md](docs/testing.md).
+All six must be clean. `pnpm test` does not typecheck — vitest transpiles without
+checking — so `pnpm typecheck` is the one that catches a type error, and it covers
+`test/`, `e2e/` and `scripts/` as well as `src`. `pnpm format` rewrites; prose is
+deliberately out of scope (see `.prettierignore`).
+
+Details and the slower suites (CLI end-to-end, Keycloak SSO) are in
+[docs/testing.md](docs/testing.md).
 
 Then:
 

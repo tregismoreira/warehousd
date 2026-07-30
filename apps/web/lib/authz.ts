@@ -12,9 +12,7 @@ export function atLeast(actual: Role, required: Role): boolean {
   return RANK[actual] >= RANK[required];
 }
 
-export type Guard =
-  | { ok: true; user: SessionUser }
-  | { ok: false; response: Response };
+export type Guard = { ok: true; user: SessionUser } | { ok: false; response: Response };
 
 // Authorization is enforced here, per route — never in a layout. A layout redirect is UX;
 // this is the gate. Error bodies are byte-identical to the hand-rolled checks they replace

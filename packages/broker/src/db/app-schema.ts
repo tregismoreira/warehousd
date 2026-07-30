@@ -19,8 +19,8 @@ export const grants = app.table("grants", {
   purposeDetail: text("purpose_detail"),
   allowedFields: text("allowed_fields").array(),
   orgId: text("org_id").notNull().default("default"),
-  env: text("env").notNull(),               // check ('dev','live') added in DDL
-  status: text("status").notNull(),         // pending|approved|denied|revoked
+  env: text("env").notNull(), // check ('dev','live') added in DDL
+  status: text("status").notNull(), // pending|approved|denied|revoked
   requestedAt: timestamp("requested_at", { withTimezone: true }).defaultNow(),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   decidedBy: text("decided_by"),
@@ -38,9 +38,9 @@ export const auditEvents = app.table("audit_events", {
   intent: jsonb("intent"),
   fieldsReturned: text("fields_returned").array(),
   grantId: uuid("grant_id"),
-  outcome: text("outcome"),                 // 'allowed' | 'refused'
+  outcome: text("outcome"), // 'allowed' | 'refused'
   reason: text("reason"),
-  via: text("via"),                         // session | oauth | api_key:<id>
+  via: text("via"), // session | oauth | api_key:<id>
 });
 
 export const vocabularies = app.table("vocabularies", {
@@ -51,30 +51,33 @@ export const vocabularies = app.table("vocabularies", {
 
 export const terms = app.table("terms", {
   id: uuid("id").primaryKey().defaultRandom(),
-  vocabularyId: uuid("vocabulary_id").notNull(),   // FK + unique(vocabulary_id, env, slug) enforced in DDL
-  env: text("env").notNull().default("all"),       // check ('all','dev','live'); 'all' for YAML, env-specific for dataset-sourced
+  vocabularyId: uuid("vocabulary_id").notNull(), // FK + unique(vocabulary_id, env, slug) enforced in DDL
+  env: text("env").notNull().default("all"), // check ('all','dev','live'); 'all' for YAML, env-specific for dataset-sourced
   slug: text("slug").notNull(),
   label: text("label").notNull(),
-  parentId: uuid("parent_id"),                     // reserved for hierarchy, unused in MVP
+  parentId: uuid("parent_id"), // reserved for hierarchy, unused in MVP
 });
 
 export const clientPolicies = app.table("client_policies", {
   clientId: text("client_id").primaryKey(),
   displayName: text("display_name"),
   orgId: text("org_id").notNull().default("default"),
-  allowedScopes: text("allowed_scopes").array().notNull().default(sql`'{env:dev}'`),
+  allowedScopes: text("allowed_scopes")
+    .array()
+    .notNull()
+    .default(sql`'{env:dev}'`),
   promotedAt: timestamp("promoted_at", { withTimezone: true }),
   promotedBy: text("promoted_by"),
-  allowedCollections: text("allowed_collections").array(),  // null = no ceiling
-  mode: text("mode").notNull().default("delegated"),        // delegated | headless
-  robotUserId: text("robot_user_id"),                        // headless only
-  trustedIssuerId: uuid("trusted_issuer_id"),                // delegated only
+  allowedCollections: text("allowed_collections").array(), // null = no ceiling
+  mode: text("mode").notNull().default("delegated"), // delegated | headless
+  robotUserId: text("robot_user_id"), // headless only
+  trustedIssuerId: uuid("trusted_issuer_id"), // delegated only
 });
 
 export const clientSecrets = app.table("client_secrets", {
   id: uuid("id").primaryKey().defaultRandom(),
-  clientId: text("client_id").notNull(),                    // FK enforced in DDL
-  orgId: text("org_id").notNull(),                          // FK enforced in DDL
+  clientId: text("client_id").notNull(), // FK enforced in DDL
+  orgId: text("org_id").notNull(), // FK enforced in DDL
   prefix: text("prefix").notNull(),
   secretHash: text("secret_hash").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -86,7 +89,7 @@ export const clientSecrets = app.table("client_secrets", {
 
 export const trustedIssuers = app.table("trusted_issuers", {
   id: uuid("id").primaryKey().defaultRandom(),
-  orgId: text("org_id").notNull(),                          // FK enforced in DDL
+  orgId: text("org_id").notNull(), // FK enforced in DDL
   issuer: text("issuer").notNull(),
   jwksUri: text("jwks_uri").notNull(),
   audience: text("audience").notNull(),
@@ -95,14 +98,14 @@ export const trustedIssuers = app.table("trusted_issuers", {
 });
 
 export const changeLog = app.table("change_log", {
-  seq: bigint("seq", { mode: "number" }).primaryKey(),      // bigserial in DDL
-  orgId: text("org_id").notNull(),                          // FK enforced in DDL
-  env: text("env").notNull(),                                // check (env in ('dev','live'))
+  seq: bigint("seq", { mode: "number" }).primaryKey(), // bigserial in DDL
+  orgId: text("org_id").notNull(), // FK enforced in DDL
+  env: text("env").notNull(), // check (env in ('dev','live'))
   collection: text("collection").notNull(),
   documentId: text("document_id").notNull(),
   rev: uuid("rev").notNull(),
-  op: text("op").notNull(),                                  // create, update, delete, or proposal
-  status: text("status").notNull(),                          // approved, pending, rejected
+  op: text("op").notNull(), // create, update, delete, or proposal
+  status: text("status").notNull(), // approved, pending, rejected
   at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   by: text("by").notNull(),
 });

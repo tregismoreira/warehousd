@@ -16,7 +16,10 @@ beforeAll(async () => {
   await applyConfig(admin, cfg);
   await generateSynthetic(admin, cfg, 42);
 }, 60_000);
-afterAll(async () => { await admin.end(); await p.end(); });
+afterAll(async () => {
+  await admin.end();
+  await p.end();
+});
 
 const count = async (t: string) =>
   Number((await admin.query(`select count(*)::int as n from data_synth.${t}`)).rows[0].n);
@@ -24,17 +27,21 @@ const count = async (t: string) =>
 describe("regenerateSynthetic", () => {
   it("is reproducible for a fixed seed", async () => {
     await regenerateSynthetic(admin, cfg, 7);
-    const first = (await admin.query(`select id, full_name from data_synth.people order by id`)).rows;
+    const first = (await admin.query(`select id, full_name from data_synth.people order by id`))
+      .rows;
     await regenerateSynthetic(admin, cfg, 7);
-    const second = (await admin.query(`select id, full_name from data_synth.people order by id`)).rows;
+    const second = (await admin.query(`select id, full_name from data_synth.people order by id`))
+      .rows;
     expect(second).toEqual(first);
   });
 
   it("produces different data for a different seed", async () => {
     await regenerateSynthetic(admin, cfg, 1);
-    const a = (await admin.query(`select full_name from data_synth.people order by id limit 5`)).rows;
+    const a = (await admin.query(`select full_name from data_synth.people order by id limit 5`))
+      .rows;
     await regenerateSynthetic(admin, cfg, 2);
-    const b = (await admin.query(`select full_name from data_synth.people order by id limit 5`)).rows;
+    const b = (await admin.query(`select full_name from data_synth.people order by id limit 5`))
+      .rows;
     expect(b).not.toEqual(a);
   });
 
@@ -53,10 +60,15 @@ describe("regenerateSynthetic", () => {
 
   it("never touches data_live", async () => {
     await admin.query(
-      `insert into data_live.departments (id, name) values (gen_random_uuid(), 'Live Only Dept')`);
-    const before = Number((await admin.query(`select count(*)::int as n from data_live.departments`)).rows[0].n);
+      `insert into data_live.departments (id, name) values (gen_random_uuid(), 'Live Only Dept')`,
+    );
+    const before = Number(
+      (await admin.query(`select count(*)::int as n from data_live.departments`)).rows[0].n,
+    );
     await regenerateSynthetic(admin, cfg, 99);
-    const after = Number((await admin.query(`select count(*)::int as n from data_live.departments`)).rows[0].n);
+    const after = Number(
+      (await admin.query(`select count(*)::int as n from data_live.departments`)).rows[0].n,
+    );
     expect(after).toBe(before);
   });
 

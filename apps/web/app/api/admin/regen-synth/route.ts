@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
     await app.query(
       `insert into app.audit_events (user_id, env, collection, intent, fields_returned, outcome, reason)
        values ($1, 'dev', $2, $3, '{}', 'allowed', null)`,
-      [guard.user.id, collection, JSON.stringify({ op: "regen_synth", seed: seed ?? 42 })]);
+      [guard.user.id, collection, JSON.stringify({ op: "regen_synth", seed: seed ?? 42 })],
+    );
   }
 
   return Response.json({ ok: true, collections });

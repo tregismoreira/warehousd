@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { buildRunArgs, assertDocker } from "../src/docker";
 
@@ -135,9 +135,7 @@ describe("assertDocker", () => {
       throw error;
     });
 
-    expect(() => assertDocker()).toThrow(
-      /docker not found on PATH.*Install Docker Desktop/
-    );
+    expect(() => assertDocker()).toThrow(/docker not found on PATH.*Install Docker Desktop/);
   });
 
   it("throws daemon message when docker daemon is not reachable", () => {
@@ -148,8 +146,6 @@ describe("assertDocker", () => {
       throw error;
     });
 
-    expect(() => assertDocker()).toThrow(
-      /Docker is installed but the daemon isn't reachable/
-    );
+    expect(() => assertDocker()).toThrow(/Docker is installed but the daemon isn't reachable/);
   });
 });

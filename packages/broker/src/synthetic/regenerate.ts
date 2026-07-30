@@ -8,7 +8,9 @@ import { generateSynthetic } from "./generate";
 // data_synth only, always. Invariant 5: the generator has no read path into data_live, and
 // this function has no write path into it either — the schema name is a literal.
 export async function regenerateSynthetic(
-  db: Pool, cfg: WarehousdConfig, seed = 42,
+  db: Pool,
+  cfg: WarehousdConfig,
+  seed = 42,
 ): Promise<{ collections: string[] }> {
   const regenerated: string[] = [];
   for (const name of Object.keys(cfg.collections)) {

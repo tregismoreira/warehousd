@@ -20,13 +20,24 @@ import { makeHistoryVerbs } from "./verbs/history";
 export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
   const deps = makeVerbDeps(pools, cfg);
 
-  const { query, describeCollection, listCollections, searchDocuments, getDocument } = makeReadVerbs(deps);
+  const { query, describeCollection, listCollections, searchDocuments, getDocument } =
+    makeReadVerbs(deps);
   const mutate = makeMutateVerb(deps);
   const { approveProposal, rejectProposal, listProposals, getProposal } = makeProposeVerbs(deps);
   const { changes, listRevisions } = makeHistoryVerbs(deps);
 
   return {
-    query, describeCollection, listCollections, searchDocuments, getDocument, mutate,
-    approveProposal, rejectProposal, listProposals, changes, listRevisions, getProposal,
+    query,
+    describeCollection,
+    listCollections,
+    searchDocuments,
+    getDocument,
+    mutate,
+    approveProposal,
+    rejectProposal,
+    listProposals,
+    changes,
+    listRevisions,
+    getProposal,
   };
 }

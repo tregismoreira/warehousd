@@ -10,7 +10,9 @@ beforeAll(async () => {
   cookies.marcus = await signIn(db.auth, "marcus@harbor.demo", "demo");
   cookies.ana = await signIn(db.auth, "ana@harbor.demo", "demo");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(cookie?: string) {
   const headers: Record<string, string> = {};
@@ -20,9 +22,15 @@ function req(cookie?: string) {
 
 // (actor, surface) → expected outcome. Kept as data so later tasks add rows, not code.
 const MATRIX: [keyof typeof cookies, "admin" | "manager" | "member", boolean][] = [
-  ["mia", "member", true],   ["mia", "manager", false],   ["mia", "admin", false],
-  ["marcus", "member", true], ["marcus", "manager", true], ["marcus", "admin", false],
-  ["ana", "member", true],   ["ana", "manager", true],    ["ana", "admin", true],
+  ["mia", "member", true],
+  ["mia", "manager", false],
+  ["mia", "admin", false],
+  ["marcus", "member", true],
+  ["marcus", "manager", true],
+  ["marcus", "admin", false],
+  ["ana", "member", true],
+  ["ana", "manager", true],
+  ["ana", "admin", true],
 ];
 
 describe("surface authorization matrix", () => {

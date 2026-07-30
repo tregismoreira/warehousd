@@ -77,7 +77,10 @@ function canonicalDecimal(raw: string): string | null {
   digits = digits.replace(/^0+/, "");
   if (digits === "") return "0"; // every spelling of zero, signed or not
   const trailing = /0+$/.exec(digits);
-  if (trailing) { digits = digits.slice(0, -trailing[0].length); scale += trailing[0].length; }
+  if (trailing) {
+    digits = digits.slice(0, -trailing[0].length);
+    scale += trailing[0].length;
+  }
   return `${s.startsWith("-") ? "-" : ""}${digits}e${scale}`;
 }
 
@@ -134,23 +137,29 @@ export function canonicalize(type: FieldConfig["type"], v: unknown): string | nu
         return Number.isSafeInteger(v) ? canonicalDecimal(v.toString()) : null;
       return typeof v === "string" && INTEGER.test(v.trim()) ? canonicalDecimal(v) : null;
     case "numeric":
-      if (typeof v === "number")
-        return Number.isFinite(v) ? canonicalDecimal(v.toString()) : null;
+      if (typeof v === "number") return Number.isFinite(v) ? canonicalDecimal(v.toString()) : null;
       return typeof v === "string" ? canonicalDecimal(v) : null;
-    case "timestamptz": return canonicalInstant(v);
-    case "date":        return canonicalDate(v);
-    case "boolean":     return canonicalBoolean(v);
-    case "uuid":        return canonicalUuid(v);
+    case "timestamptz":
+      return canonicalInstant(v);
+    case "date":
+      return canonicalDate(v);
+    case "boolean":
+      return canonicalBoolean(v);
+    case "uuid":
+      return canonicalUuid(v);
     // jsonb equality is structural — key order and duplicate keys are normalised by Postgres,
     // and numbers inside are compared as numerics. Nothing here can reproduce that, and the old
     // String() form matched every object against every other, so a json filter is refused.
-    case "json":        return null;
+    case "json":
+      return null;
     case "text":
     case undefined:
       // The driver renders a bound parameter for a text column with its own text form, which for
       // the scalars a filter can hold is JavaScript's.
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- the object case is excluded above; what reaches String() here is a scalar the compiler only knows as `unknown`.
       return typeof v === "object" ? null : String(v);
-    default:            return null;
+    default:
+      return null;
   }
 }
 
@@ -163,7 +172,8 @@ export type FilterValidationError = { field: string; detail: string };
 // A null filter value is *not* an error: it is a legal predicate that matches nothing, which is
 // what `col = NULL` does in SQL. Only a value whose type cannot be compared exactly is refused.
 export function validateDocumentFilters(
-  filters: DocumentFilter[], c: CollectionConfig,
+  filters: DocumentFilter[],
+  c: CollectionConfig,
 ): FilterValidationError | null {
   for (const f of filters) {
     const field = c.fields[f.field];
@@ -188,13 +198,17 @@ export function validateDocumentFilters(
 // Callers must have run validateDocumentFilters first; an uninterpretable value reaching here
 // matches nothing, so a skipped validation fails closed rather than open.
 export function matchesFilters(
-  row: Record<string, unknown>, filters: DocumentFilter[], c: CollectionConfig,
+  row: Record<string, unknown>,
+  filters: DocumentFilter[],
+  c: CollectionConfig,
 ): boolean {
   return filters.every((f) => matchesFilter(row, f, c));
 }
 
 function matchesFilter(
-  row: Record<string, unknown>, f: DocumentFilter, c: CollectionConfig,
+  row: Record<string, unknown>,
+  f: DocumentFilter,
+  c: CollectionConfig,
 ): boolean {
   const type = c.fields[f.field]?.type;
   const actual = row[f.field];

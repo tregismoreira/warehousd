@@ -1,0 +1,15 @@
+# Every file, by default.
+*       @tregismoreira
+
+# The enforcement boundary and the two adapters that reach it. A change here is a change to what
+# this project promises, so it is called out separately from the default rule even though the owner
+# is the same today — the point is that the list stays visible when there is more than one.
+/packages/broker/src/           @tregismoreira
+/apps/web/app/mcp/              @tregismoreira
+/apps/web/app/v1/               @tregismoreira
+/apps/web/lib/                  @tregismoreira
+
+# Anything that decides what runs, with what permissions, or what gets published.
+/.github/                       @tregismoreira
+/apps/web/Dockerfile            @tregismoreira
+/SECURITY.md                    @tregismoreira

@@ -4,11 +4,19 @@ import type { RefusalReason, MutationRefusalReason } from "@warehousd/broker";
 // All routes use this single table so no route invents its own.
 // conflict is special-cased: 412 if If-Match was provided (optimistic concurrency
 // mismatch), 409 otherwise (unconditional conflict, e.g., duplicate key).
-export function restStatus(reason: RefusalReason | MutationRefusalReason, ifMatchProvided: boolean = false): number {
+export function restStatus(
+  reason: RefusalReason | MutationRefusalReason,
+  ifMatchProvided: boolean = false,
+): number {
   if (reason === "conflict") return ifMatchProvided ? 412 : 409;
 
   // Access denial: no grant, expired grant, field/verb denial, field not writable
-  if (reason === "no_grant" || reason === "expired_grant" || reason === "field_denied" || reason === "verb_denied")
+  if (
+    reason === "no_grant" ||
+    reason === "expired_grant" ||
+    reason === "field_denied" ||
+    reason === "verb_denied"
+  )
     return 403;
 
   // Forbidden rather than conflict: the request is well-formed and the state is fine, it is the
@@ -37,7 +45,10 @@ export function restStatus(reason: RefusalReason | MutationRefusalReason, ifMatc
   return 500; // fallback
 }
 
-export function refuse(reason: RefusalReason | MutationRefusalReason, ifMatchProvided?: boolean): Response {
+export function refuse(
+  reason: RefusalReason | MutationRefusalReason,
+  ifMatchProvided?: boolean,
+): Response {
   const status = restStatus(reason, ifMatchProvided);
   return Response.json({ error: reason }, { status });
 }

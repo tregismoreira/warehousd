@@ -4,10 +4,7 @@ import { getAppPool } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
 import { orgOf } from "../../../../../lib/session";
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
 

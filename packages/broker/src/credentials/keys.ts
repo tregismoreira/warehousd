@@ -104,7 +104,8 @@ export async function createClientSecret(
   const existing = await db.query(
     `select count(*)::int as cnt from app.client_secrets
      where client_id=$1 and revoked_at is null`,
-    [clientId]);
+    [clientId],
+  );
   if (existing.rows[0].cnt >= 2) {
     throw new Error("Maximum 2 unrevoked secrets per client");
   }
@@ -124,7 +125,8 @@ export async function createClientSecret(
        (client_id, org_id, prefix, secret_hash, created_at, created_by, expires_at)
      values ($1, $2, $3, $4, now(), $5, $6)
      returning id`,
-    [clientId, orgId, prefix, secretHash, createdBy, expiresAt]);
+    [clientId, orgId, prefix, secretHash, createdBy, expiresAt],
+  );
 
   return { secret, id: r.rows[0].id };
 }
@@ -143,7 +145,8 @@ export async function verifyClientSecret(
   const r = await db.query(
     `select id, client_id, org_id, prefix, secret_hash, revoked_at, expires_at
      from app.client_secrets where prefix=$1 limit 1`,
-    [prefix]);
+    [prefix],
+  );
 
   if (r.rowCount === 0) return null;
 
@@ -167,14 +170,14 @@ export async function verifyClientSecret(
   if (!timingSafeEqual(testHash, storedHash)) return null;
 
   // Update last_used_at
-  await db.query(
-    `update app.client_secrets set last_used_at=now() where id=$1`,
-    [row.id]);
+  await db.query(`update app.client_secrets set last_used_at=now() where id=$1`, [row.id]);
 
   // From the stored prefix, not the presented string: same value, but unambiguously server-side.
   // The format regex above guarantees the prefix carries one of the two.
   return {
-    clientId: row.client_id, orgId: row.org_id, id: row.id,
+    clientId: row.client_id,
+    orgId: row.org_id,
+    id: row.id,
     env: envFromSecret(row.prefix) ?? "dev",
   };
 }
@@ -194,7 +197,8 @@ export async function rotateClientSecret(
   const old = await db.query(
     `select id from app.client_secrets
      where id=$1 and client_id=$2 and org_id=$3 and revoked_at is null`,
-    [oldSecretId, clientId, orgId]);
+    [oldSecretId, clientId, orgId],
+  );
   if (old.rowCount === 0) throw new Error("Old secret not found or already revoked");
 
   // createClientSecret enforces the ceiling of two unrevoked secrets, so a client cannot
@@ -211,12 +215,16 @@ export async function rotateClientSecret(
 //
 // Returns whether a row matched, so a caller can answer `not_found` without a second query.
 export async function revokeClientSecret(
-  db: Pool, secretId: string, clientId: string, orgId: string,
+  db: Pool,
+  secretId: string,
+  clientId: string,
+  orgId: string,
 ): Promise<boolean> {
   const r = await db.query(
     `update app.client_secrets set revoked_at=now()
      where id=$1 and client_id=$2 and org_id=$3`,
-    [secretId, clientId, orgId]);
+    [secretId, clientId, orgId],
+  );
   return (r.rowCount ?? 0) > 0;
 }
 
@@ -230,7 +238,8 @@ export async function listClientSecrets(
      from app.client_secrets
      where client_id=$1 and org_id=$2
      order by created_at desc`,
-    [clientId, orgId]);
+    [clientId, orgId],
+  );
 
   return r.rows.map((row) => ({
     id: row.id,

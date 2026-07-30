@@ -13,7 +13,10 @@ const MUTATING_VERBS: readonly string[] = ["create", "update", "delete"];
 // One rule set for verbs, shared by every approval path — the web route, the MCP tool, and
 // anything later. A rule enforced in only one of them is not a rule.
 export function validateVerbs(
-  verbs: string[], cfg: WarehousdConfig, collection: string, allowedFields: string[],
+  verbs: string[],
+  cfg: WarehousdConfig,
+  collection: string,
+  allowedFields: string[],
 ): { ok: true } | { ok: false; error: string } {
   if (verbs.length === 0) return { ok: false, error: "grant must carry at least one verb" };
   for (const v of verbs)
@@ -41,7 +44,10 @@ export function validateVerbs(
   if (verbs.some((v) => MUTATING_VERBS.includes(v))) {
     const writable = writableFields(cfg, collection);
     if (!allowedFields.some((f) => writable.includes(f)))
-      return { ok: false, error: "write verbs require at least one writable field in allowed_fields" };
+      return {
+        ok: false,
+        error: "write verbs require at least one writable field in allowed_fields",
+      };
   }
 
   return { ok: true };
@@ -50,7 +56,10 @@ export function validateVerbs(
 // Validation lives here, not in the callers: the web route and the MCP request_access
 // tool both reach app.grants, and a rule enforced in only one of them is not a rule.
 export function validateGrantRequest(
-  cfg: WarehousdConfig, collection: string, purposeLabel: unknown, fields: unknown,
+  cfg: WarehousdConfig,
+  collection: string,
+  purposeLabel: unknown,
+  fields: unknown,
 ): { ok: true; fields: string[] } | { ok: false; error: GrantRequestError } {
   // Check collection exists
   const c = findCollection(cfg, collection);
@@ -68,8 +77,7 @@ export function validateGrantRequest(
 
   // Validate all requested fields are grantable (posture:allow)
   for (const f of requested)
-    if (!grantable.includes(f))
-      return { ok: false, error: "field_not_grantable" };
+    if (!grantable.includes(f)) return { ok: false, error: "field_not_grantable" };
 
   return { ok: true, fields: requested };
 }
@@ -77,15 +85,31 @@ export function validateGrantRequest(
 // orgId is optional so a single-org deployment — every deployment that existed before the
 // org dimension — keeps working: an omitted org lands in the implicit one rather than
 // failing the insert. Every real call site passes ctx.orgId.
-export async function requestGrant(app: Pool, i: {
-  userId: string; collection: string; env: "dev" | "live"; orgId?: string;
-  purposeLabel: string; purposeDetail?: string; allowedFields: string[];
-}): Promise<string> {
+export async function requestGrant(
+  app: Pool,
+  i: {
+    userId: string;
+    collection: string;
+    env: "dev" | "live";
+    orgId?: string | undefined;
+    purposeLabel: string;
+    purposeDetail?: string | undefined;
+    allowedFields: string[];
+  },
+): Promise<string> {
   const r = await app.query(
     `insert into app.grants (user_id,collection,env,org_id,purpose_label,purpose_detail,allowed_fields,status)
      values ($1,$2,$3,$4,$5,$6,$7,'pending') returning id`,
-    [i.userId, i.collection, i.env, i.orgId ?? DEFAULT_ORG_ID,
-     i.purposeLabel, i.purposeDetail ?? null, i.allowedFields]);
+    [
+      i.userId,
+      i.collection,
+      i.env,
+      i.orgId ?? DEFAULT_ORG_ID,
+      i.purposeLabel,
+      i.purposeDetail ?? null,
+      i.allowedFields,
+    ],
+  );
   return r.rows[0].id;
 }
 
@@ -101,14 +125,24 @@ export type ApproveGrantError = "unknown_grant" | "invalid_verbs";
 // an optional config parameter is an opt-out of the approve-requires-read invariant that a
 // caller can take by accident.
 export async function approveGrant(
-  app: Pool, cfg: WarehousdConfig, id: string, by: string,
-  opts: { allowedFields?: string[]; expiresAt?: string; documentFilters?: DocumentFilter[];
-          verbs?: string[]; mode?: "direct" | "proposal_only"; orgId?: string } = {},
+  app: Pool,
+  cfg: WarehousdConfig,
+  id: string,
+  by: string,
+  opts: {
+    allowedFields?: string[];
+    expiresAt?: string;
+    documentFilters?: DocumentFilter[];
+    verbs?: string[];
+    mode?: "direct" | "proposal_only";
+    orgId?: string;
+  } = {},
 ): Promise<{ ok: true } | { ok: false; error: ApproveGrantError; detail?: string }> {
   const orgId = opts.orgId ?? DEFAULT_ORG_ID;
   const grantRes = await app.query(
     `select collection, allowed_fields, verbs, mode from app.grants where id=$1 and org_id=$2`,
-    [id, orgId]);
+    [id, orgId],
+  );
   if (grantRes.rowCount === 0) return { ok: false, error: "unknown_grant" };
   const grant = grantRes.rows[0];
 
@@ -125,21 +159,47 @@ export async function approveGrant(
        allowed_fields=coalesce($3, allowed_fields), expires_at=$4, document_filter=$5,
        verbs=$6, mode=$7
      where id=$1 and org_id=$8 and status='pending'`,
-    [id, by, opts.allowedFields ?? null, opts.expiresAt ?? null,
-     opts.documentFilters && opts.documentFilters.length ? JSON.stringify(opts.documentFilters) : null,
-     verbs, mode, orgId]);
+    [
+      id,
+      by,
+      opts.allowedFields ?? null,
+      opts.expiresAt ?? null,
+      opts.documentFilters && opts.documentFilters.length
+        ? JSON.stringify(opts.documentFilters)
+        : null,
+      verbs,
+      mode,
+      orgId,
+    ],
+  );
   // Zero rows means the grant was not pending — already decided, or raced.
   return (result.rowCount ?? 0) > 0 ? { ok: true } : { ok: false, error: "unknown_grant" };
 }
 
-export async function denyGrant(app: Pool, id: string, by: string, orgId = DEFAULT_ORG_ID): Promise<boolean> {
-  const result = await app.query(`update app.grants set status='denied', decided_by=$2, decided_at=now()
-    where id=$1 and org_id=$3 and status='pending'`, [id, by, orgId]);
+export async function denyGrant(
+  app: Pool,
+  id: string,
+  by: string,
+  orgId = DEFAULT_ORG_ID,
+): Promise<boolean> {
+  const result = await app.query(
+    `update app.grants set status='denied', decided_by=$2, decided_at=now()
+    where id=$1 and org_id=$3 and status='pending'`,
+    [id, by, orgId],
+  );
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function revokeGrant(app: Pool, id: string, by: string, orgId = DEFAULT_ORG_ID): Promise<boolean> {
-  const result = await app.query(`update app.grants set status='revoked', decided_by=$2, decided_at=now()
-    where id=$1 and org_id=$3 and status='approved'`, [id, by, orgId]);
+export async function revokeGrant(
+  app: Pool,
+  id: string,
+  by: string,
+  orgId = DEFAULT_ORG_ID,
+): Promise<boolean> {
+  const result = await app.query(
+    `update app.grants set status='revoked', decided_by=$2, decided_at=now()
+    where id=$1 and org_id=$3 and status='approved'`,
+    [id, by, orgId],
+  );
   return (result.rowCount ?? 0) > 0;
 }

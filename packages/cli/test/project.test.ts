@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { resolveProject } from "../src/project";
 import { readState, ensureState, writeOutputs, readOutputs, stateDir } from "../src/state";
 
@@ -162,7 +162,7 @@ collections:
   });
 
   it("ensureState persists state to file", () => {
-    const state = ensureState(projectDir);
+    const _state = ensureState(projectDir);
     const statePath = join(stateDir(projectDir), "state.json");
     expect(existsSync(statePath)).toBe(true);
   });

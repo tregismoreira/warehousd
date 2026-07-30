@@ -1,16 +1,28 @@
 "use client";
 import {
-  flexRender, getCoreRowModel, getSortedRowModel, useReactTable,
-  type ColumnDef, type SortingState,
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type SortingState,
 } from "@tanstack/react-table";
 import { useState } from "react";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function DataTable<T>({
-  columns, data, loading = false, empty,
+  columns,
+  data,
+  loading = false,
+  empty,
 }: {
   columns: ColumnDef<T, unknown>[];
   data: T[];
@@ -19,8 +31,12 @@ export function DataTable<T>({
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const table = useReactTable({
-    data, columns, state: { sorting }, onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel(),
+    data,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   return (
@@ -38,29 +54,31 @@ export function DataTable<T>({
           ))}
         </TableHeader>
         <TableBody>
-          {loading
-            ? Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>
-                  {columns.map((_c, j) => (
-                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
-                  ))}
-                </TableRow>
-              ))
-            : table.getRowModel().rows.length === 0
-              ? (
-                <TableRow>
-                  <TableCell colSpan={columns.length}>{empty}</TableCell>
-                </TableRow>
-              )
-              : table.getRowModel().rows.map((row) => (
-                  <TableRow key={row.id}>
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
-                    ))}
-                  </TableRow>
+          {loading ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <TableRow key={i}>
+                {columns.map((_c, j) => (
+                  <TableCell key={j}>
+                    <Skeleton className="h-4 w-full" />
+                  </TableCell>
                 ))}
+              </TableRow>
+            ))
+          ) : table.getRowModel().rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={columns.length}>{empty}</TableCell>
+            </TableRow>
+          ) : (
+            table.getRowModel().rows.map((row) => (
+              <TableRow key={row.id}>
+                {row.getVisibleCells().map((cell) => (
+                  <TableCell key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))
+          )}
         </TableBody>
       </Table>
     </div>

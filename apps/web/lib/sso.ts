@@ -8,7 +8,9 @@ import type { Pool } from "pg";
 // a local test IdP or an on-prem corporate IdP must be listed here explicitly.
 export function trustedOrigins(): string[] {
   return (process.env.WAREHOUSD_TRUSTED_ORIGINS ?? "")
-    .split(",").map((s) => s.trim()).filter(Boolean);
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 export function ssoPlugin(app: Pool) {
@@ -24,9 +26,13 @@ export function ssoPlugin(app: Pool) {
 
 // Gate Better Auth's SSO management endpoints to admin-only access
 const SSO_ADMIN_PATHS = new Set([
-  "/sso/register", "/sso/update-provider", "/sso/delete-provider",
-  "/sso/get-provider", "/sso/providers",
-  "/sso/verify-domain", "/sso/request-domain-verification",
+  "/sso/register",
+  "/sso/update-provider",
+  "/sso/delete-provider",
+  "/sso/get-provider",
+  "/sso/providers",
+  "/sso/verify-domain",
+  "/sso/request-domain-verification",
 ]);
 
 export function ssoAdminPlugin() {

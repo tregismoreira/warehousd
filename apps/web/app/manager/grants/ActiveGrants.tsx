@@ -8,13 +8,23 @@ import { Button } from "@/components/ui/button";
 import { Mono } from "@/components/common/Mono";
 import { EmptyState } from "@/components/common/EmptyState";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
 type ActiveGrant = {
-  id: string; user_id: string; collection: string; env: "dev" | "live";
-  allowed_fields: string[] | null; expires_at: string | null;
+  id: string;
+  user_id: string;
+  collection: string;
+  env: "dev" | "live";
+  allowed_fields: string[] | null;
+  expires_at: string | null;
   document_filter: { field: string; op: string; value: unknown } | null;
 };
 
@@ -39,7 +49,7 @@ export function ActiveGrants() {
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   async function revoke(id: string) {
@@ -64,36 +74,55 @@ export function ActiveGrants() {
   }
 
   const columns: ColumnDef<ActiveGrant, unknown>[] = [
-    { accessorKey: "user_id", header: "User",
-      cell: ({ row }) => <Mono>{row.original.user_id}</Mono> },
-    { accessorKey: "collection", header: "Collection",
-      cell: ({ row }) => <span className="font-medium">{row.original.collection}</span> },
-    { accessorKey: "env", header: "Env",
-      cell: ({ row }) => <Mono>{row.original.env}</Mono> },
-    { accessorKey: "allowed_fields", header: "Fields",
+    {
+      accessorKey: "user_id",
+      header: "User",
+      cell: ({ row }) => <Mono>{row.original.user_id}</Mono>,
+    },
+    {
+      accessorKey: "collection",
+      header: "Collection",
+      cell: ({ row }) => <span className="font-medium">{row.original.collection}</span>,
+    },
+    { accessorKey: "env", header: "Env", cell: ({ row }) => <Mono>{row.original.env}</Mono> },
+    {
+      accessorKey: "allowed_fields",
+      header: "Fields",
       cell: ({ row }) => (
         <Mono className="text-muted-foreground">
           {(row.original.allowed_fields ?? []).join(", ") || "—"}
         </Mono>
-      ) },
-    { id: "scope", header: "Document scope",
+      ),
+    },
+    {
+      id: "scope",
+      header: "Document scope",
       cell: ({ row }) => {
         const f = row.original.document_filter;
         if (!f) return <span className="text-xs text-muted-foreground">Whole collection</span>;
         return <Mono>{`${f.field} ${f.op} ${JSON.stringify(f.value)}`}</Mono>;
-      } },
-    { accessorKey: "expires_at", header: "Expires",
+      },
+    },
+    {
+      accessorKey: "expires_at",
+      header: "Expires",
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground">
-          {row.original.expires_at ? new Date(row.original.expires_at).toLocaleString() : "No expiry"}
+          {row.original.expires_at
+            ? new Date(row.original.expires_at).toLocaleString()
+            : "No expiry"}
         </span>
-      ) },
-    { id: "actions", header: "",
+      ),
+    },
+    {
+      id: "actions",
+      header: "",
       cell: ({ row }) => (
         <Button variant="destructive" size="sm" onClick={() => setPendingId(row.original.id)}>
           Revoke
         </Button>
-      ) },
+      ),
+    },
   ];
 
   return (
@@ -111,10 +140,17 @@ export function ActiveGrants() {
         }
       />
 
-      <AlertDialog open={pending !== null} onOpenChange={(v) => { if (!v) setPendingId(null); }}>
+      <AlertDialog
+        open={pending !== null}
+        onOpenChange={(v) => {
+          if (!v) setPendingId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke {pending?.user_id}&rsquo;s access to {pending?.collection}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Revoke {pending?.user_id}&rsquo;s access to {pending?.collection}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
               Revocation is immediate — their very next query is refused, with no token refresh
               involved. They can request access again.
@@ -128,7 +164,7 @@ export function ActiveGrants() {
                 // Keep the dialog mounted while the POST is in flight so the spinner is real;
                 // `revoke` closes it once the refetch has landed.
                 e.preventDefault();
-                if (pending) revoke(pending.id);
+                if (pending) void revoke(pending.id);
               }}
               disabled={revoking !== null}
             >

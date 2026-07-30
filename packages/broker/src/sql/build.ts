@@ -8,14 +8,24 @@ import { dataSchema } from "../config/collection";
 export class UnsupportedFilter extends Error {}
 
 const OP_SQL: Record<Exclude<FilterOp, "in">, string> = {
-  eq: "=", neq: "<>", gt: ">", lt: "<", gte: ">=", lte: "<=", like: "like",
+  eq: "=",
+  neq: "<>",
+  gt: ">",
+  lt: "<",
+  gte: ">=",
+  lte: "<=",
+  like: "like",
 };
 // An aggregate's `fn` is the only part of an intent that lands in the SQL text as syntax rather
 // than as a bound parameter, so it gets the same treatment as an identifier: looked up in a
 // closed set, never interpolated from the caller's string. The intent schema holds it to this
 // same enum; this is the layer that must not depend on that having happened.
 const AGG_SQL: Record<Aggregate["fn"], string> = {
-  avg: "avg", sum: "sum", count: "count", min: "min", max: "max",
+  avg: "avg",
+  sum: "sum",
+  count: "count",
+  min: "min",
+  max: "max",
 };
 // `OP_SQL[op]` and `AGG_SQL[fn]` are property reads on object literals, so every name on
 // Object.prototype answers them: `op: "constructor"` returns the Object constructor, whose
@@ -35,17 +45,26 @@ function lookup(table: object, key: unknown, kind: string): string {
 const q = ident;
 
 export function buildSelect(
-  env: "dev" | "live", intent: QueryIntent, grantedFields: string[],
+  env: "dev" | "live",
+  intent: QueryIntent,
+  grantedFields: string[],
   // searchFields: the dataset fields carrying a generated "<f>_tsv" column. Omitted means a
   // file collection, whose view exposes a single fixed `tsv`. Field names go through q() like
   // every other identifier — they are config-validated, but that is the builder's rule to keep.
-  opts: { documentFilters?: DocumentFilter[]; q?: string;
-          isMultiValueField?: (field: string) => boolean; searchFields?: string[] } = {},
+  opts: {
+    documentFilters?: DocumentFilter[];
+    q?: string;
+    isMultiValueField?: (field: string) => boolean;
+    searchFields?: string[];
+  } = {},
 ): { text: string; values: unknown[] } {
   const schema = dataSchema(env);
   const view = `${schema}.v_${intent.collection}`;
   const values: unknown[] = [];
-  const param = (v: unknown) => { values.push(v); return `$${values.length}`; };
+  const param = (v: unknown) => {
+    values.push(v);
+    return `$${values.length}`;
+  };
 
   let selectClause: string;
   if (intent.aggregate && intent.aggregate.length) {
@@ -89,7 +108,10 @@ export function buildSelect(
       const arr = Array.isArray(f.value) ? f.value : [f.value];
       // An empty in-list matches nothing. Say so outright — the same guard the grant's
       // document filters below have always had; intent filters were missing it.
-      if (!arr.length) { where.push("false"); continue; }
+      if (!arr.length) {
+        where.push("false");
+        continue;
+      }
       if (isMulti) {
         // For multi-value columns, use overlap operator: "col" && $n::text[]
         const arrParam = param(arr);
@@ -104,7 +126,9 @@ export function buildSelect(
       // Ordering and pattern operators have no defensible meaning against a set of terms, and
       // the scalar form below would compare text[] against text — a driver error the caller
       // can do nothing with. Refuse the intent instead; verbs/read.ts maps this to invalid_intent.
-      throw new UnsupportedFilter(`operator "${f.op}" is not supported on multi-value field "${f.field}"`);
+      throw new UnsupportedFilter(
+        `operator "${f.op}" is not supported on multi-value field "${f.field}"`,
+      );
     } else {
       where.push(`${q(f.field)} ${lookup(OP_SQL, f.op, "operator")} ${param(f.value)}`);
     }
@@ -147,7 +171,8 @@ export function buildSelect(
 
   // ORDER BY: when rankExpr present, relevance overrides intent.orderBy
   if (rankExpr) text += ` order by ${rankExpr} desc`;
-  else if (intent.orderBy) text += ` order by ${q(intent.orderBy.field)} ${intent.orderBy.dir === "desc" ? "desc" : "asc"}`;
+  else if (intent.orderBy)
+    text += ` order by ${q(intent.orderBy.field)} ${intent.orderBy.dir === "desc" ? "desc" : "asc"}`;
 
   const limit = Math.min(Math.max(1, intent.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
   text += ` limit ${limit}`;

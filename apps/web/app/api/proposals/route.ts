@@ -8,11 +8,7 @@ export async function GET(req: NextRequest) {
   if (!ctx) return unauthenticated();
 
   const url = new URL(req.url);
-  const status = url.searchParams.get("status") as
-    | "pending"
-    | "approved"
-    | "rejected"
-    | undefined;
+  const status = url.searchParams.get("status") as "pending" | "approved" | "rejected" | undefined;
   const collection = url.searchParams.get("collection") || undefined;
 
   const result = await getBroker().broker.listProposals(ctx, {

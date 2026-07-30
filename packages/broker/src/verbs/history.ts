@@ -12,12 +12,24 @@ import { makeAuditWriter } from "../audit/decision";
 import type { VerbDeps } from "./deps";
 
 export type ChangeEntry = {
-  seq: number; collection: string; documentId: string; rev: string;
-  op: string; status: string; at: string; by: string;
+  seq: number;
+  collection: string;
+  documentId: string;
+  rev: string;
+  op: string;
+  status: string;
+  at: string;
+  by: string;
 };
 
 export type RevisionMetadata = {
-  rev: string; seq: number; at: string; by: string; op: string; status: string; fields: string[];
+  rev: string;
+  seq: number;
+  at: string;
+  by: string;
+  op: string;
+  status: string;
+  fields: string[];
 };
 
 export function makeHistoryVerbs(d: VerbDeps) {
@@ -25,7 +37,7 @@ export function makeHistoryVerbs(d: VerbDeps) {
 
   async function changes(
     ctx: BrokerContext,
-    opts: { since?: number; limit?: number } = {},
+    opts: { since?: number | undefined; limit?: number | undefined } = {},
   ): Promise<
     | { ok: true; entries: ChangeEntry[]; auditId: string }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
@@ -99,9 +111,10 @@ export function makeHistoryVerbs(d: VerbDeps) {
   }
 
   async function listRevisions(
-    ctx: BrokerContext, opts: { collection: string; id: string },
+    ctx: BrokerContext,
+    opts: { collection: string; id: string },
   ): Promise<
-    { ok: true; revisions: RevisionMetadata[]; auditId: string }
+    | { ok: true; revisions: RevisionMetadata[]; auditId: string }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
     const audit = makeAuditWriter(app, ctx);
@@ -124,7 +137,15 @@ export function makeHistoryVerbs(d: VerbDeps) {
     const pk = pkOf(c);
     if (!pk) return audit.refuse(name, "invalid_intent", { grantId: grant.id });
 
-    const cols = ["_rev", "_rev_seq", "_rev_at", "_rev_by", "_rev_op", "_rev_status", "_rev_fields"];
+    const cols = [
+      "_rev",
+      "_rev_seq",
+      "_rev_at",
+      "_rev_by",
+      "_rev_op",
+      "_rev_status",
+      "_rev_fields",
+    ];
     for (const f of grant.documentFilter)
       if (Object.hasOwn(c.fields, f.field) && !cols.includes(f.field)) cols.push(f.field);
 
@@ -133,7 +154,9 @@ export function makeHistoryVerbs(d: VerbDeps) {
         // Fetch current row to apply document filter against
         const currentQ = await client.query(
           `select ${cols.map(ident).join(", ")} from ${schema}.${ident(name)}
-           where org_id=$1 and ${ident(pk)}=$2 and _current`, [ctx.orgId, opts.id]);
+           where org_id=$1 and ${ident(pk)}=$2 and _current`,
+          [ctx.orgId, opts.id],
+        );
 
         if (currentQ.rows.length === 0) {
           return null; // Document not found or filtered out
@@ -152,7 +175,9 @@ export function makeHistoryVerbs(d: VerbDeps) {
         const q = await client.query(
           `select ${cols.map(ident).join(", ")} from ${schema}.${ident(name)}
            where org_id=$1 and ${ident(pk)}=$2 and _rev_status <> 'superseded'
-           order by _rev_seq asc`, [ctx.orgId, opts.id]);
+           order by _rev_seq asc`,
+          [ctx.orgId, opts.id],
+        );
 
         return q.rows.map((row) => ({
           rev: String(row._rev),

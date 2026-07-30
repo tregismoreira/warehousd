@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb } from "./helpers/web-db";
 import { getClientPolicy } from "@warehousd/broker";
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
-beforeAll(async () => { db = await setupWebDb("oauthdcr"); }, 60_000);
-afterAll(async () => { await db?.end(); });
+beforeAll(async () => {
+  db = await setupWebDb("oauthdcr");
+}, 60_000);
+afterAll(async () => {
+  await db?.end();
+});
 
 it("a dynamically registered client gets allowed_scopes = {env:dev, env:live} at registration", async () => {
   const res = await db.auth.api.registerMcpClient({

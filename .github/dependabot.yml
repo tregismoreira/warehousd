@@ -1,0 +1,40 @@
+version: 2
+
+updates:
+  # Actions are pinned by SHA in the workflows (see the note in ci.yml). Dependabot understands that
+  # pinning and rewrites both the SHA and the trailing `# v4` comment, which is the only practical
+  # way to keep SHA pins current — pinned-and-stale is its own kind of vulnerable.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # One entry covers the whole pnpm workspace: `directory: /` reads pnpm-workspace.yaml, so the two
+  # packages, the app and the example are all included without listing them.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Grouped so a routine week is one PR to review rather than fifteen. Security updates are
+      # still raised individually and immediately — that is dependabot's own behaviour and is not
+      # affected by grouping.
+      dev-dependencies:
+        dependency-type: development
+        patterns: ["*"]
+      production-minor-and-patch:
+        dependency-type: production
+        update-types: [minor, patch]
+    ignore:
+      # Pinned in package.json's `pnpm.overrides` to work around a specific upstream break; a bump
+      # here would be silently overridden anyway.
+      - dependency-name: better-call
+
+  - package-ecosystem: docker
+    directory: /apps/web
+    schedule:
+      interval: weekly

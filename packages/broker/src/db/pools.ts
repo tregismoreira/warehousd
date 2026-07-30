@@ -2,12 +2,12 @@ import { Pool, type PoolClient } from "pg";
 import type { BrokerContext } from "../types";
 
 export type Pools = {
-  app: Pool;   // owns app schema; NO data schema privileges
-  dev: Pool;   // warehousd_dev — data_synth only
-  live: Pool;  // warehousd_live — data_live only
-  imp: Pool | null;  // warehousd_import — INSERT-only on data_live base tables
-  devWrite: Pool | null;  // warehousd_dev_write — write to data_synth base tables
-  liveWrite: Pool | null;  // warehousd_live_write — write to data_live base tables
+  app: Pool; // owns app schema; NO data schema privileges
+  dev: Pool; // warehousd_dev — data_synth only
+  live: Pool; // warehousd_live — data_live only
+  imp: Pool | null; // warehousd_import — INSERT-only on data_live base tables
+  devWrite: Pool | null; // warehousd_dev_write — write to data_synth base tables
+  liveWrite: Pool | null; // warehousd_live_write — write to data_live base tables
   end: () => Promise<void>;
 };
 
@@ -47,9 +47,10 @@ const num = (name: string, fallback: number) => {
 };
 
 function timeouts(kind: "query" | "bulk") {
-  const statement_timeout = kind === "query"
-    ? num("WAREHOUSD_STATEMENT_TIMEOUT_MS", 30_000)
-    : num("WAREHOUSD_BULK_STATEMENT_TIMEOUT_MS", 600_000);
+  const statement_timeout =
+    kind === "query"
+      ? num("WAREHOUSD_STATEMENT_TIMEOUT_MS", 30_000)
+      : num("WAREHOUSD_BULK_STATEMENT_TIMEOUT_MS", 600_000);
   return {
     statement_timeout,
     // withOrg wraps every data-plane call in a transaction. If the JavaScript between `begin` and
@@ -63,8 +64,20 @@ function timeouts(kind: "query" | "bulk") {
   };
 }
 
-export function createPools(urls: { app: string; dev: string; live: string; imp?: string; devWrite?: string; liveWrite?: string }): Pools {
-  const q = timeouts("query"), bulk = timeouts("bulk");
+// The optional URLs are spelled `?: string | undefined` rather than `?: string`: every caller
+// builds this bag straight out of `process.env`, where a missing variable is `undefined` and not an
+// absent key. Under `exactOptionalPropertyTypes` those are different types, and it is the former
+// that is true here.
+export function createPools(urls: {
+  app: string;
+  dev: string;
+  live: string;
+  imp?: string | undefined;
+  devWrite?: string | undefined;
+  liveWrite?: string | undefined;
+}): Pools {
+  const q = timeouts("query"),
+    bulk = timeouts("bulk");
   const app = new Pool({ connectionString: urls.app, ...bulk });
   const dev = new Pool({ connectionString: urls.dev, ...q });
   const live = new Pool({ connectionString: urls.live, ...q });
@@ -80,9 +93,21 @@ export function createPools(urls: { app: string; dev: string; live: string; imp?
   devWrite?.on("error", onPoolError("devWrite"));
   liveWrite?.on("error", onPoolError("liveWrite"));
   return {
-    app, dev, live, imp, devWrite, liveWrite,
+    app,
+    dev,
+    live,
+    imp,
+    devWrite,
+    liveWrite,
     end: async () => {
-      await Promise.all([app.end(), dev.end(), live.end(), imp?.end(), devWrite?.end(), liveWrite?.end()].filter(Boolean));
+      // Filter the pools, then map to end() — not the other way round. `[…, imp?.end()]` builds an
+      // array whose type includes `undefined`, and `.filter(Boolean)` does not narrow it, so
+      // Promise.all was being handed a possibly-non-thenable list.
+      await Promise.all(
+        [app, dev, live, imp, devWrite, liveWrite]
+          .filter((p): p is Pool => p !== null)
+          .map((p) => p.end()),
+      );
     },
   };
 }
@@ -105,7 +130,9 @@ export function writePool(pools: Pools, ctx: Pick<BrokerContext, "env">): Pool |
 // from ctx.orgId. `set_config(..., true)` is transaction-local, so a pooled connection
 // can never leak one org's setting into another's query.
 export async function withOrg<T>(
-  pool: Pool, orgId: string, fn: (c: PoolClient) => Promise<T>,
+  pool: Pool,
+  orgId: string,
+  fn: (c: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
   try {

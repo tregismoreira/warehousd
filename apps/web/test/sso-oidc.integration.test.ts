@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { ssoSignIn } from "./helpers/sso";
 import { startFakeIdp } from "./helpers/fake-idp";
-import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
+import { pkcePair } from "./helpers/oauth";
 import { upsertClientPolicy, approveGrant, requestGrant, loadConfig } from "@warehousd/broker";
 
 // approveGrant validates verbs against the collection's config, and these fixtures grant over
@@ -65,13 +65,12 @@ describe("SSO: JIT provisioning", () => {
       name: "New Person",
     });
 
-    const { cookie } = await ssoSignIn(db.auth, "test-oidc", "/");
+    await ssoSignIn(db.auth, "test-oidc", "/");
 
     // Query the database for the new user
-    const result = await appPool.query(
-      `select id, email, role from app."user" where email = $1`,
-      ["newperson@harbor.demo"],
-    );
+    const result = await appPool.query(`select id, email, role from app."user" where email = $1`, [
+      "newperson@harbor.demo",
+    ]);
 
     expect(result.rows).toHaveLength(1);
     const user = result.rows[0];
@@ -89,13 +88,12 @@ describe("SSO: No demotion on link", () => {
       name: "Ana",
     });
 
-    const { cookie } = await ssoSignIn(db.auth, "test-oidc", "/");
+    await ssoSignIn(db.auth, "test-oidc", "/");
 
     // Check ana's role
-    const result = await appPool.query(
-      `select role from app."user" where email = $1`,
-      ["ana@harbor.demo"],
-    );
+    const result = await appPool.query(`select role from app."user" where email = $1`, [
+      "ana@harbor.demo",
+    ]);
 
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].role).toBe("admin");
@@ -124,9 +122,7 @@ describe("SSO: MCP authorize delegates to the IdP", () => {
     authorizeUrl.searchParams.set("code_challenge", challenge);
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
 
-    const noAuthRes = await db.auth.handler(
-      new Request(authorizeUrl, { redirect: "manual" }),
-    );
+    const noAuthRes = await db.auth.handler(new Request(authorizeUrl, { redirect: "manual" }));
 
     expect(noAuthRes.status).toBeGreaterThanOrEqual(300);
     expect(noAuthRes.status).toBeLessThan(400);
@@ -142,11 +138,7 @@ describe("SSO: MCP authorize delegates to the IdP", () => {
       name: "Scenario 3 SSO User",
     });
 
-    const { cookie: sessionCookie } = await ssoSignIn(
-      db.auth,
-      "test-oidc",
-      "/",
-    );
+    const { cookie: sessionCookie } = await ssoSignIn(db.auth, "test-oidc", "/");
 
     // Step 3: Now call mcp/authorize with the SSO session
     const mcpRes = await db.auth.handler(
@@ -302,10 +294,7 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
       asResponse: true,
     } as any);
     const { client_id } = await reg.json();
-    await upsertClientPolicy(appPool, client_id, "SSO Both Envs Client", [
-      "env:dev",
-      "env:live",
-    ]);
+    await upsertClientPolicy(appPool, client_id, "SSO Both Envs Client", ["env:dev", "env:live"]);
 
     // Sign in via SSO to establish session and get the user ID
     fakeIdp.setNextUser({
@@ -317,10 +306,9 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
     const { cookie: sessionCookie } = await ssoSignIn(db.auth, "test-oidc", "/");
 
     // Get the new SSO user's ID from the database
-    const userResult = await appPool.query(
-      `select id from app."user" where email = $1`,
-      ["rule3ssouser@harbor.demo"],
-    );
+    const userResult = await appPool.query(`select id from app."user" where email = $1`, [
+      "rule3ssouser@harbor.demo",
+    ]);
     const userId = userResult.rows[0].id;
 
     // Give this SSO user a live grant

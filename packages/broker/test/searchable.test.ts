@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
@@ -7,6 +7,8 @@ import { createPools, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
+import { assertSchema } from "./helpers/results";
 
 const cfg: WarehousdConfig = ConfigSchema.parse({
   project: "test",
@@ -36,10 +38,6 @@ let db: Pool;
 let pools: Pools;
 let broker: ReturnType<typeof makeBroker>;
 
-function makeCtx(userId: string, env: "dev" | "live" = "dev") {
-  return { userId, orgId: "default", env };
-}
-
 beforeAll(async () => {
   p = await provision("searchable");
   db = new Pool({ connectionString: p.urls.admin });
@@ -54,19 +52,19 @@ beforeAll(async () => {
     `insert into data_synth.articles (id, title, summary, body, category) values
      (gen_random_uuid(), 'GraphQL API Design', 'Best practices', 'GraphQL is powerful', 'tech'),
      (gen_random_uuid(), 'REST API Best Practices', 'REST design', 'REST is simple', 'tech'),
-     (gen_random_uuid(), 'Company Handbook', 'About us', 'We value teamwork', 'hr')`
+     (gen_random_uuid(), 'Company Handbook', 'About us', 'We value teamwork', 'hr')`,
   );
 
   // Setup grant
   await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5)`,
-    ["u1", "articles", ["id", "title", "summary", "body", "category"], "dev", "approved"]
+    ["u1", "articles", ["id", "title", "summary", "body", "category"], "dev", "approved"],
   );
   await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5)`,
-    ["u2", "unsearchable", ["id", "name"], "dev", "approved"]
+    ["u2", "unsearchable", ["id", "name"], "dev", "approved"],
   );
 });
 
@@ -77,7 +75,7 @@ afterAll(async () => {
 });
 
 it("searchable: true on a dataset text field makes searchDocuments return rows", async () => {
-  const r = await broker.searchDocuments(makeCtx("u1"), {
+  const r = await broker.searchDocuments(makeCtx({ userId: "u1" }), {
     collection: "articles",
     q: "GraphQL",
   });
@@ -92,7 +90,7 @@ it("searchable: true on a dataset text field makes searchDocuments return rows",
 
 it("a non-searchable text field on the same collection is not matched", async () => {
   // Search for "About us" which is in summary, but summary is not searchable
-  const r = await broker.searchDocuments(makeCtx("u1"), {
+  const r = await broker.searchDocuments(makeCtx({ userId: "u1" }), {
     collection: "articles",
     q: "About us",
   });
@@ -104,7 +102,7 @@ it("a non-searchable text field on the same collection is not matched", async ()
 });
 
 it("body is searchable, so should match", async () => {
-  const r = await broker.searchDocuments(makeCtx("u1"), {
+  const r = await broker.searchDocuments(makeCtx({ userId: "u1" }), {
     collection: "articles",
     q: "simple",
   });
@@ -116,7 +114,7 @@ it("body is searchable, so should match", async () => {
 });
 
 it("a dataset with no searchable field still refuses invalid_intent", async () => {
-  const r = await broker.searchDocuments(makeCtx("u2"), {
+  const r = await broker.searchDocuments(makeCtx({ userId: "u2" }), {
     collection: "unsearchable",
     q: "anything",
   });
@@ -124,8 +122,9 @@ it("a dataset with no searchable field still refuses invalid_intent", async () =
 });
 
 it("<f>_tsv never appears in describe_collection output", async () => {
-  const r = await broker.describeCollection(makeCtx("u1"), "articles");
-  if (r.ok) {
+  const r = await broker.describeCollection(makeCtx({ userId: "u1" }), "articles");
+  assertSchema(r);
+  {
     const fieldNames = r.fields.map((f) => f.name);
     expect(fieldNames).not.toContain("title_tsv");
     expect(fieldNames).not.toContain("body_tsv");
@@ -135,7 +134,7 @@ it("<f>_tsv never appears in describe_collection output", async () => {
 });
 
 it("<f>_tsv never appears in a result row's fieldsReturned", async () => {
-  const r = await broker.searchDocuments(makeCtx("u1"), {
+  const r = await broker.searchDocuments(makeCtx({ userId: "u1" }), {
     collection: "articles",
     q: "GraphQL",
   });

@@ -18,7 +18,11 @@ beforeAll(async () => {
   await applyConfig(admin, cfg);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live, imp: p.urls.imp });
 }, 60_000);
-afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
+afterAll(async () => {
+  await admin.end();
+  await pools.end();
+  await p.end();
+});
 
 const liveCount = async (t: string) =>
   Number((await admin.query(`select count(*)::int as n from data_live.${t}`)).rows[0].n);
@@ -46,19 +50,23 @@ describe("importCollection", () => {
 
   it("writes data_live and never data_synth", async () => {
     const synthBefore = Number(
-      (await admin.query(`select count(*)::int as n from data_synth.departments`)).rows[0].n);
+      (await admin.query(`select count(*)::int as n from data_synth.departments`)).rows[0].n,
+    );
     await importCollection(pools, cfg, "ana", "departments", {
-      format: "csv", text: `id,name\n${U(4)},Ops`,
+      format: "csv",
+      text: `id,name\n${U(4)},Ops`,
     });
     const synthAfter = Number(
-      (await admin.query(`select count(*)::int as n from data_synth.departments`)).rows[0].n);
+      (await admin.query(`select count(*)::int as n from data_synth.departments`)).rows[0].n,
+    );
     expect(synthAfter).toBe(synthBefore);
   });
 
   it("is atomic — one bad row imports nothing", async () => {
     const before = await liveCount("departments");
     const r = await importCollection(pools, cfg, "ana", "departments", {
-      format: "csv", text: `id,name\n${U(5)},Good\nnot-a-uuid,Bad`,
+      format: "csv",
+      text: `id,name\n${U(5)},Good\nnot-a-uuid,Bad`,
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -68,10 +76,12 @@ describe("importCollection", () => {
 
   it("refuses a duplicate primary key against existing data without overwriting", async () => {
     await importCollection(pools, cfg, "ana", "departments", {
-      format: "csv", text: `id,name\n${U(6)},Original`,
+      format: "csv",
+      text: `id,name\n${U(6)},Original`,
     });
     const r = await importCollection(pools, cfg, "ana", "departments", {
-      format: "csv", text: `id,name\n${U(6)},Overwritten`,
+      format: "csv",
+      text: `id,name\n${U(6)},Overwritten`,
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -82,7 +92,8 @@ describe("importCollection", () => {
 
   it("refuses a file collection", async () => {
     const r = await importCollection(pools, cfg, "ana", "policies", {
-      format: "json", text: `[{"title":"x"}]`,
+      format: "json",
+      text: `[{"title":"x"}]`,
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -92,7 +103,8 @@ describe("importCollection", () => {
   it("refuses cleanly when no import pool is configured", async () => {
     const noImp = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
     const r = await importCollection(noImp, cfg, "ana", "departments", {
-      format: "csv", text: `id,name\n${U(7)},X`,
+      format: "csv",
+      text: `id,name\n${U(7)},X`,
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -102,7 +114,8 @@ describe("importCollection", () => {
 
   it("refuses unparseable input without throwing", async () => {
     const r = await importCollection(pools, cfg, "ana", "departments", {
-      format: "json", text: "{oops",
+      format: "json",
+      text: "{oops",
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -118,27 +131,35 @@ describe("importCollection", () => {
     if (!r.ok) throw new Error("unreachable");
     const ev = await admin.query(`select * from app.audit_events where id=$1`, [r.auditId]);
     expect(ev.rows[0]).toMatchObject({
-      user_id: "ana", env: "live", collection: "metrics", outcome: "allowed",
+      user_id: "ana",
+      env: "live",
+      collection: "metrics",
+      outcome: "allowed",
     });
     expect(ev.rows[0].intent).toMatchObject({ op: "import", format: "csv", rows: 1 });
   });
 
   it("audits a refused import with the reason", async () => {
     const r = await importCollection(pools, cfg, "ana", "departments", {
-      format: "csv", text: `id,name\nbad,X`,
+      format: "csv",
+      text: `id,name\nbad,X`,
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
     const ev = await admin.query(`select * from app.audit_events where id=$1`, [r.auditId]);
     expect(ev.rows[0]).toMatchObject({
-      user_id: "ana", env: "live", collection: "departments",
-      outcome: "refused", reason: "validation_failed",
+      user_id: "ana",
+      env: "live",
+      collection: "departments",
+      outcome: "refused",
+      reason: "validation_failed",
     });
   });
 
   it("never records imported values in the audit intent", async () => {
     const r = await importCollection(pools, cfg, "ana", "departments", {
-      format: "csv", text: `id,name\n${U(9)},TopSecretDepartmentName`,
+      format: "csv",
+      text: `id,name\n${U(9)},TopSecretDepartmentName`,
     });
     if (!r.ok) throw new Error("unreachable");
     const ev = await admin.query(`select intent from app.audit_events where id=$1`, [r.auditId]);
@@ -151,7 +172,9 @@ describe("importCollection", () => {
       text: `id,full_name,email,department_id,home_address,phone\n${U(10)},Real Person,rp@x.com,${U(1)},1 Main St,555-0100`,
     });
     expect(r.ok).toBe(true);
-    const stored = await admin.query(`select home_address from data_live.people where id=$1`, [U(10)]);
+    const stored = await admin.query(`select home_address from data_live.people where id=$1`, [
+      U(10),
+    ]);
     expect(stored.rows[0].home_address).toBe("1 Main St");
   });
 });
@@ -161,20 +184,31 @@ describe("importCollection: dataset-sourced vocabulary", () => {
   // this exercises — scoping a dataset collection by a dataset-sourced vocabulary — needs its
   // own config and its own database.
   const dsCfg = ConfigSchema.parse({
-    project: "t", server: { port: 1 },
+    project: "t",
+    server: { port: 1 },
     taxonomies: {
-      client: { label: "Client", source: { collection: "clients", slug: "client_number", label: "name" } },
+      client: {
+        label: "Client",
+        source: { collection: "clients", slug: "client_number", label: "name" },
+      },
     },
     collections: {
-      clients: { description: "d", fields: {
-        id: { type: "uuid", posture: "allow", pk: true },
-        client_number: { type: "text", posture: "allow" },
-        name: { type: "text", posture: "allow" },
-      }},
-      matters: { description: "d", taxonomies: ["client"], fields: {
-        id: { type: "uuid", posture: "allow", pk: true },
-        matter_number: { type: "text", posture: "allow" },
-      }},
+      clients: {
+        description: "d",
+        fields: {
+          id: { type: "uuid", posture: "allow", pk: true },
+          client_number: { type: "text", posture: "allow" },
+          name: { type: "text", posture: "allow" },
+        },
+      },
+      matters: {
+        description: "d",
+        taxonomies: ["client"],
+        fields: {
+          id: { type: "uuid", posture: "allow", pk: true },
+          matter_number: { type: "text", posture: "allow" },
+        },
+      },
     },
   });
 
@@ -184,7 +218,12 @@ describe("importCollection: dataset-sourced vocabulary", () => {
     dAdmin = new Pool({ connectionString: dp.urls.admin });
     await createAppSchema(dAdmin);
     await applyConfig(dAdmin, dsCfg);
-    dPools = createPools({ app: dp.urls.admin, dev: dp.urls.dev, live: dp.urls.live, imp: dp.urls.imp });
+    dPools = createPools({
+      app: dp.urls.admin,
+      dev: dp.urls.dev,
+      live: dp.urls.live,
+      imp: dp.urls.imp,
+    });
     // The live term set comes from live rows, so the source collection is imported first —
     // importCollection syncs terms on commit.
     const r = await importCollection(dPools, dsCfg, "ana", "clients", {
@@ -193,11 +232,16 @@ describe("importCollection: dataset-sourced vocabulary", () => {
     });
     expect(r.ok).toBe(true);
   }, 60_000);
-  afterAll(async () => { await dAdmin.end(); await dPools.end(); await dp.end(); });
+  afterAll(async () => {
+    await dAdmin.end();
+    await dPools.end();
+    await dp.end();
+  });
 
   it("accepts a row naming a client that exists live", async () => {
     const r = await importCollection(dPools, dsCfg, "ana", "matters", {
-      format: "csv", text: `id,matter_number,client\n${U(11)},M-1,c-0001`,
+      format: "csv",
+      text: `id,matter_number,client\n${U(11)},M-1,c-0001`,
     });
     expect(r.ok).toBe(true);
     const stored = await dAdmin.query(`select client from data_live.matters where id=$1`, [U(11)]);
@@ -206,7 +250,8 @@ describe("importCollection: dataset-sourced vocabulary", () => {
 
   it("rejects a row naming a client that does not — unknown_term, not unvalidatable_term", async () => {
     const r = await importCollection(dPools, dsCfg, "ana", "matters", {
-      format: "csv", text: `id,matter_number,client\n${U(12)},M-2,c-9999`,
+      format: "csv",
+      text: `id,matter_number,client\n${U(12)},M-2,c-9999`,
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -223,7 +268,8 @@ describe("importCollection: dataset-sourced vocabulary", () => {
     await dAdmin.query(`delete from app.vocabularies where slug='client'`);
     try {
       const r = await importCollection(dPools, dsCfg, "ana", "matters", {
-        format: "csv", text: `id,matter_number,client\n${U(13)},M-3,c-0001`,
+        format: "csv",
+        text: `id,matter_number,client\n${U(13)},M-3,c-0001`,
       });
       expect(r.ok).toBe(false);
       if (r.ok) throw new Error("unreachable");
@@ -242,7 +288,8 @@ describe("importCollection: dataset-sourced vocabulary", () => {
     await dAdmin.query(`alter table app.terms rename to terms_hidden`);
     try {
       const r = await importCollection(dPools, dsCfg, "ana", "matters", {
-        format: "csv", text: `id,matter_number,client\n${U(14)},M-4,c-0001`,
+        format: "csv",
+        text: `id,matter_number,client\n${U(14)},M-4,c-0001`,
       });
       expect(r.ok).toBe(false);
       if (r.ok) throw new Error("unreachable");

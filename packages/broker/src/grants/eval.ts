@@ -33,14 +33,17 @@ export async function loadActiveGrant(
      where user_id=$1 and collection=$2 and env=$3 and org_id=$4
        and status='approved' and (expires_at is null or expires_at > now())
      order by requested_at desc limit 1`,
-    [userId, collection, env, orgId]);
+    [userId, collection, env, orgId],
+  );
   if (r.rowCount === 0) return null;
   const df = r.rows[0].document_filter;
   // document_filter is a DocumentFilter[]. A row holding the pre-Stage-2 object form is a
   // database that predates this schema and must be rebuilt — coercing it to [] would silently
   // widen a scoped grant to the whole collection, which is the one failure mode worth crashing on.
   if (df !== null && df !== undefined && !Array.isArray(df))
-    throw new Error(`grant ${r.rows[0].id}: document_filter is not an array (rebuild the database)`);
+    throw new Error(
+      `grant ${r.rows[0].id}: document_filter is not an array (rebuild the database)`,
+    );
 
   // Resolve $self, per predicate and per element inside an `in` list. Binding happens here so
   // no caller can forget it and the SQL builder still sees a plain literal. Only the exact
@@ -48,7 +51,7 @@ export async function loadActiveGrant(
   const documentFilter: DocumentFilter[] = ((df ?? []) as DocumentFilter[]).map((f) => {
     if (f.value === "$self") return { ...f, value: userId };
     if (f.op === "in" && Array.isArray(f.value))
-      return { ...f, value: f.value.map((v: unknown) => v === "$self" ? userId : v) };
+      return { ...f, value: f.value.map((v: unknown) => (v === "$self" ? userId : v)) };
     return f;
   });
 

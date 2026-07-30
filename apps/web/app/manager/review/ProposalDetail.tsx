@@ -68,7 +68,7 @@ export function ProposalDetail({
         setLoading(false);
       }
     };
-    load();
+    void load();
   }, [proposal]);
 
   async function handleApprove() {
@@ -109,7 +109,7 @@ export function ProposalDetail({
     }
   }
 
-  const restrictedFields = proposal.fields.filter(f => !fieldsReturned.includes(f));
+  const restrictedFields = proposal.fields.filter((f) => !fieldsReturned.includes(f));
 
   return (
     <div className="space-y-6 pb-8">
@@ -135,7 +135,10 @@ export function ProposalDetail({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleReject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                <AlertDialogAction
+                  onClick={handleReject}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
                   Reject
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -158,9 +161,7 @@ export function ProposalDetail({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleApprove}>
-                  Approve
-                </AlertDialogAction>
+                <AlertDialogAction onClick={handleApprove}>Approve</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>

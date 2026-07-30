@@ -56,7 +56,8 @@ export function makeMutateVerb(d: VerbDeps) {
 
     // 4. op supported for this collection type
     const supported = supportedVerbs(cfg, intent.collection);
-    if (!supported.includes(intent.op)) return audit.refuse(intent.collection, "verb_not_supported");
+    if (!supported.includes(intent.op))
+      return audit.refuse(intent.collection, "verb_not_supported");
 
     // 5. active grant
     const grant = await loadActiveGrant(app, ctx, intent.collection);
@@ -95,14 +96,13 @@ export function makeMutateVerb(d: VerbDeps) {
 
     const all = Object.keys(c.fields);
     for (const f of fieldNames) {
-      if (!all.includes(f))
-        return audit.refuseMutation(intent, grant.id, "unknown_field");
+      if (!all.includes(f)) return audit.refuseMutation(intent, grant.id, "unknown_field");
       if (c.fields[f]!.view_join)
         return audit.refuseMutation(intent, grant.id, "field_not_writable");
       if (f === identityField) {
         if (intent.op !== "create")
           return audit.refuseMutation(intent, grant.id, "field_not_writable");
-        continue;   // identity on create: addressed above, and never posture-gated
+        continue; // identity on create: addressed above, and never posture-gated
       }
       if (writePosture(c.fields[f]!) !== "allow")
         return audit.refuseMutation(intent, grant.id, "field_not_writable");
@@ -125,8 +125,13 @@ export function makeMutateVerb(d: VerbDeps) {
 // rather than a silent overwrite. Chunks are derived once here and never re-derived, which
 // is why the "search still returns pre-edit text" bug class cannot occur for files.
 async function mutateFile(
-  d: VerbDeps, ctx: BrokerContext, audit: AuditWriter,
-  intent: MutationIntent, c: CollectionConfig, grant: ActiveGrant, pool: Pool,
+  d: VerbDeps,
+  ctx: BrokerContext,
+  audit: AuditWriter,
+  intent: MutationIntent,
+  c: CollectionConfig,
+  grant: ActiveGrant,
+  pool: Pool,
 ): Promise<MutationResult> {
   // Structural, and checked before anything else: no grant can make a file revisable.
   if (intent.op !== "create") return audit.refuseMutation(intent, grant.id, "verb_not_supported");
@@ -152,10 +157,17 @@ async function mutateFile(
     const vocab = d.cfg.taxonomies[vocabSlug];
     if (!vocab?.terms) return audit.refuseMutation(intent, grant.id, "invalid_value");
     // A `multiple: true` vocabulary carries a list; every part is validated independently.
-    const submitted = Array.isArray(values[vocabSlug]) ? values[vocabSlug] as unknown[] : [values[vocabSlug]];
-    for (const t of submitted)
-      if (!Object.hasOwn(vocab.terms, String(t ?? "")))
+    const submitted = Array.isArray(values[vocabSlug])
+      ? (values[vocabSlug] as unknown[])
+      : [values[vocabSlug]];
+    for (const t of submitted) {
+      // A client-supplied term. A non-scalar stringifies to "[object Object]", which is not a term
+      // slug, so the refusal below is reached — the placeholder never leaves this expression.
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      const term = String(t ?? "");
+      if (!Object.hasOwn(vocab.terms, term))
         return audit.refuseMutation(intent, grant.id, "invalid_value");
+    }
   }
 
   const chunks = chunkText(content);
@@ -176,21 +188,30 @@ async function mutateFile(
       // becomes `conflict` — which also closes the race a pre-check would leave open.
       const fileId = randomUUID();
       const cols = ["id", "org_id", "path", "title", "owner", "checksum", "updated_at"];
-      const vals: unknown[] = [fileId, ctx.orgId, path,
-        coerced.title ?? null, coerced.owner ?? null, checksum,
-        coerced.updated_at ?? new Date()];
+      const vals: unknown[] = [
+        fileId,
+        ctx.orgId,
+        path,
+        coerced.title ?? null,
+        coerced.owner ?? null,
+        checksum,
+        coerced.updated_at ?? new Date(),
+      ];
       for (const vocabSlug of c.taxonomies ?? []) {
         cols.push(vocabSlug);
         vals.push(coerced[vocabSlug] ?? null);
       }
       await client.query(
         `insert into ${files} (${cols.map(ident).join(", ")})
-         values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
+         values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`,
+        vals,
+      );
 
       for (const [seq, chunk] of chunks.entries())
         await client.query(
           `insert into ${docs} (id, file_id, org_id, document_seq, content) values ($1,$2,$3,$4,$5)`,
-          [randomUUID(), fileId, ctx.orgId, seq, chunk]);
+          [randomUUID(), fileId, ctx.orgId, seq, chunk],
+        );
 
       // For files, store the file_id as the rev identifier in change_log; the checksum is
       // returned to the caller as the If-Match value but is not a UUID for storage.
@@ -199,7 +220,13 @@ async function mutateFile(
       assertRecorded(rec);
       // A file has no revisions, so its checksum is the closest thing to one: it identifies
       // the content that was stored, and it is what a later If-Match would compare.
-      return { ok: true as const, status: "applied" as const, documentId: fileId, rev: checksum, auditId: rec.auditId };
+      return {
+        ok: true as const,
+        status: "applied" as const,
+        documentId: fileId,
+        rev: checksum,
+        auditId: rec.auditId,
+      };
     });
   } catch (err) {
     // 23505 on this table can only be the unique `path`: the caller is re-creating a
@@ -212,8 +239,12 @@ async function mutateFile(
 }
 
 async function mutateDataset(
-  ctx: BrokerContext, audit: AuditWriter,
-  intent: MutationIntent, c: CollectionConfig, grant: ActiveGrant, pool: Pool,
+  ctx: BrokerContext,
+  audit: AuditWriter,
+  intent: MutationIntent,
+  c: CollectionConfig,
+  grant: ActiveGrant,
+  pool: Pool,
 ): Promise<MutationResult> {
   const schema = dataSchema(ctx.env);
   const table = `${schema}.${ident(intent.collection)}`;
@@ -240,10 +271,23 @@ async function mutateDataset(
   ): Promise<string> => {
     const revId = randomUUID();
     const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
-    const vals: unknown[] = [revId, rev.seq, new Date(), ctx.userId, rev.op, "approved",
-      rev.fields, rev.base, rev.current, ctx.orgId, ...dataCols.map((k) => row[k] ?? null)];
+    const vals: unknown[] = [
+      revId,
+      rev.seq,
+      new Date(),
+      ctx.userId,
+      rev.op,
+      "approved",
+      rev.fields,
+      rev.base,
+      rev.current,
+      ctx.orgId,
+      ...dataCols.map((k) => row[k] ?? null),
+    ];
     await client.query(
-      `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
+      `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`,
+      vals,
+    );
     return revId;
   };
 
@@ -256,25 +300,51 @@ async function mutateDataset(
           coerced[pk] = docId;
         }
         if (docId === undefined) return audit.refuseMutation(intent, grant.id, "invalid_intent");
+        // The pk value came out of `coerced`, whose values are `unknown` to the compiler. Anything
+        // non-scalar would stringify to "[object Object]"; it is a pk, so it is a scalar — but say
+        // that once, here, rather than at each use.
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
+        const documentId = String(docId);
 
         // Check first so the caller gets a reason code; the partial unique index is the
         // backstop if two creates race.
         const clash = await client.query(
-          `select 1 from ${table} where ${ident(pk)} = $1 and _current`, [docId]);
+          `select 1 from ${table} where ${ident(pk)} = $1 and _current`,
+          [docId],
+        );
         if ((clash.rowCount ?? 0) > 0) return audit.refuseMutation(intent, grant.id, "conflict");
 
-        const revId = await insertRevision(client,
-          { seq: 1, op: "create", fields: Object.keys(coerced), base: null, current: true }, coerced);
-        await writeChangeLog(client, ctx, intent.collection, String(docId), revId, "create", "approved");
+        const revId = await insertRevision(
+          client,
+          { seq: 1, op: "create", fields: Object.keys(coerced), base: null, current: true },
+          coerced,
+        );
+        await writeChangeLog(
+          client,
+          ctx,
+          intent.collection,
+          documentId,
+          revId,
+          "create",
+          "approved",
+        );
         const rec = await audit.allowMutation(intent, grant.id, Object.keys(coerced));
         assertRecorded(rec);
-        return { ok: true as const, status: "applied" as const, documentId: String(docId), rev: revId, auditId: rec.auditId };
+        return {
+          ok: true as const,
+          status: "applied" as const,
+          documentId,
+          rev: revId,
+          auditId: rec.auditId,
+        };
       }
 
       // update and delete both revise an existing document, and differ only in the op they
       // record and whether they carry values.
       const cur = await client.query(
-        `select * from ${table} where ${ident(pk)} = $1 and _current`, [intent.id]);
+        `select * from ${table} where ${ident(pk)} = $1 and _current`,
+        [intent.id],
+      );
       if (cur.rowCount === 0) return audit.refuseMutation(intent, grant.id, "not_found");
       const current = cur.rows[0] as RevisionRow;
 
@@ -295,18 +365,36 @@ async function mutateDataset(
       // Demote the old revision BEFORE promoting the new one: both are _current between the
       // two statements otherwise, and the partial unique index would reject the insert.
       await client.query(`update ${table} set _current = false where _rev = $1`, [current._rev]);
-      const revId = await insertRevision(client, {
-        seq: Number(current._rev_seq) + 1,
-        op: isDelete ? "delete" : "update",
-        fields: isDelete ? [] : Object.keys(coerced),
-        base: Number(current._rev_seq),
-        current: true,
-      }, next);
+      const revId = await insertRevision(
+        client,
+        {
+          seq: Number(current._rev_seq) + 1,
+          op: isDelete ? "delete" : "update",
+          fields: isDelete ? [] : Object.keys(coerced),
+          base: Number(current._rev_seq),
+          current: true,
+        },
+        next,
+      );
 
-      await writeChangeLog(client, ctx, intent.collection, String(intent.id), revId, isDelete ? "delete" : "update", "approved");
+      await writeChangeLog(
+        client,
+        ctx,
+        intent.collection,
+        String(intent.id),
+        revId,
+        isDelete ? "delete" : "update",
+        "approved",
+      );
       const rec = await audit.allowMutation(intent, grant.id, isDelete ? [] : Object.keys(coerced));
       assertRecorded(rec);
-      return { ok: true as const, status: "applied" as const, documentId: String(intent.id), rev: revId, auditId: rec.auditId };
+      return {
+        ok: true as const,
+        status: "applied" as const,
+        documentId: String(intent.id),
+        rev: revId,
+        auditId: rec.auditId,
+      };
     });
   } catch (err) {
     // Same discipline as query: a driver error names columns and values, so it goes to the

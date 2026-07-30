@@ -27,7 +27,8 @@ export async function deriveTokenContext(req: Request): Promise<BrokerContext | 
   // Load client policy to get the collection ceiling
   const cp = await pool.query(
     `select allowed_collections from app.client_policies where client_id=$1`,
-    [session.clientId || ""]);
+    [session.clientId || ""],
+  );
   const allowedCollections = cp.rows[0]?.allowed_collections ?? null;
 
   return {

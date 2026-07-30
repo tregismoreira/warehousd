@@ -63,13 +63,28 @@
 }
 
 @layer base {
-  * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground antialiased; }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
 }
 
 /* Markdown rendering inside the chat console (kept from Phase 0). */
-.markdown table { @apply my-1 border-collapse; }
-.markdown th, .markdown td { @apply border border-border px-2 py-1 text-left; }
-.markdown blockquote { @apply my-1 border-l-[3px] border-muted-foreground pl-2 text-muted-foreground; }
-.markdown p { @apply my-1; }
-.markdown code { @apply rounded-sm bg-background px-1 py-px font-mono; }
+.markdown table {
+  @apply my-1 border-collapse;
+}
+.markdown th,
+.markdown td {
+  @apply border border-border px-2 py-1 text-left;
+}
+.markdown blockquote {
+  @apply my-1 border-l-[3px] border-muted-foreground pl-2 text-muted-foreground;
+}
+.markdown p {
+  @apply my-1;
+}
+.markdown code {
+  @apply rounded-sm bg-background px-1 py-px font-mono;
+}

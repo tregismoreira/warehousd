@@ -1,0 +1,39 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, because most CodeQL findings arrive as new *queries* rather than as new code — a
+    # repository that only scans on push stops learning the moment it stops changing.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The one write this repository's CI grants, and only here: it is how findings reach the
+      # Security tab.
+      security-events: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: github/codeql-action/init@a2983b8bed1923f44751c5c43237f479442827b3 # v3
+        with:
+          languages: javascript-typescript
+          # security-extended over the default: this repository's headline promise is that
+          # client-supplied input never reaches SQL except as a bound parameter, and the extra
+          # queries are largely injection and taint-tracking ones. See SECURITY.md.
+          queries: security-extended
+
+      # No build step: javascript-typescript is analysed from source. Skipping autobuild keeps this
+      # job from trying to run `pnpm build` and needing a database.
+      - uses: github/codeql-action/analyze@a2983b8bed1923f44751c5c43237f479442827b3 # v3
+        with:
+          category: /language:javascript-typescript

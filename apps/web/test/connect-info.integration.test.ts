@@ -8,7 +8,9 @@ beforeAll(async () => {
   db = await setupWebDb("connectinfo");
   miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(cookie?: string) {
   const headers: Record<string, string> = {};

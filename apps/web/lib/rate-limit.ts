@@ -29,7 +29,9 @@ function sweep(now: number): void {
 export type RateLimitResult = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 export function rateLimit(
-  key: string, opts: { max: number; windowMs: number }, now = Date.now(),
+  key: string,
+  opts: { max: number; windowMs: number },
+  now = Date.now(),
 ): RateLimitResult {
   if (windows.size > MAX_TRACKED) sweep(now);
 
@@ -39,7 +41,10 @@ export function rateLimit(
     return { ok: true };
   }
   if (existing.count >= opts.max) {
-    return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((existing.resetAt - now) / 1000)) };
+    return {
+      ok: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((existing.resetAt - now) / 1000)),
+    };
   }
   existing.count += 1;
   return { ok: true };

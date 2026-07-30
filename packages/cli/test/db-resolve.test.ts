@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { resolveDbUrl } from "../src/index";
 import { ensureState, writeOutputs } from "../src/state";
 
@@ -81,7 +81,7 @@ describe("resolveDbUrl", () => {
   it("throws error when all three are absent", () => {
     delete process.env.DATABASE_URL;
     expect(() => resolveDbUrl(projectDir)).toThrow(
-      "No database. Pass --db, set DATABASE_URL, or run `warehousd start` first."
+      "No database. Pass --db, set DATABASE_URL, or run `warehousd start` first.",
     );
   });
 });

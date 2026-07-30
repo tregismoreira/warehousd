@@ -8,8 +8,12 @@ export async function GET(req: NextRequest) {
   if (!ctx) return unauthenticated();
 
   const url = new URL(req.url);
-  const since = url.searchParams.get("since") ? parseInt(url.searchParams.get("since")!) : undefined;
-  const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!) : undefined;
+  const since = url.searchParams.get("since")
+    ? parseInt(url.searchParams.get("since")!)
+    : undefined;
+  const limit = url.searchParams.get("limit")
+    ? parseInt(url.searchParams.get("limit")!)
+    : undefined;
 
   const result = await getBroker().broker.changes(ctx, { since, limit });
 

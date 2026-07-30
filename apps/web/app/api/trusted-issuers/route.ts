@@ -23,10 +23,7 @@ export async function POST(req: NextRequest) {
   const { issuer, jwksUri, audience, subjectClaim } = await req.json();
 
   if (!issuer || !jwksUri || !audience) {
-    return Response.json(
-      { error: "missing_required_fields" },
-      { status: 400 }
-    );
+    return Response.json({ error: "missing_required_fields" }, { status: 400 });
   }
 
   const app = getAppPool();
@@ -36,7 +33,7 @@ export async function POST(req: NextRequest) {
     issuer,
     jwksUri,
     audience,
-    subjectClaim || "sub"
+    subjectClaim || "sub",
   );
 
   return Response.json({ issuer: created }, { status: 201 });

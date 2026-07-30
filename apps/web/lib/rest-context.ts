@@ -31,7 +31,8 @@ export async function deriveRestContext(req: Request): Promise<BrokerContext | n
   // Load client policy to get mode (for via derivation) and collection ceiling
   const cp = await pool.query(
     `select mode, allowed_collections from app.client_policies where client_id=$1`,
-    [session.clientId || ""]);
+    [session.clientId || ""],
+  );
   const policy = cp.rows[0];
   const allowedCollections = policy?.allowed_collections ?? null;
 
@@ -45,7 +46,8 @@ export async function deriveRestContext(req: Request): Promise<BrokerContext | n
     // OAuth/MCP flow.
     const secrets = await pool.query(
       `select 1 from app.client_secrets where client_id=$1 and revoked_at is null limit 1`,
-      [session.clientId || ""]);
+      [session.clientId || ""],
+    );
     via = (secrets.rowCount ?? 0) > 0 ? "token_exchange" : "oauth";
   } else {
     via = "oauth";

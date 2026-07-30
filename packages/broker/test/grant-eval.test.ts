@@ -1,11 +1,16 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { it, expect, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { loadActiveGrant } from "../src/grants/eval";
+import { makeCtx } from "./helpers/ctx";
 
-let p: Provisioned; let db: Pool;
-afterAll(async () => { await db?.end(); await p?.end(); });
+let p: Provisioned;
+let db: Pool;
+afterAll(async () => {
+  await db?.end();
+  await p?.end();
+});
 
 it("returns the active approved grant and null for revoked/expired", async () => {
   p = await provision("granteval");
@@ -14,22 +19,24 @@ it("returns the active approved grant and null for revoked/expired", async () =>
 
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
-     values ('mia','people', array['id','email'],'dev','approved', now() + interval '1 day')`);
-  const g = await loadActiveGrant(db, { userId: "mia", env: "dev", orgId: "default" }, "people");
+     values ('mia','people', array['id','email'],'dev','approved', now() + interval '1 day')`,
+  );
+  const g = await loadActiveGrant(db, makeCtx({ userId: "mia" }), "people");
   expect(g?.allowedFields).toEqual(["id", "email"]);
 
   // revoked → none
   await db.query(`update app.grants set status='revoked' where user_id='mia'`);
-  expect(await loadActiveGrant(db, { userId: "mia", env: "dev", orgId: "default" }, "people")).toBeNull();
+  expect(await loadActiveGrant(db, makeCtx({ userId: "mia" }), "people")).toBeNull();
 
   // expired approved → none
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
-     values ('mia','people', array['id'],'dev','approved', now() - interval '1 hour')`);
-  expect(await loadActiveGrant(db, { userId: "mia", env: "dev", orgId: "default" }, "people")).toBeNull();
+     values ('mia','people', array['id'],'dev','approved', now() - interval '1 hour')`,
+  );
+  expect(await loadActiveGrant(db, makeCtx({ userId: "mia" }), "people")).toBeNull();
 
   // wrong env → none (dev grant not visible to live)
-  const g2 = await loadActiveGrant(db, { userId: "mia", env: "live", orgId: "default" }, "people");
+  const g2 = await loadActiveGrant(db, makeCtx({ userId: "mia", env: "live" }), "people");
   expect(g2).toBeNull();
 });
 
@@ -40,14 +47,16 @@ it("loadActiveGrant returns documentFilters as array when set, empty array other
 
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at,document_filter)
-     values ('mia','policies', array['title'],'dev','approved', now() + interval '1 day', '[{"field":"path","op":"in","value":["hr/pto.md"]}]')`);
-  const g = await loadActiveGrant(db, { userId: "mia", env: "dev", orgId: "default" }, "policies");
+     values ('mia','policies', array['title'],'dev','approved', now() + interval '1 day', '[{"field":"path","op":"in","value":["hr/pto.md"]}]')`,
+  );
+  const g = await loadActiveGrant(db, makeCtx({ userId: "mia" }), "policies");
   expect(g?.documentFilter).toEqual([{ field: "path", op: "in", value: ["hr/pto.md"] }]);
 
   // Check that grants without document_filter get empty array
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at)
-     values ('mia2','policies', array['title'],'dev','approved', now() + interval '1 day')`);
-  const g2 = await loadActiveGrant(db, { userId: "mia2", env: "dev", orgId: "default" }, "policies");
+     values ('mia2','policies', array['title'],'dev','approved', now() + interval '1 day')`,
+  );
+  const g2 = await loadActiveGrant(db, makeCtx({ userId: "mia2" }), "policies");
   expect(g2?.documentFilter).toEqual([]);
 });

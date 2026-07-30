@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
 import type { QueryIntent, BrokerResult, BrokerContext } from "../src/types";
+import { makeCtx } from "./helpers/ctx";
 
 describe("types", () => {
   it("intent and result shapes are usable", () => {
-    const ctx: BrokerContext = { userId: "u1", orgId: "default", env: "dev", via: "session" };
+    const ctx: BrokerContext = makeCtx({ userId: "u1" });
     const intent: QueryIntent = {
       collection: "salaries",
       filters: [{ field: "job_title", op: "eq", value: "Senior Accountant" }],

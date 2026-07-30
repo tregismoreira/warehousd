@@ -12,20 +12,27 @@ beforeAll(async () => {
   marcusCookie = await signIn(db.auth, "marcus@harbor.demo", "demo");
   miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  await db?.end();
+});
 
 function req(url: string, opts: { method?: string; cookie?: string; body?: unknown } = {}) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.cookie) headers["cookie"] = opts.cookie;
   return new Request(`http://localhost:8722${url}`, {
-    method: opts.method ?? "GET", headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    method: opts.method ?? "GET",
+    headers,
+    // Conditional spread, not `body: … : undefined`: under `exactOptionalPropertyTypes` a
+    // present-but-undefined `body` is not the same as an absent one, and RequestInit wants absent.
+    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
   });
 }
 
 async function createClient(cookie: string, name: string) {
   const { POST } = await import("../app/api/oauth-clients/route");
-  const res = await POST(req("/api/oauth-clients", { method: "POST", cookie, body: { name } }) as any);
+  const res = await POST(
+    req("/api/oauth-clients", { method: "POST", cookie, body: { name } }) as any,
+  );
   return { status: res.status, body: res.status === 200 ? await res.json() : null };
 }
 
@@ -38,10 +45,13 @@ describe("client creation", () => {
 
   it("always starts at {env:dev} even when the body asks for live", async () => {
     const { POST } = await import("../app/api/oauth-clients/route");
-    const res = await POST(req("/api/oauth-clients", {
-      method: "POST", cookie: anaCookie,
-      body: { name: "Reporting", allowedScopes: ["env:dev", "env:live"] },
-    }) as any);
+    const res = await POST(
+      req("/api/oauth-clients", {
+        method: "POST",
+        cookie: anaCookie,
+        body: { name: "Reporting", allowedScopes: ["env:dev", "env:live"] },
+      }) as any,
+    );
     const { clientId } = await res.json();
     expect((await getClientPolicy(getAppPool(), clientId)).allowedScopes).toEqual(["env:dev"]);
   });
@@ -59,7 +69,9 @@ describe("client creation", () => {
 describe("GET /api/oauth-clients", () => {
   it("403s for a manager", async () => {
     const { GET } = await import("../app/api/oauth-clients/route");
-    expect((await GET(req("/api/oauth-clients", { cookie: marcusCookie }) as any)).status).toBe(403);
+    expect((await GET(req("/api/oauth-clients", { cookie: marcusCookie }) as any)).status).toBe(
+      403,
+    );
   });
 
   it("lists clients with scopes and a null promotion trail before promotion", async () => {
@@ -76,9 +88,14 @@ describe("GET /api/oauth-clients", () => {
   it("shows the promotion trail after a manager promotes", async () => {
     const { body } = await createClient(anaCookie, "Promoted");
     const { POST } = await import("../app/api/oauth-clients/[clientId]/promote/route");
-    await POST(req(`/api/oauth-clients/${body.clientId}/promote`, {
-      method: "POST", cookie: marcusCookie, body: { action: "promote" },
-    }) as any, { params: Promise.resolve({ clientId: body.clientId }) });
+    await POST(
+      req(`/api/oauth-clients/${body.clientId}/promote`, {
+        method: "POST",
+        cookie: marcusCookie,
+        body: { action: "promote" },
+      }) as any,
+      { params: Promise.resolve({ clientId: body.clientId }) },
+    );
 
     const { GET } = await import("../app/api/oauth-clients/route");
     const list = await (await GET(req("/api/oauth-clients", { cookie: anaCookie }) as any)).json();
@@ -98,7 +115,8 @@ describe("GET /api/oauth-clients", () => {
           "clientId","userId",scopes,"createdAt","updatedAt")
        values ('t1','at','rt', now() + interval '15 min', now() + interval '7 day',
                $1,'ana','env:dev', now(), now())`,
-      [body.clientId]);
+      [body.clientId],
+    );
 
     const { GET } = await import("../app/api/oauth-clients/route");
     const list = await (await GET(req("/api/oauth-clients", { cookie: anaCookie }) as any)).json();

@@ -53,9 +53,10 @@ export function buildApproval(
 
   // Build array of predicates: one per scoped vocabulary, plus path if specified.
   // Vocabularies and paths can coexist now.
-  const selectedTermsMap = (typeof input.selectedTerms === "object" && input.selectedTerms !== null)
-    ? (input.selectedTerms as Record<string, unknown>)
-    : {};
+  const selectedTermsMap =
+    typeof input.selectedTerms === "object" && input.selectedTerms !== null
+      ? (input.selectedTerms as Record<string, unknown>)
+      : {};
   const paths = strings(input.selectedPaths);
   const filters: { field: string; op: "in"; value: string[] }[] = [];
 

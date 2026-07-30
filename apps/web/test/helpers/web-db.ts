@@ -1,5 +1,11 @@
 import { Pool } from "pg";
-import { ADMIN, BASE, cloneTemplate } from "../../../../packages/broker/test/helpers/templates";
+import {
+  ADMIN,
+  BASE,
+  cloneName,
+  cloneTemplate,
+} from "../../../../packages/broker/test/helpers/templates";
+import { cookieHeader } from "./cookies";
 
 export const PERSONAS = [
   { id: "ana", email: "ana@harbor.demo", name: "Ana", role: "admin" },
@@ -16,7 +22,8 @@ function setAuthEnv(appUrl: string, projectDir?: string) {
   // Keycloak only. The fake IdP binds an ephemeral port and appends its own origin in
   // startFakeIdp, which every caller runs before this.
   process.env.WAREHOUSD_TRUSTED_ORIGINS ??= "http://127.0.0.1:8780";
-  process.env.WAREHOUSD_PROJECT_DIR = projectDir ?? new URL("../../../../examples/harbor", import.meta.url).pathname;
+  process.env.WAREHOUSD_PROJECT_DIR =
+    projectDir ?? new URL("../../../../examples/harbor", import.meta.url).pathname;
 }
 
 // The full bootstrap, run against an empty database. globalSetup calls it once to build the
@@ -63,7 +70,9 @@ export async function bootstrapWebDb(appUrl: string): Promise<void> {
   await migrateUserOrg(db);
 
   for (const p of PERSONAS) {
-    const res = await auth.api.signUpEmail({ body: { email: p.email, password: "demo", name: p.name } });
+    const res = await auth.api.signUpEmail({
+      body: { email: p.email, password: "demo", name: p.name },
+    });
     const gen = res.user.id;
     // Disable foreign key constraints to allow user ID updates
     await db.query(`set session_replication_role = replica`);
@@ -77,7 +86,7 @@ export async function bootstrapWebDb(appUrl: string): Promise<void> {
 }
 
 async function cloneAndOpen(kind: string, label: string, projectDir?: string) {
-  const dbName = `wh_web_${label}_${process.pid}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  const dbName = cloneName("wh_web", label);
   await cloneTemplate(kind, dbName);
 
   const appUrl = `${BASE}/${dbName}`;
@@ -99,7 +108,10 @@ async function cloneAndOpen(kind: string, label: string, projectDir?: string) {
   return { handle, db };
 }
 
-export async function setupWebDb(label: string, opts: { seedPersonas?: boolean; projectDir?: string } = {}) {
+export async function setupWebDb(
+  label: string,
+  opts: { seedPersonas?: boolean; projectDir?: string } = {},
+) {
   const { seedPersonas = true, projectDir } = opts;
   const { handle, db } = await cloneAndOpen("web", label, projectDir);
 
@@ -122,7 +134,15 @@ export async function setupWebDb(label: string, opts: { seedPersonas?: boolean; 
 // one), so it must not re-enter bootstrapWebDb: lib/auth caches APP_DATABASE_URL at module
 // load, and a second bootstrap in the same process would seed personas into the first database.
 export async function applyHarborData(appUrl: string): Promise<void> {
-  const { loadConfig, applyConfig, generateSynthetic, indexCollection, syncDatasetTerms, loadTaxonomyBindings, fileMetadataFields } = await import("@warehousd/broker");
+  const {
+    loadConfig,
+    applyConfig,
+    generateSynthetic,
+    indexCollection,
+    syncDatasetTerms,
+    loadTaxonomyBindings,
+    fileMetadataFields,
+  } = await import("@warehousd/broker");
   const harborDir = new URL("../../../../examples/harbor", import.meta.url).pathname;
   const { seedLive } = await import("../../../../examples/harbor/seed/live");
   const cfg = loadConfig(harborDir);
@@ -137,10 +157,16 @@ export async function applyHarborData(appUrl: string): Promise<void> {
     if (c.type !== "file") continue;
     const metadata = fileMetadataFields(c);
     const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
-    await indexCollection(db, "dev", name, `${harborDir}/${c.source}`, { taxonomies: devTaxonomies, metadata });
+    await indexCollection(db, "dev", name, `${harborDir}/${c.source}`, {
+      taxonomies: devTaxonomies,
+      metadata,
+    });
     if (c.source_live) {
       const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
-      await indexCollection(db, "live", name, `${harborDir}/${c.source_live}`, { taxonomies: liveTaxonomies, metadata });
+      await indexCollection(db, "live", name, `${harborDir}/${c.source_live}`, {
+        taxonomies: liveTaxonomies,
+        metadata,
+      });
     }
   }
   await db.end();
@@ -189,7 +215,5 @@ export async function signIn(auth: any, email: string, password: string): Promis
     body: { email, password },
     asResponse: true,
   });
-  const setCookie = res.headers.get("set-cookie") ?? "";
-  // Reduce "name=value; attrs" to just "name=value" pairs joined for a Cookie header.
-  return setCookie.split(/,(?=[^;]+?=)/).map((c: string) => c.split(";")[0].trim()).join("; ");
+  return cookieHeader(res.headers.get("set-cookie") ?? "");
 }

@@ -22,7 +22,12 @@ export async function runStatus(dir: string): Promise<StatusResult> {
   if (outputs) {
     try {
       const url = new URL("/api/health", outputs.apiUrl);
-      const response = await fetch(url.toString(), { timeout: 5000 });
+      // `timeout` is not a RequestInit option, so this call had no timeout at all and a hung
+      // server made `warehousd status` hang with it. AbortSignal.timeout is the real one, and the
+      // abort surfaces as a rejection the catch below already handles.
+      const response = await fetch(url.toString(), {
+        signal: AbortSignal.timeout(5000),
+      });
       healthy = response.ok;
     } catch {
       healthy = false;

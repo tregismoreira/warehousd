@@ -1,0 +1,20 @@
+{
+  // The repo-root TypeScript that belongs to no package: the test runner and vitest configs, the
+  // dev/e2e bootstrap scripts, and the example project's seed. All of it was outside every program
+  // before this file.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "types": ["node"],
+    "allowJs": true
+  },
+  "include": [
+    "scripts",
+    "vitest.config.ts",
+    "vitest.serial.config.ts",
+    "vitest.e2e.config.ts",
+    "vitest.global-setup.ts",
+    "examples"
+  ]
+}

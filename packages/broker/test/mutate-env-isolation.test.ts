@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema, applyConfig, createPools, makeBroker, type Pools } from "../src/index";
+import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import type { BrokerContext } from "../src/types";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
+import { assertApplied } from "./helpers/results";
 
 let p: Provisioned, app: Pool;
 
@@ -30,7 +32,10 @@ beforeAll(async () => {
   await applyConfig(app, cfg);
 }, 60_000);
 
-afterAll(async () => { await app.end(); await p.end(); });
+afterAll(async () => {
+  await app.end();
+  await p.end();
+});
 
 describe("broker.mutate env isolation", () => {
   it("env scope: dev context reaches devWrite pool, not liveWrite", async () => {
@@ -45,19 +50,29 @@ describe("broker.mutate env isolation", () => {
     const broker = makeBroker(pools, cfg);
 
     const grantId = await requestGrant(app, {
-      userId: "env_user", collection: "data", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "value"],
+      userId: "env_user",
+      collection: "data",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "value"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-    const ctx: BrokerContext = { userId: "env_user", env: "dev", orgId: "default" };
-    const result = await broker.mutate(ctx, { collection: "data", op: "create", values: { value: "dev_value" } });
+    const ctx: BrokerContext = makeCtx({ userId: "env_user" });
+    const result = await broker.mutate(ctx, {
+      collection: "data",
+      op: "create",
+      values: { value: "dev_value" },
+    });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
+      assertApplied(result);
       // Data should exist in data_synth (dev), not data_live
-      const inDev = await app.query(
-        `select value from data_synth.data where id = $1`, [result.documentId]);
+      const inDev = await app.query(`select value from data_synth.data where id = $1`, [
+        result.documentId,
+      ]);
       expect(inDev.rows.length).toBe(1);
       expect(inDev.rows[0].value).toBe("dev_value");
     }
@@ -77,19 +92,29 @@ describe("broker.mutate env isolation", () => {
     const broker = makeBroker(pools, cfg);
 
     const grantId = await requestGrant(app, {
-      userId: "live_user", collection: "data", env: "live", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "value"],
+      userId: "live_user",
+      collection: "data",
+      env: "live",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "value"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-    const ctx: BrokerContext = { userId: "live_user", env: "live", orgId: "default" };
-    const result = await broker.mutate(ctx, { collection: "data", op: "create", values: { value: "live_value" } });
+    const ctx: BrokerContext = makeCtx({ userId: "live_user", env: "live" });
+    const result = await broker.mutate(ctx, {
+      collection: "data",
+      op: "create",
+      values: { value: "live_value" },
+    });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
+      assertApplied(result);
       // Data should exist in data_live, not data_synth
-      const inLive = await app.query(
-        `select value from data_live.data where id = $1`, [result.documentId]);
+      const inLive = await app.query(`select value from data_live.data where id = $1`, [
+        result.documentId,
+      ]);
       expect(inLive.rows.length).toBe(1);
       expect(inLive.rows[0].value).toBe("live_value");
     }
@@ -108,13 +133,21 @@ describe("broker.mutate env isolation", () => {
     const broker = makeBroker(pools, cfg);
 
     const grantId = await requestGrant(app, {
-      userId: "nopool_user", collection: "data", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "value"],
+      userId: "nopool_user",
+      collection: "data",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "value"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-    const ctx: BrokerContext = { userId: "nopool_user", env: "dev", orgId: "default" };
-    const result = await broker.mutate(ctx, { collection: "data", op: "create", values: { value: "x" } });
+    const ctx: BrokerContext = makeCtx({ userId: "nopool_user" });
+    const result = await broker.mutate(ctx, {
+      collection: "data",
+      op: "create",
+      values: { value: "x" },
+    });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -136,22 +169,35 @@ describe("broker.mutate env isolation", () => {
     const broker = makeBroker(pools, cfg);
 
     const grantId = await requestGrant(app, {
-      userId: "isolation_user", collection: "data", env: "live", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "value"],
+      userId: "isolation_user",
+      collection: "data",
+      env: "live",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "value"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
-    const ctx: BrokerContext = { userId: "isolation_user", env: "live", orgId: "default" };
-    const result = await broker.mutate(ctx, { collection: "data", op: "create", values: { value: "should_be_live" } });
+    const ctx: BrokerContext = makeCtx({ userId: "isolation_user", env: "live" });
+    const result = await broker.mutate(ctx, {
+      collection: "data",
+      op: "create",
+      values: { value: "should_be_live" },
+    });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
+      assertApplied(result);
       // Data should be in data_live
-      const inLive = await app.query(`select 1 from data_live.data where id = $1`, [result.documentId]);
+      const inLive = await app.query(`select 1 from data_live.data where id = $1`, [
+        result.documentId,
+      ]);
       expect(inLive.rows.length).toBe(1);
 
       // Data should NOT be in data_synth
-      const inDev = await app.query(`select 1 from data_synth.data where id = $1`, [result.documentId]);
+      const inDev = await app.query(`select 1 from data_synth.data where id = $1`, [
+        result.documentId,
+      ]);
       expect(inDev.rows.length).toBe(0);
     }
 

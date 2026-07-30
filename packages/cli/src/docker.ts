@@ -21,11 +21,11 @@ export function assertDocker(): void {
     const error = err as { code?: string };
     if (error.code === "ENOENT") {
       throw new DockerError(
-        "docker not found on PATH. Install Docker Desktop (https://docs.docker.com/get-docker/) and retry."
+        "docker not found on PATH. Install Docker Desktop (https://docs.docker.com/get-docker/) and retry.",
       );
     }
     throw new DockerError(
-      "Docker is installed but the daemon isn't reachable. Start Docker and retry."
+      "Docker is installed but the daemon isn't reachable. Start Docker and retry.",
     );
   }
 }
@@ -64,9 +64,7 @@ export function ensureImage(ref: string, opts?: { offline?: boolean }): void {
   run(["pull", ref]);
 }
 
-export function containerState(
-  name: string
-): "running" | "exited" | "absent" {
+export function containerState(name: string): "running" | "exited" | "absent" {
   const result = tryRun(["inspect", "-f", "{{.State.Status}}", name]);
   if (!result.ok) {
     return "absent";
@@ -78,18 +76,14 @@ export function containerState(
 }
 
 export function ensureNetwork(name: string, label: string): void {
-  if (
-    tryRun(["network", "inspect", name]).ok
-  ) {
+  if (tryRun(["network", "inspect", name]).ok) {
     return;
   }
   run(["network", "create", "--label", label, name]);
 }
 
 export function ensureVolume(name: string, label: string): void {
-  if (
-    tryRun(["volume", "inspect", name]).ok
-  ) {
+  if (tryRun(["volume", "inspect", name]).ok) {
     return;
   }
   run(["volume", "create", "--label", label, name]);

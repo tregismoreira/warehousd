@@ -17,10 +17,22 @@ describe("entrypoint.bootstrap", () => {
     await mkdir(join(fixture, "seed", "docs-live"), { recursive: true });
 
     // Two markdown files for the file collection
-    await writeFile(join(fixture, "seed", "docs-dev", "policy1.md"), "# Policy 1\nContent for policy 1");
-    await writeFile(join(fixture, "seed", "docs-dev", "policy2.md"), "# Policy 2\nContent for policy 2");
-    await writeFile(join(fixture, "seed", "docs-live", "policy1.md"), "# Policy 1 Live\nContent for live policy 1");
-    await writeFile(join(fixture, "seed", "docs-live", "policy2.md"), "# Policy 2 Live\nContent for live policy 2");
+    await writeFile(
+      join(fixture, "seed", "docs-dev", "policy1.md"),
+      "# Policy 1\nContent for policy 1",
+    );
+    await writeFile(
+      join(fixture, "seed", "docs-dev", "policy2.md"),
+      "# Policy 2\nContent for policy 2",
+    );
+    await writeFile(
+      join(fixture, "seed", "docs-live", "policy1.md"),
+      "# Policy 1 Live\nContent for live policy 1",
+    );
+    await writeFile(
+      join(fixture, "seed", "docs-live", "policy2.md"),
+      "# Policy 2 Live\nContent for live policy 2",
+    );
 
     // Minimal warehousd.yml with one dataset and one file collection
     const yaml = `
@@ -88,10 +100,9 @@ collections:
     expect(Number(filesResult.rows[0].cnt)).toBe(2);
 
     // Assert an admin user exists with role='admin'
-    const adminResult = await db.query(
-      `select id, role from app."user" where email = $1`,
-      [process.env.WAREHOUSD_ADMIN_EMAIL]
-    );
+    const adminResult = await db.query(`select id, role from app."user" where email = $1`, [
+      process.env.WAREHOUSD_ADMIN_EMAIL,
+    ]);
     expect(adminResult.rowCount).toBe(1);
     expect(adminResult.rows[0].role).toBe("admin");
 
@@ -118,10 +129,12 @@ collections:
     // Get state before second bootstrap
     let db = new Pool({ connectionString: setup.appUrl });
     const itemsCountBefore = await db.query(`select count(*) as cnt from data_synth.items`);
-    const filesCountBefore = await db.query(`select count(*) as cnt from data_synth."documents__files"`);
+    const filesCountBefore = await db.query(
+      `select count(*) as cnt from data_synth."documents__files"`,
+    );
     const usersCountBefore = await db.query(`select count(*) as cnt from app."user"`);
     const clientBefore = await db.query(
-      `select "clientId", "clientSecret" from app."oauthApplication" where name='warehousd dev client'`
+      `select "clientId", "clientSecret" from app."oauthApplication" where name='warehousd dev client'`,
     );
     await db.end();
 
@@ -131,10 +144,12 @@ collections:
     // Assert counts are the same
     db = new Pool({ connectionString: setup.appUrl });
     const itemsCountAfter = await db.query(`select count(*) as cnt from data_synth.items`);
-    const filesCountAfter = await db.query(`select count(*) as cnt from data_synth."documents__files"`);
+    const filesCountAfter = await db.query(
+      `select count(*) as cnt from data_synth."documents__files"`,
+    );
     const usersCountAfter = await db.query(`select count(*) as cnt from app."user"`);
     const clientAfter = await db.query(
-      `select "clientId", "clientSecret" from app."oauthApplication" where name='warehousd dev client'`
+      `select "clientId", "clientSecret" from app."oauthApplication" where name='warehousd dev client'`,
     );
 
     expect(Number(itemsCountAfter.rows[0].cnt)).toBe(Number(itemsCountBefore.rows[0].cnt));
@@ -186,7 +201,7 @@ collections:
     // Assert the new collection has rows
     const db = new Pool({ connectionString: setup.appUrl });
     const newCollectionResult = await db.query(
-      `select count(*) as cnt from data_synth.newcollection`
+      `select count(*) as cnt from data_synth.newcollection`,
     );
     expect(Number(newCollectionResult.rows[0].cnt)).toBeGreaterThan(0);
 

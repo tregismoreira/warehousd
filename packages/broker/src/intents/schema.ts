@@ -99,11 +99,17 @@ const MutationValues = z.record(Ident, z.unknown());
 export const MutationIntentSchema = z.discriminatedUnion("op", [
   z.object({ collection: Ident, op: z.literal("create"), values: MutationValues }),
   z.object({
-    collection: Ident, op: z.literal("update"), id: z.string(),
-    expect: z.string().optional(), values: MutationValues,
+    collection: Ident,
+    op: z.literal("update"),
+    id: z.string(),
+    expect: z.string().optional(),
+    values: MutationValues,
   }),
   z.object({
-    collection: Ident, op: z.literal("delete"), id: z.string(), expect: z.string().optional(),
+    collection: Ident,
+    op: z.literal("delete"),
+    id: z.string(),
+    expect: z.string().optional(),
   }),
 ]);
 
@@ -127,7 +133,9 @@ export function describeIntentError(err: z.ZodError): string {
 // audited — an unaudited probe leaves no trace, which is the worse half of the bug. Detail
 // goes to the log only: the reason codes deliberately carry nothing back to the caller.
 export function checkIntent<T>(
-  schema: z.ZodType<T>, raw: unknown, verb: string,
+  schema: z.ZodType<T>,
+  raw: unknown,
+  verb: string,
 ): { ok: true; intent: T } | { ok: false; collection: string } {
   const r = schema.safeParse(raw);
   if (r.success) return { ok: true, intent: r.data };

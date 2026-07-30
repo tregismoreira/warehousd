@@ -20,14 +20,24 @@ export function pkOf(c: CollectionConfig): string | null {
 // the collection's view and has no column on the base table (apply/ddl.ts skips it), so it is
 // neither written nor carried forward.
 export function dataColsOf(c: CollectionConfig): string[] {
-  return Object.entries(c.fields).filter(([, f]) => !f.view_join).map(([n]) => n);
+  return Object.entries(c.fields)
+    .filter(([, f]) => !f.view_join)
+    .map(([n]) => n);
 }
 
 // The revision bookkeeping columns, in the order every insert below binds them. Frozen because the
 // order is load-bearing: callers build a parallel value array and rely on index i naming column i.
 export const REV_COLS: readonly string[] = Object.freeze([
-  "_rev", "_rev_seq", "_rev_at", "_rev_by", "_rev_op", "_rev_status",
-  "_rev_fields", "_rev_base", "_current", "org_id",
+  "_rev",
+  "_rev_seq",
+  "_rev_at",
+  "_rev_by",
+  "_rev_op",
+  "_rev_status",
+  "_rev_fields",
+  "_rev_base",
+  "_current",
+  "org_id",
 ]);
 
 // A revision row as the base table stores it: the bookkeeping columns REV_COLS names, plus one

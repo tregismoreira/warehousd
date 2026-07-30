@@ -69,7 +69,7 @@ function LoginInner({ demo }: { demo: boolean }) {
       }
     }
 
-    fetchSSOStatus();
+    void fetchSSOStatus();
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -77,8 +77,10 @@ function LoginInner({ demo }: { demo: boolean }) {
     setErr(null);
     setSubmitting(true);
     const { error } = await authClient.signIn.email({ email, password, callbackURL: returnTo });
-    if (error) { setErr(error.message ?? "login failed"); setSubmitting(false); }
-    else window.location.href = returnTo;
+    if (error) {
+      setErr(error.message ?? "login failed");
+      setSubmitting(false);
+    } else window.location.href = returnTo;
   }
 
   async function signInWithSSO(providerId: string, providerType: string) {
@@ -120,37 +122,56 @@ function LoginInner({ demo }: { demo: boolean }) {
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
-          id="email" placeholder="email" type="email" autoComplete="username"
-          value={email} onChange={(e) => setEmail(e.target.value)}
+          id="email"
+          placeholder="email"
+          type="email"
+          autoComplete="username"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
         />
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Password</Label>
         <Input
-          id="password" placeholder="password" type="password" autoComplete="current-password"
-          value={password} onChange={(e) => setPassword(e.target.value)}
+          id="password"
+          placeholder="password"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
         />
       </div>
       <Button type="submit" className="w-full" disabled={submitting}>
         Sign in
       </Button>
-      {err && <p className="text-sm text-deny" role="alert">{err}</p>}
+      {err && (
+        <p className="text-sm text-deny" role="alert">
+          {err}
+        </p>
+      )}
     </form>
   );
 
   const demoCreds = demo && (
     <div className="space-y-1 text-xs text-muted-foreground">
-      <p><strong className="text-foreground">Demo credentials</strong> (password <code className="font-mono">demo</code>):</p>
+      <p>
+        <strong className="text-foreground">Demo credentials</strong> (password{" "}
+        <code className="font-mono">demo</code>):
+      </p>
       <ul className="space-y-1">
         {DEMO_CREDS.map((c) => (
           <li key={c.email}>
             <button
               type="button"
               className="font-mono underline-offset-2 hover:underline"
-              onClick={() => { setEmail(c.email); setPassword("demo"); }}
+              onClick={() => {
+                setEmail(c.email);
+                setPassword("demo");
+              }}
             >
               {c.email}
-            </button>{" "}— {c.role}
+            </button>{" "}
+            — {c.role}
           </li>
         ))}
       </ul>
@@ -162,10 +183,14 @@ function LoginInner({ demo }: { demo: boolean }) {
               <button
                 type="button"
                 className="font-mono underline-offset-2 hover:underline"
-                onClick={() => { setEmail(c.email); setPassword("demo"); }}
+                onClick={() => {
+                  setEmail(c.email);
+                  setPassword("demo");
+                }}
               >
                 {c.email}
-              </button>{" "}— {c.role}
+              </button>{" "}
+              — {c.role}
             </li>
           ))}
         </ul>
@@ -205,7 +230,11 @@ function LoginInner({ demo }: { demo: boolean }) {
                 </div>
               </details>
             )}
-            {err && !localLoginEnabled && <p className="text-sm text-deny" role="alert">{err}</p>}
+            {err && !localLoginEnabled && (
+              <p className="text-sm text-deny" role="alert">
+                {err}
+              </p>
+            )}
           </CardContent>
         </Card>
       </Centered>
@@ -231,7 +260,13 @@ function LoginInner({ demo }: { demo: boolean }) {
 
 export default function LoginForm({ demo }: { demo: boolean }) {
   return (
-    <Suspense fallback={<Centered><p className="text-sm text-muted-foreground">Loading...</p></Centered>}>
+    <Suspense
+      fallback={
+        <Centered>
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </Centered>
+      }
+    >
       <LoginInner demo={demo} />
     </Suspense>
   );

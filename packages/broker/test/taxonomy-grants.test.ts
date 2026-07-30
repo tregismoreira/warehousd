@@ -11,21 +11,46 @@ import { indexCollection } from "../src/indexing";
 import { syncDatasetTerms, loadTaxonomyBindings } from "../src/taxonomy";
 import { makeBroker } from "../src/broker";
 import { createPools, type Pools } from "../src/db/pools";
+import { makeCtx } from "./helpers/ctx";
 
-let p: Provisioned; let admin: Pool; let pools: Pools;
+let p: Provisioned;
+let admin: Pool;
+let pools: Pools;
 let broker: ReturnType<typeof makeBroker>;
 
 const cfg = ConfigSchema.parse({
-  project: "t", server: { port: 1 },
-  taxonomies: { category: { label: "Category", terms: {
-    hr: { label: "HR" }, finance: { label: "Finance" } } } },
+  project: "t",
+  server: { port: 1 },
+  taxonomies: {
+    category: {
+      label: "Category",
+      terms: {
+        hr: { label: "HR" },
+        finance: { label: "Finance" },
+      },
+    },
+  },
   collections: {
-    notes: { description: "notes", taxonomies: ["category"], fields: {
-      id: { type: "uuid", posture: "allow", pk: true },
-      body: { type: "text", posture: "allow" } } },
-    briefs: { description: "briefs", type: "file", source: "./unused", taxonomies: ["category"], fields: {
-      title: { posture: "allow" }, content: { posture: "allow" },
-      path: { posture: "deny" }, category: { posture: "allow" } } },
+    notes: {
+      description: "notes",
+      taxonomies: ["category"],
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        body: { type: "text", posture: "allow" },
+      },
+    },
+    briefs: {
+      description: "briefs",
+      type: "file",
+      source: "./unused",
+      taxonomies: ["category"],
+      fields: {
+        title: { posture: "allow" },
+        content: { posture: "allow" },
+        path: { posture: "deny" },
+        category: { posture: "allow" },
+      },
+    },
   },
 });
 
@@ -41,30 +66,54 @@ beforeAll(async () => {
     (gen_random_uuid(), 'finance note', 'finance')`);
   // documents: one per term
   const dir = mkdtempSync(join(tmpdir(), "taxdocs-"));
-  writeFileSync(join(dir, "handbook.md"), "---\ncategory: hr\n---\n# Handbook\n\nVacation policy paragraph.");
-  writeFileSync(join(dir, "budget.md"), "---\ncategory: finance\n---\n# Budget\n\nVacation budget paragraph.");
+  writeFileSync(
+    join(dir, "handbook.md"),
+    "---\ncategory: hr\n---\n# Handbook\n\nVacation policy paragraph.",
+  );
+  writeFileSync(
+    join(dir, "budget.md"),
+    "---\ncategory: finance\n---\n# Budget\n\nVacation budget paragraph.",
+  );
   await syncDatasetTerms(admin, cfg, "dev");
-  await indexCollection(admin, "dev", "briefs", dir,
-    { taxonomies: await loadTaxonomyBindings(admin, cfg, "briefs", "dev") });
+  await indexCollection(admin, "dev", "briefs", dir, {
+    taxonomies: await loadTaxonomyBindings(admin, cfg, "briefs", "dev"),
+  });
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
 });
 
-afterAll(async () => { await admin.end(); await pools.end(); await p.end(); });
+afterAll(async () => {
+  await admin.end();
+  await pools.end();
+  await p.end();
+});
 
-async function grant(user: string, collection: string, fields: string[], documentFilters: object[] | null) {
-  await admin.query(`delete from app.grants where user_id=$1 and collection=$2`, [user, collection]);
+async function grant(
+  user: string,
+  collection: string,
+  fields: string[],
+  documentFilters: object[] | null,
+) {
+  await admin.query(`delete from app.grants where user_id=$1 and collection=$2`, [
+    user,
+    collection,
+  ]);
   await admin.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status, document_filter)
      values ($1,$2,$3,'dev','approved',$4)`,
-    [user, collection, fields, documentFilters ? JSON.stringify(documentFilters) : null]);
+    [user, collection, fields, documentFilters ? JSON.stringify(documentFilters) : null],
+  );
 }
 
 describe("term-scoped grants: structured", () => {
   it("document_filter on the term restricts documents; excluded documents silently absent", async () => {
-    await grant("u1", "notes", ["id", "body", "category"],
-      [{ field: "category", op: "in", value: ["hr"] }]);
-    const r = await broker.query({ userId: "u1", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
+    await grant(
+      "u1",
+      "notes",
+      ["id", "body", "category"],
+      [{ field: "category", op: "in", value: ["hr"] }],
+    );
+    const r = await broker.query(makeCtx({ userId: "u1" }), { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.documents.length).toBe(2);
@@ -73,30 +122,39 @@ describe("term-scoped grants: structured", () => {
   });
 
   it("client filters AND with the term scope — no widening", async () => {
-    await grant("u1", "notes", ["id", "body", "category"], [{ field: "category", op: "in", value: ["hr"] }]);
-    const r = await broker.query({ userId: "u1", orgId: "default", env: "dev", via: "session" },
-      { collection: "notes", filters: [{ field: "category", op: "eq", value: "finance" }] });
+    await grant(
+      "u1",
+      "notes",
+      ["id", "body", "category"],
+      [{ field: "category", op: "in", value: ["hr"] }],
+    );
+    const r = await broker.query(makeCtx({ userId: "u1" }), {
+      collection: "notes",
+      filters: [{ field: "category", op: "eq", value: "finance" }],
+    });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents.length).toBe(0);
   });
 
   it("term field can gate rows without being readable (deny-style)", async () => {
     await grant("u2", "notes", ["id", "body"], [{ field: "category", op: "in", value: ["hr"] }]);
-    const r = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
+    const r = await broker.query(makeCtx({ userId: "u2" }), { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.documents.length).toBe(2);
-      for (const row of r.documents) expect("category" in row).toBe(false);  // absent, not null
+      for (const row of r.documents) expect("category" in row).toBe(false); // absent, not null
     }
-    const denied = await broker.query({ userId: "u2", orgId: "default", env: "dev", via: "session" },
-      { collection: "notes", fields: ["category"] });
+    const denied = await broker.query(makeCtx({ userId: "u2" }), {
+      collection: "notes",
+      fields: ["category"],
+    });
     expect(denied.ok).toBe(false);
     if (!denied.ok) expect(denied.reason).toBe("field_denied");
   });
 
   it("empty in-list denies all rows", async () => {
     await grant("u3", "notes", ["id", "body"], [{ field: "category", op: "in", value: [] }]);
-    const r = await broker.query({ userId: "u3", orgId: "default", env: "dev", via: "session" }, { collection: "notes" });
+    const r = await broker.query(makeCtx({ userId: "u3" }), { collection: "notes" });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents.length).toBe(0);
   });
@@ -104,11 +162,17 @@ describe("term-scoped grants: structured", () => {
 
 describe("term-scoped grants: file search", () => {
   it("searchDocuments only reaches documents inside the term scope", async () => {
-    await grant("u4", "briefs", ["title", "content", "category"],
-      [{ field: "category", op: "in", value: ["hr"] }]);
+    await grant(
+      "u4",
+      "briefs",
+      ["title", "content", "category"],
+      [{ field: "category", op: "in", value: ["hr"] }],
+    );
     // "vacation" matches a document in BOTH files — only the hr one may return
-    const r = await broker.searchDocuments({ userId: "u4", orgId: "default", env: "dev", via: "session" },
-      { collection: "briefs", q: "vacation" });
+    const r = await broker.searchDocuments(makeCtx({ userId: "u4" }), {
+      collection: "briefs",
+      q: "vacation",
+    });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.documents.length).toBeGreaterThan(0);
@@ -120,8 +184,13 @@ describe("term-scoped grants: file search", () => {
   });
 
   it("broker.query on the bound file collection filters by term too", async () => {
-    await grant("u4", "briefs", ["title", "content", "category"], [{ field: "category", op: "in", value: ["hr"] }]);
-    const r = await broker.query({ userId: "u4", orgId: "default", env: "dev", via: "session" }, { collection: "briefs" });
+    await grant(
+      "u4",
+      "briefs",
+      ["title", "content", "category"],
+      [{ field: "category", op: "in", value: ["hr"] }],
+    );
+    const r = await broker.query(makeCtx({ userId: "u4" }), { collection: "briefs" });
     expect(r.ok).toBe(true);
     if (r.ok) for (const row of r.documents) expect(row.category).toBe("hr");
   });
@@ -129,8 +198,11 @@ describe("term-scoped grants: file search", () => {
 
 describe("audit", () => {
   it("term-scoped calls are audited like any other", async () => {
-    const n = (await admin.query(
-      `select count(*)::int as n from app.audit_events where user_id in ('u1','u2','u3','u4')`)).rows[0].n;
+    const n = (
+      await admin.query(
+        `select count(*)::int as n from app.audit_events where user_id in ('u1','u2','u3','u4')`,
+      )
+    ).rows[0].n;
     expect(n).toBeGreaterThan(0);
   });
 });
@@ -141,10 +213,14 @@ describe("Stage 2: multi-predicate document filters", () => {
   beforeAll(async () => {
     // Setup: collection bound to TWO vocabularies
     const cfg2 = ConfigSchema.parse({
-      project: "t", server: { port: 1 },
+      project: "t",
+      server: { port: 1 },
       taxonomies: {
         priority: { label: "Priority", terms: { high: { label: "High" }, low: { label: "Low" } } },
-        severity: { label: "Severity", terms: { critical: { label: "Critical" }, minor: { label: "Minor" } } },
+        severity: {
+          label: "Severity",
+          terms: { critical: { label: "Critical" }, minor: { label: "Minor" } },
+        },
       },
       collections: {
         incidents: {
@@ -176,7 +252,11 @@ describe("Stage 2: multi-predicate document filters", () => {
     broker2 = makeBroker(pools2, cfg2);
   });
 
-  afterAll(async () => { await admin2.end(); await pools2.end(); await p2.end(); });
+  afterAll(async () => {
+    await admin2.end();
+    await pools2.end();
+    await p2.end();
+  });
 
   it("multiple predicates AND together: high priority AND critical severity", async () => {
     // Grant with two predicates: priority=high AND severity=critical
@@ -184,15 +264,14 @@ describe("Stage 2: multi-predicate document filters", () => {
       values ('u_multi','incidents',array['id','title','priority','severity'],'dev','approved',
        '[{"field":"priority","op":"in","value":["high"]},{"field":"severity","op":"in","value":["critical"]}]'::jsonb)`);
 
-    const r = await broker2.query({ userId: "u_multi", orgId: "default", env: "dev", via: "session" }, { collection: "incidents" });
+    const r = await broker2.query(makeCtx({ userId: "u_multi" }), { collection: "incidents" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       // Should only return the high-critical incident
       expect(r.documents).toHaveLength(1);
-      expect(r.documents[0].title).toBe("high-critical");
+      expect(r.documents[0]!.title).toBe("high-critical");
     }
   });
-
 });
 
 // A `multiple: true` vocabulary is a text[] column, so every predicate against it must come
@@ -203,18 +282,38 @@ describe("multi-value term scoping through the broker", () => {
   let p3: Provisioned, admin3: Pool, pools3: Pools, broker3: ReturnType<typeof makeBroker>;
 
   const cfg3 = ConfigSchema.parse({
-    project: "t", server: { port: 1 },
+    project: "t",
+    server: { port: 1 },
     taxonomies: {
-      tags: { label: "Tags", multiple: true, terms: {
-        litigation: { label: "Litigation" }, discovery: { label: "Discovery" },
-        filings: { label: "Filings" }, tax: { label: "Tax" } } },
-      client: { label: "Client", terms: { "c-0042": { label: "Acme" }, "c-0099": { label: "Globex" } } },
+      tags: {
+        label: "Tags",
+        multiple: true,
+        terms: {
+          litigation: { label: "Litigation" },
+          discovery: { label: "Discovery" },
+          filings: { label: "Filings" },
+          tax: { label: "Tax" },
+        },
+      },
+      client: {
+        label: "Client",
+        terms: { "c-0042": { label: "Acme" }, "c-0099": { label: "Globex" } },
+      },
     },
     collections: {
-      case_files: { description: "case files", type: "file", source: "./unused",
-        taxonomies: ["client", "tags"], fields: {
-          title: { posture: "allow" }, content: { posture: "allow" },
-          path: { posture: "deny" }, client: { posture: "allow" }, tags: { posture: "allow" } } },
+      case_files: {
+        description: "case files",
+        type: "file",
+        source: "./unused",
+        taxonomies: ["client", "tags"],
+        fields: {
+          title: { posture: "allow" },
+          content: { posture: "allow" },
+          path: { posture: "deny" },
+          client: { posture: "allow" },
+          tags: { posture: "allow" },
+        },
+      },
     },
   });
 
@@ -227,35 +326,49 @@ describe("multi-value term scoping through the broker", () => {
     const dir = mkdtempSync(join(tmpdir(), "multivalue-"));
     // Two documents for the same client, differing only in tags, so a wrong operator can't
     // pass by accident: one overlaps the granted tag set, one does not.
-    writeFileSync(join(dir, "motion.md"),
-      "---\nclient: c-0042\ntags: [litigation, discovery]\n---\n# Motion\n\nVacation paragraph.");
-    writeFileSync(join(dir, "tax-memo.md"),
-      "---\nclient: c-0042\ntags: [tax]\n---\n# Tax Memo\n\nVacation paragraph.");
+    writeFileSync(
+      join(dir, "motion.md"),
+      "---\nclient: c-0042\ntags: [litigation, discovery]\n---\n# Motion\n\nVacation paragraph.",
+    );
+    writeFileSync(
+      join(dir, "tax-memo.md"),
+      "---\nclient: c-0042\ntags: [tax]\n---\n# Tax Memo\n\nVacation paragraph.",
+    );
     // Same tags as motion.md but a different client — proves the two predicates AND, and
     // that the array predicate alone is not doing all the work.
-    writeFileSync(join(dir, "other-client.md"),
-      "---\nclient: c-0099\ntags: [litigation, discovery]\n---\n# Other\n\nVacation paragraph.");
+    writeFileSync(
+      join(dir, "other-client.md"),
+      "---\nclient: c-0099\ntags: [litigation, discovery]\n---\n# Other\n\nVacation paragraph.",
+    );
     await syncDatasetTerms(admin3, cfg3, "dev");
-    await indexCollection(admin3, "dev", "case_files", dir,
-      { taxonomies: await loadTaxonomyBindings(admin3, cfg3, "case_files", "dev") });
+    await indexCollection(admin3, "dev", "case_files", dir, {
+      taxonomies: await loadTaxonomyBindings(admin3, cfg3, "case_files", "dev"),
+    });
 
     pools3 = createPools({ app: p3.urls.admin, dev: p3.urls.dev, live: p3.urls.live });
     broker3 = makeBroker(pools3, cfg3);
   });
 
-  afterAll(async () => { await admin3.end(); await pools3.end(); await p3.end(); });
+  afterAll(async () => {
+    await admin3.end();
+    await pools3.end();
+    await p3.end();
+  });
 
   it("stores a multi-value term column as text[]", async () => {
-    const t = (await admin3.query(
-      `select data_type from information_schema.columns
-       where table_schema='data_synth' and table_name='case_files__files' and column_name='tags'`)).rows[0];
+    const t = (
+      await admin3.query(
+        `select data_type from information_schema.columns
+       where table_schema='data_synth' and table_name='case_files__files' and column_name='tags'`,
+      )
+    ).rows[0];
     expect(t.data_type).toBe("ARRAY");
   });
 
   it("describe_collection reports the multi-value term field as text[], not text", async () => {
     await admin3.query(`insert into app.grants (user_id,collection,allowed_fields,env,status)
       values ('u_desc','case_files',array['title','client','tags'],'dev','approved')`);
-    const d = await broker3.describeCollection({ userId: "u_desc", orgId: "default", env: "dev", via: "session" }, "case_files");
+    const d = await broker3.describeCollection(makeCtx({ userId: "u_desc" }), "case_files");
     expect("ok" in d && d.ok === false).toBe(false);
     if (!("ok" in d)) {
       const byName = Object.fromEntries(d.fields.map((f) => [f.name, f.type]));
@@ -270,7 +383,7 @@ describe("multi-value term scoping through the broker", () => {
       values ('u_mv','case_files',array['title','content','client','tags'],'dev','approved',
        '[{"field":"tags","op":"in","value":["litigation","filings"]}]'::jsonb)`);
 
-    const r = await broker3.query({ userId: "u_mv", orgId: "default", env: "dev", via: "session" }, { collection: "case_files" });
+    const r = await broker3.query(makeCtx({ userId: "u_mv" }), { collection: "case_files" });
     // Before isMultiValueField reached buildSelect this refused with internal_error, because
     // `"tags" in ($1,$2)` asks Postgres to compare text[] against text.
     expect(r.ok).toBe(true);
@@ -285,18 +398,20 @@ describe("multi-value term scoping through the broker", () => {
        '[{"field":"client","op":"in","value":["c-0042"]},
          {"field":"tags","op":"in","value":["litigation","discovery","filings"]}]'::jsonb)`);
 
-    const r = await broker3.query({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" }, { collection: "case_files" });
+    const r = await broker3.query(makeCtx({ userId: "u_mv2" }), { collection: "case_files" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       // tax-memo.md fails the tag overlap, other-client.md fails the client predicate.
       expect(r.documents).toHaveLength(1);
-      expect(r.documents[0].title).toBe("Motion");
+      expect(r.documents[0]!.title).toBe("Motion");
     }
   });
 
   it("searchDocuments honours the same overlap scope", async () => {
-    const r = await broker3.searchDocuments({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" },
-      { collection: "case_files", q: "vacation" });
+    const r = await broker3.searchDocuments(makeCtx({ userId: "u_mv2" }), {
+      collection: "case_files",
+      q: "vacation",
+    });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.documents.length).toBeGreaterThan(0);
@@ -305,23 +420,29 @@ describe("multi-value term scoping through the broker", () => {
   });
 
   it("a client filter naming a multi-value field ANDs with the grant's overlap, never widens it", async () => {
-    const r = await broker3.query({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" },
-      { collection: "case_files", filters: [{ field: "tags", op: "in", value: ["tax"] }] });
+    const r = await broker3.query(makeCtx({ userId: "u_mv2" }), {
+      collection: "case_files",
+      filters: [{ field: "tags", op: "in", value: ["tax"] }],
+    });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents).toHaveLength(0);
   });
 
   it("an empty in-list on a multi-value field matches nothing rather than erroring", async () => {
-    const r = await broker3.query({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" },
-      { collection: "case_files", filters: [{ field: "tags", op: "in", value: [] }] });
+    const r = await broker3.query(makeCtx({ userId: "u_mv2" }), {
+      collection: "case_files",
+      filters: [{ field: "tags", op: "in", value: [] }],
+    });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.documents).toHaveLength(0);
   });
 
   it("refuses an ordering operator on a multi-value field as invalid_intent, not internal_error", async () => {
     // `"tags" > $1` would compare text[] to text; the caller needs to know it's their filter.
-    const r = await broker3.query({ userId: "u_mv2", orgId: "default", env: "dev", via: "session" },
-      { collection: "case_files", filters: [{ field: "tags", op: "gt", value: "litigation" }] });
+    const r = await broker3.query(makeCtx({ userId: "u_mv2" }), {
+      collection: "case_files",
+      filters: [{ field: "tags", op: "gt", value: "litigation" }],
+    });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("invalid_intent");
   });
@@ -334,15 +455,34 @@ describe("dataset-sourced vocabulary terms", () => {
   let p4: Provisioned, admin4: Pool;
 
   const cfg4 = ConfigSchema.parse({
-    project: "t", server: { port: 1 },
-    taxonomies: { client: { label: "Client", source: { collection: "clients", slug: "client_number", label: "name" } } },
+    project: "t",
+    server: { port: 1 },
+    taxonomies: {
+      client: {
+        label: "Client",
+        source: { collection: "clients", slug: "client_number", label: "name" },
+      },
+    },
     collections: {
-      clients: { description: "clients", fields: {
-        id: { type: "uuid", posture: "allow", pk: true },
-        client_number: { type: "text", posture: "allow" },
-        name: { type: "text", posture: "allow" } } },
-      cases: { description: "cases", type: "file", source: "./unused", taxonomies: ["client"], fields: {
-        title: { posture: "allow" }, content: { posture: "allow" }, path: { posture: "deny" } } },
+      clients: {
+        description: "clients",
+        fields: {
+          id: { type: "uuid", posture: "allow", pk: true },
+          client_number: { type: "text", posture: "allow" },
+          name: { type: "text", posture: "allow" },
+        },
+      },
+      cases: {
+        description: "cases",
+        type: "file",
+        source: "./unused",
+        taxonomies: ["client"],
+        fields: {
+          title: { posture: "allow" },
+          content: { posture: "allow" },
+          path: { posture: "deny" },
+        },
+      },
     },
   });
 
@@ -360,7 +500,10 @@ describe("dataset-sourced vocabulary terms", () => {
     await syncDatasetTerms(admin4, cfg4, "live");
   });
 
-  afterAll(async () => { await admin4.end(); await p4.end(); });
+  afterAll(async () => {
+    await admin4.end();
+    await p4.end();
+  });
 
   it("carries the source collection's label, not just the slug", async () => {
     const [b] = await loadTaxonomyBindings(admin4, cfg4, "cases", "dev");
@@ -380,7 +523,9 @@ describe("dataset-sourced vocabulary terms", () => {
   });
 
   it("re-syncing picks up a renamed client without duplicating the term", async () => {
-    await admin4.query(`update data_synth.clients set name='Acme Holdings' where client_number='C-0001'`);
+    await admin4.query(
+      `update data_synth.clients set name='Acme Holdings' where client_number='C-0001'`,
+    );
     await syncDatasetTerms(admin4, cfg4, "dev");
     const [b] = await loadTaxonomyBindings(admin4, cfg4, "cases", "dev");
     expect(b!.terms).toHaveLength(2);
@@ -392,8 +537,12 @@ describe("dataset-sourced vocabulary terms", () => {
     await admin4.query(`insert into data_synth.clients (id, client_number, name) values
       (gen_random_uuid(), 'Acme, Inc.', 'Acme One'),
       (gen_random_uuid(), 'Acme Inc',   'Acme Two')`);
-    await expect(syncDatasetTerms(admin4, cfg4, "dev")).rejects.toThrow(/both slugify to "acme-inc"/);
-    await admin4.query(`delete from data_synth.clients where client_number in ('Acme, Inc.','Acme Inc')`);
+    await expect(syncDatasetTerms(admin4, cfg4, "dev")).rejects.toThrow(
+      /both slugify to "acme-inc"/,
+    );
+    await admin4.query(
+      `delete from data_synth.clients where client_number in ('Acme, Inc.','Acme Inc')`,
+    );
   });
 
   it("refuses a source value with no slug-safe characters", async () => {

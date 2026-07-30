@@ -3,19 +3,26 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, withOrg } from "../src/index";
 import type { WarehousdConfig } from "../src/config/schema";
+import { ConfigSchema } from "../src/config/schema";
 
 let p: Provisioned, admin: Pool, liveWrite: Pool, liveRead: Pool;
 
-const cfg: WarehousdConfig = {
-  project: "t", server: { port: 1 }, synthetic: { documents_per_collection: {} },
+const cfg: WarehousdConfig = ConfigSchema.parse({
+  project: "t",
+  server: { port: 1 },
+  synthetic: { documents_per_collection: {} },
   collections: {
-    pages: { description: "d", writable: true, fields: {
-      id: { type: "uuid", posture: "allow", pk: true },
-      title: { type: "text", posture: "allow" },
-      body: { type: "text", posture: "allow" },
-    }},
+    pages: {
+      description: "d",
+      writable: true,
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        title: { type: "text", posture: "allow" },
+        body: { type: "text", posture: "allow" },
+      },
+    },
   },
-};
+});
 
 beforeAll(async () => {
   p = await provision("write-privileges");
@@ -25,82 +32,115 @@ beforeAll(async () => {
   liveWrite = new Pool({ connectionString: p.urls.liveWrite! });
   liveRead = new Pool({ connectionString: p.urls.live });
 }, 60_000);
-afterAll(async () => { await admin.end(); await liveWrite.end(); await liveRead.end(); await p.end(); });
+afterAll(async () => {
+  await admin.end();
+  await liveWrite.end();
+  await liveRead.end();
+  await p.end();
+});
 
 const asOrg = (pool: Pool, orgId: string, sql: string, params: unknown[] = []) =>
   withOrg(pool, orgId, (c) => c.query(sql, params));
 
 describe("warehousd_live_write privileges", () => {
   it("can INSERT into a data_live base table", async () => {
-    await expect(asOrg(liveWrite, "default",
-      `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields)
+    await expect(
+      asOrg(
+        liveWrite,
+        "default",
+        `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields)
        values ('default', gen_random_uuid(), 'Test', 1, 'user1', 'create', 'approved', '{}')`,
-    )).resolves.toBeDefined();
+      ),
+    ).resolves.toBeDefined();
   });
 
   it("cannot UPDATE a data column — Postgres refuses the attempt", async () => {
     // First insert a row
-    await asOrg(liveWrite, "default",
+    await asOrg(
+      liveWrite,
+      "default",
       `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields)
        values ('default', gen_random_uuid(), 'Original', 1, 'user1', 'create', 'approved', '{}')`,
     );
     // Try to update data column
-    await expect(asOrg(liveWrite, "default",
-      `update data_live.pages set title = 'Modified'`,
-    )).rejects.toThrow(/permission denied/i);
+    await expect(
+      asOrg(liveWrite, "default", `update data_live.pages set title = 'Modified'`),
+    ).rejects.toThrow(/permission denied/i);
   });
 
   it("can UPDATE _current and _rev_status promotion columns", async () => {
-    const id = (await asOrg(liveWrite, "default",
-      `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields) values ('default', gen_random_uuid(), 'Test2', 1, 'user1', 'create', 'approved', '{}') returning id`,
-    )).rows[0].id;
-    await expect(asOrg(liveWrite, "default",
-      `update data_live.pages set _current = true, _rev_status = 'approved' where id = $1`,
-      [id],
-    )).resolves.toBeDefined();
+    const id = (
+      await asOrg(
+        liveWrite,
+        "default",
+        `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields) values ('default', gen_random_uuid(), 'Test2', 1, 'user1', 'create', 'approved', '{}') returning id`,
+      )
+    ).rows[0].id;
+    await expect(
+      asOrg(
+        liveWrite,
+        "default",
+        `update data_live.pages set _current = true, _rev_status = 'approved' where id = $1`,
+        [id],
+      ),
+    ).resolves.toBeDefined();
   });
 
   it("cannot DELETE from the table — no delete privilege granted", async () => {
-    await expect(asOrg(liveWrite, "default",
-      `delete from data_live.pages`,
-    )).rejects.toThrow(/permission denied/i);
+    await expect(asOrg(liveWrite, "default", `delete from data_live.pages`)).rejects.toThrow(
+      /permission denied/i,
+    );
   });
 
   it("the partial unique index rejects a second concurrent promotion", async () => {
-    const id = (await asOrg(liveWrite, "default",
-      `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+    const id = (
+      await asOrg(
+        liveWrite,
+        "default",
+        `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'Test3', 1, 'user1', 'create', 'approved', '{}', true) returning id`,
-    )).rows[0].id;
+      )
+    ).rows[0].id;
     // Try to insert another _current row for the same document id
-    await expect(asOrg(liveWrite, "default",
-      `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+    await expect(
+      asOrg(
+        liveWrite,
+        "default",
+        `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', $1, 'Test3b', 2, 'user2', 'update', 'approved', '{}', true)`,
-      [id],
-    )).rejects.toThrow(/unique constraint/i);
+        [id],
+      ),
+    ).rejects.toThrow(/unique constraint/i);
   });
 
   it("can SELECT from the base table (for concurrency checks and merges)", async () => {
-    await expect(asOrg(liveWrite, "default",
-      `select id from data_live.pages limit 1`,
-    )).resolves.toBeDefined();
+    await expect(
+      asOrg(liveWrite, "default", `select id from data_live.pages limit 1`),
+    ).resolves.toBeDefined();
   });
 
   it("RLS confines SELECT to the current org", async () => {
     // Use a unique marker to identify rows from this test
     const marker = `rls_test_${Date.now()}`;
     // Insert one row in default, one in other org
-    await asOrg(liveWrite, "default",
+    await asOrg(
+      liveWrite,
+      "default",
       `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields)
        values ('default', gen_random_uuid(), $1, 1, 'user1', 'create', 'approved', '{}')`,
       [marker],
     );
-    await asOrg(liveWrite, "other",
+    await asOrg(
+      liveWrite,
+      "other",
       `insert into data_live.pages (org_id, id, title, _rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields)
        values ('other', gen_random_uuid(), $1, 1, 'user1', 'create', 'approved', '{}')`,
       [marker],
     );
     // Select while in default org context
-    const rows = await asOrg(liveWrite, "default",
+    const rows = await asOrg(
+      liveWrite,
+      "default",
       `select count(*)::int as n from data_live.pages where title = $1`,
       [marker],
     );
@@ -110,13 +150,17 @@ describe("warehousd_live_write privileges", () => {
 
 describe("the read roles remain unchanged", () => {
   it("warehousd_live still cannot write", async () => {
-    await expect(liveRead.query(
-      `insert into data_live.pages (id, org_id, title) values (gen_random_uuid(), 'default', 'x')`,
-    )).rejects.toThrow(/permission denied/i);
+    await expect(
+      liveRead.query(
+        `insert into data_live.pages (id, org_id, title) values (gen_random_uuid(), 'default', 'x')`,
+      ),
+    ).rejects.toThrow(/permission denied/i);
   });
 
   it("warehousd_live can only select from views, not base tables", async () => {
-    await expect(liveRead.query(`select * from data_live.pages limit 1`)).rejects.toThrow(/permission denied/i);
+    await expect(liveRead.query(`select * from data_live.pages limit 1`)).rejects.toThrow(
+      /permission denied/i,
+    );
     // But the view should work (with org context)
     await withOrg(liveRead, "default", (c) => c.query(`select * from data_live.v_pages limit 1`));
   });
@@ -126,7 +170,8 @@ describe("no DELETE privilege anywhere", () => {
   it("information_schema confirms no DELETE on data_live base tables for write role", async () => {
     const privs = await admin.query(
       `select privilege_type from information_schema.table_privileges
-       where table_schema='data_live' and grantee='warehousd_live_write' and privilege_type='DELETE'`);
-    expect(privs.rowCount).toBe(0, "warehousd_live_write should have no DELETE privilege");
+       where table_schema='data_live' and grantee='warehousd_live_write' and privilege_type='DELETE'`,
+    );
+    expect(privs.rowCount, "warehousd_live_write should have no DELETE privilege").toBe(0);
   });
 });

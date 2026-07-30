@@ -24,7 +24,8 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
 const ORG_A = DEFAULT_ORG_ID;
 const ORG_B = "org-b";
 
-let p: Provisioned; let db: Pool;
+let p: Provisioned;
+let db: Pool;
 
 beforeAll(async () => {
   p = await provision("orgctl");
@@ -33,12 +34,19 @@ beforeAll(async () => {
   await db.query(`insert into app.organizations (id, name) values ($1,'B')`, [ORG_B]);
 }, 60_000);
 
-afterAll(async () => { await db.end(); await p.end(); });
+afterAll(async () => {
+  await db.end();
+  await p.end();
+});
 
 const pendingIn = (orgId: string, userId: string, env: "dev" | "live" = "dev") =>
   requestGrant(db, {
-    userId, collection: "people", env, orgId,
-    purposeLabel: "t", allowedFields: ["id", "full_name"],
+    userId,
+    collection: "people",
+    env,
+    orgId,
+    purposeLabel: "t",
+    allowedFields: ["id", "full_name"],
   });
 
 describe("control-plane org scoping", () => {
@@ -48,7 +56,7 @@ describe("control-plane org scoping", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toBe("unknown_grant");
     const row = await db.query(`select status from app.grants where id=$1`, [id]);
-    expect(row.rows[0].status).toBe("pending");   // untouched
+    expect(row.rows[0].status).toBe("pending"); // untouched
   });
 
   it("a manager can approve a grant in their own org", async () => {

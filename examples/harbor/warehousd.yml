@@ -5,36 +5,36 @@ taxonomies:
   department:
     label: Department
     terms:
-      litigation:              { label: Litigation }
-      corporate:                { label: Corporate }
-      hr:                       { label: HR }
-      finance:                  { label: Finance }
-      real-estate:              { label: Real Estate }
-      intellectual-property:    { label: Intellectual Property }
-      employment:               { label: Employment }
-      tax:                      { label: Tax }
+      litigation: { label: Litigation }
+      corporate: { label: Corporate }
+      hr: { label: HR }
+      finance: { label: Finance }
+      real-estate: { label: Real Estate }
+      intellectual-property: { label: Intellectual Property }
+      employment: { label: Employment }
+      tax: { label: Tax }
   tags:
     label: Tags
     multiple: true
     terms:
-      litigation:            { label: Litigation }
-      discovery:              { label: Discovery }
-      filings:                { label: Filings }
-      motion:                 { label: Motion }
-      deposition:             { label: Deposition }
-      settlement:             { label: Settlement }
-      appeal:                 { label: Appeal }
-      contract:               { label: Contract }
-      compliance:             { label: Compliance }
-      ip:                     { label: IP }
-      employment:             { label: Employment }
-      tax:                    { label: Tax }
-      real-estate:            { label: Real Estate }
-      mergers-acquisitions:   { label: Mergers & Acquisitions }
-      bankruptcy:             { label: Bankruptcy }
-      privileged:             { label: Privileged }
-      confidential:           { label: Confidential }
-      urgent:                 { label: Urgent }
+      litigation: { label: Litigation }
+      discovery: { label: Discovery }
+      filings: { label: Filings }
+      motion: { label: Motion }
+      deposition: { label: Deposition }
+      settlement: { label: Settlement }
+      appeal: { label: Appeal }
+      contract: { label: Contract }
+      compliance: { label: Compliance }
+      ip: { label: IP }
+      employment: { label: Employment }
+      tax: { label: Tax }
+      real-estate: { label: Real Estate }
+      mergers-acquisitions: { label: Mergers & Acquisitions }
+      bankruptcy: { label: Bankruptcy }
+      privileged: { label: Privileged }
+      confidential: { label: Confidential }
+      urgent: { label: Urgent }
   client:
     label: Client
     source: { collection: clients, slug: client_number, label: name }
@@ -42,173 +42,200 @@ collections:
   departments:
     description: Firm departments
     fields:
-      id:       { type: uuid, posture: allow, pk: true }
+      id: { type: uuid, posture: allow, pk: true }
       # Without the hint the generic `name` heuristic applies, which draws generic corporate
       # department names ("Engineering", "Sales") that read wrong for a law firm.
-      name:     { type: text, posture: allow, gen: department_name }
-      kind:     { type: text, posture: allow, nullable: true }
-      head_id:  { type: uuid, posture: allow, fk: people.id, nullable: true }
-      head_name: { type: text, posture: allow, view_join: { table: people, column: full_name, on: head_id } }
+      name: { type: text, posture: allow, gen: department_name }
+      kind: { type: text, posture: allow, nullable: true }
+      head_id: { type: uuid, posture: allow, fk: people.id, nullable: true }
+      head_name:
+        { type: text, posture: allow, view_join: { table: people, column: full_name, on: head_id } }
   people:
     description: Employee directory
     fields:
-      id:                { type: uuid, posture: allow, pk: true }
-      full_name:         { type: text, posture: allow }
-      email:             { type: text, posture: allow }
-      department_name:   { type: text, posture: allow, view_join: { table: departments, column: name, on: department_id } }
+      id: { type: uuid, posture: allow, pk: true }
+      full_name: { type: text, posture: allow }
+      email: { type: text, posture: allow }
+      department_name:
+        {
+          type: text,
+          posture: allow,
+          view_join: { table: departments, column: name, on: department_id },
+        }
       # The deferred side of the people ↔ departments cycle: rows are inserted with this NULL
       # and back-filled once both collections exist, exactly like departments.head_id above.
-      department_id:     { type: uuid, posture: allow, fk: departments.id, nullable: true }
-      home_address:      { type: text, posture: deny }
-      phone:             { type: text, posture: deny }
-      role:              { type: text, posture: allow, nullable: true }
-      job_title:         { type: text, posture: allow, nullable: true }
-      bar_number:        { type: text, posture: deny, nullable: true, gen: bar_number }
-      hire_date:         { type: date, posture: allow, nullable: true }
-      manager_id:        { type: uuid, posture: allow, fk: people.id, nullable: true }
-      manager_name:      { type: text, posture: allow, view_join: { table: people, column: full_name, on: manager_id } }
+      department_id: { type: uuid, posture: allow, fk: departments.id, nullable: true }
+      home_address: { type: text, posture: deny }
+      phone: { type: text, posture: deny }
+      role: { type: text, posture: allow, nullable: true }
+      job_title: { type: text, posture: allow, nullable: true }
+      bar_number: { type: text, posture: deny, nullable: true, gen: bar_number }
+      hire_date: { type: date, posture: allow, nullable: true }
+      manager_id: { type: uuid, posture: allow, fk: people.id, nullable: true }
+      manager_name:
+        {
+          type: text,
+          posture: allow,
+          view_join: { table: people, column: full_name, on: manager_id },
+        }
   salaries:
     description: Compensation records (sensitive)
     fields:
-      id:             { type: uuid,    posture: allow, pk: true }
-      person_id:      { type: uuid,    posture: allow, fk: people.id }
-      person_name:    { type: text,    posture: allow, view_join: { table: people, column: full_name, on: person_id } }
-      job_title:      { type: text,    posture: allow }
-      base_salary:    { type: numeric, posture: allow, min: 60000, max: 220000 }
-      currency:       { type: text,    posture: allow }
-      effective_date: { type: date,    posture: allow }
-      ssn:            { type: text,    posture: deny }
-      bonus:          { type: numeric, posture: allow, min: 0, max: 50000, nullable: true }
-      comp_band:      { type: text,    posture: allow, nullable: true }
+      id: { type: uuid, posture: allow, pk: true }
+      person_id: { type: uuid, posture: allow, fk: people.id }
+      person_name:
+        {
+          type: text,
+          posture: allow,
+          view_join: { table: people, column: full_name, on: person_id },
+        }
+      job_title: { type: text, posture: allow }
+      base_salary: { type: numeric, posture: allow, min: 60000, max: 220000 }
+      currency: { type: text, posture: allow }
+      effective_date: { type: date, posture: allow }
+      ssn: { type: text, posture: deny }
+      bonus: { type: numeric, posture: allow, min: 0, max: 50000, nullable: true }
+      comp_band: { type: text, posture: allow, nullable: true }
   announcements:
     description: Firm announcements
     taxonomies: [department]
     fields:
-      id:         { type: uuid, posture: allow, pk: true }
-      title:      { type: text, posture: allow }
-      summary:    { type: text, posture: allow }
-      owner:      { type: text, posture: allow }
+      id: { type: uuid, posture: allow, pk: true }
+      title: { type: text, posture: allow }
+      summary: { type: text, posture: allow }
+      owner: { type: text, posture: allow }
       updated_at: { type: timestamptz, posture: allow }
   metrics:
     description: Daily business metrics
     fields:
-      id:                { type: uuid, posture: allow, pk: true }
-      date:              { type: date, posture: allow }
-      revenue:           { type: numeric, posture: allow, min: 10000, max: 90000 }
-      active_customers:  { type: int, posture: allow, min: 100, max: 5000 }
-      region:            { type: text, posture: allow }
-      billable_hours:    { type: numeric, posture: allow, min: 500, max: 5000, nullable: true }
-      realization_rate:  { type: numeric, posture: allow, min: 0, max: 1, nullable: true }
+      id: { type: uuid, posture: allow, pk: true }
+      date: { type: date, posture: allow }
+      revenue: { type: numeric, posture: allow, min: 10000, max: 90000 }
+      active_customers: { type: int, posture: allow, min: 100, max: 5000 }
+      region: { type: text, posture: allow }
+      billable_hours: { type: numeric, posture: allow, min: 500, max: 5000, nullable: true }
+      realization_rate: { type: numeric, posture: allow, min: 0, max: 1, nullable: true }
   clients:
     description: Client directory
     fields:
-      id:                     { type: uuid, posture: allow, pk: true }
+      id: { type: uuid, posture: allow, pk: true }
       # Dense, deterministic sequence C-0001..C-0150 — seed documents in seed/case-files-dev
       # reference these slugs by their slugified form (e.g. c-0042), so the sequence must
       # stay dense with no gaps for as many rows as synthetic.documents_per_collection.clients.
-      client_number:          { type: text, posture: allow, gen: client_number }
-      name:                   { type: text, posture: allow, gen: company_name }
-      industry:                { type: text, posture: allow, gen: industry }
-      status:                  { type: text, posture: allow }
-      onboarded_at:            { type: timestamptz, posture: allow }
-      primary_contact_email:   { type: text, posture: allow }
-      billing_address:         { type: text, posture: deny }
-      credit_notes:            { type: text, posture: deny }
+      client_number: { type: text, posture: allow, gen: client_number }
+      name: { type: text, posture: allow, gen: company_name }
+      industry: { type: text, posture: allow, gen: industry }
+      status: { type: text, posture: allow }
+      onboarded_at: { type: timestamptz, posture: allow }
+      primary_contact_email: { type: text, posture: allow }
+      billing_address: { type: text, posture: deny }
+      credit_notes: { type: text, posture: deny }
   matters:
     description: Client matters
     fields:
-      id:                        { type: uuid, posture: allow, pk: true }
-      matter_number:             { type: text, posture: allow, gen: matter_number }
-      client_id:                 { type: uuid, posture: allow, fk: clients.id }
-      client_name:               { type: text, posture: allow, view_join: { table: clients, column: name, on: client_id } }
-      responsible_attorney_id:   { type: uuid, posture: allow, fk: people.id }
-      responsible_attorney_name: { type: text, posture: allow, view_join: { table: people, column: full_name, on: responsible_attorney_id } }
-      originating_attorney_id:   { type: uuid, posture: allow, fk: people.id }
-      originating_attorney_name: { type: text, posture: allow, view_join: { table: people, column: full_name, on: originating_attorney_id } }
-      privileged_notes:          { type: text, posture: deny }
+      id: { type: uuid, posture: allow, pk: true }
+      matter_number: { type: text, posture: allow, gen: matter_number }
+      client_id: { type: uuid, posture: allow, fk: clients.id }
+      client_name:
+        { type: text, posture: allow, view_join: { table: clients, column: name, on: client_id } }
+      responsible_attorney_id: { type: uuid, posture: allow, fk: people.id }
+      responsible_attorney_name:
+        {
+          type: text,
+          posture: allow,
+          view_join: { table: people, column: full_name, on: responsible_attorney_id },
+        }
+      originating_attorney_id: { type: uuid, posture: allow, fk: people.id }
+      originating_attorney_name:
+        {
+          type: text,
+          posture: allow,
+          view_join: { table: people, column: full_name, on: originating_attorney_id },
+        }
+      privileged_notes: { type: text, posture: deny }
   time_entries:
     description: Attorney time entries
     fields:
-      id:          { type: uuid, posture: allow, pk: true }
-      matter_id:   { type: uuid, posture: allow, fk: matters.id }
-      person_id:   { type: uuid, posture: allow, fk: people.id }
-      entry_date:  { type: date, posture: allow }
-      hours:       { type: numeric, posture: allow, min: 0.25, max: 12 }
-      narrative:   { type: text, posture: allow, gen: narrative }
-      billable:    { type: boolean, posture: allow }
+      id: { type: uuid, posture: allow, pk: true }
+      matter_id: { type: uuid, posture: allow, fk: matters.id }
+      person_id: { type: uuid, posture: allow, fk: people.id }
+      entry_date: { type: date, posture: allow }
+      hours: { type: numeric, posture: allow, min: 0.25, max: 12 }
+      narrative: { type: text, posture: allow, gen: narrative }
+      billable: { type: boolean, posture: allow }
   invoices:
     description: Client invoices
     fields:
-      id:              { type: uuid, posture: allow, pk: true }
-      invoice_number:  { type: text, posture: allow, gen: invoice_number }
-      client_id:       { type: uuid, posture: allow, fk: clients.id }
-      matter_id:       { type: uuid, posture: allow, fk: matters.id }
-      amount:          { type: numeric, posture: allow, min: 500, max: 50000 }
-      status:          { type: text, posture: allow }
-      issued_date:     { type: date, posture: allow }
-      due_date:        { type: date, posture: allow }
+      id: { type: uuid, posture: allow, pk: true }
+      invoice_number: { type: text, posture: allow, gen: invoice_number }
+      client_id: { type: uuid, posture: allow, fk: clients.id }
+      matter_id: { type: uuid, posture: allow, fk: matters.id }
+      amount: { type: numeric, posture: allow, min: 500, max: 50000 }
+      status: { type: text, posture: allow }
+      issued_date: { type: date, posture: allow }
+      due_date: { type: date, posture: allow }
   trust_accounts:
     description: Client trust accounts (IOLTA)
     fields:
-      id:              { type: uuid, posture: allow, pk: true }
-      client_id:       { type: uuid, posture: allow, fk: clients.id }
-      account_number:  { type: text, posture: deny }
-      balance:         { type: numeric, posture: allow, min: 0, max: 500000 }
-      currency:        { type: text, posture: allow }
-      opened_date:     { type: date, posture: allow }
+      id: { type: uuid, posture: allow, pk: true }
+      client_id: { type: uuid, posture: allow, fk: clients.id }
+      account_number: { type: text, posture: deny }
+      balance: { type: numeric, posture: allow, min: 0, max: 500000 }
+      currency: { type: text, posture: allow }
+      opened_date: { type: date, posture: allow }
   expenses:
     description: Matter expenses
     fields:
-      id:             { type: uuid, posture: allow, pk: true }
-      matter_id:      { type: uuid, posture: allow, fk: matters.id }
-      category:       { type: text, posture: allow }
-      amount:         { type: numeric, posture: allow, min: 10, max: 5000 }
-      incurred_date:  { type: date, posture: allow }
-      receipt_path:   { type: text, posture: deny }
+      id: { type: uuid, posture: allow, pk: true }
+      matter_id: { type: uuid, posture: allow, fk: matters.id }
+      category: { type: text, posture: allow }
+      amount: { type: numeric, posture: allow, min: 10, max: 5000 }
+      incurred_date: { type: date, posture: allow }
+      receipt_path: { type: text, posture: deny }
   vendors:
     description: Firm vendors
     fields:
-      id:        { type: uuid, posture: allow, pk: true }
-      name:      { type: text, posture: allow, gen: company_name }
-      category:  { type: text, posture: allow }
-      tax_id:    { type: text, posture: deny }
-      active:    { type: boolean, posture: allow }
+      id: { type: uuid, posture: allow, pk: true }
+      name: { type: text, posture: allow, gen: company_name }
+      category: { type: text, posture: allow }
+      tax_id: { type: text, posture: deny }
+      active: { type: boolean, posture: allow }
   conflict_checks:
     description: New-matter conflict checks
     fields:
-      id:            { type: uuid, posture: allow, pk: true }
-      client_id:     { type: uuid, posture: allow, fk: clients.id }
-      requested_by:  { type: uuid, posture: allow, fk: people.id }
-      status:        { type: text, posture: allow }
-      checked_date:  { type: date, posture: allow }
-      notes:         { type: text, posture: deny }
+      id: { type: uuid, posture: allow, pk: true }
+      client_id: { type: uuid, posture: allow, fk: clients.id }
+      requested_by: { type: uuid, posture: allow, fk: people.id }
+      status: { type: text, posture: allow }
+      checked_date: { type: date, posture: allow }
+      notes: { type: text, posture: deny }
   court_deadlines:
     description: Court and filing deadlines
     fields:
-      id:           { type: uuid, posture: allow, pk: true }
-      matter_id:    { type: uuid, posture: allow, fk: matters.id }
-      court_name:   { type: text, posture: allow, gen: court_name }
-      description:  { type: text, posture: allow }
-      due_date:     { type: date, posture: allow }
-      status:       { type: text, posture: allow }
+      id: { type: uuid, posture: allow, pk: true }
+      matter_id: { type: uuid, posture: allow, fk: matters.id }
+      court_name: { type: text, posture: allow, gen: court_name }
+      description: { type: text, posture: allow }
+      due_date: { type: date, posture: allow }
+      status: { type: text, posture: allow }
   performance_reviews:
     description: Employee performance reviews
     fields:
-      id:                 { type: uuid, posture: allow, pk: true }
-      person_id:          { type: uuid, posture: allow, fk: people.id }
-      reviewer_id:        { type: uuid, posture: allow, fk: people.id }
-      review_date:        { type: date, posture: allow }
-      rating:             { type: text, posture: allow }
-      improvement_plan:   { type: text, posture: deny }
+      id: { type: uuid, posture: allow, pk: true }
+      person_id: { type: uuid, posture: allow, fk: people.id }
+      reviewer_id: { type: uuid, posture: allow, fk: people.id }
+      review_date: { type: date, posture: allow }
+      rating: { type: text, posture: allow }
+      improvement_plan: { type: text, posture: deny }
   pto_requests:
     description: PTO requests
     fields:
-      id:          { type: uuid, posture: allow, pk: true }
-      person_id:   { type: uuid, posture: allow, fk: people.id }
-      start_date:  { type: date, posture: allow }
-      end_date:    { type: date, posture: allow }
-      status:      { type: text, posture: allow }
-      reason:      { type: text, posture: deny }
+      id: { type: uuid, posture: allow, pk: true }
+      person_id: { type: uuid, posture: allow, fk: people.id }
+      start_date: { type: date, posture: allow }
+      end_date: { type: date, posture: allow }
+      status: { type: text, posture: allow }
+      reason: { type: text, posture: deny }
   # The one writable collection in the demo — the target of the governed write path. It has no
   # `fk`, so an agent can propose a task without first resolving a matter, and it is absent
   # from `synthetic.documents_per_collection` below because a writable collection's rows come
@@ -217,10 +244,10 @@ collections:
     description: Matter tasks (writable — governed write path)
     writable: true
     fields:
-      id:         { type: uuid, posture: allow, pk: true }
-      title:      { type: text, posture: { read: allow, write: allow } }
-      notes:      { type: text, posture: { read: allow, write: allow } }
-      assignee:   { type: text, posture: { read: allow, write: allow } }
+      id: { type: uuid, posture: allow, pk: true }
+      title: { type: text, posture: { read: allow, write: allow } }
+      notes: { type: text, posture: { read: allow, write: allow } }
+      assignee: { type: text, posture: { read: allow, write: allow } }
       created_at: { type: timestamptz, posture: allow }
   policies:
     type: file
@@ -229,11 +256,11 @@ collections:
     source: ./seed/docs-dev
     source_live: ./seed/docs-live
     fields:
-      title:       { posture: allow }
-      content:     { posture: allow }
-      owner:       { posture: allow }
-      updated_at:  { posture: allow }
-      path:        { posture: deny }
+      title: { posture: allow }
+      content: { posture: allow }
+      owner: { posture: allow }
+      updated_at: { posture: allow }
+      path: { posture: deny }
       review_date: { type: date, posture: allow }
   case_files:
     type: file
@@ -242,15 +269,15 @@ collections:
     source: ./seed/case-files-dev
     source_live: ./seed/case-files-live
     fields:
-      title:            { posture: allow }
-      content:          { posture: allow }
-      owner:            { posture: allow }
-      updated_at:       { posture: allow }
-      path:             { posture: deny }
-      matter_number:    { type: text, posture: allow }
-      document_type:    { type: text, posture: allow }
-      confidentiality:  { type: text, posture: allow }
-      filed_date:       { type: date, posture: allow }
+      title: { posture: allow }
+      content: { posture: allow }
+      owner: { posture: allow }
+      updated_at: { posture: allow }
+      path: { posture: deny }
+      matter_number: { type: text, posture: allow }
+      document_type: { type: text, posture: allow }
+      confidentiality: { type: text, posture: allow }
+      filed_date: { type: date, posture: allow }
   precedents:
     type: file
     description: Precedent templates and prior work product (searchable)
@@ -258,13 +285,13 @@ collections:
     source: ./seed/precedents-dev
     source_live: ./seed/precedents-live
     fields:
-      title:          { posture: allow }
-      content:        { posture: allow }
-      owner:          { posture: allow }
-      updated_at:     { posture: allow }
-      path:           { posture: deny }
-      jurisdiction:   { type: text, posture: allow }
-      last_reviewed:  { type: date, posture: allow }
+      title: { posture: allow }
+      content: { posture: allow }
+      owner: { posture: allow }
+      updated_at: { posture: allow }
+      path: { posture: deny }
+      jurisdiction: { type: text, posture: allow }
+      last_reviewed: { type: date, posture: allow }
 synthetic:
   documents_per_collection:
     clients: 150

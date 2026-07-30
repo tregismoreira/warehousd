@@ -1,7 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { as, signOut } from "./helpers/auth";
 
-test("request → approve with trimmed fields → revoke, all through the UI", async ({ page, context }) => {
+test("request → approve with trimmed fields → revoke, all through the UI", async ({
+  page,
+  context,
+}) => {
   // Ensure we're on the dev environment by clearing the env cookie.
   await context.clearCookies({ name: "wh_env" });
 

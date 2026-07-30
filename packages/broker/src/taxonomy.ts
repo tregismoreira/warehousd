@@ -28,7 +28,11 @@ export type TaxonomyBinding = {
  *
  * Called after data exists (after generateSynthetic or seedLive) and before indexing.
  */
-export async function syncDatasetTerms(db: Pool, cfg: WarehousdConfig, env: "dev" | "live"): Promise<void> {
+export async function syncDatasetTerms(
+  db: Pool,
+  cfg: WarehousdConfig,
+  env: "dev" | "live",
+): Promise<void> {
   const schema = env === "dev" ? "data_synth" : "data_live";
 
   for (const [vocabSlug, vocab] of Object.entries(cfg.taxonomies ?? {})) {
@@ -38,10 +42,13 @@ export async function syncDatasetTerms(db: Pool, cfg: WarehousdConfig, env: "dev
     if (!srcCollection || srcCollection.type !== "dataset") continue;
 
     // Get or create vocabulary
-    const vid = (await db.query(
-      `insert into app.vocabularies (slug, label) values ($1,$2)
+    const vid = (
+      await db.query(
+        `insert into app.vocabularies (slug, label) values ($1,$2)
        on conflict (slug) do update set label=excluded.label returning id`,
-      [vocabSlug, vocab.label])).rows[0].id;
+        [vocabSlug, vocab.label],
+      )
+    ).rows[0].id;
 
     // Slugify and upsert terms from the dataset. Every interpolated identifier is re-checked
     // here rather than trusted: ConfigSchema proves these name real fields on a real collection,
@@ -51,9 +58,12 @@ export async function syncDatasetTerms(db: Pool, cfg: WarehousdConfig, env: "dev
     for (const id of [src.collection, src.slug, src.label])
       if (!IDENT.test(id)) throw new Error(`vocabulary "${vocabSlug}": unsafe identifier "${id}"`);
 
-    const rows = (await db.query(
-      `select distinct "${src.slug}" as slug, "${src.label}" as label
-       from ${schema}."${src.collection}" where "${src.slug}" is not null`)).rows;
+    const rows = (
+      await db.query(
+        `select distinct "${src.slug}" as slug, "${src.label}" as label
+       from ${schema}."${src.collection}" where "${src.slug}" is not null`,
+      )
+    ).rows;
 
     // Two source rows can slugify to the same term ("Acme, Inc." and "Acme Inc" both give
     // `acme-inc`), and the upsert would quietly fold them into one — which silently widens
@@ -63,17 +73,22 @@ export async function syncDatasetTerms(db: Pool, cfg: WarehousdConfig, env: "dev
     for (const row of rows) {
       const slug = slugify(row.slug);
       if (!slug)
-        throw new Error(`vocabulary "${vocabSlug}": ${src.collection}.${src.slug} value `
-          + `"${row.slug}" has no slug-safe characters`);
+        throw new Error(
+          `vocabulary "${vocabSlug}": ${src.collection}.${src.slug} value ` +
+            `"${row.slug}" has no slug-safe characters`,
+        );
       const clash = seen.get(slug);
       if (clash !== undefined && clash !== row.slug)
-        throw new Error(`vocabulary "${vocabSlug}": ${src.collection}.${src.slug} values `
-          + `"${clash}" and "${row.slug}" both slugify to "${slug}"`);
+        throw new Error(
+          `vocabulary "${vocabSlug}": ${src.collection}.${src.slug} values ` +
+            `"${clash}" and "${row.slug}" both slugify to "${slug}"`,
+        );
       seen.set(slug, row.slug);
       await db.query(
         `insert into app.terms (vocabulary_id, env, slug, label) values ($1,$2,$3,$4)
          on conflict (vocabulary_id, env, slug) do update set label=excluded.label`,
-        [vid, env, slug, row.label]);
+        [vid, env, slug, row.label],
+      );
     }
   }
 }
@@ -83,7 +98,10 @@ export async function syncDatasetTerms(db: Pool, cfg: WarehousdConfig, env: "dev
  * Returns one entry per bound vocabulary, with slugs from app.terms for the given env.
  */
 export async function loadTaxonomyBindings(
-  db: Pool, cfg: WarehousdConfig, collection: string, env: "dev" | "live",
+  db: Pool,
+  cfg: WarehousdConfig,
+  collection: string,
+  env: "dev" | "live",
 ): Promise<TaxonomyBinding[]> {
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
@@ -95,18 +113,20 @@ export async function loadTaxonomyBindings(
     if (!vocab) throw new Error(`Unknown vocabulary: ${vocabSlug}`);
 
     // Get vocabulary ID
-    const vidRow = (await db.query(
-      `select id from app.vocabularies where slug=$1`,
-      [vocabSlug])).rows[0];
+    const vidRow = (await db.query(`select id from app.vocabularies where slug=$1`, [vocabSlug]))
+      .rows[0];
 
     if (!vidRow) throw new Error(`Vocabulary not found in database: ${vocabSlug}`);
 
     // Load terms for this env
     // YAML vocabularies have env='all', dataset-sourced have env='dev' or 'live'
-    const termEnv = vocab.terms ? 'all' : env;
-    const termRows = (await db.query<{ slug: string; label: string | null }>(
-      `select slug, label from app.terms where vocabulary_id=$1 and env=$2 order by slug`,
-      [vidRow.id, termEnv])).rows;
+    const termEnv = vocab.terms ? "all" : env;
+    const termRows = (
+      await db.query<{ slug: string; label: string | null }>(
+        `select slug, label from app.terms where vocabulary_id=$1 and env=$2 order by slug`,
+        [vidRow.id, termEnv],
+      )
+    ).rows;
     const terms = termRows.map((r) => ({ slug: r.slug, label: r.label ?? r.slug }));
 
     bindings.push({
@@ -129,6 +149,6 @@ export function slugify(input: string): string {
   return input
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }

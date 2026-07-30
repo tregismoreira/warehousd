@@ -15,7 +15,7 @@ it("selects only granted fields, parameterizes filter values, caps limit", () =>
   expect(text).toContain(`from data_synth.v_people`);
   expect(text).toMatch(/select\s+"id",\s+"email"/i);
   expect(text).not.toContain("home_address");
-  expect(text).toContain("limit 500");           // MAX_LIMIT
+  expect(text).toContain("limit 500"); // MAX_LIMIT
   expect(values).toEqual(["%@x"]);
 });
 
@@ -34,7 +34,8 @@ it("builds aggregate + groupBy expressions", () => {
 
 it("expands `in` operator to a parameter list", () => {
   const intent: QueryIntent = {
-    collection: "people", fields: ["id"],
+    collection: "people",
+    fields: ["id"],
     filters: [{ field: "id", op: "in", value: ["a", "b", "c"] }],
   };
   const { text, values } = buildSelect("dev", intent, ["id"]);
@@ -43,51 +44,59 @@ it("expands `in` operator to a parameter list", () => {
 });
 
 it("ANDs documentFilters into where with parameterized values", () => {
-  const { text, values } = buildSelect("dev", { collection: "policies", fields: ["title"] },
-    ["title", "content"], { documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md", "hr/benefits.md"] }] });
+  const { text, values } = buildSelect(
+    "dev",
+    { collection: "policies", fields: ["title"] },
+    ["title", "content"],
+    { documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md", "hr/benefits.md"] }] },
+  );
   expect(text).toContain(`"path" in ($1, $2)`);
   expect(values).toEqual(["hr/pto.md", "hr/benefits.md"]);
 });
 
 it("empty in-list compiles to constant false, not a SQL error (design test 8)", () => {
-  const { text } = buildSelect("dev", { collection: "policies", fields: ["title"] },
-    ["title"], { documentFilters: [{ field: "path", op: "in", value: [] }] });
+  const { text } = buildSelect("dev", { collection: "policies", fields: ["title"] }, ["title"], {
+    documentFilters: [{ field: "path", op: "in", value: [] }],
+  });
   expect(text).toContain("false");
   expect(text).not.toContain("in ()");
 });
 
 it("multi-value `in` becomes array overlap, single-value stays `in`", () => {
-  const multi = buildSelect("dev", { collection: "case_files", fields: ["title"] },
-    ["title"], {
-      documentFilters: [{ field: "tags", op: "in", value: ["litigation", "discovery"] }],
-      isMultiValueField: (f) => f === "tags",
-    });
+  const multi = buildSelect("dev", { collection: "case_files", fields: ["title"] }, ["title"], {
+    documentFilters: [{ field: "tags", op: "in", value: ["litigation", "discovery"] }],
+    isMultiValueField: (f) => f === "tags",
+  });
   expect(multi.text).toContain(`"tags" && $1::text[]`);
   expect(multi.text).not.toContain(`"tags" in (`);
   expect(multi.values).toEqual([["litigation", "discovery"]]);
 
   // same predicate, non-multi field: the scalar `in` form, one param per value
-  const single = buildSelect("dev", { collection: "case_files", fields: ["title"] },
-    ["title"], { documentFilters: [{ field: "tags", op: "in", value: ["litigation", "discovery"] }] });
+  const single = buildSelect("dev", { collection: "case_files", fields: ["title"] }, ["title"], {
+    documentFilters: [{ field: "tags", op: "in", value: ["litigation", "discovery"] }],
+  });
   expect(single.text).toContain(`"tags" in ($1, $2)`);
 });
 
 it("multi-value `eq` asks whether the value is any() of the column", () => {
-  const { text, values } = buildSelect("dev", { collection: "case_files", fields: ["title"] },
-    ["title"], {
+  const { text, values } = buildSelect(
+    "dev",
+    { collection: "case_files", fields: ["title"] },
+    ["title"],
+    {
       documentFilters: [{ field: "tags", op: "eq", value: "privileged" }],
       isMultiValueField: (f) => f === "tags",
-    });
+    },
+  );
   expect(text).toContain(`= any("tags")`);
   expect(values).toEqual(["privileged"]);
 });
 
 it("an empty multi-value in-list still denies everything (no overlap against empty)", () => {
-  const { text } = buildSelect("dev", { collection: "case_files", fields: ["title"] },
-    ["title"], {
-      documentFilters: [{ field: "tags", op: "in", value: [] }],
-      isMultiValueField: (f) => f === "tags",
-    });
+  const { text } = buildSelect("dev", { collection: "case_files", fields: ["title"] }, ["title"], {
+    documentFilters: [{ field: "tags", op: "in", value: [] }],
+    isMultiValueField: (f) => f === "tags",
+  });
   expect(text).toContain("false");
   expect(text).not.toContain("&&");
 });
@@ -99,12 +108,12 @@ it("an empty multi-value in-list still denies everything (no overlap against emp
 // fragment parsed and the subquery ran on the data pool.
 describe("no intent value reaches SQL as syntax", () => {
   // The literal payload from the audit. Kept verbatim: a paraphrase stops being the regression.
-  const INJECTED_FN =
-    "count(id) as z, (select current_setting('is_superuser')) as leak, count";
+  const INJECTED_FN = "count(id) as z, (select current_setting('is_superuser')) as leak, count";
 
   it("rejects an injected aggregate fn at the schema", () => {
     const r = QueryIntentSchema.safeParse({
-      collection: "salaries", aggregate: [{ fn: INJECTED_FN, field: "base_salary" }],
+      collection: "salaries",
+      aggregate: [{ fn: INJECTED_FN, field: "base_salary" }],
     });
     expect(r.success).toBe(false);
   });
@@ -113,17 +122,23 @@ describe("no intent value reaches SQL as syntax", () => {
     // buildSelect is reachable from getDocument/searchDocuments with broker-built intents, so it
     // owns this rule independently of whoever validated upstream.
     const intent = {
-      collection: "salaries", aggregate: [{ fn: INJECTED_FN, field: "base_salary" }],
+      collection: "salaries",
+      aggregate: [{ fn: INJECTED_FN, field: "base_salary" }],
     } as unknown as QueryIntent;
     expect(() => buildSelect("live", intent, ["base_salary"])).toThrow(UnsupportedFilter);
   });
 
   it("does not carry an injected fn into the SELECT list or the column alias", () => {
     const intent = {
-      collection: "salaries", aggregate: [{ fn: INJECTED_FN, field: "base_salary" }],
+      collection: "salaries",
+      aggregate: [{ fn: INJECTED_FN, field: "base_salary" }],
     } as unknown as QueryIntent;
     let text = "";
-    try { text = buildSelect("live", intent, ["base_salary"]).text; } catch { /* expected */ }
+    try {
+      text = buildSelect("live", intent, ["base_salary"]).text;
+    } catch {
+      /* expected */
+    }
     expect(text).not.toContain("current_setting");
     expect(text).not.toContain("as leak");
   });
@@ -134,7 +149,8 @@ describe("no intent value reaches SQL as syntax", () => {
   it("refuses a prototype-chain operator name rather than interpolating it", () => {
     for (const op of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
       const intent = {
-        collection: "people", fields: ["id"],
+        collection: "people",
+        fields: ["id"],
         filters: [{ field: "id", op, value: "x" }],
       } as unknown as QueryIntent;
       expect(() => buildSelect("dev", intent, ["id"]), op).toThrow(UnsupportedFilter);
@@ -143,9 +159,11 @@ describe("no intent value reaches SQL as syntax", () => {
 
   it("still builds every legitimate aggregate function", () => {
     for (const fn of ["avg", "sum", "count", "min", "max"] as const) {
-      const { text } = buildSelect("live",
+      const { text } = buildSelect(
+        "live",
         { collection: "salaries", aggregate: [{ fn, field: "base_salary" }] },
-        ["base_salary"]);
+        ["base_salary"],
+      );
       // The alias the broker reports as fieldsReturned is `<fn>_<field>` — unchanged.
       expect(text).toContain(`${fn}("base_salary") as "${fn}_base_salary"`);
     }
@@ -158,9 +176,12 @@ describe("no intent value reaches SQL as syntax", () => {
 // caller's bad input into a 500.
 describe("limit is type-checked at the schema and clamped by the builder", () => {
   it.each([
-    ["a string", "abc"], ["a float", 2.5],
-    ["NaN", Number.NaN], ["Infinity", Number.POSITIVE_INFINITY],
-    ["null", null], ["an object", {}],
+    ["a string", "abc"],
+    ["a float", 2.5],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["null", null],
+    ["an object", {}],
   ])("rejects a limit that is not an integer: %s", (_label, limit) => {
     expect(QueryIntentSchema.safeParse({ collection: "people", limit }).success).toBe(false);
   });
@@ -187,7 +208,10 @@ describe("limit is type-checked at the schema and clamped by the builder", () =>
 // value has no code path that reads it. See the note at the top of intents/schema.ts.
 it("ignores an unknown key rather than refusing the intent", () => {
   const parsed = QueryIntentSchema.safeParse({
-    collection: "people", fields: ["id"], env: "live", userId: "someone-else",
+    collection: "people",
+    fields: ["id"],
+    env: "live",
+    userId: "someone-else",
   });
   expect(parsed.success).toBe(true);
   expect(parsed.data).toEqual({ collection: "people", fields: ["id"] });

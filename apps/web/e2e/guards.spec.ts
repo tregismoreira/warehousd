@@ -34,14 +34,23 @@ test.describe("role-scoped surfaces", () => {
   test("an admin reaches every surface", async ({ page }) => {
     await as(page, "admin");
     await expect(page).toHaveURL(/\/admin$/);
-    for (const path of ["/admin/collections", "/admin/users", "/admin/clients",
-                        "/admin/sso", "/admin/audit", "/admin/import"]) {
+    for (const path of [
+      "/admin/collections",
+      "/admin/users",
+      "/admin/clients",
+      "/admin/sso",
+      "/admin/audit",
+      "/admin/import",
+    ]) {
       await page.goto(path, { waitUntil: "domcontentloaded" });
       await expect(page).not.toHaveURL(/\/403$/);
     }
   });
 
-  test("an unauthenticated visitor is sent to login from every surface", async ({ page, context }) => {
+  test("an unauthenticated visitor is sent to login from every surface", async ({
+    page,
+    context,
+  }) => {
     await context.clearCookies();
     for (const path of ["/", "/admin", "/manager", "/member"]) {
       await page.goto(path);
@@ -52,7 +61,9 @@ test.describe("role-scoped surfaces", () => {
   test("the env switcher persists across a reload", async ({ page }) => {
     await as(page, "admin");
     const liveBtn = page.getByRole("group", { name: "Environment" }).getByText("live");
-    const envResponse = page.waitForResponse((r) => r.url().endsWith("/api/env") && r.request().method() === "POST");
+    const envResponse = page.waitForResponse(
+      (r) => r.url().endsWith("/api/env") && r.request().method() === "POST",
+    );
     await liveBtn.click();
     await envResponse;
     await page.reload();

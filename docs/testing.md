@@ -11,7 +11,10 @@ change enforcement, the pull request must carry a test that fails without it.
 | Command | What it runs | Needs |
 |---|---|---|
 | `pnpm lint` | ESLint, including the rule that keeps `packages/broker` free of HTTP/MCP/UI/LLM imports | — |
+| `pnpm typecheck` | `tsc` over four projects: `src`, `test`, `e2e` and `scripts` | — |
+| `pnpm format:check` | Prettier, code only — prose is out of scope (see `.prettierignore`) | — |
 | `pnpm test` | Vitest: broker unit + integration, CLI, and web route/integration tests | Postgres |
+| `pnpm test:coverage` | `pnpm test` with coverage merged across both passes, checked against a floor | Postgres |
 | `pnpm build` | Production build and full typecheck | — |
 | `pnpm e2e` | Playwright against a real browser: every web surface | Postgres |
 | `pnpm test:e2e:cli` | The built CLI driving real Docker containers end to end | Docker |
@@ -24,6 +27,8 @@ for the SSO suite); `pnpm test:down` tears it down with its volume.
 ```bash
 pnpm test:up
 pnpm lint
+pnpm typecheck
+pnpm format:check
 WAREHOUSD_PROJECT_DIR=examples/harbor pnpm test
 pnpm build
 pnpm e2e
@@ -92,10 +97,46 @@ Postgres *cluster* rather than to their own database:
 Adding a suite that asserts on roles, transaction ids, or anything else outside its own
 database means adding it to `SERIAL_TESTS` in `vitest.config.ts`.
 
-**`pnpm test` does not typecheck.** Vitest transpiles without checking, so type
-errors sit undetected while every test passes. `pnpm build` is what catches them;
-`npx tsc --noEmit -p apps/web/tsconfig.json` lists them all at once, where
-`next build` reports only the first.
+**`pnpm test` does not typecheck** — vitest transpiles without checking, so a type
+error sits undetected while every test passes. `pnpm typecheck` is what catches
+it, and it covers more than `pnpm build` does: `scripts/typecheck.ts` runs `tsc`
+over four projects, adding `test/`, `e2e/` and `scripts/` to the `src` that
+`next build` and the broker's own build already cover. Those directories were
+inside no program at all until then — 436 type errors and four latent bugs were
+sitting behind a green suite, including three imports that resolved to
+`undefined` at runtime and a Jest-ism (`expect(x).toBe(0, "message")`) whose
+message vitest silently discarded.
+
+Not `tsc -b`: build mode requires every project to be `composite`, and composite
+forbids `noEmit`. Three of the four exist only to be checked.
+
+### Per-run databases are swept, not leaked
+
+Each test file provisions its own database — `wh_<label>_<checkout-suffix>_<pid>`,
+cloned from a template — and its `afterAll` drops it. That covers the happy path
+only: an interrupted run, a killed worker, an OOM, or a `beforeAll` that throws
+after `provision()` returned all leave the database behind. Nothing collected
+them, so they accumulated across every run anyone had ever done. Measured once:
+**218 databases, of which 211 were abandoned clones holding 1.68 GB**, with idle
+autovacuum on them costing the container ~27% CPU — 0.06% after dropping them.
+
+`vitest.global-setup.ts` now sweeps at both ends. `teardown()` handles the
+ordinary case including a suite that threw; `setup()` sweeps *before* the run,
+because teardown cannot run at all if the run was killed, and that is what makes
+the leak self-healing rather than dependent on remembering a command.
+
+Two things bound the sweep, and both matter:
+
+- **The checkout suffix is in the clone name.** Sibling workspaces share this
+  Postgres, so "drop every `wh_%` that is not a template" would destroy another
+  workspace's in-flight databases. The suffix is what makes a sweep addressable
+  to one checkout. Templates are excluded by name as well as by pattern.
+- **A live owning pid is skipped.** The suffix scopes to a checkout, not to a
+  process, and `pnpm test` is two vitest passes with nothing stopping a third run
+  overlapping. The trailing pid in the name is checked for liveness first.
+
+`pnpm test:clean` does the same sweep by hand. It is the least important part of
+this: a cleanup command nobody remembers to run is how it reached 211.
 
 The Keycloak suite is gated behind `WAREHOUSD_E2E_KEYCLOAK`, so a default
 `pnpm test` run never needs a container beyond Postgres. `pnpm test:e2e:cli`

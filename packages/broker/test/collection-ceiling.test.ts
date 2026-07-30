@@ -3,13 +3,17 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { loadActiveGrant } from "../src/grants/eval";
-import { loadConfig, ConfigSchema } from "../src/config/schema";
+import { ConfigSchema } from "../src/config/schema";
 import { applyConfig } from "../src/apply/apply";
 import { createPools, makeBroker } from "../src/index";
 import type { BrokerContext } from "../src/types";
+import { makeCtx } from "./helpers/ctx";
+import { assertListing } from "./helpers/results";
 
 let p: Provisioned;
-afterAll(async () => { await p?.end(); });
+afterAll(async () => {
+  await p?.end();
+});
 
 describe("collection ceiling", () => {
   it("user with grant on collection outside ceiling is refused through that client", async () => {
@@ -20,8 +24,14 @@ describe("collection ceiling", () => {
     const config = ConfigSchema.parse({
       project: "test",
       collections: {
-        campaigns: { description: "Campaigns", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
-        salaries: { description: "Salaries", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
+        campaigns: {
+          description: "Campaigns",
+          fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+        },
+        salaries: {
+          description: "Salaries",
+          fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+        },
       },
     });
     await applyConfig(db, config);
@@ -31,24 +41,34 @@ describe("collection ceiling", () => {
       `insert into app.grants
          (user_id, collection, env, status, org_id, verbs, mode)
        values ($1, $2, $3, $4, $5, $6, $7)`,
-      ["user1", "salaries", "dev", "approved", "default", ["read"], "direct"]);
+      ["user1", "salaries", "dev", "approved", "default", ["read"], "direct"],
+    );
 
     // Set the client policy ceiling to only campaigns (not salaries)
     await db.query(
       `insert into app.client_policies (client_id, allowed_collections, org_id)
        values ($1, $2, $3)`,
-      ["client1", ["campaigns"], "default"]);
+      ["client1", ["campaigns"], "default"],
+    );
 
     // Without ceiling, user has grant on salaries
-    let grant = await loadActiveGrant(db, { userId: "user1", env: "dev", orgId: "default" }, "salaries");
+    let grant = await loadActiveGrant(db, makeCtx({ userId: "user1" }), "salaries");
     expect(grant).not.toBeNull();
 
     // With ceiling excluding salaries, user is refused (returns null)
-    grant = await loadActiveGrant(db, { userId: "user1", env: "dev", orgId: "default", allowedCollections: ["campaigns"] }, "salaries");
+    grant = await loadActiveGrant(
+      db,
+      { userId: "user1", env: "dev", orgId: "default", allowedCollections: ["campaigns"] },
+      "salaries",
+    );
     expect(grant).toBeNull();
 
     // With ceiling including salaries, user still has the grant
-    grant = await loadActiveGrant(db, { userId: "user1", env: "dev", orgId: "default", allowedCollections: ["salaries"] }, "salaries");
+    grant = await loadActiveGrant(
+      db,
+      { userId: "user1", env: "dev", orgId: "default", allowedCollections: ["salaries"] },
+      "salaries",
+    );
     expect(grant).not.toBeNull();
 
     await db.end();
@@ -62,14 +82,20 @@ describe("collection ceiling", () => {
     const config = ConfigSchema.parse({
       project: "test",
       collections: {
-        campaigns: { description: "Campaigns", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
-        salaries: { description: "Salaries", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
+        campaigns: {
+          description: "Campaigns",
+          fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+        },
+        salaries: {
+          description: "Salaries",
+          fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+        },
       },
     });
     await applyConfig(db, config);
 
     // No grant at all
-    let grant = await loadActiveGrant(db, { userId: "user2", env: "dev", orgId: "default" }, "salaries");
+    let grant = await loadActiveGrant(db, makeCtx({ userId: "user2" }), "salaries");
     expect(grant).toBeNull();
 
     // Grant exists but ceiling excludes it
@@ -77,9 +103,14 @@ describe("collection ceiling", () => {
       `insert into app.grants
          (user_id, collection, env, status, org_id, verbs, mode)
        values ($1, $2, $3, $4, $5, $6, $7)`,
-      ["user2", "salaries", "dev", "approved", "default", ["read"], "direct"]);
+      ["user2", "salaries", "dev", "approved", "default", ["read"], "direct"],
+    );
 
-    grant = await loadActiveGrant(db, { userId: "user2", env: "dev", orgId: "default", allowedCollections: ["campaigns"] }, "salaries");
+    grant = await loadActiveGrant(
+      db,
+      { userId: "user2", env: "dev", orgId: "default", allowedCollections: ["campaigns"] },
+      "salaries",
+    );
     expect(grant).toBeNull(); // Same result as no grant
 
     await db.end();
@@ -93,8 +124,14 @@ describe("collection ceiling", () => {
     const config = ConfigSchema.parse({
       project: "test",
       collections: {
-        campaigns: { description: "Campaigns", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
-        salaries: { description: "Salaries", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
+        campaigns: {
+          description: "Campaigns",
+          fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+        },
+        salaries: {
+          description: "Salaries",
+          fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+        },
       },
     });
     await applyConfig(db, config);
@@ -104,14 +141,33 @@ describe("collection ceiling", () => {
       `insert into app.grants
          (user_id, collection, env, status, org_id, verbs, mode)
        values ($1, $2, $3, $4, $5, $6, $7)`,
-      ["user3", "campaigns", "dev", "approved", "default", ["read"], "direct"]);
+      ["user3", "campaigns", "dev", "approved", "default", ["read"], "direct"],
+    );
 
     // Even if ceiling allows salaries, user still can't access it (no grant)
-    let grant = await loadActiveGrant(db, { userId: "user3", env: "dev", orgId: "default", allowedCollections: ["salaries", "campaigns"] }, "salaries");
+    let grant = await loadActiveGrant(
+      db,
+      {
+        userId: "user3",
+        env: "dev",
+        orgId: "default",
+        allowedCollections: ["salaries", "campaigns"],
+      },
+      "salaries",
+    );
     expect(grant).toBeNull();
 
     // But can access campaigns which both user and ceiling allow
-    grant = await loadActiveGrant(db, { userId: "user3", env: "dev", orgId: "default", allowedCollections: ["salaries", "campaigns"] }, "campaigns");
+    grant = await loadActiveGrant(
+      db,
+      {
+        userId: "user3",
+        env: "dev",
+        orgId: "default",
+        allowedCollections: ["salaries", "campaigns"],
+      },
+      "campaigns",
+    );
     expect(grant).not.toBeNull();
 
     await db.end();
@@ -125,7 +181,10 @@ describe("collection ceiling", () => {
     const config = ConfigSchema.parse({
       project: "test",
       collections: {
-        campaigns: { description: "Campaigns", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
+        campaigns: {
+          description: "Campaigns",
+          fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+        },
       },
     });
     await applyConfig(db, config);
@@ -135,18 +194,41 @@ describe("collection ceiling", () => {
       `insert into app.grants
          (user_id, collection, env, status, org_id, verbs, mode)
        values ($1, $2, $3, $4, $5, $6, $7)`,
-      ["user4", "campaigns", "dev", "approved", "default", ["read"], "direct"]);
+      ["user4", "campaigns", "dev", "approved", "default", ["read"], "direct"],
+    );
 
     // With null ceiling (no restriction), grant is visible
-    let grant = await loadActiveGrant(db, { userId: "user4", env: "dev", orgId: "default", allowedCollections: null }, "campaigns");
+    let grant = await loadActiveGrant(
+      db,
+      { userId: "user4", env: "dev", orgId: "default", allowedCollections: null },
+      "campaigns",
+    );
     expect(grant).not.toBeNull();
 
-    // With undefined ceiling (also no restriction), grant is visible
-    grant = await loadActiveGrant(db, { userId: "user4", env: "dev", orgId: "default", allowedCollections: undefined }, "campaigns");
+    // With undefined ceiling (also no restriction), grant is visible.
+    //
+    // The cast is the assertion. `allowedCollections` is required and non-undefined on
+    // BrokerContext, so no *typed* caller can reach this — but the resolver guards with `!= null`,
+    // and that guard is what keeps an untyped boundary (a context assembled from a JSON claim set)
+    // from being read as a closed ceiling. Deleting the case would leave the guard untested.
+    grant = await loadActiveGrant(
+      db,
+      {
+        userId: "user4",
+        env: "dev",
+        orgId: "default",
+        allowedCollections: undefined as unknown as null,
+      },
+      "campaigns",
+    );
     expect(grant).not.toBeNull();
 
     // With empty array ceiling, grant is rejected (not in the empty set)
-    grant = await loadActiveGrant(db, { userId: "user4", env: "dev", orgId: "default", allowedCollections: [] }, "campaigns");
+    grant = await loadActiveGrant(
+      db,
+      { userId: "user4", env: "dev", orgId: "default", allowedCollections: [] },
+      "campaigns",
+    );
     expect(grant).toBeNull();
 
     await db.end();
@@ -162,9 +244,18 @@ describe("collection ceiling applies to discovery", () => {
   const config = ConfigSchema.parse({
     project: "test",
     collections: {
-      campaigns: { description: "Campaigns", fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
-      salaries:  { description: "Salaries",  fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
-      policies:  { description: "Policies",  fields: { id: { type: "uuid", pk: true, posture: "allow" } } },
+      campaigns: {
+        description: "Campaigns",
+        fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+      },
+      salaries: {
+        description: "Salaries",
+        fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+      },
+      policies: {
+        description: "Policies",
+        fields: { id: { type: "uuid", pk: true, posture: "allow" } },
+      },
     },
   });
 
@@ -173,18 +264,37 @@ describe("collection ceiling applies to discovery", () => {
     db = new Pool({ connectionString: lp.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, config);
-    pools = createPools({ app: lp.urls.admin, dev: lp.urls.dev, live: lp.urls.live,
-      devWrite: lp.urls.devWrite, liveWrite: lp.urls.liveWrite });
+    pools = createPools({
+      app: lp.urls.admin,
+      dev: lp.urls.dev,
+      live: lp.urls.live,
+      devWrite: lp.urls.devWrite,
+      liveWrite: lp.urls.liveWrite,
+    });
     broker = makeBroker(pools, config);
   }, 60_000);
 
-  afterAll(async () => { await db.end(); await pools.end(); await lp.end(); });
+  afterAll(async () => {
+    await db.end();
+    await pools.end();
+    await lp.end();
+  });
 
+  // `undefined` is spread away rather than assigned, so `ctx(undefined)` produces a context with
+  // the key *absent* — the spelling this suite exists to prove behaves like `null`. Same cast
+  // reasoning as the loadActiveGrant case above.
   const ctx = (allowedCollections?: string[] | null): BrokerContext =>
-    ({ userId: "u", env: "dev", orgId: "default", ...(allowedCollections !== undefined ? { allowedCollections } : {}) });
+    makeCtx({ userId: "u", ...(allowedCollections !== undefined ? { allowedCollections } : {}) });
+
+  // listCollections returns `CollectionListing[] | Refusal`; assertListing is what says which.
+  async function list(c: BrokerContext) {
+    const r = await broker.listCollections(c);
+    assertListing(r);
+    return r;
+  }
 
   it("lists only collections inside the ceiling", async () => {
-    const names = (await broker.listCollections(ctx(["campaigns", "policies"]))).map((c) => c.name);
+    const names = (await list(ctx(["campaigns", "policies"]))).map((c) => c.name);
     expect(names.sort()).toEqual(["campaigns", "policies"]);
   });
 
@@ -203,15 +313,22 @@ describe("collection ceiling applies to discovery", () => {
     // null and absent both mean "unrestricted", matching loadActiveGrant. A ceiling that defaulted
     // to closed here would break every first-party session, which carries no ceiling at all.
     for (const c of [ctx(null), ctx(undefined)])
-      expect((await broker.listCollections(c)).map((x) => x.name).sort())
-        .toEqual(["campaigns", "policies", "salaries"]);
+      expect((await list(c)).map((x) => x.name).sort()).toEqual([
+        "campaigns",
+        "policies",
+        "salaries",
+      ]);
   });
 
   it("still audits the call, ceiling or not", async () => {
     // The ceiling narrows what is returned; it does not make the call unobserved.
-    const before = await db.query(`select count(*)::int as n from app.audit_events where collection = '*'`);
+    const before = await db.query(
+      `select count(*)::int as n from app.audit_events where collection = '*'`,
+    );
     await broker.listCollections(ctx(["campaigns"]));
-    const after = await db.query(`select count(*)::int as n from app.audit_events where collection = '*'`);
+    const after = await db.query(
+      `select count(*)::int as n from app.audit_events where collection = '*'`,
+    );
     expect(after.rows[0].n).toBe(before.rows[0].n + 1);
   });
 });

@@ -14,25 +14,31 @@ beforeAll(async () => {
     fakeIdpServer = createServer((req, res) => {
       if (req.url === "/.well-known/openid-configuration") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({
-          issuer: fakeIdpUrl,
-          authorization_endpoint: `${fakeIdpUrl}/authorize`,
-          token_endpoint: `${fakeIdpUrl}/token`,
-          jwks_uri: `${fakeIdpUrl}/jwks`,
-          userinfo_endpoint: `${fakeIdpUrl}/userinfo`,
-          scopes_supported: ["openid", "profile", "email"],
-        }));
+        res.end(
+          JSON.stringify({
+            issuer: fakeIdpUrl,
+            authorization_endpoint: `${fakeIdpUrl}/authorize`,
+            token_endpoint: `${fakeIdpUrl}/token`,
+            jwks_uri: `${fakeIdpUrl}/jwks`,
+            userinfo_endpoint: `${fakeIdpUrl}/userinfo`,
+            scopes_supported: ["openid", "profile", "email"],
+          }),
+        );
       } else if (req.url === "/jwks") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({
-          keys: [{
-            kty: "RSA",
-            use: "sig",
-            kid: "fake-key-id",
-            n: "test",
-            e: "AQAB",
-          }],
-        }));
+        res.end(
+          JSON.stringify({
+            keys: [
+              {
+                kty: "RSA",
+                use: "sig",
+                kid: "fake-key-id",
+                n: "test",
+                e: "AQAB",
+              },
+            ],
+          }),
+        );
       } else {
         res.writeHead(404);
         res.end();
@@ -70,7 +76,9 @@ function req(url: string, opts: { method?: string; cookie?: string; body?: unkno
   return new Request(`http://localhost:8722${url}`, {
     method: opts.method ?? "GET",
     headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    // Conditional spread, not `body: … : undefined`: under `exactOptionalPropertyTypes` a
+    // present-but-undefined `body` is not the same as an absent one, and RequestInit wants absent.
+    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
   });
 }
 
@@ -78,14 +86,16 @@ describe("SSO Admin Routes", () => {
   describe("POST /api/sso/providers (app-level, registerSSOProvider) — auth gate", () => {
     it("member (mia) cannot register → 403", async () => {
       const { POST } = await import("../app/api/sso/providers/route");
-      const res = await POST(req("/api/sso/providers", {
-        method: "POST",
-        cookie: miaCookie,
-        body: {
-          issuer: fakeIdpUrl,
-          type: "oidc",
-        },
-      }) as any);
+      const res = await POST(
+        req("/api/sso/providers", {
+          method: "POST",
+          cookie: miaCookie,
+          body: {
+            issuer: fakeIdpUrl,
+            type: "oidc",
+          },
+        }) as any,
+      );
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.error).toBe("forbidden");
@@ -93,14 +103,16 @@ describe("SSO Admin Routes", () => {
 
     it("manager (marcus) cannot register → 403", async () => {
       const { POST } = await import("../app/api/sso/providers/route");
-      const res = await POST(req("/api/sso/providers", {
-        method: "POST",
-        cookie: marcusCookie,
-        body: {
-          issuer: fakeIdpUrl,
-          type: "oidc",
-        },
-      }) as any);
+      const res = await POST(
+        req("/api/sso/providers", {
+          method: "POST",
+          cookie: marcusCookie,
+          body: {
+            issuer: fakeIdpUrl,
+            type: "oidc",
+          },
+        }) as any,
+      );
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.error).toBe("forbidden");
@@ -110,9 +122,11 @@ describe("SSO Admin Routes", () => {
   describe("GET /api/sso/providers (app-level)", () => {
     it("manager (marcus) cannot list → 403", async () => {
       const { GET } = await import("../app/api/sso/providers/route");
-      const res = await GET(req("/api/sso/providers", {
-        cookie: marcusCookie,
-      }) as any);
+      const res = await GET(
+        req("/api/sso/providers", {
+          cookie: marcusCookie,
+        }) as any,
+      );
       expect(res.status).toBe(403);
     });
 
@@ -120,9 +134,11 @@ describe("SSO Admin Routes", () => {
       const { GET } = await import("../app/api/sso/providers/route");
 
       // List providers
-      const listRes = await GET(req("/api/sso/providers", {
-        cookie: anaCookie,
-      }) as any);
+      const listRes = await GET(
+        req("/api/sso/providers", {
+          cookie: anaCookie,
+        }) as any,
+      );
       expect(listRes.status).toBe(200);
 
       // Create a new Response to read the body without affecting the clone
@@ -163,16 +179,9 @@ describe("SSO Admin Routes", () => {
       const admin2Id = res.user.id;
 
       // Set role to admin
-      await appPool.query(
-        `set session_replication_role = replica`
-      );
-      await appPool.query(
-        `update app."user" set role='admin' where id=$1`,
-        [admin2Id]
-      );
-      await appPool.query(
-        `set session_replication_role = default`
-      );
+      await appPool.query(`set session_replication_role = replica`);
+      await appPool.query(`update app."user" set role='admin' where id=$1`, [admin2Id]);
+      await appPool.query(`set session_replication_role = default`);
 
       // Sign in as second admin
       const admin2Cookie = await signIn(db.auth, "admin2@test.demo", "demo");
@@ -183,14 +192,16 @@ describe("SSO Admin Routes", () => {
       const id = crypto.randomUUID();
       await appPool.query(
         `insert into app."ssoProvider" (id, "providerId", issuer, domain, "userId", "organizationId") values ($1, $2, $3, $4, $5, $6)`,
-        [id, providerId, fakeIdpUrl, "test.example.com", "ana", null]
+        [id, providerId, fakeIdpUrl, "test.example.com", "ana", null],
       );
 
       // List providers as ana to verify it exists
       const { GET } = await import("../app/api/sso/providers/route");
-      const listRes = await GET(req("/api/sso/providers", {
-        cookie: anaCookie,
-      }) as any);
+      const listRes = await GET(
+        req("/api/sso/providers", {
+          cookie: anaCookie,
+        }) as any,
+      );
       const listBody = await listRes.json();
       expect(listBody.providers.some((p: any) => p.providerId === providerId)).toBe(true);
 
@@ -201,14 +212,16 @@ describe("SSO Admin Routes", () => {
           method: "DELETE",
           cookie: admin2Cookie,
         }) as any,
-        { params: Promise.resolve({ providerId }) }
+        { params: Promise.resolve({ providerId }) },
       );
       expect(deleteRes.status).toBe(200);
 
       // Verify it's deleted
-      const listRes2 = await GET(req("/api/sso/providers", {
-        cookie: anaCookie,
-      }) as any);
+      const listRes2 = await GET(
+        req("/api/sso/providers", {
+          cookie: anaCookie,
+        }) as any,
+      );
       const listBody2 = await listRes2.json();
       expect(listBody2.providers.some((p: any) => p.providerId === providerId)).toBe(false);
 
@@ -219,44 +232,50 @@ describe("SSO Admin Routes", () => {
   describe("Raw Better Auth endpoints (5a: ssoAdminPlugin hook)", () => {
     describe("POST /api/auth/sso/register (raw, via db.auth.handler)", () => {
       it("member (mia) cannot register → 403", async () => {
-        const res = await db.auth.handler(req("/api/auth/sso/register", {
-          method: "POST",
-          cookie: miaCookie,
-          body: {
-            issuer: fakeIdpUrl,
-            type: "oidc",
-          },
-        }));
+        const res = await db.auth.handler(
+          req("/api/auth/sso/register", {
+            method: "POST",
+            cookie: miaCookie,
+            body: {
+              issuer: fakeIdpUrl,
+              type: "oidc",
+            },
+          }),
+        );
         expect(res.status).toBe(403);
       });
 
       it("manager (marcus) cannot register → 403", async () => {
-        const res = await db.auth.handler(req("/api/auth/sso/register", {
-          method: "POST",
-          cookie: marcusCookie,
-          body: {
-            issuer: fakeIdpUrl,
-            type: "oidc",
-          },
-        }));
+        const res = await db.auth.handler(
+          req("/api/auth/sso/register", {
+            method: "POST",
+            cookie: marcusCookie,
+            body: {
+              issuer: fakeIdpUrl,
+              type: "oidc",
+            },
+          }),
+        );
         expect(res.status).toBe(403);
       });
 
       it("admin (ana) can register → succeeds", async () => {
-        const res = await db.auth.handler(req("/api/auth/sso/register", {
-          method: "POST",
-          cookie: anaCookie,
-          body: {
-            providerId: "admin-register-test-provider",
-            issuer: fakeIdpUrl,
-            domain: "test.example.com",
-            oidcConfig: {
-              clientId: "test-client-id",
-              clientSecret: "test-client-secret",
-              discoveryEndpoint: `${fakeIdpUrl}/.well-known/openid-configuration`,
+        const res = await db.auth.handler(
+          req("/api/auth/sso/register", {
+            method: "POST",
+            cookie: anaCookie,
+            body: {
+              providerId: "admin-register-test-provider",
+              issuer: fakeIdpUrl,
+              domain: "test.example.com",
+              oidcConfig: {
+                clientId: "test-client-id",
+                clientSecret: "test-client-secret",
+                discoveryEndpoint: `${fakeIdpUrl}/.well-known/openid-configuration`,
+              },
             },
-          },
-        }));
+          }),
+        );
         expect([200, 201]).toContain(res.status);
         const body = await res.json();
         expect(body.id || body.providerId).toBeDefined();
@@ -265,10 +284,12 @@ describe("SSO Admin Routes", () => {
 
     describe("GET /api/auth/sso/providers (raw, via db.auth.handler)", () => {
       it("manager (marcus) cannot list → 403", async () => {
-        const res = await db.auth.handler(req("/api/auth/sso/providers", {
-          method: "GET",
-          cookie: marcusCookie,
-        }));
+        const res = await db.auth.handler(
+          req("/api/auth/sso/providers", {
+            method: "GET",
+            cookie: marcusCookie,
+          }),
+        );
         expect(res.status).toBe(403);
       });
     });

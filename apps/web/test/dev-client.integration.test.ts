@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb } from "./helpers/web-db";
-import {
-  getClientPolicy, ensureDevClient, getDevClient, DEV_CLIENT_NAME,
-} from "@warehousd/broker";
+import { getClientPolicy, ensureDevClient, getDevClient, DEV_CLIENT_NAME } from "@warehousd/broker";
 import { getAppPool } from "../app/lib/broker";
 
 let db: Awaited<ReturnType<typeof setupWebDb>>;
@@ -23,7 +21,7 @@ describe("ensureDevClient", () => {
 
     const row = await app.query(
       `select "redirectUrls" from app."oauthApplication" where "clientId"=$1`,
-      [client.clientId]
+      [client.clientId],
     );
     expect(row.rowCount).toBe(1);
     // Better Auth reads this as a comma-separated string, not JSON (mcp/authorize.mjs
@@ -44,7 +42,7 @@ describe("ensureDevClient", () => {
     // Verify exactly one row exists with that name
     const check1 = await app.query(
       `select count(*) as cnt from app."oauthApplication" where name=$1`,
-      [DEV_CLIENT_NAME]
+      [DEV_CLIENT_NAME],
     );
     expect(parseInt(check1.rows[0].cnt)).toBe(1);
 
@@ -56,7 +54,7 @@ describe("ensureDevClient", () => {
     // Still exactly one row
     const check2 = await app.query(
       `select count(*) as cnt from app."oauthApplication" where name=$1`,
-      [DEV_CLIENT_NAME]
+      [DEV_CLIENT_NAME],
     );
     expect(parseInt(check2.rows[0].cnt)).toBe(1);
   });
@@ -78,7 +76,9 @@ describe("ensureDevClient", () => {
     const { clientId, clientSecret } = await ensureDevClient(app, null, secret);
 
     const row = await app.query(
-      `select "clientSecret" from app."oauthApplication" where "clientId"=$1`, [clientId]);
+      `select "clientSecret" from app."oauthApplication" where "clientId"=$1`,
+      [clientId],
+    );
     expect(row.rows[0].clientSecret).toBe(secret);
     // The caller that supplied it gets it back, because nothing else can read it out later.
     expect(clientSecret).toBe(secret);
@@ -91,18 +91,21 @@ describe("ensureDevClient", () => {
     const secret = "legacy-rotation-secret";
     const { clientId } = await ensureDevClient(app, null, secret);
     const { createHash } = await import("node:crypto");
-    await app.query(
-      `update app."oauthApplication" set "clientSecret"=$2 where "clientId"=$1`,
-      [clientId, createHash("sha256").update(secret).digest("base64url")]);
+    await app.query(`update app."oauthApplication" set "clientSecret"=$2 where "clientId"=$1`, [
+      clientId,
+      createHash("sha256").update(secret).digest("base64url"),
+    ]);
 
     await ensureDevClient(app, null, secret);
 
     const row = await app.query(
-      `select "clientSecret" from app."oauthApplication" where "clientId"=$1`, [clientId]);
+      `select "clientSecret" from app."oauthApplication" where "clientId"=$1`,
+      [clientId],
+    );
     expect(row.rows[0].clientSecret).toBe(secret);
   });
 
-  it("after ensureDevClient, getClientPolicy returns exactly [\"env:dev\"]", async () => {
+  it('after ensureDevClient, getClientPolicy returns exactly ["env:dev"]', async () => {
     const app = getAppPool();
 
     const client = await ensureDevClient(app, null);

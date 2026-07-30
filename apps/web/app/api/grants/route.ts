@@ -1,6 +1,12 @@
 import { NextRequest } from "next/server";
 import { getAppPool, getConfig } from "../../lib/broker";
-import { approveGrant, denyGrant, revokeGrant, requestGrant, validateGrantRequest } from "@warehousd/broker";
+import {
+  approveGrant,
+  denyGrant,
+  revokeGrant,
+  requestGrant,
+  validateGrantRequest,
+} from "@warehousd/broker";
 import { requireSession, requireRole, atLeast } from "../../../lib/authz";
 import { readEnvCookie, orgOf } from "../../../lib/session";
 import { buildApproval } from "../../../lib/approve";
@@ -14,25 +20,31 @@ export async function GET(req: NextRequest) {
   const org = orgOf(user);
   const mine = await app.query(
     `select * from app.grants where org_id=$1 and user_id=$2 order by requested_at desc`,
-    [org, user.id]);
+    [org, user.id],
+  );
   // The pending queue is approver-only data: it names who asked for what, and why. A member
   // calling this endpoint directly used to receive the whole organisation's queue. It is also
   // org-scoped: a manager approves for their own tenant, never another's.
   const pending = atLeast(user.role, "manager")
     ? await app.query(
-        `select * from app.grants where org_id=$1 and status='pending' order by requested_at desc`, [org])
+        `select * from app.grants where org_id=$1 and status='pending' order by requested_at desc`,
+        [org],
+      )
     : { rows: [] as typeof mine.rows };
 
   const active = atLeast(user.role, "manager")
     ? await app.query(
-        `select * from app.grants where org_id=$1 and status='approved' order by decided_at desc nulls last`, [org])
+        `select * from app.grants where org_id=$1 and status='approved' order by decided_at desc nulls last`,
+        [org],
+      )
     : { rows: [] as typeof mine.rows };
 
-  const enriched = (rows: typeof mine.rows) => rows.map((g) => ({
-    ...g,
-    collectionType: cfg.collections[g.collection]?.type || "dataset",
-    taxonomyFields: cfg.collections[g.collection]?.taxonomies ?? [],
-  }));
+  const enriched = (rows: typeof mine.rows) =>
+    rows.map((g) => ({
+      ...g,
+      collectionType: cfg.collections[g.collection]?.type || "dataset",
+      taxonomyFields: cfg.collections[g.collection]?.taxonomies ?? [],
+    }));
 
   return Response.json({
     mine: enriched(mine.rows),
@@ -56,8 +68,7 @@ export async function POST(req: NextRequest) {
     const { collection, purposeLabel, purposeDetail, fields } = body;
 
     const validation = validateGrantRequest(cfg, collection, purposeLabel, fields);
-    if (!validation.ok)
-      return Response.json({ error: validation.error }, { status: 400 });
+    if (!validation.ok) return Response.json({ error: validation.error }, { status: 400 });
 
     const requestId = await requestGrant(app, {
       userId: user.id,
@@ -81,7 +92,8 @@ export async function POST(req: NextRequest) {
   if (action === "approve") {
     const cur = await app.query(
       `select collection, allowed_fields, status from app.grants where id=$1 and org_id=$2`,
-      [body.id, org]);
+      [body.id, org],
+    );
     const row = cur.rows[0];
     if (!row) return Response.json({ error: "unknown_grant" }, { status: 404 });
     if (row.status !== "pending") return Response.json({ error: "not_pending" }, { status: 409 });
@@ -95,10 +107,16 @@ export async function POST(req: NextRequest) {
     });
     if (!built.ok) return Response.json({ error: built.error }, { status: 400 });
 
-    const approved = await approveGrant(app, cfg, body.id, by, { ...built.opts, verbs: body.verbs, orgId: org });
+    const approved = await approveGrant(app, cfg, body.id, by, {
+      ...built.opts,
+      verbs: body.verbs,
+      orgId: org,
+    });
     if (!approved.ok)
-      return Response.json({ error: approved.error },
-        { status: approved.error === "unknown_grant" ? 404 : 400 });
+      return Response.json(
+        { error: approved.error },
+        { status: approved.error === "unknown_grant" ? 404 : 400 },
+      );
     return Response.json({ ok: true });
   }
   if (action === "deny") {

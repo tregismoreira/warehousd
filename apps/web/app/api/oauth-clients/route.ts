@@ -40,7 +40,8 @@ export async function POST(req: NextRequest) {
   await app.query(
     `insert into app."oauthApplication" ("id","clientId","clientSecret",name,type,"redirectUrls","userId","createdAt","updatedAt")
      values ($1,$2,$3,$4,'web','[]',$5,now(),now())`,
-    [id, clientId, clientSecret, name ?? "Untitled client", guard.user.id]);
+    [id, clientId, clientSecret, name ?? "Untitled client", guard.user.id],
+  );
   await upsertClientPolicy(app, clientId, name ?? null, ["env:dev"]);
 
   // The secret is returned here and never again — GET deliberately omits it.

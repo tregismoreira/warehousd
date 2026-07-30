@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
+import { cookiePair } from "./helpers/cookies";
 import { upsertClientPolicy } from "@warehousd/broker";
 import { getAppPool } from "../app/lib/broker";
 
@@ -96,10 +97,9 @@ afterAll(async () => {
 async function waitForKeycloak(maxAttempts = 60) {
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const res = await fetch(
-        `${REALM_ENDPOINT}/.well-known/openid-configuration`,
-        { signal: AbortSignal.timeout(5000) },
-      );
+      const res = await fetch(`${REALM_ENDPOINT}/.well-known/openid-configuration`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (res.ok) {
         return;
       }
@@ -120,7 +120,7 @@ function parseLoginForm(html: string): { action: string; fields: Record<string, 
   }
 
   const formTag = formTagMatch[0];
-  const formBody = formTagMatch[1];
+  const formBody = formTagMatch[1] ?? "";
 
   // Extract action attribute independently of other attributes
   const actionMatch = formTag.match(/action="([^"]*)"/i);
@@ -136,8 +136,10 @@ function parseLoginForm(html: string): { action: string; fields: Record<string, 
     const inputTag = inputMatch[0];
     const nameMatch = inputTag.match(/name="([^"]*)"/i);
     const valueMatch = inputTag.match(/value="([^"]*)"/i);
-    if (nameMatch && valueMatch) {
-      fields[nameMatch[1]] = valueMatch[1];
+    const name = nameMatch?.[1];
+    const value = valueMatch?.[1];
+    if (name !== undefined && value !== undefined) {
+      fields[name] = value;
     }
   }
 
@@ -202,7 +204,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
 
       // Extract state cookie from Set-Cookie header
       const setCookieHeader = signInRes.headers.get("set-cookie") ?? "";
-      const stateCookie = setCookieHeader.split(";")[0].trim();
+      const stateCookie = cookiePair(setCookieHeader);
 
       // Step 2: Fetch the authorization URL (real HTTP to Keycloak)
       const authRes = await fetch(authorizationUrl, { redirect: "manual" });
@@ -225,7 +227,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
 
       // Extract cookies from login page response (may include AUTH_SESSION_ID, KC_RESTART)
       const loginCookies = loginRes.headers.getSetCookie();
-      const cookiePairs = loginCookies.map((cookie) => cookie.split(";")[0].trim()).join("; ");
+      const cookiePairs = loginCookies.map(cookiePair).join("; ");
       const allCookies = cookiePairs + "; " + stateCookie;
 
       // Step 4: POST credentials to login form
@@ -258,10 +260,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
       );
 
       // Extract session cookie from callback response using proper Set-Cookie parsing
-      const sessionCookie = callbackRes.headers
-        .getSetCookie()
-        .map((c: string) => c.split(";")[0].trim())
-        .join("; ");
+      const sessionCookie = callbackRes.headers.getSetCookie().map(cookiePair).join("; ");
 
       // Step 6: Verify user was created with role='member'
       const userResult = await appPool.query(
@@ -283,9 +282,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
         asResponse: true,
       } as any);
       const { client_id, client_secret } = await reg.json();
-      await upsertClientPolicy(appPool, client_id, "Keycloak Test Client", [
-        "env:dev",
-      ]);
+      await upsertClientPolicy(appPool, client_id, "Keycloak Test Client", ["env:dev"]);
 
       const { verifier, challenge } = pkcePair();
       const { code } = await authorizeAndGetCode(db.auth, {
@@ -335,7 +332,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
 
       // Extract state cookie from Set-Cookie header
       const setCookieHeader = signInRes.headers.get("set-cookie") ?? "";
-      const stateCookie = setCookieHeader.split(";")[0].trim();
+      const stateCookie = cookiePair(setCookieHeader);
 
       // Step 2: Fetch the authorization URL (may return HTML directly or redirect to Keycloak)
       const authRes = await fetch(authorizationUrl, { redirect: "manual" });
@@ -358,7 +355,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
 
       // Extract cookies from login page response
       const loginCookies = loginRes.headers.getSetCookie();
-      const cookiePairs = loginCookies.map((cookie) => cookie.split(";")[0].trim()).join("; ");
+      const cookiePairs = loginCookies.map(cookiePair).join("; ");
       const allCookies = cookiePairs + "; " + stateCookie;
 
       // Step 4: POST credentials to login form (use a different user for SAML vs OIDC)
@@ -402,10 +399,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
 
       // Extract session cookie from ACS response using proper Set-Cookie parsing
       // (ACS endpoint may redirect with session cookie or set it directly)
-      let sessionCookie = acsRes.headers
-        .getSetCookie()
-        .map((c: string) => c.split(";")[0].trim())
-        .join("; ");
+      let sessionCookie = acsRes.headers.getSetCookie().map(cookiePair).join("; ");
 
       // If ACS returns a redirect (e.g., to RelayState/callback), follow it
       if (acsRes.status >= 300 && acsRes.status < 400) {
@@ -413,16 +407,15 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
         if (redirectUrl) {
           // Make absolute URL if relative
           if (!redirectUrl.startsWith("http")) {
-            redirectUrl = "http://localhost:8722" + (redirectUrl.startsWith("/") ? "" : "/") + redirectUrl;
+            redirectUrl =
+              "http://localhost:8722" + (redirectUrl.startsWith("/") ? "" : "/") + redirectUrl;
           }
           const redirectRes = await db.auth.handler(
             new Request(redirectUrl, {
               headers: { cookie: stateCookie },
             }),
           );
-          const redirectCookies = redirectRes.headers
-            .getSetCookie()
-            .map((c: string) => c.split(";")[0].trim());
+          const redirectCookies = redirectRes.headers.getSetCookie().map(cookiePair);
           if (redirectCookies.length > 0) {
             sessionCookie = redirectCookies.join("; ");
           }
@@ -440,7 +433,9 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
       );
 
       if (userResult.rows.length === 0) {
-        throw new Error(`User not created after SAML login. ACS status: ${acsRes.status}, sessionCookie: "${sessionCookie}"`);
+        throw new Error(
+          `User not created after SAML login. ACS status: ${acsRes.status}, sessionCookie: "${sessionCookie}"`,
+        );
       }
 
       expect(userResult.rows).toHaveLength(1);
@@ -457,9 +452,7 @@ describe.skipIf(!process.env.WAREHOUSD_E2E_KEYCLOAK)(
         asResponse: true,
       } as any);
       const { client_id, client_secret } = await reg.json();
-      await upsertClientPolicy(appPool, client_id, "Keycloak SAML Test Client", [
-        "env:dev",
-      ]);
+      await upsertClientPolicy(appPool, client_id, "Keycloak SAML Test Client", ["env:dev"]);
 
       const { verifier, challenge } = pkcePair();
       const { code } = await authorizeAndGetCode(db.auth, {

@@ -6,6 +6,8 @@ import { requestGrant, approveGrant } from "../src/grants/manage";
 import type { BrokerContext } from "../src/types";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
+import { assertPending } from "./helpers/results";
 
 let p: Provisioned, app: Pool, pools: any;
 
@@ -41,17 +43,31 @@ beforeAll(async () => {
   app = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(app);
   await applyConfig(app, cfg);
-  pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live, devWrite: p.urls.devWrite, liveWrite: p.urls.liveWrite });
+  pools = createPools({
+    app: p.urls.admin,
+    dev: p.urls.dev,
+    live: p.urls.live,
+    devWrite: p.urls.devWrite,
+    liveWrite: p.urls.liveWrite,
+  });
   broker = makeBroker(pools, cfg);
 }, 60_000);
 
-afterAll(async () => { await app.end(); await pools.end(); await p.end(); });
+afterAll(async () => {
+  await app.end();
+  await pools.end();
+  await p.end();
+});
 
 describe("broker proposal authorization", () => {
   it("approve without read coverage of proposal fields → field_denied", async () => {
     const proposerGrantId = await requestGrant(app, {
-      userId: "proposer_noread", collection: "sensitive", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "public"],
+      userId: "proposer_noread",
+      collection: "sensitive",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "public"],
     });
     await approveGrant(app, cfg, proposerGrantId, "admin", {
       verbs: ["read", "update"],
@@ -59,8 +75,12 @@ describe("broker proposal authorization", () => {
     });
 
     const approverGrantId = await requestGrant(app, {
-      userId: "approver_noread", collection: "sensitive", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "public"],
+      userId: "approver_noread",
+      collection: "sensitive",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "public"],
     });
     await approveGrant(app, cfg, approverGrantId, "admin", { verbs: ["read", "approve"] });
 
@@ -68,11 +88,12 @@ describe("broker proposal authorization", () => {
     const createRes = await app.query(
       `insert into data_synth.sensitive (org_id, id, public, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'public_val', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
-       returning id`);
+       returning id`,
+    );
     const docId = createRes.rows[0].id;
 
     // Proposer updates a non-secret field
-    const proposerCtx: BrokerContext = { userId: "proposer_noread", env: "dev", orgId: "default" };
+    const proposerCtx: BrokerContext = makeCtx({ userId: "proposer_noread" });
     const propRes = await broker.mutate(proposerCtx, {
       collection: "sensitive",
       op: "update",
@@ -80,18 +101,22 @@ describe("broker proposal authorization", () => {
       values: { public: "updated_public" },
     });
     expect(propRes.ok).toBe(true);
-    if (!propRes.ok) throw new Error("proposal failed");
+    assertPending(propRes);
 
     // Approver tries to approve → should succeed since they have read coverage
-    const approverCtx: BrokerContext = { userId: "approver_noread", env: "dev", orgId: "default" };
+    const approverCtx: BrokerContext = makeCtx({ userId: "approver_noread" });
     const approveRes = await broker.approveProposal(approverCtx, propRes.proposalId);
     expect(approveRes.ok).toBe(true);
   });
 
   it("approve without read coverage of some proposal fields → field_denied", async () => {
     const proposerGrantId = await requestGrant(app, {
-      userId: "proposer_partial", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name", "dept"],
+      userId: "proposer_partial",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name", "dept"],
     });
     await approveGrant(app, cfg, proposerGrantId, "admin", {
       verbs: ["read", "update"],
@@ -99,8 +124,12 @@ describe("broker proposal authorization", () => {
     });
 
     const approverGrantId = await requestGrant(app, {
-      userId: "approver_partial", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name"],
+      userId: "approver_partial",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name"],
     });
     await approveGrant(app, cfg, approverGrantId, "admin", { verbs: ["read", "approve"] });
 
@@ -108,11 +137,12 @@ describe("broker proposal authorization", () => {
     const createRes = await app.query(
       `insert into data_synth.people (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'partial@ex.com', 'Partial', 'HR', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
-       returning id`);
+       returning id`,
+    );
     const docId = createRes.rows[0].id;
 
     // Proposal touches dept field that approver cannot read
-    const proposerCtx: BrokerContext = { userId: "proposer_partial", env: "dev", orgId: "default" };
+    const proposerCtx: BrokerContext = makeCtx({ userId: "proposer_partial" });
     const propRes = await broker.mutate(proposerCtx, {
       collection: "people",
       op: "update",
@@ -120,10 +150,10 @@ describe("broker proposal authorization", () => {
       values: { dept: "Engineering" },
     });
     expect(propRes.ok).toBe(true);
-    if (!propRes.ok) throw new Error("proposal failed");
+    assertPending(propRes);
 
     // Approver tries to approve → should fail with field_denied
-    const approverCtx: BrokerContext = { userId: "approver_partial", env: "dev", orgId: "default" };
+    const approverCtx: BrokerContext = makeCtx({ userId: "approver_partial" });
     const approveRes = await broker.approveProposal(approverCtx, propRes.proposalId);
     expect(approveRes.ok).toBe(false);
     if (!approveRes.ok) {
@@ -133,8 +163,12 @@ describe("broker proposal authorization", () => {
 
   it("approver whose documentFilter excludes the document → not_found", async () => {
     const proposerGrantId = await requestGrant(app, {
-      userId: "proposer_filter", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name", "dept"],
+      userId: "proposer_filter",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name", "dept"],
     });
     await approveGrant(app, cfg, proposerGrantId, "admin", {
       verbs: ["read", "update"],
@@ -142,8 +176,12 @@ describe("broker proposal authorization", () => {
     });
 
     const approverGrantId = await requestGrant(app, {
-      userId: "approver_filter", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name", "dept"],
+      userId: "approver_filter",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name", "dept"],
     });
     await approveGrant(app, cfg, approverGrantId, "admin", {
       verbs: ["read", "approve"],
@@ -154,11 +192,12 @@ describe("broker proposal authorization", () => {
     const createRes = await app.query(
       `insert into data_synth.people (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'filter@ex.com', 'Filter', 'Sales', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
-       returning id`);
+       returning id`,
+    );
     const docId = createRes.rows[0].id;
 
     // Propose change
-    const proposerCtx: BrokerContext = { userId: "proposer_filter", env: "dev", orgId: "default" };
+    const proposerCtx: BrokerContext = makeCtx({ userId: "proposer_filter" });
     const propRes = await broker.mutate(proposerCtx, {
       collection: "people",
       op: "update",
@@ -166,10 +205,10 @@ describe("broker proposal authorization", () => {
       values: { email: "filtered@ex.com" },
     });
     expect(propRes.ok).toBe(true);
-    if (!propRes.ok) throw new Error("proposal failed");
+    assertPending(propRes);
 
     // Approver's filter doesn't match the document
-    const approverCtx: BrokerContext = { userId: "approver_filter", env: "dev", orgId: "default" };
+    const approverCtx: BrokerContext = makeCtx({ userId: "approver_filter" });
     const approveRes = await broker.approveProposal(approverCtx, propRes.proposalId);
     expect(approveRes.ok).toBe(false);
     if (!approveRes.ok) {
@@ -179,8 +218,12 @@ describe("broker proposal authorization", () => {
 
   it("grant without approve verb → verb_denied", async () => {
     const proposerGrantId = await requestGrant(app, {
-      userId: "proposer_noapprove", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name"],
+      userId: "proposer_noapprove",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name"],
     });
     await approveGrant(app, cfg, proposerGrantId, "admin", {
       verbs: ["read", "update"],
@@ -188,8 +231,12 @@ describe("broker proposal authorization", () => {
     });
 
     const nonApproverGrantId = await requestGrant(app, {
-      userId: "non_approver", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name"],
+      userId: "non_approver",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name"],
     });
     await approveGrant(app, cfg, nonApproverGrantId, "admin", { verbs: ["read"] });
 
@@ -197,11 +244,12 @@ describe("broker proposal authorization", () => {
     const createRes = await app.query(
       `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'noapprove@ex.com', 'No Approve', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
-       returning id`);
+       returning id`,
+    );
     const docId = createRes.rows[0].id;
 
     // Propose
-    const proposerCtx: BrokerContext = { userId: "proposer_noapprove", env: "dev", orgId: "default" };
+    const proposerCtx: BrokerContext = makeCtx({ userId: "proposer_noapprove" });
     const propRes = await broker.mutate(proposerCtx, {
       collection: "people",
       op: "update",
@@ -209,10 +257,10 @@ describe("broker proposal authorization", () => {
       values: { email: "noapprove_new@ex.com" },
     });
     expect(propRes.ok).toBe(true);
-    if (!propRes.ok) throw new Error("proposal failed");
+    assertPending(propRes);
 
     // Non-approver tries to approve
-    const noApproveCtx: BrokerContext = { userId: "non_approver", env: "dev", orgId: "default" };
+    const noApproveCtx: BrokerContext = makeCtx({ userId: "non_approver" });
     const approveRes = await broker.approveProposal(noApproveCtx, propRes.proposalId);
     expect(approveRes.ok).toBe(false);
     if (!approveRes.ok) {
@@ -222,8 +270,12 @@ describe("broker proposal authorization", () => {
 
   it("listProposals returns no field values", async () => {
     const proposerGrantId = await requestGrant(app, {
-      userId: "proposer_list", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name"],
+      userId: "proposer_list",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name"],
     });
     await approveGrant(app, cfg, proposerGrantId, "admin", {
       verbs: ["read", "update"],
@@ -231,8 +283,12 @@ describe("broker proposal authorization", () => {
     });
 
     const approverGrantId = await requestGrant(app, {
-      userId: "approver_list", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name"],
+      userId: "approver_list",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name"],
     });
     await approveGrant(app, cfg, approverGrantId, "admin", { verbs: ["read", "approve"] });
 
@@ -240,11 +296,12 @@ describe("broker proposal authorization", () => {
     const createRes = await app.query(
       `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'secret_value@ex.com', 'Secret Name', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
-       returning id`);
+       returning id`,
+    );
     const docId = createRes.rows[0].id;
 
     // Propose a change with a specific value
-    const proposerCtx: BrokerContext = { userId: "proposer_list", env: "dev", orgId: "default" };
+    const proposerCtx: BrokerContext = makeCtx({ userId: "proposer_list" });
     const propRes = await broker.mutate(proposerCtx, {
       collection: "people",
       op: "update",
@@ -254,7 +311,7 @@ describe("broker proposal authorization", () => {
     expect(propRes.ok).toBe(true);
 
     // List proposals
-    const approverCtx: BrokerContext = { userId: "approver_list", env: "dev", orgId: "default" };
+    const approverCtx: BrokerContext = makeCtx({ userId: "approver_list" });
     const listRes = await broker.listProposals(approverCtx, { status: "pending" });
     expect(listRes.ok).toBe(true);
 
@@ -273,8 +330,12 @@ describe("broker proposal authorization", () => {
 
   it("listProposals shows nothing from collection caller cannot read", async () => {
     const proposerGrantId = await requestGrant(app, {
-      userId: "proposer_noread2", collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name"],
+      userId: "proposer_noread2",
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name"],
     });
     await approveGrant(app, cfg, proposerGrantId, "admin", {
       verbs: ["read", "update"],
@@ -282,8 +343,12 @@ describe("broker proposal authorization", () => {
     });
 
     const noReadGrantId = await requestGrant(app, {
-      userId: "no_read_grant", collection: "sensitive", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id"],
+      userId: "no_read_grant",
+      collection: "sensitive",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id"],
     });
     await approveGrant(app, cfg, noReadGrantId, "admin", { verbs: ["create"] });
 
@@ -291,10 +356,11 @@ describe("broker proposal authorization", () => {
     const createRes = await app.query(
       `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'noread@ex.com', 'No Read', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
-       returning id`);
+       returning id`,
+    );
     const docId = createRes.rows[0].id;
 
-    const proposerCtx: BrokerContext = { userId: "proposer_noread2", env: "dev", orgId: "default" };
+    const proposerCtx: BrokerContext = makeCtx({ userId: "proposer_noread2" });
     const propRes = await broker.mutate(proposerCtx, {
       collection: "people",
       op: "update",
@@ -304,7 +370,7 @@ describe("broker proposal authorization", () => {
     expect(propRes.ok).toBe(true);
 
     // User without approval verb lists proposals
-    const noReadCtx: BrokerContext = { userId: "no_read_grant", env: "dev", orgId: "default" };
+    const noReadCtx: BrokerContext = makeCtx({ userId: "no_read_grant" });
     const listRes = await broker.listProposals(noReadCtx);
     expect(listRes.ok).toBe(true);
 
@@ -329,22 +395,31 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
       `insert into data_synth.people
          (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), $1, 'Seed', 'HR', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
-       returning id`, [email]);
+       returning id`,
+      [email],
+    );
     return r.rows[0].id;
   }
 
-  async function grant(userId: string, verbs: string[], mode?: string) {
+  async function grant(userId: string, verbs: string[], mode?: "direct" | "proposal_only") {
     const id = await requestGrant(app, {
-      userId, collection: "people", env: "dev", orgId: "default",
-      purposeLabel: "test", allowedFields: ["id", "email", "name", "dept"],
+      userId,
+      collection: "people",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "name", "dept"],
     });
     await approveGrant(app, cfg, id, "admin", mode ? { verbs, mode } : { verbs });
   }
 
   async function propose(userId: string, docId: string, values: Record<string, unknown>) {
-    const res = await broker.mutate(
-      { userId, env: "dev", orgId: "default" } as BrokerContext,
-      { collection: "people", op: "update", id: docId, values });
+    const res = await broker.mutate({ userId, env: "dev", orgId: "default" } as BrokerContext, {
+      collection: "people",
+      op: "update",
+      id: docId,
+      values,
+    });
     expect(res.ok).toBe(true);
     if (!res.ok || res.status !== "pending") throw new Error("expected a pending proposal");
     return res.proposalId;
@@ -356,7 +431,9 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
     const proposalId = await propose("selfapprover", docId, { name: "Renamed By Me" });
 
     const res = await broker.approveProposal(
-      { userId: "selfapprover", env: "dev", orgId: "default" } as BrokerContext, proposalId);
+      { userId: "selfapprover", env: "dev", orgId: "default" } as BrokerContext,
+      proposalId,
+    );
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error("self-approval succeeded");
     // Not verb_denied: the caller does hold `approve`. Saying "denied" would send them asking
@@ -371,13 +448,18 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
     const proposalId = await propose("selfapprover2", docId, { name: "Should Not Land" });
 
     await broker.approveProposal(
-      { userId: "selfapprover2", env: "dev", orgId: "default" } as BrokerContext, proposalId);
+      { userId: "selfapprover2", env: "dev", orgId: "default" } as BrokerContext,
+      proposalId,
+    );
 
-    const still = await app.query(
-      `select _rev_status from data_synth.people where _rev = $1`, [proposalId]);
+    const still = await app.query(`select _rev_status from data_synth.people where _rev = $1`, [
+      proposalId,
+    ]);
     expect(still.rows[0]._rev_status).toBe("pending");
     const current = await app.query(
-      `select name from data_synth.people where id = $1 and _current`, [docId]);
+      `select name from data_synth.people where id = $1 and _current`,
+      [docId],
+    );
     expect(current.rows[0].name).toBe("Seed");
   });
 
@@ -387,13 +469,16 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
     const proposalId = await propose("selfrejecter", docId, { name: "Withdraw Me" });
 
     const res = await broker.rejectProposal(
-      { userId: "selfrejecter", env: "dev", orgId: "default" } as BrokerContext, proposalId);
+      { userId: "selfrejecter", env: "dev", orgId: "default" } as BrokerContext,
+      proposalId,
+    );
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error("self-rejection succeeded");
     expect(res.reason).toBe("self_approval_denied");
 
-    const still = await app.query(
-      `select _rev_status from data_synth.people where _rev = $1`, [proposalId]);
+    const still = await app.query(`select _rev_status from data_synth.people where _rev = $1`, [
+      proposalId,
+    ]);
     expect(still.rows[0]._rev_status).toBe("pending");
   });
 
@@ -404,10 +489,14 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
     const proposalId = await propose("proposer_fe", docId, { name: "Renamed By Reviewer" });
 
     const res = await broker.approveProposal(
-      { userId: "reviewer_fe", env: "dev", orgId: "default" } as BrokerContext, proposalId);
+      { userId: "reviewer_fe", env: "dev", orgId: "default" } as BrokerContext,
+      proposalId,
+    );
     expect(res.ok).toBe(true);
     const current = await app.query(
-      `select name from data_synth.people where id = $1 and _current`, [docId]);
+      `select name from data_synth.people where id = $1 and _current`,
+      [docId],
+    );
     expect(current.rows[0].name).toBe("Renamed By Reviewer");
   });
 });

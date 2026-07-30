@@ -6,10 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Mono } from "@/components/common/Mono";
 
@@ -35,9 +45,12 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
     if (open && mode === "delegated" && !issuersLoaded) {
       setLoadingIssuers(true);
       fetch("/api/trusted-issuers")
-        .then(r => r.json())
-        .then(data => { setIssuers(data.issuers); setIssuersLoaded(true); })
-        .catch(e => toast.error(`Failed to load issuers: ${e.message}`))
+        .then((r) => r.json())
+        .then((data) => {
+          setIssuers(data.issuers);
+          setIssuersLoaded(true);
+        })
+        .catch((e) => toast.error(`Failed to load issuers: ${e.message}`))
         .finally(() => setLoadingIssuers(false));
     }
   }, [open, mode, issuersLoaded]);
@@ -52,7 +65,9 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
           mode,
           trustedIssuerId: mode === "delegated" ? trustedIssuerId : undefined,
           robotUserId: mode === "headless" ? robotUserId.trim() : undefined,
-          allowedCollections: allowedCollections.trim() ? allowedCollections.split(",").map(c => c.trim()) : null,
+          allowedCollections: allowedCollections.trim()
+            ? allowedCollections.split(",").map((c) => c.trim())
+            : null,
           expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
         }),
       });
@@ -70,26 +85,32 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
     }
   }
 
-  const isValid = name.trim() && mode && (
-    (mode === "delegated" && trustedIssuerId) ||
-    (mode === "headless" && robotUserId.trim())
-  );
+  const isValid =
+    name.trim() &&
+    mode &&
+    ((mode === "delegated" && trustedIssuerId) || (mode === "headless" && robotUserId.trim()));
 
   return (
-    <Dialog open={open} onOpenChange={(v) => {
-      setOpen(v);
-      if (!v) {
-        setCreated(null);
-        setName("");
-        setMode("");
-        setTrustedIssuerId("");
-        setRobotUserId("");
-        setAllowedCollections("");
-        setExpiresAt("");
-      }
-    }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) {
+          setCreated(null);
+          setName("");
+          setMode("");
+          setTrustedIssuerId("");
+          setRobotUserId("");
+          setAllowedCollections("");
+          setExpiresAt("");
+        }
+      }}
+    >
       <DialogTrigger asChild>
-        <Button><Plus size={16} className="mr-2" />New key</Button>
+        <Button>
+          <Plus size={16} className="mr-2" />
+          New key
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-xl">
         {created ? (
@@ -103,39 +124,61 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
             <div className="space-y-3">
               <div>
                 <Label className="text-xs text-muted-foreground">Client ID</Label>
-                <Mono copyable className="text-sm">{created.clientId}</Mono>
+                <Mono copyable className="text-sm">
+                  {created.clientId}
+                </Mono>
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">Secret</Label>
-                <Mono copyable className="text-sm font-bold">{created.secret}</Mono>
+                <Mono copyable className="text-sm font-bold">
+                  {created.secret}
+                </Mono>
               </div>
               <p className="flex items-start gap-2 rounded-md border border-pending/40 p-3 text-xs text-muted-foreground">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0 text-pending" />
                 This secret is <b className="mx-1 font-mono">whd_dev_*</b> by default and can only
-                ever access synthetic data. Rotate to issue a live secret, then ask a manager to promote
-                it if access to live data is needed.
+                ever access synthetic data. Rotate to issue a live secret, then ask a manager to
+                promote it if access to live data is needed.
               </p>
             </div>
-            <DialogFooter><Button onClick={() => setOpen(false)}>Done</Button></DialogFooter>
+            <DialogFooter>
+              <Button onClick={() => setOpen(false)}>Done</Button>
+            </DialogFooter>
           </>
         ) : (
           <>
             <DialogHeader>
               <DialogTitle>New API key</DialogTitle>
               <DialogDescription>
-                Create a credential for programmatic REST API access. Revocation takes effect immediately.
+                Create a credential for programmatic REST API access. Revocation takes effect
+                immediately.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>
-                <Label htmlFor="name">Name <span className="text-destructive">*</span></Label>
-                <Input id="name" placeholder="Data sync job"
-                  value={name} onChange={(e) => setName(e.target.value)} />
+                <Label htmlFor="name">
+                  Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="name"
+                  placeholder="Data sync job"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
               </div>
 
               <div>
-                <Label htmlFor="mode">Mode <span className="text-destructive">*</span></Label>
-                <Select value={mode} onValueChange={(v) => { setMode(v as "delegated" | "headless"); setTrustedIssuerId(""); setRobotUserId(""); }}>
+                <Label htmlFor="mode">
+                  Mode <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={mode}
+                  onValueChange={(v) => {
+                    setMode(v as "delegated" | "headless");
+                    setTrustedIssuerId("");
+                    setRobotUserId("");
+                  }}
+                >
                   <SelectTrigger id="mode">
                     <SelectValue placeholder="Select mode" />
                   </SelectTrigger>
@@ -148,8 +191,14 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
 
               {mode === "delegated" && (
                 <div>
-                  <Label htmlFor="issuer">Trusted issuer <span className="text-destructive">*</span></Label>
-                  <Select value={trustedIssuerId} onValueChange={setTrustedIssuerId} disabled={loadingIssuers}>
+                  <Label htmlFor="issuer">
+                    Trusted issuer <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={trustedIssuerId}
+                    onValueChange={setTrustedIssuerId}
+                    disabled={loadingIssuers}
+                  >
                     <SelectTrigger id="issuer">
                       <SelectValue placeholder={loadingIssuers ? "Loading..." : "Select issuer"} />
                     </SelectTrigger>
@@ -166,27 +215,45 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
 
               {mode === "headless" && (
                 <div>
-                  <Label htmlFor="robotUserId">Robot user ID <span className="text-destructive">*</span></Label>
-                  <Input id="robotUserId" placeholder="service-account-123"
-                    value={robotUserId} onChange={(e) => setRobotUserId(e.target.value)} />
+                  <Label htmlFor="robotUserId">
+                    Robot user ID <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="robotUserId"
+                    placeholder="service-account-123"
+                    value={robotUserId}
+                    onChange={(e) => setRobotUserId(e.target.value)}
+                  />
                 </div>
               )}
 
               <div>
                 <Label htmlFor="collections">Collection ceiling (comma-separated, optional)</Label>
-                <Input id="collections" placeholder="documents, users"
-                  value={allowedCollections} onChange={(e) => setAllowedCollections(e.target.value)} />
+                <Input
+                  id="collections"
+                  placeholder="documents, users"
+                  value={allowedCollections}
+                  onChange={(e) => setAllowedCollections(e.target.value)}
+                />
               </div>
 
               <div>
                 <Label htmlFor="expiresAt">Expiry date (optional)</Label>
-                <Input id="expiresAt" type="date"
-                  value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+                <Input
+                  id="expiresAt"
+                  type="date"
+                  value={expiresAt}
+                  onChange={(e) => setExpiresAt(e.target.value)}
+                />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button disabled={!isValid} onClick={submit}>Create</Button>
+              <Button variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button disabled={!isValid} onClick={submit}>
+                Create
+              </Button>
             </DialogFooter>
           </>
         )}

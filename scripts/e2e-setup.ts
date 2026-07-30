@@ -8,7 +8,9 @@ const ADMIN = "postgres://postgres:postgres@127.0.0.1:54330/postgres";
 // Sibling checkouts share one Postgres container, so a fixed database name means two
 // concurrent `pnpm e2e` runs drop and recreate each other's data mid-suite. Scope the name to
 // the workspace directory. `apps/web/playwright.config.ts` derives the same slug.
-const SLUG = basename(resolve(__dirname, "..")).toLowerCase().replace(/[^a-z0-9_]/g, "_");
+const SLUG = basename(resolve(__dirname, ".."))
+  .toLowerCase()
+  .replace(/[^a-z0-9_]/g, "_");
 const DB = process.env.WAREHOUSD_E2E_DB ?? `warehousd_e2e_${SLUG}`;
 
 async function main() {
@@ -56,10 +58,11 @@ async function main() {
   }
 
   // Seed grants for E2E tests: proposal flow (write-path.spec.ts)
-  const { requestGrant, approveGrant, revokeGrant, loadConfig } = await import("../packages/broker/src/index");
+  const { requestGrant, approveGrant, revokeGrant, loadConfig } =
+    await import("../packages/broker/src/index");
   const { getAppPool } = await import("../apps/web/app/lib/broker");
   const app = getAppPool();
-  const cfg = loadConfig(process.env.WAREHOUSD_PROJECT_DIR!);
+  const cfg = loadConfig(process.env.WAREHOUSD_PROJECT_DIR);
 
   const fields = ["id", "title", "notes", "assignee", "created_at"];
 
@@ -113,4 +116,8 @@ async function main() {
   await db.end();
   console.log(`e2e database ready: ${DB}`);
 }
-main();
+// See scripts/dev-bootstrap.ts: a bare `main()` turns a failure into an unhandled rejection.
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exit(1);
+});

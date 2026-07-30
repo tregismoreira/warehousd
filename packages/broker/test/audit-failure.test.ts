@@ -35,7 +35,11 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
 });
 
 const ctx: BrokerContext = {
-  userId: "auditfail_user", env: "dev", orgId: "default", allowedCollections: null, via: "session",
+  userId: "auditfail_user",
+  env: "dev",
+  orgId: "default",
+  allowedCollections: null,
+  via: "session",
 };
 
 // Everything the broker asks the app pool for keeps working except the audit insert. Failing the
@@ -62,20 +66,31 @@ beforeAll(async () => {
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   pools = createPools({
-    app: p.urls.admin, dev: p.urls.dev, live: p.urls.live,
-    devWrite: p.urls.devWrite, liveWrite: p.urls.liveWrite,
+    app: p.urls.admin,
+    dev: p.urls.dev,
+    live: p.urls.live,
+    devWrite: p.urls.devWrite,
+    liveWrite: p.urls.liveWrite,
   });
 
   const grantId = await requestGrant(pools.app, {
-    userId: ctx.userId, collection: "people", env: "dev", orgId: "default",
-    purposeLabel: "test", allowedFields: ["id", "email"],
+    userId: ctx.userId,
+    collection: "people",
+    env: "dev",
+    orgId: "default",
+    purposeLabel: "test",
+    allowedFields: ["id", "email"],
   });
   await approveGrant(pools.app, cfg, grantId, "admin", { verbs: ["read", "create"] });
 
   broker = makeBroker({ ...pools, app: withFailingAudit(pools.app) }, cfg);
 }, 60_000);
 
-afterAll(async () => { await admin?.end(); await pools?.end(); await p?.end(); });
+afterAll(async () => {
+  await admin?.end();
+  await pools?.end();
+  await p?.end();
+});
 
 describe("an audit write that fails", () => {
   it("turns an otherwise-successful query into a controlled internal_error, not a throw", async () => {
@@ -108,7 +123,9 @@ describe("an audit write that fails", () => {
 
   it("rolls the write back: a mutation whose decision was not recorded did not happen", async () => {
     const r = await broker.mutate(ctx, {
-      collection: "people", op: "create", values: { email: "rolled-back@example.com" },
+      collection: "people",
+      op: "create",
+      values: { email: "rolled-back@example.com" },
     });
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -118,12 +135,14 @@ describe("an audit write that fails", () => {
 
     // The insert ran inside withOrg before the audit write; returning the refusal from inside the
     // transaction would have committed it. assertRecorded throws instead, so nothing is there.
-    const rows = await admin.query(
-      `select 1 from data_synth.people where email = $1`, ["rolled-back@example.com"]);
+    const rows = await admin.query(`select 1 from data_synth.people where email = $1`, [
+      "rolled-back@example.com",
+    ]);
     expect(rows.rowCount).toBe(0);
     // The change feed is written in the same transaction, so it must be empty too.
     const feed = await admin.query(
-      `select 1 from app.change_log where collection = 'people' and env = 'dev'`);
+      `select 1 from app.change_log where collection = 'people' and env = 'dev'`,
+    );
     expect(feed.rowCount).toBe(0);
   });
 
@@ -133,16 +152,26 @@ describe("an audit write that fails", () => {
     process.on("unhandledRejection", onUnhandled);
     try {
       await broker.query(ctx, { collection: "people", fields: ["email"] });
-      await broker.mutate(ctx, { collection: "people", op: "create", values: { email: "u@example.com" } });
+      await broker.mutate(ctx, {
+        collection: "people",
+        op: "create",
+        values: { email: "u@example.com" },
+      });
       await broker.changes(ctx, {});
-      await broker.listRevisions(ctx, { collection: "people", id: "00000000-0000-0000-0000-000000000000" });
+      await broker.listRevisions(ctx, {
+        collection: "people",
+        id: "00000000-0000-0000-0000-000000000000",
+      });
       await broker.listProposals(ctx, {});
       await broker.getProposal(ctx, "00000000-0000-0000-0000-000000000000");
       await broker.approveProposal(ctx, "00000000-0000-0000-0000-000000000000");
       await broker.rejectProposal(ctx, "00000000-0000-0000-0000-000000000000");
       await broker.describeCollection(ctx, "people");
       await broker.searchDocuments(ctx, { collection: "people", q: "x" });
-      await broker.getDocument(ctx, { collection: "people", id: "00000000-0000-0000-0000-000000000000" });
+      await broker.getDocument(ctx, {
+        collection: "people",
+        id: "00000000-0000-0000-0000-000000000000",
+      });
       // Give the loop a turn so a rejection settled after the await would still be seen.
       await new Promise((res) => setImmediate(res));
     } finally {

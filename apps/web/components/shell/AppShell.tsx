@@ -10,9 +10,16 @@ import { EnvSwitcher } from "./EnvSwitcher";
 import { UserMenu } from "./UserMenu";
 
 export function AppShell({
-  surface, role, email, env, children,
+  surface,
+  role,
+  email,
+  env,
+  children,
 }: {
-  surface: Role; role: Role; email: string; env: "dev" | "live";
+  surface: Role;
+  role: Role;
+  email: string;
+  env: "dev" | "live";
   children: React.ReactNode;
 }) {
   const items = NAV[surface];

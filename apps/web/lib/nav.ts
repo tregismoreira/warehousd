@@ -1,6 +1,17 @@
 import {
-  BadgeCheck, Boxes, FileUp, Key, KeyRound, ScrollText, ShieldCheck, Users,
-  Inbox, ListChecks, Plug, LayoutDashboard, ClipboardCheck,
+  BadgeCheck,
+  Boxes,
+  FileUp,
+  Key,
+  KeyRound,
+  ScrollText,
+  ShieldCheck,
+  Users,
+  Inbox,
+  ListChecks,
+  Plug,
+  LayoutDashboard,
+  ClipboardCheck,
 } from "lucide-react";
 import type { Role } from "./authz";
 

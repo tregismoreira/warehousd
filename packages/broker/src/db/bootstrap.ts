@@ -1,4 +1,4 @@
-import type { Pool, PoolClient } from "pg";
+import type { Pool } from "pg";
 
 // Roles are cluster-global while databases are not, so two bootstraps running against
 // different databases on one cluster contend on the same pg_authid row and one of them fails
@@ -30,7 +30,12 @@ export async function ensureSchemasAndRoles(db: Pool, dataRolePassword: string):
   // then build CREATE/ALTER statements with escapeLiteral to safely quote the password.
   const client = await db.connect();
   try {
-    for (const role of ["warehousd_dev", "warehousd_live", "warehousd_dev_write", "warehousd_live_write"]) {
+    for (const role of [
+      "warehousd_dev",
+      "warehousd_live",
+      "warehousd_dev_write",
+      "warehousd_live_write",
+    ]) {
       const escapedPassword = client.escapeLiteral(dataRolePassword);
       await withRoleRetry(async () => {
         // Re-read existence inside the retry: a concurrent bootstrap may have created the

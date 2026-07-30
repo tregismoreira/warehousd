@@ -5,9 +5,7 @@ import { orgOf } from "../../../../../lib/session";
 
 const ROLES = new Set(["admin", "manager", "member"]);
 
-export async function PATCH(
-  req: NextRequest, { params }: { params: Promise<{ userId: string }> },
-) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
   const { userId } = await params;
@@ -22,8 +20,10 @@ export async function PATCH(
   // the guard while org B demoted its own last one. The sibling listing route
   // (../route.ts) already filters by "orgId"; this one is the write.
   const org = orgOf(guard.user);
-  const cur = await app.query(
-    `select role from app."user" where id=$1 and "orgId"=$2`, [userId, org]);
+  const cur = await app.query(`select role from app."user" where id=$1 and "orgId"=$2`, [
+    userId,
+    org,
+  ]);
   // A user outside the caller's org is reported as unknown rather than forbidden: which ids exist
   // elsewhere is not this admin's to learn.
   if (cur.rowCount === 0) return Response.json({ error: "unknown_user" }, { status: 404 });
@@ -34,12 +34,13 @@ export async function PATCH(
     return Response.json({ error: "cannot_demote_self" }, { status: 400 });
   if (cur.rows[0].role === "admin" && role !== "admin") {
     const admins = await app.query(
-      `select count(*)::int as n from app."user" where role='admin' and "orgId"=$1`, [org]);
+      `select count(*)::int as n from app."user" where role='admin' and "orgId"=$1`,
+      [org],
+    );
     if (admins.rows[0].n <= 1)
       return Response.json({ error: "cannot_demote_last_admin" }, { status: 400 });
   }
 
-  await app.query(
-    `update app."user" set role=$2 where id=$1 and "orgId"=$3`, [userId, role, org]);
+  await app.query(`update app."user" set role=$2 where id=$1 and "orgId"=$3`, [userId, role, org]);
   return Response.json({ ok: true });
 }

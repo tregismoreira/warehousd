@@ -23,12 +23,18 @@ describe("entrypoint.bootstrap with a dataset-sourced vocabulary", () => {
     await mkdir(join(fixture, "seed", "cases-live"), { recursive: true });
     // The dev doc names a client the synthetic generator produces; the live doc names one that
     // only an import into data_live could create.
-    await writeFile(join(fixture, "seed", "cases-dev", "matter.md"),
-      "---\nclient: c-0001\n---\n# Dev Matter\nDev body.");
-    await writeFile(join(fixture, "seed", "cases-live", "matter.md"),
-      "---\nclient: c-9001\n---\n# Live Matter\nLive body.");
+    await writeFile(
+      join(fixture, "seed", "cases-dev", "matter.md"),
+      "---\nclient: c-0001\n---\n# Dev Matter\nDev body.",
+    );
+    await writeFile(
+      join(fixture, "seed", "cases-live", "matter.md"),
+      "---\nclient: c-9001\n---\n# Live Matter\nLive body.",
+    );
 
-    await writeFile(join(fixture, "warehousd.yml"), `
+    await writeFile(
+      join(fixture, "warehousd.yml"),
+      `
 project: test-entrypoint-src
 server: { port: 8722 }
 taxonomies:
@@ -53,7 +59,8 @@ collections:
       content: { posture: allow }
 synthetic:
   documents_per_collection: { clients: 5 }
-`);
+`,
+    );
 
     setup = await setupWebDb("entrypoint-src");
     process.env.WAREHOUSD_PROJECT_DIR = fixture;

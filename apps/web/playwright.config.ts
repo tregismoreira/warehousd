@@ -9,7 +9,9 @@ const ROOT = resolve(__dirname, "../..");
 // suite in the next workspace drop this one's schema out from under it mid-run. Scope it to the
 // workspace directory; `scripts/e2e-setup.ts` derives the same slug, so what this connects to is
 // what that script provisioned.
-const SLUG = basename(ROOT).toLowerCase().replace(/[^a-z0-9_]/g, "_");
+const SLUG = basename(ROOT)
+  .toLowerCase()
+  .replace(/[^a-z0-9_]/g, "_");
 const DB_NAME = process.env.WAREHOUSD_E2E_DB ?? `warehousd_e2e_${SLUG}`;
 const url = (role: string, pw: string) => `postgres://${role}:${pw}@127.0.0.1:54330/${DB_NAME}`;
 
@@ -64,7 +66,6 @@ export default defineConfig({
     // the port derived above there is nothing legitimate to reuse anyway.
     reuseExistingServer: false,
     timeout: 600_000,
-    maxStartupAttempts: 3,
     env: {
       WAREHOUSD_APP_PORT: String(PORT),
       APP_DATABASE_URL: url("postgres", "postgres"),

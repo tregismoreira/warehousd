@@ -22,8 +22,12 @@ export async function GET(req: NextRequest) {
         status: applyStatus(c, row?.config ?? null),
         appliedAt: row?.updated_at ?? null,
         fields: Object.entries(c.fields).map(([fname, f]) => ({
-          name: fname, type: f.type ?? null, posture: f.posture,
-          pk: f.pk ?? false, fk: f.fk ?? null, view_join: f.view_join ?? null,
+          name: fname,
+          type: f.type ?? null,
+          posture: f.posture,
+          pk: f.pk ?? false,
+          fk: f.fk ?? null,
+          view_join: f.view_join ?? null,
           nullable: f.nullable ?? false,
         })),
       };

@@ -6,7 +6,11 @@ import { authClient } from "@/lib/auth-client";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Users } from "lucide-react";
@@ -92,12 +96,12 @@ export function UsersTable() {
 
   useEffect(() => {
     fetch("/api/admin/users")
-      .then(r => r.json())
-      .then(data => {
+      .then((r) => r.json())
+      .then((data) => {
         setUsers(data.users);
         setLoading(false);
       })
-      .catch(e => {
+      .catch((e) => {
         console.error("Failed to load users:", e);
         toast.error("Failed to load users");
         setLoading(false);
@@ -118,7 +122,9 @@ export function UsersTable() {
     {
       accessorKey: "grantCount",
       header: "Approved Grants",
-      cell: ({ row }) => <span className="text-sm text-muted-foreground">{row.original.grantCount}</span>,
+      cell: ({ row }) => (
+        <span className="text-sm text-muted-foreground">{row.original.grantCount}</span>
+      ),
     },
     {
       id: "createdAt",
@@ -135,7 +141,9 @@ export function UsersTable() {
     <div>
       <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm">
         <p className="text-muted-foreground">
-          <strong>admin</strong> manages collections, identity and imports · <strong>manager</strong> approves grants · <strong>member</strong> requests and queries. New SSO users are provisioned as <strong>member</strong>.
+          <strong>admin</strong> manages collections, identity and imports ·{" "}
+          <strong>manager</strong> approves grants · <strong>member</strong> requests and queries.
+          New SSO users are provisioned as <strong>member</strong>.
         </p>
       </div>
       <DataTable

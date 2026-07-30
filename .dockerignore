@@ -8,3 +8,12 @@ docs
 .git
 .github
 coverage
+.vitest-reports
+
+# Nothing under here is read at build or at run time, and keeping it out of the build context means
+# it cannot end up in the published image by way of a COPY that was widened later. `next build`
+# type-checks tsconfig.json's program, which does not include these.
+**/test
+**/e2e
+apps/web/test-results
+apps/web/playwright-report

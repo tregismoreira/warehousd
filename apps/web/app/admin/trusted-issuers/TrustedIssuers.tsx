@@ -36,7 +36,7 @@ export function TrustedIssuers() {
   }
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   const columns: ColumnDef<TrustedIssuer, unknown>[] = [
@@ -48,7 +48,9 @@ export function TrustedIssuers() {
     {
       accessorKey: "jwksUri",
       header: "JWKS URI",
-      cell: ({ row }) => <Mono className="text-xs text-muted-foreground">{row.original.jwksUri}</Mono>,
+      cell: ({ row }) => (
+        <Mono className="text-xs text-muted-foreground">{row.original.jwksUri}</Mono>
+      ),
     },
     {
       accessorKey: "audience",

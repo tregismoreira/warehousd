@@ -40,11 +40,11 @@ describe("two-axis postures", () => {
       },
     });
 
-    const c = cfg.collections.people;
-    expect(c.fields.id.posture).toEqual({ read: "allow", write: "deny" });
-    expect(c.fields.email.posture).toEqual({ read: "allow", write: "deny" });
-    expect(c.fields.phone.posture).toEqual({ read: "deny", write: "deny" });
-    expect(c.fields.salary.posture).toEqual({ read: "deny", write: "allow" });
+    const c = cfg.collections.people!;
+    expect(c.fields.id!.posture).toEqual({ read: "allow", write: "deny" });
+    expect(c.fields.email!.posture).toEqual({ read: "allow", write: "deny" });
+    expect(c.fields.phone!.posture).toEqual({ read: "deny", write: "deny" });
+    expect(c.fields.salary!.posture).toEqual({ read: "deny", write: "allow" });
   });
 
   it("view_join + write:allow is a config error", () => {
@@ -59,8 +59,11 @@ describe("two-axis postures", () => {
             // would fail on that instead, and this test would pass without ever reaching the
             // write:allow rule it exists to cover.
             dept_id: { type: "uuid", posture: "allow", fk: "departments.id" },
-            dept_name: { type: "text", posture: { read: "allow", write: "allow" },
-              view_join: { table: "departments", column: "name", on: "dept_id" } },
+            dept_name: {
+              type: "text",
+              posture: { read: "allow", write: "allow" },
+              view_join: { table: "departments", column: "name", on: "dept_id" },
+            },
           },
         },
       },
@@ -152,6 +155,6 @@ describe("two-axis postures", () => {
         },
       },
     });
-    expect(cfg.collections.people.writable).toBe(true);
+    expect(cfg.collections.people!.writable).toBe(true);
   });
 });

@@ -7,26 +7,45 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
 } from "@/components/ui/sheet";
 import { Mono } from "@/components/common/Mono";
 
 export type PendingGrant = {
-  id: string; user_id: string; collection: string; env: "dev" | "live";
-  allowed_fields: string[] | null; purpose_label: string | null; purpose_detail: string | null;
-  requested_at: string; collectionType?: string; taxonomyFields?: string[];
+  id: string;
+  user_id: string;
+  collection: string;
+  env: "dev" | "live";
+  allowed_fields: string[] | null;
+  purpose_label: string | null;
+  purpose_detail: string | null;
+  requested_at: string;
+  collectionType?: string;
+  taxonomyFields?: string[];
 };
 
 type Vocabulary = {
-  field: string; label: string; multiple: boolean;
+  field: string;
+  label: string;
+  multiple: boolean;
   terms: { slug: string; label: string }[];
 };
 
 export function ApproveSheet({
-  grant, open, onOpenChange, onDone,
+  grant,
+  open,
+  onOpenChange,
+  onDone,
 }: {
-  grant: PendingGrant | null; open: boolean;
-  onOpenChange: (v: boolean) => void; onDone: () => void;
+  grant: PendingGrant | null;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onDone: () => void;
 }) {
   const [fields, setFields] = useState<Set<string>>(new Set());
   const [expiresAt, setExpiresAt] = useState("");
@@ -39,19 +58,24 @@ export function ApproveSheet({
   useEffect(() => {
     if (!grant) return;
     setFields(new Set(grant.allowed_fields ?? []));
-    setPickedPaths(new Set()); setPickedTermsByField({});
-    setExpiresAt(""); setPaths([]); setVocabularies([]);
+    setPickedPaths(new Set());
+    setPickedTermsByField({});
+    setExpiresAt("");
+    setPaths([]);
+    setVocabularies([]);
 
     if (grant.collectionType === "file") {
-      fetch(`/api/grants/doc-paths?collection=${grant.collection}&env=${grant.env}`)
-        .then((r) => r.json()).then((d) => setPaths(d.paths ?? []));
+      void fetch(`/api/grants/doc-paths?collection=${grant.collection}&env=${grant.env}`)
+        .then((r) => r.json())
+        .then((d) => setPaths(d.paths ?? []));
     }
     if (grant.taxonomyFields && grant.taxonomyFields.length > 0) {
-      fetch(`/api/grants/terms?collection=${grant.collection}`)
-        .then((r) => r.json()).then((d) => {
+      void fetch(`/api/grants/terms?collection=${grant.collection}`)
+        .then((r) => r.json())
+        .then((d) => {
           setVocabularies(d.vocabularies ?? []);
           const picked: Record<string, Set<string>> = {};
-          for (const vocab of (d.vocabularies ?? [])) {
+          for (const vocab of d.vocabularies ?? []) {
             picked[vocab.field] = new Set();
           }
           setPickedTermsByField(picked);
@@ -68,26 +92,33 @@ export function ApproveSheet({
       if (terms.size > 0) selectedTerms[field] = Array.from(terms);
     }
     const res = await fetch("/api/grants", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(
         action === "deny"
           ? { action, id: grant.id }
           : {
-              action, id: grant.id,
+              action,
+              id: grant.id,
               allowedFields: Array.from(fields),
               expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
               selectedPaths: Array.from(pickedPaths),
               selectedTerms,
-            }),
+            },
+      ),
     });
     setBusy(false);
-    if (!res.ok) { toast.error("Failed", { description: (await res.json()).error }); return; }
+    if (!res.ok) {
+      toast.error("Failed", { description: (await res.json()).error });
+      return;
+    }
     toast.success(action === "approve" ? "Grant approved" : "Request denied");
-    onOpenChange(false); onDone();
+    onOpenChange(false);
+    onDone();
   }
 
   if (!grant) return null;
-  const scopedTerms = Object.values(pickedTermsByField).some(s => s.size > 0);
+  const scopedTerms = Object.values(pickedTermsByField).some((s) => s.size > 0);
   const scoped = scopedTerms || pickedPaths.size > 0;
 
   return (
@@ -98,7 +129,13 @@ export function ApproveSheet({
           <SheetDescription>
             <Mono>{grant.user_id}</Mono> wants <Mono>{grant.collection}</Mono> in{" "}
             <Mono>{grant.env}</Mono>
-            {grant.purpose_label ? <> for <b>{grant.purpose_label}</b></> : null}.
+            {grant.purpose_label ? (
+              <>
+                {" "}
+                for <b>{grant.purpose_label}</b>
+              </>
+            ) : null}
+            .
           </SheetDescription>
         </SheetHeader>
 
@@ -121,7 +158,8 @@ export function ApproveSheet({
                     checked={fields.has(f)}
                     onCheckedChange={(v) => {
                       const next = new Set(fields);
-                      if (v) next.add(f); else next.delete(f);
+                      if (v) next.add(f);
+                      else next.delete(f);
                       setFields(next);
                     }}
                   />
@@ -133,8 +171,12 @@ export function ApproveSheet({
 
           <div className="space-y-2">
             <Label htmlFor="expiry">Expires</Label>
-            <Input id="expiry" type="datetime-local"
-              value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+            <Input
+              id="expiry"
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(e) => setExpiresAt(e.target.value)}
+            />
             <p className="text-xs text-muted-foreground">
               Leave empty for no expiry. An expired grant behaves exactly like a revoked one.
             </p>
@@ -155,9 +197,12 @@ export function ApproveSheet({
                         <Checkbox
                           checked={pickedTermsByField[vocab.field]?.has(t.slug) ?? false}
                           onCheckedChange={(v) => {
-                            const next = new Map(Object.entries(pickedTermsByField).map(([k, s]) => [k, new Set(s)]));
+                            const next = new Map(
+                              Object.entries(pickedTermsByField).map(([k, s]) => [k, new Set(s)]),
+                            );
                             const fieldTerms = next.get(vocab.field) || new Set<string>();
-                            if (v) fieldTerms.add(t.slug); else fieldTerms.delete(t.slug);
+                            if (v) fieldTerms.add(t.slug);
+                            else fieldTerms.delete(t.slug);
                             next.set(vocab.field, fieldTerms);
                             setPickedTermsByField(Object.fromEntries(next));
                           }}
@@ -181,7 +226,8 @@ export function ApproveSheet({
                       checked={pickedPaths.has(p)}
                       onCheckedChange={(v) => {
                         const next = new Set(pickedPaths);
-                        if (v) next.add(p); else next.delete(p);
+                        if (v) next.add(p);
+                        else next.delete(p);
                         setPickedPaths(next);
                       }}
                     />
@@ -200,7 +246,9 @@ export function ApproveSheet({
         </div>
 
         <SheetFooter>
-          <Button variant="outline" disabled={busy} onClick={() => act("deny")}>Deny</Button>
+          <Button variant="outline" disabled={busy} onClick={() => act("deny")}>
+            Deny
+          </Button>
           <Button disabled={busy || fields.size === 0} onClick={() => act("approve")}>
             {busy && <Loader2 size={16} className="mr-2 animate-spin" />}
             Approve

@@ -11,7 +11,12 @@ import { Pool } from "pg";
 import { setupWebDbWithData, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
 import { upsertClientPolicy } from "@warehousd/broker";
-import { DENIED_CANARY, SSN_CANARY, LIVE_ONLY_CANARY, DOC_RESTRICTED_CANARY } from "../../../packages/broker/test/fixtures/canaries";
+import {
+  DENIED_CANARY,
+  SSN_CANARY,
+  LIVE_ONLY_CANARY,
+  DOC_RESTRICTED_CANARY,
+} from "../../../packages/broker/test/fixtures/canaries";
 
 let db: Awaited<ReturnType<typeof setupWebDbWithData>>;
 let admin: Pool;
@@ -24,14 +29,18 @@ beforeAll(async () => {
 
   // Plant canaries in denied columns directly, mirroring packages/broker/test/probe.test.ts —
   // the only thing that should block them is posture, not a missing grant.
-  const dep = (await admin.query(
-    `insert into data_synth.departments (id,name) values (gen_random_uuid(),'Fin') returning id`,
-  )).rows[0].id;
-  const person = (await admin.query(
-    `insert into data_synth.people (id,full_name,email,department_id,home_address,phone)
+  const dep = (
+    await admin.query(
+      `insert into data_synth.departments (id,name) values (gen_random_uuid(),'Fin') returning id`,
+    )
+  ).rows[0].id;
+  const person = (
+    await admin.query(
+      `insert into data_synth.people (id,full_name,email,department_id,home_address,phone)
      values (gen_random_uuid(),'Canary Person','canary@x', $1, $2, '555') returning id`,
-    [dep, DENIED_CANARY],
-  )).rows[0].id;
+      [dep, DENIED_CANARY],
+    )
+  ).rows[0].id;
   await admin.query(
     `insert into data_synth.salaries (id,person_id,job_title,base_salary,currency,effective_date,ssn)
      values (gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`,
@@ -53,22 +62,37 @@ beforeAll(async () => {
   }
 }, 120_000);
 
-afterAll(async () => { await admin?.end(); await db?.end(); });
+afterAll(async () => {
+  await admin?.end();
+  await db?.end();
+});
 
 async function mintAccessToken(scope: string) {
   const app = admin;
   const reg = await db.auth.api.registerMcpClient({
-    body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "MCP Acceptance Test Client" },
+    body: {
+      redirect_uris: ["http://localhost:9999/callback"],
+      client_name: "MCP Acceptance Test Client",
+    },
     asResponse: true,
   } as any);
   const { client_id, client_secret } = await reg.json();
   await upsertClientPolicy(app, client_id, "MCP Acceptance Test Client", ["env:dev", "env:live"]);
   const { verifier, challenge } = pkcePair();
-  const { code } = await authorizeAndGetCode(db.auth, { clientId: client_id, scope, cookie: miaCookie, challenge });
+  const { code } = await authorizeAndGetCode(db.auth, {
+    clientId: client_id,
+    scope,
+    cookie: miaCookie,
+    challenge,
+  });
   const tokenRes = await db.auth.api.mcpOAuthToken({
     body: {
-      grant_type: "authorization_code", code, redirect_uri: "http://localhost:9999/callback",
-      client_id, client_secret, code_verifier: verifier,
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: "http://localhost:9999/callback",
+      client_id,
+      client_secret,
+      code_verifier: verifier,
     },
     asResponse: true,
   } as any);
@@ -91,7 +115,12 @@ async function rpc(token: string, method: string, params?: unknown) {
   const { POST } = await import("../app/mcp/route");
   const res = await POST(rpcRequest(token, { jsonrpc: "2.0", id: 1, method, params }));
   const text = await res.text();
-  const jsonLine = text.startsWith("{") ? text : text.split("\n").find((l) => l.startsWith("data: "))?.slice(6);
+  const jsonLine = text.startsWith("{")
+    ? text
+    : text
+        .split("\n")
+        .find((l) => l.startsWith("data: "))
+        ?.slice(6);
   return { status: res.status, body: jsonLine ? JSON.parse(jsonLine) : null };
 }
 
@@ -102,8 +131,12 @@ async function callTool(token: string, name: string, args: Record<string, unknow
 
 describe("hostile-intent probe suite over MCP (§10 test 4)", () => {
   const probesPath = new URL("../../../packages/broker/test/fixtures/probes.json", import.meta.url);
-  const allProbes = JSON.parse(readFileSync(probesPath, "utf8")) as
-    { name: string; surface?: string; intent: Record<string, unknown>; expect: "allowed" | "refused" }[];
+  const allProbes = JSON.parse(readFileSync(probesPath, "utf8")) as {
+    name: string;
+    surface?: string;
+    intent: Record<string, unknown>;
+    expect: "allowed" | "refused";
+  }[];
 
   it("query_collection: no probe leaks a canary; outcomes match expectations", async () => {
     const token = await mintAccessToken("env:dev");
@@ -111,7 +144,7 @@ describe("hostile-intent probe suite over MCP (§10 test 4)", () => {
     expect(probes.length).toBeGreaterThan(0);
 
     for (const probe of probes) {
-      const out = await callTool(token, "query_collection", probe.intent as unknown as Record<string, unknown>);
+      const out = await callTool(token, "query_collection", probe.intent);
       const outcome = out.ok ? "allowed" : "refused";
       expect(outcome, `probe "${probe.name}"`).toBe(probe.expect);
       const payload = JSON.stringify(out);
@@ -130,7 +163,9 @@ describe("hostile-intent probe suite over MCP (§10 test 4)", () => {
       const outcome = out.ok ? "allowed" : "refused";
       expect(outcome, `probe "${probe.name}"`).toBe(probe.expect);
       const payload = JSON.stringify(out);
-      expect(payload.includes(DOC_RESTRICTED_CANARY), `canary in response of "${probe.name}"`).toBe(false);
+      expect(payload.includes(DOC_RESTRICTED_CANARY), `canary in response of "${probe.name}"`).toBe(
+        false,
+      );
     }
   });
 });
@@ -138,7 +173,10 @@ describe("hostile-intent probe suite over MCP (§10 test 4)", () => {
 describe("search_documents success path (_rank/document_seq, grant-filtered)", () => {
   it("returns ranked documents with _rank + document_seq, ungranted path absent", async () => {
     const token = await mintAccessToken("env:dev");
-    const out = await callTool(token, "search_documents", { collection: "policies", q: "expense reimbursement" });
+    const out = await callTool(token, "search_documents", {
+      collection: "policies",
+      q: "expense reimbursement",
+    });
     expect(out.ok).toBe(true);
     expect(out.documents.length).toBeGreaterThan(0);
     for (const row of out.documents) {
@@ -156,7 +194,14 @@ describe("env wall over MCP (§10 test 5, all five tools)", () => {
     const calls: [string, Record<string, unknown>][] = [
       ["list_collections", {}],
       ["describe_collection", { name: "people" }],
-      ["query_collection", { collection: "people", fields: ["id", "full_name", "email", "department_name"], limit: 500 }],
+      [
+        "query_collection",
+        {
+          collection: "people",
+          fields: ["id", "full_name", "email", "department_name"],
+          limit: 500,
+        },
+      ],
       ["search_documents", { collection: "policies", q: "compliance security" }],
       ["request_access", { collection: "metrics", purpose: "env-wall check" }],
     ];
@@ -169,7 +214,10 @@ describe("env wall over MCP (§10 test 5, all five tools)", () => {
   it("forged env in tool arguments is ignored — dev token still reads dev data", async () => {
     const token = await mintAccessToken("env:dev");
     const out = await callTool(token, "query_collection", {
-      collection: "people", fields: ["id", "full_name"], limit: 500, env: "live",
+      collection: "people",
+      fields: ["id", "full_name"],
+      limit: 500,
+      env: "live",
     });
     expect(out.ok).toBe(true);
     expect(JSON.stringify(out).includes(LIVE_ONLY_CANARY)).toBe(false);

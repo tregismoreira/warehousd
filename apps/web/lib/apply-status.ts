@@ -9,15 +9,19 @@ function canonical(v: unknown): unknown {
     return Object.fromEntries(
       Object.entries(v as Record<string, unknown>)
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([k, x]) => [k, canonical(x)]));
+        .map(([k, x]) => [k, canonical(x)]),
+    );
   }
   return v;
 }
 
 // Desired state is the YAML on disk; deployed state is what `warehousd apply` last wrote
 // into app.collections.config. Three outcomes, no fourth.
-export function applyStatus(yaml: unknown, applied: unknown | null): ApplyStatus {
+// `applied` is null when nothing has been applied yet; that case is `unknown` too, so spelling it
+// `unknown | null` said nothing the type did not already allow.
+export function applyStatus(yaml: unknown, applied: unknown): ApplyStatus {
   if (applied === null || applied === undefined) return "not_applied";
   return JSON.stringify(canonical(yaml)) === JSON.stringify(canonical(applied))
-    ? "applied" : "drifted";
+    ? "applied"
+    : "drifted";
 }

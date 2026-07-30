@@ -2,11 +2,12 @@ import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import { Pool } from "pg";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, writeSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { provision, type Provisioned } from "../../broker/test/helpers/db";
 import { runIndex } from "../src/index";
 import { createAppSchema } from "../../broker/src/db/migrate-app";
 import { applyConfig } from "../../broker/src/apply/apply";
+import { ConfigSchema } from "../../broker/src/config/schema";
 
 describe("runIndex env/source resolution", () => {
   let p: Provisioned;
@@ -64,7 +65,7 @@ collections:
     // Provision and apply config
     const db = new Pool({ connectionString: dbUrl });
     await createAppSchema(db);
-    const cfg = {
+    const cfg = ConfigSchema.parse({
       project: "test-cli",
       server: { port: 8722 },
       synthetic: { documents_per_collection: {} },
@@ -88,7 +89,7 @@ collections:
           },
         },
       },
-    };
+    });
     await applyConfig(db, cfg);
     await db.end();
 
@@ -149,8 +150,12 @@ collections:
   it("env=live uses source_live", async () => {
     await runIndex(projectDir, dbUrl, "policies", { env: "live" });
     const db = new Pool({ connectionString: dbUrl });
-    const live = await db.query(`select content from data_live."policies__files" join data_live."policies__documents" on data_live."policies__documents".file_id = data_live."policies__files".id limit 1`);
-    const synth = await db.query(`select content from data_synth."policies__files" join data_synth."policies__documents" on data_synth."policies__documents".file_id = data_synth."policies__files".id limit 1`);
+    const live = await db.query(
+      `select content from data_live."policies__files" join data_live."policies__documents" on data_live."policies__documents".file_id = data_live."policies__files".id limit 1`,
+    );
+    const synth = await db.query(
+      `select content from data_synth."policies__files" join data_synth."policies__documents" on data_synth."policies__documents".file_id = data_synth."policies__files".id limit 1`,
+    );
     expect(live.rowCount).toBe(1);
     expect(synth.rowCount).toBe(1);
     // The content should be different because dev uses docs-dev and live uses docs-live
@@ -162,7 +167,7 @@ collections:
   it("env=live with neither source_live nor --source throws (never silently reuses dev source)", async () => {
     const db = new Pool({ connectionString: dbUrl });
     // Setup schema for dirWithoutSourceLive
-    const cfg2 = {
+    const cfg2 = ConfigSchema.parse({
       project: "test-cli",
       server: { port: 8722 },
       synthetic: { documents_per_collection: {} },
@@ -185,16 +190,16 @@ collections:
           },
         },
       },
-    };
+    });
     await applyConfig(db, cfg2);
     await db.end();
 
-    await expect(runIndex(dirWithoutSourceLive, dbUrl, "policies", { env: "live" }))
-      .rejects.toThrow(/source_live|--source/);
+    await expect(
+      runIndex(dirWithoutSourceLive, dbUrl, "policies", { env: "live" }),
+    ).rejects.toThrow(/source_live|--source/);
   });
 
   it("rejects a dataset collection", async () => {
-    await expect(runIndex(projectDir, dbUrl, "people", {}))
-      .rejects.toThrow(/file/);
+    await expect(runIndex(projectDir, dbUrl, "people", {})).rejects.toThrow(/file/);
   });
 });

@@ -6,7 +6,7 @@ import { unauthenticated, refuse, ok } from "../../../../../../lib/rest";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ c: string; id: string }> }
+  { params }: { params: Promise<{ c: string; id: string }> },
 ) {
   const ctx = await deriveRestContext(req);
   if (!ctx) return unauthenticated();
@@ -26,7 +26,7 @@ export async function GET(
 
 export async function PUT(
   req: NextRequest,
-  { params }: { params: Promise<{ c: string; id: string }> }
+  { params }: { params: Promise<{ c: string; id: string }> },
 ) {
   const ctx = await deriveRestContext(req);
   if (!ctx) return unauthenticated();
@@ -62,7 +62,7 @@ export async function PUT(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: Promise<{ c: string; id: string }> }
+  { params }: { params: Promise<{ c: string; id: string }> },
 ) {
   const ctx = await deriveRestContext(req);
   if (!ctx) return unauthenticated();

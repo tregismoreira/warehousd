@@ -9,9 +9,9 @@ export type ClientPolicy = {
 };
 
 export function resolveEnvScopes(options: {
-  requested: string[];          // scopes requested in the auth flow
-  policy: ClientPolicy;          // client's allowed scopes (policy.allowedScopes)
-  liveEligible: boolean;         // user has an approved live grant
+  requested: string[]; // scopes requested in the auth flow
+  policy: ClientPolicy; // client's allowed scopes (policy.allowedScopes)
+  liveEligible: boolean; // user has an approved live grant
 }): string[] {
   const { requested, policy, liveEligible } = options;
 
@@ -59,9 +59,10 @@ export function resolveIssuedEnvScope(options: {
 }): "env:dev" | "env:live" | null {
   const { requested, policy, liveEligible } = options;
   const requestedEnv = requested.filter((s) => (ENV_SCOPES as readonly string[]).includes(s));
-  const survivors = requestedEnv.length === 0
-    ? recomputeEnvScope({ policy, liveEligible })
-    : resolveEnvScopes({ requested, policy, liveEligible });
+  const survivors =
+    requestedEnv.length === 0
+      ? recomputeEnvScope({ policy, liveEligible })
+      : resolveEnvScopes({ requested, policy, liveEligible });
 
   // Exactly one, and live wins only if it survived the rules above. A client whose policy allows
   // neither env gets null, and the caller refuses rather than falling back to dev.
@@ -90,10 +91,7 @@ export function recomputeEnvScope(options: {
 
 // Policy intersection for dual-mode (both dev and live eligible).
 // Used by the env-picker UI to enforce exactly-one-env selection.
-export function pickEnvScope(
-  survivors: string[],
-  picked: string | null | undefined,
-): string[] {
+export function pickEnvScope(survivors: string[], picked: string | null | undefined): string[] {
   // Rule 4: exactly-one-env picker. When both env:dev and env:live survive
   // rules 1-3, the caller (UI or API) must pick one.
   if (survivors.includes("env:dev") && survivors.includes("env:live")) {

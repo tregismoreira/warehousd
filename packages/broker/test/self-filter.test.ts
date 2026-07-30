@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
@@ -8,6 +8,7 @@ import { makeBroker } from "../src/broker";
 import { approveGrant } from "../src/grants/manage";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
 
 const cfg: WarehousdConfig = ConfigSchema.parse({
   project: "test",
@@ -28,10 +29,6 @@ let db: Pool;
 let pools: Pools;
 let broker: ReturnType<typeof makeBroker>;
 
-function makeCtx(userId: string, env: "dev" | "live" = "dev") {
-  return { userId, orgId: "default", env };
-}
-
 beforeAll(async () => {
   p = await provision("self-filter");
   db = new Pool({ connectionString: p.urls.admin });
@@ -46,7 +43,7 @@ beforeAll(async () => {
     `insert into data_synth.notes (id, owner, content) values
      (gen_random_uuid(), 'alice', 'Alice note 1'),
      (gen_random_uuid(), 'alice', 'Alice note 2'),
-     (gen_random_uuid(), 'bob', 'Bob note 1')`
+     (gen_random_uuid(), 'bob', 'Bob note 1')`,
   );
 });
 
@@ -61,7 +58,7 @@ it("$self with op:eq scopes to the calling user", async () => {
   const grantRes = await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5) returning id`,
-    ["alice", "notes", ["id", "owner", "content"], "dev", "pending"]
+    ["alice", "notes", ["id", "owner", "content"], "dev", "pending"],
   );
   const grantId = grantRes.rows[0].id;
 
@@ -69,7 +66,7 @@ it("$self with op:eq scopes to the calling user", async () => {
     documentFilters: [{ field: "owner", op: "eq", value: "$self" }],
   });
 
-  const r = await broker.query(makeCtx("alice"), { collection: "notes" });
+  const r = await broker.query(makeCtx({ userId: "alice" }), { collection: "notes" });
   expect(r.ok).toBe(true);
   if (r.ok) {
     // alice should see only her notes (where owner = 'alice')
@@ -82,7 +79,7 @@ it("$self inside an op:in array resolves per element", async () => {
   const grantRes = await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5) returning id`,
-    ["bob", "notes", ["id", "owner", "content"], "dev", "pending"]
+    ["bob", "notes", ["id", "owner", "content"], "dev", "pending"],
   );
   const grantId = grantRes.rows[0].id;
 
@@ -90,7 +87,7 @@ it("$self inside an op:in array resolves per element", async () => {
     documentFilters: [{ field: "owner", op: "in", value: ["alice", "$self"] }],
   });
 
-  const r = await broker.query(makeCtx("bob"), { collection: "notes" });
+  const r = await broker.query(makeCtx({ userId: "bob" }), { collection: "notes" });
   expect(r.ok).toBe(true);
   if (r.ok) {
     // bob should see alice's notes and his own (bob expanded from $self)
@@ -103,7 +100,7 @@ it("'$self-service' is treated as a literal, not a sentinel", async () => {
   const grantRes = await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5) returning id`,
-    ["charlie", "notes", ["id", "owner", "content"], "dev", "pending"]
+    ["charlie", "notes", ["id", "owner", "content"], "dev", "pending"],
   );
   const grantId = grantRes.rows[0].id;
 
@@ -111,7 +108,7 @@ it("'$self-service' is treated as a literal, not a sentinel", async () => {
     documentFilters: [{ field: "owner", op: "eq", value: "$self-service" }],
   });
 
-  const r = await broker.query(makeCtx("charlie"), { collection: "notes" });
+  const r = await broker.query(makeCtx({ userId: "charlie" }), { collection: "notes" });
   expect(r.ok).toBe(true);
   if (r.ok) {
     // Should match nobody (no document has owner = "$self-service")
@@ -125,7 +122,7 @@ it("the generated SQL contains no literal '$self'", async () => {
   const grantRes = await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5) returning id`,
-    ["dave", "notes", ["id", "owner", "content"], "dev", "pending"]
+    ["dave", "notes", ["id", "owner", "content"], "dev", "pending"],
   );
   const grantId = grantRes.rows[0].id;
 
@@ -134,7 +131,7 @@ it("the generated SQL contains no literal '$self'", async () => {
   });
 
   // Query and ensure it resolves properly
-  const r = await broker.query(makeCtx("dave"), { collection: "notes" });
+  const r = await broker.query(makeCtx({ userId: "dave" }), { collection: "notes" });
   expect(r.ok).toBe(true);
   if (r.ok) {
     // The documents should be scoped by owner='dave', not owner='$self'

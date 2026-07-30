@@ -4,7 +4,7 @@ import { getSessionUser } from "../../../../../lib/session";
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: Promise<{ providerId: string }> }
+  { params }: { params: Promise<{ providerId: string }> },
 ) {
   const sessionUser = await getSessionUser(req);
   if (!sessionUser) return Response.json({ error: "unauthenticated" }, { status: 401 });

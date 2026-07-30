@@ -92,7 +92,7 @@ describe("REST routes: 401 unauthenticated", () => {
       body: JSON.stringify({}),
     });
     const params = Promise.resolve({ c: "test" });
-    const response = await queryRoute.POST(req as any, { params } as any);
+    const response = await queryRoute.POST(req as any, { params });
     expect(response.status).toBe(401);
     const body = await response.json();
     expect(body.error).toBe("unauthenticated");

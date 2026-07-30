@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
@@ -8,6 +8,7 @@ import { makeBroker } from "../src/broker";
 import { validateVerbs, requestGrant, approveGrant } from "../src/grants/manage";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
+import { makeCtx } from "./helpers/ctx";
 
 const cfg: WarehousdConfig = ConfigSchema.parse({
   project: "test",
@@ -42,10 +43,6 @@ let db: Pool;
 let pools: Pools;
 let broker: ReturnType<typeof makeBroker>;
 
-function makeCtx(userId: string, env: "dev" | "live" = "dev") {
-  return { userId, orgId: "default", env };
-}
-
 beforeAll(async () => {
   p = await provision("verbs");
   db = new Pool({ connectionString: p.urls.admin });
@@ -67,7 +64,7 @@ it("existing grants default to ['read']", async () => {
   const r = await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status)
      values ($1, $2, $3, $4, $5) returning id, verbs`,
-    ["u1", "people", ["id", "email"], "dev", "approved"]
+    ["u1", "people", ["id", "email"], "dev", "approved"],
   );
   expect(r.rows[0].verbs).toEqual(["read"]);
 });
@@ -77,10 +74,13 @@ it("a grant lacking 'read' refuses query with no_grant (not a new code)", async 
   await db.query(
     `insert into app.grants (id, user_id, collection, allowed_fields, env, status, verbs)
      values (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
-    ["u_no_read", "people", ["id", "email"], "dev", "approved", ["create"]]
+    ["u_no_read", "people", ["id", "email"], "dev", "approved", ["create"]],
   );
 
-  const r = await broker.query(makeCtx("u_no_read"), { collection: "people", fields: ["id"] });
+  const r = await broker.query(makeCtx({ userId: "u_no_read" }), {
+    collection: "people",
+    fields: ["id"],
+  });
   expect(r).toMatchObject({ ok: false, reason: "no_grant" });
 });
 
@@ -132,8 +132,11 @@ it("an empty verb list is refused — a grant that can do nothing is a mistake",
 
 it("approveGrant refuses invalid verbs instead of writing them", async () => {
   const id = await requestGrant(db, {
-    userId: "u_bad_verbs", collection: "people", env: "dev",
-    purposeLabel: "t", allowedFields: ["id", "name"],
+    userId: "u_bad_verbs",
+    collection: "people",
+    env: "dev",
+    purposeLabel: "t",
+    allowedFields: ["id", "name"],
   });
   const r = await approveGrant(db, cfg, id, "marcus", { verbs: ["read", "create"] });
   expect(r.ok).toBe(false);
@@ -144,14 +147,23 @@ it("approveGrant refuses invalid verbs instead of writing them", async () => {
 
 it("approveGrant stores the verbs and mode it was given", async () => {
   const id = await requestGrant(db, {
-    userId: "u_good_verbs", collection: "people", env: "dev",
-    purposeLabel: "t", allowedFields: ["id", "email"],
+    userId: "u_good_verbs",
+    collection: "people",
+    env: "dev",
+    purposeLabel: "t",
+    allowedFields: ["id", "email"],
   });
-  expect((await approveGrant(db, cfg, id, "marcus",
-    { verbs: ["read", "create"], mode: "proposal_only" })).ok).toBe(true);
+  expect(
+    (
+      await approveGrant(db, cfg, id, "marcus", {
+        verbs: ["read", "create"],
+        mode: "proposal_only",
+      })
+    ).ok,
+  ).toBe(true);
   const row = await db.query(`select verbs, mode from app.grants where id=$1`, [id]);
   expect(row.rows[0].verbs).toEqual(["read", "create"]);
-  expect(row.rows[0].mode).toBe("proposal_only");   // Phase 5 is what makes it behave
+  expect(row.rows[0].mode).toBe("proposal_only"); // Phase 5 is what makes it behave
 });
 
 it("read-only grant allows query", async () => {
@@ -159,9 +171,12 @@ it("read-only grant allows query", async () => {
   await db.query(
     `insert into app.grants (user_id, collection, allowed_fields, env, status, verbs)
      values ($1, $2, $3, $4, $5, $6)`,
-    ["u_read_only", "people", ["id", "email"], "dev", "approved", ["read"]]
+    ["u_read_only", "people", ["id", "email"], "dev", "approved", ["read"]],
   );
 
-  const r = await broker.query(makeCtx("u_read_only"), { collection: "people", fields: ["id"] });
+  const r = await broker.query(makeCtx({ userId: "u_read_only" }), {
+    collection: "people",
+    fields: ["id"],
+  });
   expect(r.ok).toBe(true);
 });

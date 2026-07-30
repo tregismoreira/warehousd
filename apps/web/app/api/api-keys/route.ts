@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
      join app.client_policies p on p.client_id = a."clientId"
      where p.org_id = $1
      order by a."createdAt" desc`,
-    [org]);
+    [org],
+  );
 
   const keys = await Promise.all(
     r.rows.map(async (row) => ({
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
       trustedIssuerId: row.trustedIssuerId,
       createdAt: row.createdAt,
       secrets: await listClientSecrets(app, row.clientId, org),
-    }))
+    })),
   );
 
   return Response.json({ keys });
@@ -48,31 +49,19 @@ export async function POST(req: NextRequest) {
   if (!guard.ok) return guard.response;
 
   const org = orgOf(guard.user);
-  const {
-    name,
-    mode,
-    trustedIssuerId,
-    robotUserId,
-    allowedCollections,
-    expiresAt,
-  } = await req.json();
+  const { name, mode, trustedIssuerId, robotUserId, allowedCollections, expiresAt } =
+    await req.json();
 
   if (!name || !mode) {
     return Response.json({ error: "missing_name_or_mode" }, { status: 400 });
   }
 
   if (mode === "delegated" && !trustedIssuerId) {
-    return Response.json(
-      { error: "delegated_mode_requires_trusted_issuer" },
-      { status: 400 }
-    );
+    return Response.json({ error: "delegated_mode_requires_trusted_issuer" }, { status: 400 });
   }
 
   if (mode === "headless" && !robotUserId) {
-    return Response.json(
-      { error: "headless_mode_requires_robot_user_id" },
-      { status: 400 }
-    );
+    return Response.json({ error: "headless_mode_requires_robot_user_id" }, { status: 400 });
   }
 
   const app = getAppPool();
@@ -83,7 +72,7 @@ export async function POST(req: NextRequest) {
   await app.query(
     `insert into app."oauthApplication" ("id","clientId","clientSecret",name,type,"redirectUrls","userId","createdAt","updatedAt")
      values ($1,$2,$3,$4,'web','[]',$5,now(),now())`,
-    [id, clientId, randomBytes(32).toString("hex"), name, guard.user.id]
+    [id, clientId, randomBytes(32).toString("hex"), name, guard.user.id],
   );
 
   // Upsert the policy
@@ -91,19 +80,22 @@ export async function POST(req: NextRequest) {
     `insert into app.client_policies (client_id, org_id, display_name, allowed_scopes, mode, allowed_collections, trusted_issuer_id, robot_user_id)
      values ($1, $2, $3, '{env:dev}', $4, $5, $6, $7)
      on conflict (client_id) do update set display_name=$3, mode=$4, allowed_collections=$5, trusted_issuer_id=$6, robot_user_id=$7`,
-    [clientId, org, name, mode, allowedCollections || null, trustedIssuerId || null, robotUserId || null]
+    [
+      clientId,
+      org,
+      name,
+      mode,
+      allowedCollections || null,
+      trustedIssuerId || null,
+      robotUserId || null,
+    ],
   );
 
   // Create the first secret
-  const expiryDate = expiresAt ? new Date(expiresAt) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-  const { secret } = await createClientSecret(
-    app,
-    clientId,
-    org,
-    expiryDate,
-    guard.user.id,
-    "dev"
-  );
+  const expiryDate = expiresAt
+    ? new Date(expiresAt)
+    : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+  const { secret } = await createClientSecret(app, clientId, org, expiryDate, guard.user.id, "dev");
 
   return Response.json({ clientId, secret }, { status: 201 });
 }

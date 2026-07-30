@@ -2,10 +2,17 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { canonicalize, matchesFilters, validateDocumentFilters } from "../src/grants/filters";
-import { ConfigSchema, type CollectionConfig, type FieldConfig, type WarehousdConfig } from "../src/config/schema";
+import {
+  ConfigSchema,
+  type CollectionConfig,
+  type FieldConfig,
+  type WarehousdConfig,
+} from "../src/config/schema";
 import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import type { BrokerContext, DocumentFilter } from "../src/types";
+import { makeCtx } from "./helpers/ctx";
+import { assertApplied } from "./helpers/results";
 
 // A grant's document filter is evaluated twice in this codebase: in SQL on the read path
 // (sql/build.ts) and in process on the write path (grants/filters.ts). This file is the assertion
@@ -19,32 +26,43 @@ import type { BrokerContext, DocumentFilter } from "../src/types";
 let p: Provisioned, admin: Pool;
 
 const PG_TYPE: Record<string, string> = {
-  text: "text", uuid: "uuid", int: "integer", numeric: "numeric",
-  timestamptz: "timestamptz", date: "date", boolean: "boolean",
+  text: "text",
+  uuid: "uuid",
+  int: "integer",
+  numeric: "numeric",
+  timestamptz: "timestamptz",
+  date: "date",
+  boolean: "boolean",
 };
 
 beforeAll(async () => {
   p = await provision("filter-parity");
   admin = new Pool({ connectionString: p.urls.admin });
-  const cols = Object.entries(PG_TYPE).map(([n, t]) => `c_${n} ${t}`).join(", ");
+  const cols = Object.entries(PG_TYPE)
+    .map(([n, t]) => `c_${n} ${t}`)
+    .join(", ");
   await admin.query(`create table public.parity (${cols})`);
 }, 60_000);
 
-afterAll(async () => { await admin.end(); await p.end(); });
+afterAll(async () => {
+  await admin.end();
+  await p.end();
+});
 
 // One collection whose fields cover every declared type, so canonicalize() is reached through the
 // same shape the broker uses rather than called with a bare type string.
-const collection = (): CollectionConfig => ConfigSchema.parse({
-  project: "t",
-  collections: {
-    c: {
-      description: "d",
-      fields: Object.fromEntries(
-        Object.keys(PG_TYPE).map((t) => [`c_${t}`, { type: t, posture: "allow" }]),
-      ),
+const collection = (): CollectionConfig =>
+  ConfigSchema.parse({
+    project: "t",
+    collections: {
+      c: {
+        description: "d",
+        fields: Object.fromEntries(
+          Object.keys(PG_TYPE).map((t) => [`c_${t}`, { type: t, posture: "allow" }]),
+        ),
+      },
     },
-  },
-}).collections.c!;
+  }).collections.c!;
 
 type Case = { type: string; stored: string | null; filter: unknown; note?: string };
 
@@ -57,11 +75,31 @@ const CASES: Case[] = [
   { type: "text", stored: "100", filter: 100, note: "number against a text column" },
 
   // uuid — Postgres compares 128-bit values, so spelling is insignificant
-  { type: "uuid", stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", filter: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" },
-  { type: "uuid", stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", filter: "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11" },
-  { type: "uuid", stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", filter: "{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}" },
-  { type: "uuid", stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", filter: "a0eebc999c0b4ef8bb6d6bb9bd380a11" },
-  { type: "uuid", stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", filter: "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" },
+  {
+    type: "uuid",
+    stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    filter: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+  },
+  {
+    type: "uuid",
+    stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    filter: "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
+  },
+  {
+    type: "uuid",
+    stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    filter: "{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}",
+  },
+  {
+    type: "uuid",
+    stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    filter: "a0eebc999c0b4ef8bb6d6bb9bd380a11",
+  },
+  {
+    type: "uuid",
+    stored: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    filter: "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+  },
 
   // int — driver returns a number
   { type: "int", stored: "5", filter: 5 },
@@ -83,15 +121,27 @@ const CASES: Case[] = [
   { type: "numeric", stored: "100.00", filter: 101 },
   // Precision: these two differ in Postgres but collapse to the same IEEE double, so a Number()
   // comparison would report a match between two different values — the over-permissive direction.
-  { type: "numeric", stored: "1000000000000000000000000000000", filter: "1000000000000000000000000000001" },
-  { type: "numeric", stored: "1000000000000000000000000000000", filter: "1000000000000000000000000000000" },
+  {
+    type: "numeric",
+    stored: "1000000000000000000000000000000",
+    filter: "1000000000000000000000000000001",
+  },
+  {
+    type: "numeric",
+    stored: "1000000000000000000000000000000",
+    filter: "1000000000000000000000000000000",
+  },
 
   // timestamptz — driver returns a Date
   { type: "timestamptz", stored: "2026-07-29T12:00:00Z", filter: "2026-07-29T12:00:00Z" },
   { type: "timestamptz", stored: "2026-07-29T12:00:00Z", filter: "2026-07-29 12:00:00+00:00" },
   { type: "timestamptz", stored: "2026-07-29T12:00:00Z", filter: "2026-07-29T09:00:00-03:00" },
-  { type: "timestamptz", stored: "2026-07-29T12:00:00Z", filter: "2026-07-29T12:00:00.500Z",
-    note: "sub-second precision is significant to both" },
+  {
+    type: "timestamptz",
+    stored: "2026-07-29T12:00:00Z",
+    filter: "2026-07-29T12:00:00.500Z",
+    note: "sub-second precision is significant to both",
+  },
   { type: "timestamptz", stored: "2026-07-29T12:00:00Z", filter: "2026-07-29T12:00:00.000Z" },
   { type: "timestamptz", stored: "2026-07-29T12:00:00Z", filter: "2026-07-29T13:00:00Z" },
 
@@ -128,8 +178,9 @@ describe("document filter: in-process evaluation matches SQL", () => {
 
   for (const k of CASES) {
     const field = `c_${k.type}`;
-    const label = `${k.type}: stored ${JSON.stringify(k.stored)} vs filter ${JSON.stringify(k.filter)}`
-      + (k.note ? ` (${k.note})` : "");
+    const label =
+      `${k.type}: stored ${JSON.stringify(k.stored)} vs filter ${JSON.stringify(k.filter)}` +
+      (k.note ? ` (${k.note})` : "");
 
     it(label, async () => {
       // Validation gates both paths. A filter it refuses never reaches either evaluator, so it is
@@ -138,12 +189,15 @@ describe("document filter: in-process evaluation matches SQL", () => {
       expect(invalid, `case is admitted by validation`).toBeNull();
 
       await admin.query(`truncate public.parity`);
-      await admin.query(
-        `insert into public.parity (${field}) values ($1::${PG_TYPE[k.type]})`, [k.stored]);
+      await admin.query(`insert into public.parity (${field}) values ($1::${PG_TYPE[k.type]})`, [
+        k.stored,
+      ]);
 
       // What the database says, through a bound parameter — the read path's semantics exactly.
       const sql = await admin.query(
-        `select coalesce(${field} = $1, false) as m from public.parity`, [k.filter as never]);
+        `select coalesce(${field} = $1, false) as m from public.parity`,
+        [k.filter as never],
+      );
       const sqlMatch: boolean = sql.rows[0]!.m;
 
       // What the write path says, against the row as the driver hands it over.
@@ -179,12 +233,15 @@ describe("document filter: `in` lists agree with SQL", () => {
       expect(validateDocumentFilters([{ field, op: "in", value: k.list }], c)).toBeNull();
 
       await admin.query(`truncate public.parity`);
-      await admin.query(
-        `insert into public.parity (${field}) values ($1::${PG_TYPE[k.type]})`, [k.stored]);
+      await admin.query(`insert into public.parity (${field}) values ($1::${PG_TYPE[k.type]})`, [
+        k.stored,
+      ]);
 
       const params = k.list.map((_, i) => `$${i + 1}`).join(", ");
       const sql = await admin.query(
-        `select coalesce(${field} in (${params}), false) as m from public.parity`, k.list as never[]);
+        `select coalesce(${field} in (${params}), false) as m from public.parity`,
+        k.list as never[],
+      );
       const row = (await admin.query(`select * from public.parity`)).rows[0]!;
 
       expect(matchesFilters(row, [{ field, op: "in", value: k.list }], c)).toBe(sql.rows[0]!.m);
@@ -202,8 +259,16 @@ describe("document filter validation refuses what the two paths could not agree 
     // Valid to Postgres, but "…T12:00:00+00" is NaN to the strict JavaScript date parser while
     // "… 12:00:00+00" parses to the right instant under the legacy one. Admitting bare-hour
     // offsets would make the separator decide whether a grant works.
-    { label: "timestamptz with a bare-hour offset", field: "c_timestamptz", value: "2026-07-29T12:00:00+00" },
-    { label: "timestamptz with a bare-hour offset, space separator", field: "c_timestamptz", value: "2026-07-29 12:00:00+00" },
+    {
+      label: "timestamptz with a bare-hour offset",
+      field: "c_timestamptz",
+      value: "2026-07-29T12:00:00+00",
+    },
+    {
+      label: "timestamptz with a bare-hour offset, space separator",
+      field: "c_timestamptz",
+      value: "2026-07-29 12:00:00+00",
+    },
     { label: "date in a non-ISO spelling", field: "c_date", value: "07/29/2026" },
     // Postgres accepts unambiguous prefixes of its boolean words; matching that exactly buys a
     // grant author nothing, so only the canonical spellings are admitted.
@@ -227,16 +292,21 @@ describe("document filter validation refuses what the two paths could not agree 
     });
 
   it("refuses a value inside an `in` list, not only a scalar", () => {
-    expect(validateDocumentFilters(
-      [{ field: "c_boolean", op: "in", value: ["t", "maybe"] }], c)).not.toBeNull();
+    expect(
+      validateDocumentFilters([{ field: "c_boolean", op: "in", value: ["t", "maybe"] }], c),
+    ).not.toBeNull();
   });
 
   it("admits a null filter value, which matches nothing just as `col = NULL` does", () => {
     // Legal SQL, so not a validation error — but it must not match, including against a null
     // column. The parity cases above pin the matching half.
     expect(validateDocumentFilters([{ field: "c_text", op: "eq", value: null }], c)).toBeNull();
-    expect(matchesFilters({ c_text: null }, [{ field: "c_text", op: "eq", value: null }], c)).toBe(false);
-    expect(matchesFilters({ c_text: "x" }, [{ field: "c_text", op: "eq", value: null }], c)).toBe(false);
+    expect(matchesFilters({ c_text: null }, [{ field: "c_text", op: "eq", value: null }], c)).toBe(
+      false,
+    );
+    expect(matchesFilters({ c_text: "x" }, [{ field: "c_text", op: "eq", value: null }], c)).toBe(
+      false,
+    );
   });
 
   it("refuses a view_join field, which the write path cannot see at all", () => {
@@ -252,7 +322,8 @@ describe("document filter validation refuses what the two paths could not agree 
             id: { type: "uuid", posture: "allow", pk: true },
             owner_id: { type: "uuid", posture: "allow", fk: "people.id" },
             owner_name: {
-              type: "text", posture: "allow",
+              type: "text",
+              posture: "allow",
               view_join: { table: "people", column: "full_name", on: "owner_id" },
             },
           },
@@ -270,12 +341,19 @@ describe("document filter validation refuses what the two paths could not agree 
     // write path, which has no way to reproduce jsonb equality.
     const withJson = ConfigSchema.parse({
       project: "t",
-      collections: { c: { description: "d", fields: {
-        id: { type: "uuid", posture: "allow", pk: true },
-        meta: { type: "json", posture: "allow" },
-      } } },
+      collections: {
+        c: {
+          description: "d",
+          fields: {
+            id: { type: "uuid", posture: "allow", pk: true },
+            meta: { type: "json", posture: "allow" },
+          },
+        },
+      },
     }).collections.c!;
-    expect(validateDocumentFilters([{ field: "meta", op: "eq", value: { a: 1 } }], withJson)).not.toBeNull();
+    expect(
+      validateDocumentFilters([{ field: "meta", op: "eq", value: { a: 1 } }], withJson),
+    ).not.toBeNull();
   });
 });
 
@@ -283,7 +361,8 @@ describe("canonicalize", () => {
   // Guards the property the parity suite depends on: equal values share a canonical form and
   // unequal values do not. Cheap to state here, expensive to discover from a failing grant.
   const eq = (type: FieldConfig["type"], a: unknown, b: unknown) => {
-    const ca = canonicalize(type, a), cb = canonicalize(type, b);
+    const ca = canonicalize(type, a),
+      cb = canonicalize(type, b);
     expect(ca).not.toBeNull();
     expect(ca).toBe(cb);
   };
@@ -294,8 +373,9 @@ describe("canonicalize", () => {
   });
 
   it("keeps numerics apart beyond double precision", () => {
-    expect(canonicalize("numeric", "1000000000000000000000000000000"))
-      .not.toBe(canonicalize("numeric", "1000000000000000000000000000001"));
+    expect(canonicalize("numeric", "1000000000000000000000000000000")).not.toBe(
+      canonicalize("numeric", "1000000000000000000000000000001"),
+    );
   });
 
   it("treats every spelling of zero as one value", () => {
@@ -312,8 +392,13 @@ describe("canonicalize", () => {
 
   it("refuses rather than guessing", () => {
     for (const [type, v] of [
-      ["timestamptz", "2026-07-29 12:00:00"], ["date", "29/07/2026"],
-      ["boolean", "tr"], ["int", "1e2"], ["numeric", "abc"], ["uuid", "nope"], ["json", {}],
+      ["timestamptz", "2026-07-29 12:00:00"],
+      ["date", "29/07/2026"],
+      ["boolean", "tr"],
+      ["int", "1e2"],
+      ["numeric", "abc"],
+      ["uuid", "nope"],
+      ["json", {}],
     ] as [FieldConfig["type"], unknown][])
       expect(canonicalize(type, v), `${type} ${JSON.stringify(v)}`).toBeNull();
   });
@@ -331,14 +416,14 @@ describe("a grant scopes read and write identically", () => {
         description: "Things",
         writable: true,
         fields: {
-          id:     { type: "uuid",        posture: "allow", pk: true },
-          name:   { type: "text",        posture: { read: "allow", write: "allow" } },
-          owner:  { type: "text",        posture: { read: "allow", write: "allow" } },
-          amount: { type: "numeric",     posture: { read: "allow", write: "allow" } },
-          count:  { type: "int",         posture: { read: "allow", write: "allow" } },
-          due:    { type: "date",        posture: { read: "allow", write: "allow" } },
-          at:     { type: "timestamptz", posture: { read: "allow", write: "allow" } },
-          active: { type: "boolean",     posture: { read: "allow", write: "allow" } },
+          id: { type: "uuid", posture: "allow", pk: true },
+          name: { type: "text", posture: { read: "allow", write: "allow" } },
+          owner: { type: "text", posture: { read: "allow", write: "allow" } },
+          amount: { type: "numeric", posture: { read: "allow", write: "allow" } },
+          count: { type: "int", posture: { read: "allow", write: "allow" } },
+          due: { type: "date", posture: { read: "allow", write: "allow" } },
+          at: { type: "timestamptz", posture: { read: "allow", write: "allow" } },
+          active: { type: "boolean", posture: { read: "allow", write: "allow" } },
         },
       },
     },
@@ -353,41 +438,67 @@ describe("a grant scopes read and write identically", () => {
     wapp = new Pool({ connectionString: wp.urls.admin });
     await createAppSchema(wapp);
     await applyConfig(wapp, wcfg);
-    wpools = createPools({ app: wp.urls.admin, dev: wp.urls.dev, live: wp.urls.live,
-      devWrite: wp.urls.devWrite, liveWrite: wp.urls.liveWrite });
+    wpools = createPools({
+      app: wp.urls.admin,
+      dev: wp.urls.dev,
+      live: wp.urls.live,
+      devWrite: wp.urls.devWrite,
+      liveWrite: wp.urls.liveWrite,
+    });
     broker = makeBroker(wpools, wcfg);
 
     // One row, written through the broker so the stored values are exactly what the write path
     // produces rather than what a hand-written INSERT would.
     const seedGrant = await requestGrant(wapp, {
-      userId: "seeder", collection: "things", env: "dev", orgId: "default",
-      purposeLabel: "seed", allowedFields: FIELDS,
+      userId: "seeder",
+      collection: "things",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "seed",
+      allowedFields: FIELDS,
     });
     await approveGrant(wapp, wcfg, seedGrant, "admin", { verbs: ["read", "create", "update"] });
-    const created = await broker.mutate(
-      { userId: "seeder", env: "dev", orgId: "default" },
-      { collection: "things", op: "create", values: {
-        name: "widget", owner: "ada", amount: "100.00", count: 5,
-        due: "2026-07-29", at: "2026-07-29T12:00:00Z", active: true,
-      } });
+    const created = await broker.mutate(makeCtx({ userId: "seeder" }), {
+      collection: "things",
+      op: "create",
+      values: {
+        name: "widget",
+        owner: "ada",
+        amount: "100.00",
+        count: 5,
+        due: "2026-07-29",
+        at: "2026-07-29T12:00:00Z",
+        active: true,
+      },
+    });
     expect(created.ok, JSON.stringify(created)).toBe(true);
-    if (created.ok) docId = created.documentId!;
+    assertApplied(created);
+    docId = created.documentId;
   }, 90_000);
 
-  afterAll(async () => { await wapp.end(); await wpools.end(); await wp.end(); });
+  afterAll(async () => {
+    await wapp.end();
+    await wpools.end();
+    await wp.end();
+  });
 
   let seq = 0;
   // Runs one grant through both verbs and returns what each decided about the row.
   async function bothPaths(filter: DocumentFilter) {
     const userId = `parity_user_${seq++}`;
     const grantId = await requestGrant(wapp, {
-      userId, collection: "things", env: "dev", orgId: "default",
-      purposeLabel: "parity", allowedFields: FIELDS,
+      userId,
+      collection: "things",
+      env: "dev",
+      orgId: "default",
+      purposeLabel: "parity",
+      allowedFields: FIELDS,
     });
     await approveGrant(wapp, wcfg, grantId, "admin", {
-      verbs: ["read", "update"], documentFilters: [filter],
+      verbs: ["read", "update"],
+      documentFilters: [filter],
     });
-    const ctx: BrokerContext = { userId, env: "dev", orgId: "default" };
+    const ctx: BrokerContext = makeCtx({ userId });
 
     const read = await broker.query(ctx, { collection: "things", fields: ["id"] });
     const readReaches = read.ok
@@ -395,8 +506,12 @@ describe("a grant scopes read and write identically", () => {
       : `refused:${read.reason}`;
 
     // A no-op-ish update: it only has to get far enough to prove the filter admitted the row.
-    const write = await broker.mutate(ctx,
-      { collection: "things", op: "update", id: docId, values: { name: "widget" } });
+    const write = await broker.mutate(ctx, {
+      collection: "things",
+      op: "update",
+      id: docId,
+      values: { name: "widget" },
+    });
     const writeReaches = write.ok ? true : `refused:${write.reason}`;
 
     return { readReaches, writeReaches };
@@ -406,30 +521,46 @@ describe("a grant scopes read and write identically", () => {
   // differ from how the value was written on purpose — that difference is what used to break the
   // write path while leaving the read path working.
   const cases: { label: string; match: DocumentFilter; miss: DocumentFilter }[] = [
-    { label: "text",
+    {
+      label: "text",
       match: { field: "owner", op: "eq", value: "ada" },
-      miss:  { field: "owner", op: "eq", value: "grace" } },
-    { label: "numeric written as 100.00, filtered as 100",
+      miss: { field: "owner", op: "eq", value: "grace" },
+    },
+    {
+      label: "numeric written as 100.00, filtered as 100",
       match: { field: "amount", op: "eq", value: 100 },
-      miss:  { field: "amount", op: "eq", value: 101 } },
-    { label: "numeric filtered in exponent form",
+      miss: { field: "amount", op: "eq", value: 101 },
+    },
+    {
+      label: "numeric filtered in exponent form",
       match: { field: "amount", op: "eq", value: "1e2" },
-      miss:  { field: "amount", op: "eq", value: "1e3" } },
-    { label: "int",
+      miss: { field: "amount", op: "eq", value: "1e3" },
+    },
+    {
+      label: "int",
       match: { field: "count", op: "eq", value: 5 },
-      miss:  { field: "count", op: "eq", value: 6 } },
-    { label: "date",
+      miss: { field: "count", op: "eq", value: 6 },
+    },
+    {
+      label: "date",
       match: { field: "due", op: "eq", value: "2026-07-29" },
-      miss:  { field: "due", op: "eq", value: "2026-07-30" } },
-    { label: "timestamptz filtered in a different but equal zone",
+      miss: { field: "due", op: "eq", value: "2026-07-30" },
+    },
+    {
+      label: "timestamptz filtered in a different but equal zone",
       match: { field: "at", op: "eq", value: "2026-07-29T09:00:00-03:00" },
-      miss:  { field: "at", op: "eq", value: "2026-07-29T09:00:00Z" } },
-    { label: "boolean filtered as 't'",
+      miss: { field: "at", op: "eq", value: "2026-07-29T09:00:00Z" },
+    },
+    {
+      label: "boolean filtered as 't'",
       match: { field: "active", op: "eq", value: "t" },
-      miss:  { field: "active", op: "eq", value: "f" } },
-    { label: "in-list over numerics",
+      miss: { field: "active", op: "eq", value: "f" },
+    },
+    {
+      label: "in-list over numerics",
       match: { field: "amount", op: "in", value: ["1e2", "7"] },
-      miss:  { field: "amount", op: "in", value: ["7", "8"] } },
+      miss: { field: "amount", op: "in", value: ["7", "8"] },
+    },
   ];
 
   for (const k of cases) {

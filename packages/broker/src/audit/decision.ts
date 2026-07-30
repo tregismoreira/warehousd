@@ -1,5 +1,10 @@
 import type { Pool } from "pg";
-import type { BrokerContext, MutationIntent, MutationRefusalReason, MutationResult } from "../types";
+import type {
+  BrokerContext,
+  MutationIntent,
+  MutationRefusalReason,
+  MutationResult,
+} from "../types";
 import { writeAudit, type AuditIntent } from "./write";
 
 // One decision, one audit row. Every broker verb ends in exactly one of these two calls.
@@ -30,8 +35,7 @@ export type AuditDetail = {
 // "the non-negotiable part". Nothing here fabricates an id to paper over that; the failure becomes
 // a refusal the caller can read, and a loud log line for the operator.
 export type AuditedAllow =
-  | { ok: true; auditId: string }
-  | { ok: false; reason: "internal_error"; auditId: null };
+  { ok: true; auditId: string } | { ok: false; reason: "internal_error"; auditId: null };
 
 export type AuditedRefusal<R extends string> = { ok: false; reason: R; auditId: string | null };
 
@@ -41,13 +45,21 @@ export type AuditWriter = {
   allow(collection: string, detail?: AuditDetail): Promise<AuditedAllow>;
   // Record a refusal. The refusal stands whether or not the row was written — there is nothing to
   // withhold — so this yields the reason the caller asked for, with a null id if the log failed.
-  refuse<R extends string>(collection: string, reason: R, detail?: AuditDetail): Promise<AuditedRefusal<R>>;
+  refuse<R extends string>(
+    collection: string,
+    reason: R,
+    detail?: AuditDetail,
+  ): Promise<AuditedRefusal<R>>;
   // The mutation forms. Separate because a mutation's audited intent is not its intent: it records
   // the op and the field NAMES only. Going through these rather than through `allow`/`refuse` with
   // a hand-built intent is what stops one mutation refusal from auditing differently than the
   // identical one three lines below it.
   allowMutation(i: MutationIntent, grantId: string | null, fields: string[]): Promise<AuditedAllow>;
-  refuseMutation(i: MutationIntent, grantId: string | null, reason: MutationRefusalReason): Promise<MutationResult>;
+  refuseMutation(
+    i: MutationIntent,
+    grantId: string | null,
+    reason: MutationRefusalReason,
+  ): Promise<MutationResult>;
 };
 
 // Raised to abort a data transaction whose decision could not be recorded.
@@ -58,7 +70,9 @@ export type AuditWriter = {
 // catch turns it into the same controlled refusal (and re-attempts the refusal's own audit row,
 // which records that the operation was rejected).
 export class AuditWriteFailed extends Error {
-  constructor() { super("audit write failed — transaction rolled back"); }
+  constructor() {
+    super("audit write failed — transaction rolled back");
+  }
 }
 
 export function assertRecorded(rec: AuditedAllow): asserts rec is { ok: true; auditId: string } {
@@ -74,21 +88,35 @@ function mutationIntent(i: MutationIntent, fields: string[]) {
 
 export function makeAuditWriter(app: Pool, ctx: BrokerContext): AuditWriter {
   async function record(
-    collection: string, outcome: "allowed" | "refused", reason: string | null, detail: AuditDetail,
+    collection: string,
+    outcome: "allowed" | "refused",
+    reason: string | null,
+    detail: AuditDetail,
   ): Promise<string | null> {
     try {
       return await writeAudit(app, {
-        userId: ctx.userId, env: ctx.env, collection, orgId: ctx.orgId,
+        userId: ctx.userId,
+        env: ctx.env,
+        collection,
+        orgId: ctx.orgId,
         intent: detail.intent ?? null,
         fieldsReturned: detail.fieldsReturned ?? [],
         grantId: detail.grantId ?? null,
-        outcome, reason, via: ctx.via,
+        outcome,
+        reason,
+        via: ctx.via,
       });
     } catch (err) {
       // Loud, and with enough to reconstruct the decision that went unrecorded — this line is the
       // only remaining trace of it.
       console.error("[broker] AUDIT WRITE FAILED — decision not recorded", {
-        collection, outcome, reason, userId: ctx.userId, orgId: ctx.orgId, env: ctx.env, err,
+        collection,
+        outcome,
+        reason,
+        userId: ctx.userId,
+        orgId: ctx.orgId,
+        env: ctx.env,
+        err,
       });
       return null;
     }
@@ -96,7 +124,9 @@ export function makeAuditWriter(app: Pool, ctx: BrokerContext): AuditWriter {
 
   // An allow is only an allow once the row exists. This is the whole of the downgrade rule.
   const sealed = (auditId: string | null): AuditedAllow =>
-    auditId === null ? { ok: false, reason: "internal_error", auditId: null } : { ok: true, auditId };
+    auditId === null
+      ? { ok: false, reason: "internal_error", auditId: null }
+      : { ok: true, auditId };
 
   return {
     async allow(collection, detail = {}) {
@@ -106,15 +136,18 @@ export function makeAuditWriter(app: Pool, ctx: BrokerContext): AuditWriter {
       return { ok: false, reason, auditId: await record(collection, "refused", reason, detail) };
     },
     async allowMutation(i, grantId, fields) {
-      return sealed(await record(i.collection, "allowed", null,
-        { intent: mutationIntent(i, fields), grantId }));
+      return sealed(
+        await record(i.collection, "allowed", null, { intent: mutationIntent(i, fields), grantId }),
+      );
     },
     async refuseMutation(i, grantId, reason) {
       // The field names a refused mutation touched, taken from the intent itself. A delete carries
       // no values, so it names none.
       const fields = i.op === "delete" ? [] : Object.keys(i.values);
-      const auditId = await record(i.collection, "refused", reason,
-        { intent: mutationIntent(i, fields), grantId });
+      const auditId = await record(i.collection, "refused", reason, {
+        intent: mutationIntent(i, fields),
+        grantId,
+      });
       return { ok: false, reason, auditId };
     },
   };

@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a capability warehousd does not have.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What you are trying to do and where warehousd stops you. Describe the situation, not the
+        solution — the shape of the fix is usually the easier half.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. If you have a design, this is the place for it.
+
+  - type: textarea
+    id: enforcement
+    attributes:
+      label: Effect on the enforcement model
+      description: >-
+        warehousd's premise is that MCP clients send structured intents and never SQL, that every
+        access is grant-scoped, and that every decision is audited. If this proposal touches any of
+        those three, say how. If it does not, say that.
+    validations:
+      required: true

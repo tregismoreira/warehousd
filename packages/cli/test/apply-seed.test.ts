@@ -5,7 +5,9 @@ import { runApply, runSeed } from "../src/index";
 import { join } from "node:path";
 
 let p: Provisioned;
-afterAll(async () => { await p?.end(); });
+afterAll(async () => {
+  await p?.end();
+});
 
 it("runApply then runSeed provisions and populates data_synth", async () => {
   p = await provision("cli");

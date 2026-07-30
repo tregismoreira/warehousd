@@ -1,0 +1,13 @@
+{
+  // `tsconfig.json` covers `src` only, because that is what `build` emits to dist. The suite is a
+  // separate program so that it can be typechecked without being emitted — before this existed,
+  // ~16.7k lines of test code compiled nowhere and 436 type errors sat behind a green `pnpm test`
+  // (see docs/testing.md and the hardening plan's 5.2).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "types": ["node"]
+  },
+  "include": ["src", "test"]
+}

@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { coverage } from "./vitest.coverage";
 
 // Suites that depend on cluster-global state and so cannot share a Postgres with anything
 // running concurrently. They run alone in a second pass — see vitest.serial.config.ts.
@@ -28,6 +29,9 @@ export default defineConfig({
     include: ["packages/**/test/**/*.test.ts", "apps/**/test/**/*.test.ts"],
     exclude: ["**/e2e/**", "**/node_modules/**", ...SERIAL_TESTS],
     globalSetup: ["./vitest.global-setup.ts"],
+    // Options only — `coverage.enabled` stays false until `--coverage` is passed, so a plain
+    // `pnpm test` pays nothing. See vitest.coverage.ts and scripts/run-tests.ts.
+    coverage,
     hookTimeout: 60_000,
     testTimeout: 30_000,
     // Every test file provisions its own database (label + pid) and the role DDL that used to

@@ -9,8 +9,14 @@ import { Badge } from "@/components/ui/badge";
 import { Mono } from "@/components/common/Mono";
 import { EmptyState } from "@/components/common/EmptyState";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
@@ -25,7 +31,15 @@ export type Client = {
   lastTokenAt: string | null;
 };
 
-export function ClientsTable({ clients, loading, onRefresh }: { clients: Client[]; loading: boolean; onRefresh: () => Promise<void> }) {
+export function ClientsTable({
+  clients,
+  loading,
+  onRefresh,
+}: {
+  clients: Client[];
+  loading: boolean;
+  onRefresh: () => Promise<void>;
+}) {
   const [actionId, setActionId] = useState<string | null>(null);
   const [actionType, setActionType] = useState<"promote" | "demote" | null>(null);
 
@@ -90,10 +104,11 @@ export function ClientsTable({ clients, loading, onRefresh }: { clients: Client[
       cell: ({ row }) => (
         <div className="flex flex-wrap gap-1">
           {row.original.allowedScopes.map((scope) => (
-            <Badge key={scope} variant="outline" className={cn(
-              "font-mono text-xs",
-              scope === "env:live" ? "text-allow" : undefined,
-            )}>
+            <Badge
+              key={scope}
+              variant="outline"
+              className={cn("font-mono text-xs", scope === "env:live" ? "text-allow" : undefined)}
+            >
               {scope}
             </Badge>
           ))}
@@ -104,7 +119,8 @@ export function ClientsTable({ clients, loading, onRefresh }: { clients: Client[
       id: "promotion",
       header: "Promoted",
       cell: ({ row }) => {
-        if (!row.original.promotedAt) return <span className="text-xs text-muted-foreground">—</span>;
+        if (!row.original.promotedAt)
+          return <span className="text-xs text-muted-foreground">—</span>;
         return (
           <span className="text-xs text-muted-foreground">
             {new Date(row.original.promotedAt).toLocaleDateString()} by {row.original.promotedBy}
@@ -116,7 +132,8 @@ export function ClientsTable({ clients, loading, onRefresh }: { clients: Client[
       id: "lastToken",
       header: "Last token issued",
       cell: ({ row }) => {
-        if (!row.original.lastTokenAt) return <span className="text-xs text-muted-foreground">Never</span>;
+        if (!row.original.lastTokenAt)
+          return <span className="text-xs text-muted-foreground">Never</span>;
         return (
           <span className="text-xs text-muted-foreground">
             {new Date(row.original.lastTokenAt).toLocaleDateString()}
@@ -135,13 +152,17 @@ export function ClientsTable({ clients, loading, onRefresh }: { clients: Client[
           return (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="outline" size="sm">Promote</Button>
+                <Button variant="outline" size="sm">
+                  Promote
+                </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Promote {row.original.displayName} to live?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This client will be able to receive <Mono>env:live</Mono> tokens on its next refresh — within 15 minutes. Live data is still filtered through each calling user&rsquo;s own grants.
+                    This client will be able to receive <Mono>env:live</Mono> tokens on its next
+                    refresh — within 15 minutes. Live data is still filtered through each calling
+                    user&rsquo;s own grants.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -162,13 +183,16 @@ export function ClientsTable({ clients, loading, onRefresh }: { clients: Client[
         return (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm">Demote</Button>
+              <Button variant="outline" size="sm">
+                Demote
+              </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Demote {row.original.displayName} to dev?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  <Mono>env:live</Mono> is removed on the next token refresh — within 15 minutes. Existing tokens keep working until they expire.
+                  <Mono>env:live</Mono> is removed on the next token refresh — within 15 minutes.
+                  Existing tokens keep working until they expire.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

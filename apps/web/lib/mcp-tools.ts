@@ -1,11 +1,19 @@
 import type { BrokerContext } from "@warehousd/broker";
 import {
-  requestGrant, validateGrantRequest,
-  QueryIntentSchema, DocSearchIntentSchema, GetDocumentIntentSchema, MutationIntentSchema,
+  requestGrant,
+  validateGrantRequest,
+  QueryIntentSchema,
+  DocSearchIntentSchema,
+  GetDocumentIntentSchema,
+  MutationIntentSchema,
 } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../app/lib/broker";
 
-export type JsonSchema = { type: "object"; properties: Record<string, unknown>; required?: string[] };
+export type JsonSchema = {
+  type: "object";
+  properties: Record<string, unknown>;
+  required?: string[];
+};
 
 export type ToolDef = {
   name: string;
@@ -65,21 +73,23 @@ export const TOOLS: ToolDef[] = [
       "grant; denied fields are never returned, and referencing one anywhere (fields, filters, " +
       "orderBy, aggregate, groupBy) refuses the whole call — you are an untrusted proposer, the " +
       "broker is the source of truth. Two mutually exclusive shapes: (1) document fetch — use " +
-      "\"fields\", never combine with \"aggregate\"/\"groupBy\"; (2) aggregation (counts, sums, " +
-      "averages, breakdowns \"by X\") — use \"aggregate\" + \"groupBy\", never set \"fields\". " +
-      "Example aggregation: aggregate=[{\"fn\":\"count\",\"field\":\"id\"}], " +
-      "groupBy=[\"department_name\"]. Refusals are deny-by-default and purpose-bound; a refusal " +
+      '"fields", never combine with "aggregate"/"groupBy"; (2) aggregation (counts, sums, ' +
+      'averages, breakdowns "by X") — use "aggregate" + "groupBy", never set "fields". ' +
+      'Example aggregation: aggregate=[{"fn":"count","field":"id"}], ' +
+      'groupBy=["department_name"]. Refusals are deny-by-default and purpose-bound; a refusal ' +
       "includes a request_access hint.",
     inputSchema: {
       type: "object",
       properties: {
         collection: { type: "string", description: "Collection name, from list_collections." },
         fields: {
-          type: "array", items: { type: "string" },
+          type: "array",
+          items: { type: "string" },
           description: "Document-fetch shape only. Field names to return; omit for aggregation.",
         },
         filters: {
-          type: "array", items: {
+          type: "array",
+          items: {
             type: "object",
             properties: {
               field: { type: "string" },
@@ -95,7 +105,8 @@ export const TOOLS: ToolDef[] = [
         },
         limit: { type: "number", description: "Default 100, max 500." },
         aggregate: {
-          type: "array", items: {
+          type: "array",
+          items: {
             type: "object",
             properties: {
               fn: { type: "string", enum: ["avg", "sum", "count", "min", "max"] },
@@ -106,7 +117,8 @@ export const TOOLS: ToolDef[] = [
           description: "Aggregation shape only. e.g. count/sum/avg per group.",
         },
         groupBy: {
-          type: "array", items: { type: "string" },
+          type: "array",
+          items: { type: "string" },
           description: "Aggregation shape only. Field names to group by.",
         },
       },
@@ -154,8 +166,15 @@ export const TOOLS: ToolDef[] = [
       type: "object",
       properties: {
         collection: { type: "string", description: "Collection name." },
-        id: { type: "string", description: "Document id (pk for datasets, file_id for files). Mutually exclusive with path." },
-        path: { type: "string", description: "Source file path (file collections only). Mutually exclusive with id." },
+        id: {
+          type: "string",
+          description:
+            "Document id (pk for datasets, file_id for files). Mutually exclusive with path.",
+        },
+        path: {
+          type: "string",
+          description: "Source file path (file collections only). Mutually exclusive with id.",
+        },
       },
       required: ["collection"],
     },
@@ -201,7 +220,10 @@ export const TOOLS: ToolDef[] = [
         collection: { type: "string" },
         id: { type: "string", description: "Document id (pk)." },
         values: { type: "object", description: "Fields to update." },
-        expect: { type: "string", description: "Optional revision to enforce optimistic concurrency." },
+        expect: {
+          type: "string",
+          description: "Optional revision to enforce optimistic concurrency.",
+        },
       },
       required: ["collection", "id", "values"],
     },
@@ -219,7 +241,10 @@ export const TOOLS: ToolDef[] = [
       properties: {
         collection: { type: "string" },
         id: { type: "string", description: "Document id (pk)." },
-        expect: { type: "string", description: "Optional revision to enforce optimistic concurrency." },
+        expect: {
+          type: "string",
+          description: "Optional revision to enforce optimistic concurrency.",
+        },
       },
       required: ["collection", "id"],
     },
@@ -235,9 +260,13 @@ export const TOOLS: ToolDef[] = [
       type: "object",
       properties: {
         collection: { type: "string" },
-        purpose: { type: "string", description: "Why you need this access — shown to the approver." },
+        purpose: {
+          type: "string",
+          description: "Why you need this access — shown to the approver.",
+        },
         fields: {
-          type: "array", items: { type: "string" },
+          type: "array",
+          items: { type: "string" },
           description: "Fields you need. Omit to let the approver decide scope from the purpose.",
         },
       },
@@ -245,9 +274,13 @@ export const TOOLS: ToolDef[] = [
     },
     handler: async (ctx, input) => {
       const cfg = getConfig();
-      const validation = validateGrantRequest(cfg, input.collection as string, input.purpose, input.fields);
-      if (!validation.ok)
-        return withHint({ ok: false, reason: validation.error });
+      const validation = validateGrantRequest(
+        cfg,
+        input.collection as string,
+        input.purpose,
+        input.fields,
+      );
+      if (!validation.ok) return withHint({ ok: false, reason: validation.error });
 
       const requestId = await requestGrant(getAppPool(), {
         userId: ctx.userId,

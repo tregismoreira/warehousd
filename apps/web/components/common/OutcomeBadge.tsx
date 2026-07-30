@@ -2,8 +2,12 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
 export function OutcomeBadge({
-  outcome, reason,
-}: { outcome: "allowed" | "refused"; reason?: string | null }) {
+  outcome,
+  reason,
+}: {
+  outcome: "allowed" | "refused";
+  reason?: string | null;
+}) {
   const allowed = outcome === "allowed";
   return (
     <Badge

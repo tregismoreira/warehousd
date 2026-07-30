@@ -13,12 +13,14 @@ async function createKey(page: Page, name: string, robot: string, ceiling?: stri
   if (ceiling) await page.getByLabel("Collection ceiling").fill(ceiling);
 
   const [res] = await Promise.all([
-    page.waitForResponse(r => r.url().includes("/api/api-keys") && r.request().method() === "POST"),
+    page.waitForResponse(
+      (r) => r.url().includes("/api/api-keys") && r.request().method() === "POST",
+    ),
     page.getByRole("button", { name: "Create" }).click(),
   ]);
   const { clientId, secret } = await res.json();
   expect(secret).toMatch(/^whd_dev_/);
-  return { clientId, secret } as { clientId: string; secret: string };
+  return { clientId, secret };
 }
 
 // Row actions live behind an icon-only dropdown trigger, so "Manage" is a menuitem.
@@ -43,7 +45,12 @@ const RUN = Date.now().toString(36);
 // A secret is "working" iff it can still mint a token — the property revocation must break.
 async function secretWorks(page: Page, clientId: string, secret: string) {
   const res = await page.request.post("/v1/token", {
-    form: { grant_type: "client_credentials", client_id: clientId, client_secret: secret, scope: "env:dev" },
+    form: {
+      grant_type: "client_credentials",
+      client_id: clientId,
+      client_secret: secret,
+      scope: "env:dev",
+    },
   });
   return res.status() === 200;
 }
@@ -55,7 +62,9 @@ test.beforeEach(async ({ page, context }) => {
 });
 
 test.describe("API keys", () => {
-  test("create: the secret is revealed once and is not re-fetchable after reload", async ({ page }) => {
+  test("create: the secret is revealed once and is not re-fetchable after reload", async ({
+    page,
+  }) => {
     const { secret } = await createKey(page, `Create Key ${RUN}`, "test-robot-123");
 
     // Revealed exactly once, in the creation dialog.
@@ -70,14 +79,16 @@ test.describe("API keys", () => {
     await expect(page.getByText(secret)).toHaveCount(0);
   });
 
-  test("rotate: the new secret works and the old one keeps working until revoked", async ({ page }) => {
+  test("rotate: the new secret works and the old one keeps working until revoked", async ({
+    page,
+  }) => {
     const first = await createKey(page, `Rotate Key ${RUN}`, ROBOT);
     await page.getByRole("button", { name: "Done" }).click();
 
     await openKey(page, `Rotate Key ${RUN}`);
     await page.getByRole("button", { name: "Rotate secret" }).click();
     const [res] = await Promise.all([
-      page.waitForResponse(r => r.url().includes("/rotate") && r.request().method() === "POST"),
+      page.waitForResponse((r) => r.url().includes("/rotate") && r.request().method() === "POST"),
       page.getByRole("alertdialog").getByRole("button", { name: "Rotate" }).click(),
     ]);
     const { secret: rotated } = await res.json();

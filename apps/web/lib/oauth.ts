@@ -2,9 +2,15 @@ import { mcp } from "better-auth/plugins";
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { Pool } from "pg";
-import { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy, DEFAULT_ORG_ID, resolveEnvScopes, recomputeEnvScope, pickEnvScope } from "@warehousd/broker";
-
-const ENV_SCOPES = ["env:dev", "env:live"] as const;
+import {
+  getClientPolicy,
+  hasApprovedLiveGrant,
+  upsertClientPolicy,
+  DEFAULT_ORG_ID,
+  resolveEnvScopes,
+  recomputeEnvScope,
+  pickEnvScope,
+} from "@warehousd/broker";
 
 // env:dev / env:live are the ONLY scopes this plugin adds beyond Better Auth's OIDC defaults
 // (openid, profile, email, offline_access). Rule enforcement (client policy intersection,
@@ -78,7 +84,9 @@ export function envScopePlugin(app: Pool) {
             if (!query) return;
 
             const clientId = String(query.client_id ?? "");
-            const requested = String(query.scope ?? "").split(" ").filter(Boolean);
+            const requested = String(query.scope ?? "")
+              .split(" ")
+              .filter(Boolean);
             const requestedEnv = requested.filter((s) => ["env:dev", "env:live"].includes(s));
             if (requestedEnv.length === 0) return;
 
@@ -124,20 +132,25 @@ export function envScopePlugin(app: Pool) {
           handler: createAuthMiddleware(async (ctx) => {
             const grantType = ctx.body?.grant_type;
             if (grantType !== "refresh_token") return;
-            const returned = ctx.context.returned as { access_token?: string; scope?: string } | undefined;
+            const returned = ctx.context.returned as
+              { access_token?: string; scope?: string } | undefined;
             if (!returned?.access_token) return;
 
             // findOne is generic and defaults to `{}`; naming the three columns this handler
             // reads is what makes `row.userId` a checked property rather than a hopeful one.
             const row = await ctx.context.adapter.findOne<{
-              scopes: string | null; clientId: string; userId: string;
+              scopes: string | null;
+              clientId: string;
+              userId: string;
             }>({
               model: "oauthAccessToken",
               where: [{ field: "accessToken", value: returned.access_token }],
             });
             if (!row) return;
 
-            const current: string[] = String(row.scopes ?? "").split(" ").filter(Boolean);
+            const current: string[] = String(row.scopes ?? "")
+              .split(" ")
+              .filter(Boolean);
             const currentEnv = current.filter((s) => ["env:dev", "env:live"].includes(s));
             if (currentEnv.length === 0) return;
 
@@ -156,7 +169,10 @@ export function envScopePlugin(app: Pool) {
             // `requested` would make a promotion permanently invisible to an existing token.
             const allowed = recomputeEnvScope({ policy, liveEligible });
 
-            const recomputed = [...current.filter((s) => !["env:dev", "env:live"].includes(s)), ...allowed].join(" ");
+            const recomputed = [
+              ...current.filter((s) => !["env:dev", "env:live"].includes(s)),
+              ...allowed,
+            ].join(" ");
             if (recomputed === row.scopes) return;
 
             await ctx.context.adapter.update({
@@ -174,7 +190,10 @@ export function envScopePlugin(app: Pool) {
             if (!(returned instanceof Response)) return;
             const body = await returned.clone().json();
             if (!body?.client_id) return;
-            await upsertClientPolicy(app, body.client_id, body.client_name ?? null, ["env:dev", "env:live"]);
+            await upsertClientPolicy(app, body.client_id, body.client_name ?? null, [
+              "env:dev",
+              "env:live",
+            ]);
           }),
         },
       ],

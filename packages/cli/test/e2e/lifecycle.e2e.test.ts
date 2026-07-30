@@ -6,7 +6,12 @@ import { execFileSync } from "node:child_process";
 import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { Pool } from "pg";
-import { pkcePair, signInViaHttp, authorizeAndGetCode, exchangeCodeForToken } from "./helpers/oauth";
+import {
+  pkcePair,
+  signInViaHttp,
+  authorizeAndGetCode,
+  exchangeCodeForToken,
+} from "./helpers/oauth";
 import { getClientPolicy } from "@warehousd/broker";
 import { resolveProject, type Project } from "../../src/project";
 
@@ -55,7 +60,9 @@ describe("CLI Docker Lifecycle E2E", () => {
   beforeAll(async () => {
     // Pre-check: ensure CLI dist exists
     if (!existsSync(CLI_DIST)) {
-      throw new Error(`CLI dist not found at ${CLI_DIST}. Run: cd mvp && pnpm --filter warehousd build`);
+      throw new Error(
+        `CLI dist not found at ${CLI_DIST}. Run: cd mvp && pnpm --filter warehousd build`,
+      );
     }
 
     const serverPort = await freePort();
@@ -77,17 +84,24 @@ describe("CLI Docker Lifecycle E2E", () => {
     };
   });
 
-  afterAll(async () => {
+  afterAll(() => {
     try {
       // stack.ns is unset only if the run died before Step 2 wrote the config; there is
       // nothing to reap in that case because `start` never ran.
       if (stack.ns) {
         // Force cleanup: remove all containers with this project's label
         try {
-          const listOut = execFileSync("docker", ["ps", "-aq", "--filter", `label=${stack.ns.label}`], {
-            encoding: "utf8",
-          });
-          const containerIds = listOut.trim().split("\n").filter((id) => id);
+          const listOut = execFileSync(
+            "docker",
+            ["ps", "-aq", "--filter", `label=${stack.ns.label}`],
+            {
+              encoding: "utf8",
+            },
+          );
+          const containerIds = listOut
+            .trim()
+            .split("\n")
+            .filter((id) => id);
           for (const id of containerIds) {
             try {
               execFileSync("docker", ["rm", "-f", id], { stdio: "pipe" });
@@ -121,7 +135,7 @@ describe("CLI Docker Lifecycle E2E", () => {
     }
   });
 
-  it("Step 1: init creates config files in bare temp dir", async () => {
+  it("Step 1: init creates config files in bare temp dir", () => {
     execFileSync("node", [CLI_DIST, "init"], { cwd: stack.projectDir, stdio: "pipe" });
 
     const warehousdYml = join(stack.projectDir, "warehousd.yml");
@@ -137,7 +151,7 @@ describe("CLI Docker Lifecycle E2E", () => {
     expect(content).toContain("collections:");
   });
 
-  it("Step 2: overwrite warehousd.yml with fixture containing offset ports and datasets", async () => {
+  it("Step 2: overwrite warehousd.yml with fixture containing offset ports and datasets", () => {
     const fixtureYaml = `
 project: ${stack.projectName}
 server:
@@ -189,7 +203,7 @@ taxonomies:
     stack.ns = resolveProject(stack.projectDir).ns;
   });
 
-  it("Step 3: start creates outputs.json with exactly six keys and uses offset port", async () => {
+  it("Step 3: start creates outputs.json with exactly six keys and uses offset port", () => {
     const env = { ...process.env, WAREHOUSD_IMAGE };
     execFileSync("node", [CLI_DIST, "start"], { cwd: stack.projectDir, env, stdio: "pipe" });
 
@@ -294,7 +308,7 @@ taxonomies:
     const { access_token, scope } = await exchangeCodeForToken(stack.apiUrl, {
       clientId: stack.devClientId,
       clientSecret: stack.devClientSecret,
-      code: code!,
+      code: code,
       verifier,
       redirectUri: "http://localhost/callback",
     });
@@ -309,7 +323,7 @@ taxonomies:
       headers: {
         Authorization: `Bearer ${access_token}`,
         "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
+        Accept: "application/json, text/event-stream",
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -409,14 +423,17 @@ taxonomies:
         where table_schema = 'data_synth' and table_name = 'v_dataset_col'
         order by column_name
       `);
-      const columnNames = viewColumns.rows.map(row => row.column_name);
+      const columnNames = viewColumns.rows.map((row) => row.column_name);
       expect(columnNames).toContain("name");
       expect(columnNames).toContain("id");
 
       // Verify the client policy still references the dataset
-      const policy = await db.query(`
+      const policy = await db.query(
+        `
         select 1 from app.client_policies where client_id=$1
-      `, [initialClientId]);
+      `,
+        [initialClientId],
+      );
       expect(policy.rowCount).toBe(1);
     } finally {
       await db.end();

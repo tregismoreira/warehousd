@@ -18,7 +18,11 @@ export function EnvSwitcher({ initial }: { initial: "dev" | "live" }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ env: next }),
     });
-    if (!res.ok) { setEnv(prev); toast.error("Could not switch environment"); return; }
+    if (!res.ok) {
+      setEnv(prev);
+      toast.error("Could not switch environment");
+      return;
+    }
     startTransition(() => router.refresh());
   }
 
