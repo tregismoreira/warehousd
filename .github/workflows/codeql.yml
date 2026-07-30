@@ -14,7 +14,39 @@ permissions:
   contents: read
 
 jobs:
+  # Code scanning needs GitHub Advanced Security on a private repository, and this one does not
+  # have it — the upload fails with "Code scanning is not enabled for this repository" *after* a
+  # full analysis has run. Skipping is the honest outcome: a red X on every pull request teaches
+  # people to ignore the check, and a green one that uploaded nothing is worse than either.
+  #
+  # Visibility is read at run time rather than from `github.event.repository.visibility`, which is
+  # not populated on `schedule` runs. That expression would leave the weekly re-scan permanently
+  # skipped even after the repository goes public — and the weekly run is the one this workflow can
+  # least afford to lose, since most CodeQL findings arrive as new queries rather than as new code.
+  #
+  # Nothing here needs changing when that happens. Flip the repository to public and the next run
+  # analyses.
+  visibility:
+    runs-on: ubuntu-latest
+    outputs:
+      public: ${{ steps.check.outputs.public }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          public="$(gh api "repos/${{ github.repository }}" --jq '.private | not')"
+          echo "public=$public" >> "$GITHUB_OUTPUT"
+          if [ "$public" = "true" ]; then
+            echo "Repository is public — running CodeQL analysis." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Repository is private and code scanning is unavailable, so the analysis was skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "Make the repository public, or enable GitHub Advanced Security, to turn it back on." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   analyze:
+    needs: visibility
+    if: needs.visibility.outputs.public == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
