@@ -7,6 +7,10 @@ export type State = {
   dataRolePassword: string;
   betterAuthSecret: string;
   adminPassword: string;
+  // The outputs-contract OAuth client's secret. Generated here, like every other secret, because
+  // the process that has to print it is this one: the container stores only a hash of it, so it
+  // cannot be read back out of the database on a later `start`.
+  devClientSecret: string;
 };
 
 export type Outputs = {
@@ -61,6 +65,7 @@ export function ensureState(dir: string): State {
     dataRolePassword: existing.dataRolePassword ?? randomBytes(24).toString("hex"),
     betterAuthSecret: existing.betterAuthSecret ?? randomBytes(24).toString("hex"),
     adminPassword: existing.adminPassword ?? randomBytes(24).toString("hex"),
+    devClientSecret: existing.devClientSecret ?? randomBytes(32).toString("hex"),
   };
 
   // Write state with restricted permissions

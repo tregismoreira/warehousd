@@ -118,6 +118,9 @@ export async function runStart(
       BETTER_AUTH_URL: `http://localhost:${p.ports.server}`,
       WAREHOUSD_ADMIN_EMAIL: adminEmail,
       WAREHOUSD_ADMIN_PASSWORD: st.adminPassword,
+      // The container stores only a hash of this, so this process stays the only holder of the
+      // plaintext — which is what lets `start` keep printing it on every run.
+      WAREHOUSD_DEV_CLIENT_SECRET: st.devClientSecret,
       WAREHOUSD_DEMO: String(p.cfg.demo ?? false),
       WAREHOUSD_SEED: String(opts.seed ?? 42),
     },
@@ -151,8 +154,12 @@ export async function runStart(
       );
     }
 
-    // Step 10: Build and write outputs
-    const outputs = buildOutputs(p, appUrlHost, devClient);
+    // Step 10: Build and write outputs. The clientId comes from the database; the secret comes
+    // from local state, because the database holds only its hash.
+    const outputs = buildOutputs(p, appUrlHost, {
+      clientId: devClient.clientId,
+      clientSecret: st.devClientSecret,
+    });
     writeOutputs(p.dir, outputs);
 
     return outputs;

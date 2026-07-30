@@ -95,12 +95,14 @@ collections:
     expect(adminResult.rowCount).toBe(1);
     expect(adminResult.rows[0].role).toBe("admin");
 
-    // Assert getDevClient() returns a client whose policy is ["env:dev"]
+    // Assert getDevClient() returns a client whose policy is ["env:dev"]. It returns the id and
+    // nothing else — the secret column holds a hash, and handing the plaintext back is what made
+    // that column plaintext in the first place.
     const { getDevClient } = await import("@warehousd/broker");
     const client = await getDevClient(db);
     expect(client).not.toBeNull();
     expect(client!.clientId).toBeDefined();
-    expect(client!.clientSecret).toBeDefined();
+    expect(client).not.toHaveProperty("clientSecret");
 
     // Assert no demo personas when WAREHOUSD_DEMO is unset
     const usersResult = await db.query(`select id from app."user" order by id`);

@@ -204,6 +204,60 @@ describe("token exchange (delegated flow)", () => {
     expect((await res.json()).error).toBe("unauthorized_client");
   });
 
+  // Every attempt used to be free, and each one that gets past the format check runs an scrypt
+  // derivation. The cap is per client_id so one caller cannot lock the others out.
+  describe("rate limiting", () => {
+    it("answers 429 with Retry-After once a client exceeds the window, and not before", async () => {
+      const { resetRateLimits } = await import("../lib/rate-limit");
+      resetRateLimits();
+
+      const app = getAppPool();
+      const clientId = await registerClient("TE RateLimit");
+      await upsertClientPolicy(app, clientId, "TE RateLimit", ["env:dev"]);
+      await app.query(
+        `update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`,
+        [trustedIssuer.id, clientId]);
+      const { secret } = await createClientSecret(
+        app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
+
+      // The limit is 30/minute. Legitimate use is far below it, so the first exchange must pass.
+      const first = await delegatedExchange(clientId, secret, await signSubjectJwt("mia@harbor.demo"));
+      expect(first.status).toBe(200);
+
+      let limited: Response | null = null;
+      for (let i = 0; i < 40 && !limited; i++) {
+        const res = await delegatedExchange(clientId, secret, await signSubjectJwt("mia@harbor.demo"));
+        if (res.status === 429) limited = res;
+      }
+      expect(limited).not.toBeNull();
+      expect(await limited!.json()).toEqual({ error: "slow_down" });
+      expect(Number(limited!.headers.get("retry-after"))).toBeGreaterThan(0);
+
+      resetRateLimits();
+    });
+
+    it("does not let one throttled client block another", async () => {
+      const { resetRateLimits, rateLimit } = await import("../lib/rate-limit");
+      resetRateLimits();
+      const app = getAppPool();
+
+      // Burn a different client's window directly, then confirm ours still works.
+      for (let i = 0; i < 60; i++) rateLimit("v1-token:someone-else", { max: 30, windowMs: 60_000 });
+
+      const clientId = await registerClient("TE NotBlocked");
+      await upsertClientPolicy(app, clientId, "TE NotBlocked", ["env:dev"]);
+      await app.query(
+        `update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`,
+        [trustedIssuer.id, clientId]);
+      const { secret } = await createClientSecret(
+        app, clientId, "default", new Date(Date.now() + 86_400_000), "test");
+
+      const res = await delegatedExchange(clientId, secret, await signSubjectJwt("mia@harbor.demo"));
+      expect(res.status).toBe(200);
+      resetRateLimits();
+    });
+  });
+
   // A token has to say which environment it reaches. This endpoint stored an empty scope string
   // when the caller named no env scope, and every reader then supplied dev as a default — so the
   // env a token reached was a property of whoever read it rather than of the token.

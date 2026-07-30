@@ -16,7 +16,7 @@ export { generateSynthetic } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
 export { createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-app";
 export * from "./grants/manage";
-export { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy, setAllowedScopes, getDevClient, ensureDevClient, DEV_CLIENT_NAME } from "./oauth/client-policies";
+export { getClientPolicy, hasApprovedLiveGrant, upsertClientPolicy, setAllowedScopes, getDevClient, ensureDevClient, hashOauthClientSecret, DEV_CLIENT_NAME } from "./oauth/client-policies";
 export type { ClientPolicy } from "./oauth/client-policies";
 export { resolveEnvScopes, resolveIssuedEnvScope, recomputeEnvScope, pickEnvScope, type ClientPolicy as EnvScopeClientPolicy } from "./oauth/env-scope";
 export * from "./db/bootstrap";

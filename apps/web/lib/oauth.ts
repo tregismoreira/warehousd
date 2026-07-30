@@ -20,6 +20,12 @@ export const mcpPlugin = mcp({
     scopes: ["env:dev", "env:live"],
     accessTokenExpiresIn: 900, // 15 min, per §6.1 rule 4
     allowDynamicClientRegistration: true,
+    // Better Auth defaults this to "plain", so every dynamically registered client's secret sat
+    // in app."oauthApplication" in cleartext — including the ones real MCP clients get from DCR.
+    // A database dump was a set of working client credentials. "hashed" stores
+    // base64url(sha256(secret)) and verifies with a constant-time compare; the dev client's own
+    // row is written with the same hasher (broker's hashOauthClientSecret), so both agree.
+    storeClientSecret: "hashed",
   },
 });
 

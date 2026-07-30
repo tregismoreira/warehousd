@@ -72,6 +72,14 @@ deployment that follows the expectations above, but each is worth knowing:
   direction: `env:dev` is generated data, and `env:live` is never implied — real
   data requires the scope to be explicitly present, which requires both a policy
   allowing it and a user with an approved, unexpired live grant.
+- **An API key's `whd_dev_` / `whd_live_` prefix is a label, not a ceiling.** It
+  exists so a leaked key can be triaged on sight, and `verifyClientSecret` reports
+  it — but nothing narrows access to it. What bounds the environment is
+  `client_policies.allowed_scopes` intersected with the user's live-grant
+  eligibility. Both admin routes currently mint with `dev`, so a live-prefixed key
+  cannot be created; enforcing the prefix would cap every delegated client at dev
+  with no way to opt out. Making it a real ceiling needs a way to mint a live key
+  first.
 - **A trusted issuer's `subject_claim` is trusted as an identity.** In the
   delegated (RFC 8693) flow the claim named by `subject_claim` is matched against
   a local user's email address. warehousd requires that the value be a

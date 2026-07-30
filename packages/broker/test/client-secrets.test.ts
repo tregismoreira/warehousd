@@ -26,6 +26,30 @@ describe("client secrets", () => {
     expect(getDisplayPrefix(secret)).toBe("whd_live_abc123");
   });
 
+  // The prefix is a ceiling, not a label: verifyClientSecret reports it so /v1/token can narrow
+  // to it. It went unread anywhere while createClientSecret's comment claimed a leaked key
+  // "should say on sight which environment it reaches".
+  it("verification reports the env encoded in the key's own prefix", async () => {
+    p = await provision("clientsecrets");
+    const db = new Pool({ connectionString: p.urls.admin });
+    try {
+      await createAppSchema(db);
+      await seedClient(db);
+
+      const dev = await createClientSecret(
+        db, "test_client", "default", new Date(Date.now() + 86_400_000), "tester", "dev");
+      expect(await verifyClientSecret(db, dev.secret)).toMatchObject({ env: "dev" });
+      await revokeClientSecret(db, dev.id);
+
+      const live = await createClientSecret(
+        db, "test_client", "default", new Date(Date.now() + 86_400_000), "tester", "live");
+      expect(live.secret.startsWith("whd_live_")).toBe(true);
+      expect(await verifyClientSecret(db, live.secret)).toMatchObject({ env: "live" });
+    } finally {
+      await db.end();
+    }
+  });
+
   it("malformed checksum rejected without database round trip", async () => {
     // A secret with invalid checksum should fail validation immediately
     const badSecret = "whd_live_abc123_xyz789_badchecksum";

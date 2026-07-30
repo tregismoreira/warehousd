@@ -220,8 +220,10 @@ export async function bootstrap(): Promise<void> {
       }
     }
 
-    // 10. The outputs-contract OAuth client
-    await ensureDevClient(db, adminId);
+    // 10. The outputs-contract OAuth client. The CLI generates the secret and holds the only
+    // plaintext copy (.warehousd/state.json, mode 0600); this stores a hash of it, so `start` can
+    // still print it on a later run without the database being able to.
+    await ensureDevClient(db, adminId, process.env.WAREHOUSD_DEV_CLIENT_SECRET);
 
     // Inject the role-scoped URLs for the app to use. The write roles are separate
     // principals from the read roles — a read pool can never write, whatever the broker does.
