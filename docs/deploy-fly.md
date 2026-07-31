@@ -88,8 +88,10 @@ For development, pass `--allow-local-login`:
 warehousd deploy --allow-local-login
 ```
 
-This creates an admin account `admin@warehousd.local` with a generated password,
-printed during deploy. Local login works without an IdP.
+This creates an admin account `admin@warehousd.local` with a generated password.
+The deploy summary shows it masked — run `warehousd secrets --show` for the
+plaintext, or read `.warehousd/state.json` (mode 0600). Local login works
+without an IdP.
 
 ### 4. Build the image locally (temporary step)
 

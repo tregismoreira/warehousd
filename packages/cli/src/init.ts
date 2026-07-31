@@ -57,10 +57,32 @@ collections:
 #   documents_per_collection: { announcements: 25 }
 `;
 
+/**
+ * Applies wizard answers to the scaffold. Substitution rather than a second template: the long
+ * commented block below the header is the most useful thing `init` writes, and keeping one copy of
+ * it is what stops the two drifting apart.
+ */
+export function applyAnswers(
+  template: string,
+  answers: { project: string; port: number; managed: boolean },
+): string {
+  let out = template
+    .replace(/^project: .*$/m, `project: ${answers.project}`)
+    .replace(/^ {2}port: \d+$/m, `  port: ${answers.port}`);
+  if (!answers.managed) {
+    // Uncomment the database block the template ships commented out.
+    out = out.replace(
+      /^# database:\n# {3}managed: true.*\n# {3}url: (.*?) .*$/m,
+      "database:\n  url: $1",
+    );
+  }
+  return out;
+}
+
 // eslint-disable-next-line @typescript-eslint/require-await -- keeps the runX signatures uniform
 export async function runInit(
   dir: string,
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; answers?: { project: string; port: number; managed: boolean } },
 ): Promise<{ created: string[]; skipped: string[] }> {
   const created: string[] = [];
   const skipped: string[] = [];
@@ -68,7 +90,10 @@ export async function runInit(
   // Create warehousd.yml
   const ymlPath = join(dir, "warehousd.yml");
   if (!existsSync(ymlPath) || opts?.force) {
-    writeFileSync(ymlPath, WAREHOUSD_TEMPLATE);
+    const content = opts?.answers
+      ? applyAnswers(WAREHOUSD_TEMPLATE, opts.answers)
+      : WAREHOUSD_TEMPLATE;
+    writeFileSync(ymlPath, content);
     created.push("warehousd.yml");
   } else {
     skipped.push("warehousd.yml");

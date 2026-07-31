@@ -1,10 +1,13 @@
 import { Pool } from "pg";
 import {
   assertDocker,
+  dockerVersion,
   ensureImage,
   ensureNetwork,
   ensureVolume,
+  imageExists,
   containerState,
+  containerOnPort,
   removeContainer,
   runContainer,
   logs,
@@ -12,14 +15,11 @@ import {
 import { resolveProject } from "./project";
 import { ensureState, writeOutputs, type Outputs } from "./state";
 import { buildOutputs } from "./outputs";
-import { IMAGE_REPO } from "./image";
+import { resolveServerImage } from "./image-resolve";
+import { portIsFree } from "./preflight";
+import { silentReporter, type Reporter } from "./ui/reporter";
 import { getDevClient } from "@warehousd/broker";
 
-// WAREHOUSD_CLI_VERSION is defined by tsup at build time; fallback to 'latest' in dev mode.
-declare const WAREHOUSD_CLI_VERSION: string | undefined;
-const DEFAULT_IMAGE =
-  process.env.WAREHOUSD_IMAGE ||
-  `${IMAGE_REPO}:${typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "latest"}`;
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_INTERVAL_MS = 1000;
 
@@ -44,8 +44,10 @@ async function pollHealth(url: string, timeoutMs: number): Promise<void> {
 
 export async function runStart(
   dir: string,
-  opts: { seed?: number; pull?: boolean; verbose?: boolean } = {},
+  opts: { seed?: number; pull?: boolean; verbose?: boolean; reporter?: Reporter } = {},
 ): Promise<Outputs> {
+  const report = opts.reporter ?? silentReporter;
+
   // Step 1: Assert Docker is available
   assertDocker();
 
@@ -53,11 +55,57 @@ export async function runStart(
   const p = resolveProject(dir);
   const st = ensureState(p.dir);
 
-  // Step 3: Ensure images exist
-  const serverImage = p.cfg.server.image ?? DEFAULT_IMAGE;
-  ensureImage(serverImage);
+  const check = report.step("Checking", `${p.name}`);
+  check.done(`docker ${dockerVersion()}`);
+
+  // Step 3: Ensure images exist.
+  //
+  // Preflight before anything is created. A first run in examples/harbor once failed here with a
+  // registry error that never named the tag it wanted, while a locally built image sat unused —
+  // so say which image, and which of the three sources chose it, before trying to fetch it.
+  const image = resolveServerImage(p.dir, process.env);
+  const serverImage = image.ref;
+
+  // A port already taken is worth knowing before `docker run` turns it into a daemon message.
+  // Our own container holding it is fine: recreating it below is the whole point of `start`.
+  for (const [what, port, owner] of [
+    ["server", p.ports.server, p.ns.server],
+    ["database", p.ports.db, p.ns.db],
+  ] as const) {
+    if (!p.managed && what === "database") continue;
+    if (await portIsFree(port)) continue;
+    const holder = containerOnPort(port);
+    if (holder === owner) continue;
+    throw new Error(
+      holder
+        ? `Port ${port} (${what}) is held by container ${holder}. Stop it, or change the port in warehousd.yml.`
+        : `Port ${port} (${what}) is already in use. Change the port in warehousd.yml, or stop whatever holds it.`,
+    );
+  }
+
+  if (imageExists(serverImage)) {
+    report.step("Image", serverImage).done(`${image.source}, local`);
+  } else {
+    const pulling = report.step("Pulling", serverImage);
+    try {
+      ensureImage(serverImage);
+      pulling.done(image.source);
+    } catch (err: unknown) {
+      pulling.fail();
+      throw err;
+    }
+  }
   if (p.managed) {
-    ensureImage("pgvector/pgvector:pg16");
+    if (!imageExists("pgvector/pgvector:pg16")) {
+      const pulling = report.step("Pulling", "pgvector/pgvector:pg16");
+      try {
+        ensureImage("pgvector/pgvector:pg16");
+        pulling.done();
+      } catch (err: unknown) {
+        pulling.fail();
+        throw err;
+      }
+    }
   }
 
   // Step 4: Ensure network
@@ -68,6 +116,7 @@ export async function runStart(
     ensureVolume(p.ns.volume, p.ns.label);
     const dbState = containerState(p.ns.db);
     if (dbState !== "running") {
+      const dbStep = report.step("Starting", `${p.ns.db} → :${p.ports.db}`);
       removeContainer(p.ns.db);
       runContainer({
         name: p.ns.db,
@@ -86,6 +135,9 @@ export async function runStart(
           "/var/lib/postgresql/data": p.ns.volume,
         },
       });
+      dbStep.done();
+    } else {
+      report.step("Reusing", `${p.ns.db} → :${p.ports.db}`).done("already running");
     }
   }
 
@@ -104,6 +156,7 @@ export async function runStart(
 
   // Step 7: Recreate server container
   const adminEmail = "admin@warehousd.local";
+  const serverStep = report.step("Starting", `${p.ns.server} → :${p.ports.server}`);
   removeContainer(p.ns.server);
   runContainer({
     name: p.ns.server,
@@ -132,11 +185,16 @@ export async function runStart(
     },
   });
 
+  serverStep.done();
+
   // Step 8: Poll health endpoint
   const appUrl = `http://localhost:${p.ports.server}`;
+  const healthStep = report.step("Waiting", "health check");
   try {
     await pollHealth(appUrl, HEALTH_CHECK_TIMEOUT_MS);
+    healthStep.done();
   } catch (err) {
+    healthStep.fail();
     const containerLogs = logs(p.ns.server, 50);
     throw new Error(
       `Container health check failed: ${String(err)}\n\nContainer logs:\n${containerLogs}`,

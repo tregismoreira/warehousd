@@ -15,6 +15,21 @@ npm install -g warehousd
 
 Requires Docker and Node 22+.
 
+## Global flags
+
+Available on every command.
+
+| Flag | |
+|---|---|
+| `--json` | Machine-readable output on stdout. Secrets are **not** masked — a caller that asked for JSON asked for them. |
+| `-q, --quiet` | Suppress progress; errors and results still print. |
+| `--no-color` | Disable colour. `NO_COLOR` and `TERM=dumb` are honoured too, and colour is off automatically when output is not a terminal. |
+| `--verbose` | Echo every Docker command and its stderr. |
+
+Progress goes to **stderr**; results and `--json` go to **stdout**. So
+`warehousd start 2>/dev/null` prints the summary alone, and
+`warehousd status --json | jq` works.
+
 ## Commands
 
 Every command takes `-d, --dir <dir>` to point at the project directory
@@ -26,9 +41,14 @@ Scaffolds `warehousd.yml` and adds `warehousd.local.yml` and `.warehousd/` to
 `.gitignore`, creating that file if it does not exist. It does not create seed
 directories or `.warehousd/` — `start` does that.
 
+In a terminal it asks for the project name, the port and whether to manage
+Postgres, then applies those answers to the template. Piped, in CI, under
+`--json` or `--no-input` it writes the default template without asking.
+
 | Flag | |
 |---|---|
 | `--force` | Overwrite an existing `warehousd.yml`. |
+| `--no-input` | Never prompt; write the default template. |
 
 ### `start`
 
@@ -40,25 +60,49 @@ Idempotent — re-running picks up YAML changes.
 | Flag | |
 |---|---|
 | `-s, --seed <n>` | Synthetic data PRNG seed (default `42`). |
-| `--verbose` | Log every Docker command. |
+| `--show-secrets` | Print credentials in full instead of masked. |
 
-The server image is resolved in this order: `server.image` in `warehousd.yml`,
-then `WAREHOUSD_IMAGE`, then `ghcr.io/tregismoreira/warehousd:<cli-version>`.
+Before creating anything it checks that the ports are free and reports which
+image it will run and which of the three sources named it: `server.image` in
+`warehousd.yml`, then `WAREHOUSD_IMAGE`, then
+`ghcr.io/tregismoreira/warehousd:<cli-version>`.
+
+Progress is written to stderr as each step completes:
 
 ```
-═══════════════════════════════════════════════════════════
-warehousd is running
-═══════════════════════════════════════════════════════════
-
-MCP Server:   http://localhost:8722/mcp
-API Server:   http://localhost:8722
-Admin UI:     http://localhost:8722/admin
-Database:     postgres://warehousd:PASSWORD@localhost:PORT/warehousd
-Environment:  dev
-Dev Client:   ID: <oauth-client-id> / Secret: <oauth-client-secret>
-Admin Login:  admin@warehousd.local / <generated password>
-═══════════════════════════════════════════════════════════
+✓  Checking  harbor              docker 29.6.2 · 120ms
+✓     Image  warehousd:dev       WAREHOUSD_IMAGE, local · 40ms
+✓  Starting  wh_harbor_db → :8723                       · 0.9s
+✓  Starting  wh_harbor_server → :8722                   · 0.6s
+✓   Waiting  health check                               · 12.4s
 ```
+
+Then the summary, on stdout:
+
+```
+  warehousd is running  ready in 15.1s
+
+  MCP       http://localhost:8722/mcp
+  API       http://localhost:8722
+  Admin     http://localhost:8722/admin
+  Database  postgres://warehousd:7fc2…c97d@localhost:8723/warehousd
+  Env       dev
+
+  Dev client
+    ID      2f564a968b9bbaafdb7b78cddec53c63
+    Secret  4215…daf8
+
+  Admin login
+    Email     admin@warehousd.local
+    Password  7ac7…996b
+
+  Secrets are masked — reveal with `warehousd secrets --show`
+```
+
+Credentials are masked because this panel prints on every start and ends up in
+scrollback, screen shares and terminal recordings. The full values are in
+`.warehousd/state.json` and `outputs.json` (both mode 0600), and are printed in
+full by `warehousd secrets --show`, by `--show-secrets`, and by `--json`.
 
 ### `stop`
 
@@ -67,7 +111,11 @@ Stops the containers, keeping volumes.
 | Flag | |
 |---|---|
 | `--destroy` | Also remove the Postgres container and volume. Irreversible. |
-| `--yes` | Required with `--destroy`. There is no interactive prompt — without `--yes`, `--destroy` exits with an error. |
+| `-y, --yes` | Skip the confirmation. |
+
+In a terminal `--destroy` asks before removing the volume. Piped or in CI there
+is nobody to ask, so `--yes` is required there and its absence is an error
+naming the flag rather than a prompt that would hang.
 
 `--destroy` never touches a database it does not manage (one you supplied via
 `database.url`).
@@ -76,6 +124,59 @@ Stops the containers, keeping volumes.
 
 Prints container health and the outputs block. Exit code `0` if running, `1` if
 stopped or not found.
+
+The health check uses `apiUrl` from `.warehousd/outputs.json` when that file is
+there, and falls back to `server.port` from `warehousd.yml` when it is not — a
+missing local file is not evidence that the server is down.
+
+| Flag | |
+|---|---|
+| `--show-secrets` | Print the database URL in full instead of masked. |
+
+### `restart`
+
+`stop` then `start`, keeping data. Takes `-s, --seed <n>` and `--show-secrets`.
+
+### `logs`
+
+Container logs, without having to assemble the container name yourself.
+
+| Flag | |
+|---|---|
+| `-f, --follow` | Stream until interrupted. |
+| `-n, --tail <n>` | Lines to show (default `100`). |
+| `--service <name>` | `server` (default) or `db`. |
+
+`--service db` is an error when the project brings its own Postgres via
+`database.url`, because there is no database container in that case.
+
+### `open [target]`
+
+Opens `admin` (default), `mcp` or `api` in a browser. Where no opener is known
+for the platform, prints the URL instead.
+
+### `doctor`
+
+Checks Docker, the config, the server image, both ports and the containers, then
+exits `0` if every check passed and `1` otherwise. Run it when `start` fails and
+you want to know which part is at fault.
+
+```
+  ✓  docker       daemon reachable, server 29.6.2
+  ✓  config       warehousd.yml parses, 20 collection(s)
+  ✓  image        warehousd:dev (WAREHOUSD_IMAGE, present locally)
+  ✗  port:server  8722 is held by container other_server — stop it, or change the port in warehousd.yml
+  ✓  containers   2 container(s), server running
+```
+
+### `secrets`
+
+The generated credentials, masked unless asked otherwise.
+
+| Flag | |
+|---|---|
+| `--show` | Print them in full. |
+| `--json` | Full values as JSON, for a script. |
 
 ### `apply`
 
@@ -272,20 +373,38 @@ synthetic:
 
 ## Troubleshooting
 
-**`DockerError: Docker is installed but the daemon isn't reachable.`**
-Start Docker Desktop or the Docker daemon and retry.
+`warehousd doctor` answers most of this in one command — run it first.
 
-**`port is already allocated`**
-Change `server.port` in `warehousd.yml`, or stop whatever holds it:
-`docker stop wh_<project>_server && docker rm wh_<project>_server`.
+**Docker is installed but the daemon isn't reachable.**
+Start Docker Desktop (or `colima start`) and retry.
+
+**`That port is already in use.`**
+Change `server.port` in `warehousd.yml`, or stop whatever holds it. `doctor`
+names the container when a container is the holder.
+
+**`Could not pull the server image.`**
+The image is resolved from `server.image`, then `WAREHOUSD_IMAGE`, then the GHCR
+default for your CLI version — and `doctor` prints which one won. If you built
+the image yourself, point at it:
+
+```bash
+docker build -f apps/web/Dockerfile -t warehousd:dev .
+WAREHOUSD_IMAGE=warehousd:dev warehousd start
+```
 
 **The server starts but never becomes healthy.**
-`docker logs wh_<project>_server --tail 100`. Usually one of: Postgres not ready
-yet (wait and look again), a SQL error applying the schema, or a missing or
-too-short `BETTER_AUTH_SECRET`.
+`warehousd logs --tail 100`. Usually one of: Postgres not ready yet (wait and
+look again), a SQL error applying the schema, or a missing or too-short
+`BETTER_AUTH_SECRET`.
 
 **`outputs.json not found`**
-`warehousd status` reprints the URLs.
+`warehousd status` reprints the URLs; `warehousd secrets` reprints the
+credentials.
+
+**Docker errors appearing during a normal `start`.**
+They should not. Every "not found" a healthy first run produces internally is
+captured, not printed — if you see raw daemon output, something genuinely
+failed. `--verbose` shows every Docker command and its stderr.
 
 ## Example
 

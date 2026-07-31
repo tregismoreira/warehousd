@@ -86,6 +86,38 @@ describe("run", () => {
     expect(opts.input).toContain("SUPERSECRET_CANARY");
   });
 
+  // Passing `input` is not enough on its own. `execFileSync` silently discards it when stdio[0] is
+  // "ignore" — no error, no warning, an exit code of 0 — which would stage a Fly app with none of
+  // its secrets set and report success. The assertion above cannot see that, because it inspects
+  // the options object rather than what the child actually received.
+  it("configures stdin so the input is not silently discarded", () => {
+    mocked.mockReturnValue("ok");
+
+    run(["secrets", "import", "--app", "acme"], { input: "TOKEN=SUPERSECRET_CANARY\n" });
+
+    const stdio = (mocked.mock.calls[0]![2] as { stdio?: unknown[] }).stdio;
+    expect(stdio).toBeDefined();
+    expect(stdio![0]).not.toBe("ignore");
+  });
+
+  it("captures stderr rather than echoing flyctl's probe failures at the user", () => {
+    mocked.mockReturnValue("ok");
+
+    run(["status", "--app", "acme"]);
+
+    const stdio = (mocked.mock.calls[0]![2] as { stdio?: unknown[] }).stdio;
+    expect(stdio).toEqual(["pipe", "pipe", "pipe"]);
+  });
+
+  it("lets a real deploy stream its build log", () => {
+    mocked.mockReturnValue("ok");
+
+    run(["deploy", "--app", "acme"]);
+
+    const stdio = (mocked.mock.calls[0]![2] as { stdio?: unknown[] }).stdio;
+    expect(stdio![2]).toBe("inherit");
+  });
+
   it("redacts a failing secrets command so no credential reaches the error", () => {
     mocked.mockImplementation(() => {
       throw Object.assign(new Error("exit 1"), {

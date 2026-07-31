@@ -1,5 +1,8 @@
 import type { WarehousdConfig } from "@warehousd/broker";
 import type { DeployOutputs } from "../state";
+import type { Theme } from "../ui/theme";
+import { plainTheme } from "../ui/theme";
+import { renderDeploySummary } from "../ui/render";
 
 export function buildDeployOutputs(args: {
   appName: string;
@@ -22,40 +25,12 @@ export function buildDeployOutputs(args: {
 export function formatDeployOutputs(
   o: DeployOutputs,
   extra: { adminEmail: string; adminPassword: string },
+  opts?: { theme?: Theme | undefined; showSecrets?: boolean | undefined },
 ): string {
-  const lines: string[] = [
-    "═══════════════════════════════════════════════════════════",
-    "warehousd deployed to Fly",
-    "═══════════════════════════════════════════════════════════",
-    "",
-    "MCP Server:",
-    `  ${o.mcpUrl}`,
-    "",
-    "API Server:",
-    `  ${o.apiUrl}`,
-    "",
-    "Admin UI:",
-    `  ${o.adminUrl}`,
-    "",
-  ];
-
-  if (o.databaseUrl) {
-    lines.push("Database:");
-    lines.push(`  ${o.databaseUrl}`);
-  } else {
-    lines.push("Database:");
-    lines.push("  Managed by Fly Postgres; use `fly postgres connect` to access it");
-  }
-
-  lines.push("");
-  lines.push("Environment:");
-  lines.push(`  ${o.env}`);
-  lines.push("");
-  lines.push("Admin Login:");
-  lines.push(`  Email:    ${extra.adminEmail}`);
-  lines.push(`  Password: ${extra.adminPassword}`);
-  lines.push("");
-  lines.push("═══════════════════════════════════════════════════════════");
-
-  return lines.join("\n");
+  return renderDeploySummary({
+    outputs: o,
+    admin: { email: extra.adminEmail, password: extra.adminPassword },
+    theme: opts?.theme ?? plainTheme,
+    showSecrets: opts?.showSecrets ?? false,
+  });
 }

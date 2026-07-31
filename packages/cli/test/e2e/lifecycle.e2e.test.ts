@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "node:path";
 import { mkdtempSync, chmodSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { Pool } from "pg";
@@ -53,6 +53,9 @@ interface StackState {
   projectName: string;
   serverPort: number;
   dbPort: number;
+  // Captured from the one cold start in this suite, asserted on in Step 3b.
+  firstStartStderr?: string;
+  firstStartStdout?: string;
   // Docker object names, taken from the CLI's own resolveProject rather than rebuilt
   // here. cfg.project is sanitised before it reaches Docker (src/project.ts), so any
   // name derived independently in this file silently stops matching what `start`
@@ -220,7 +223,20 @@ taxonomies:
 
   it("Step 3: start creates outputs.json with exactly six keys and uses offset port", () => {
     const env = { ...process.env, WAREHOUSD_IMAGE };
-    execFileSync("node", [CLI_DIST, "start"], { cwd: stack.projectDir, env, stdio: "pipe" });
+    // This is the suite's only genuinely cold start — no network, no volume, no containers — so
+    // it is where the first-run stderr is worth capturing rather than discarding.
+    const proc = spawnSync("node", [CLI_DIST, "start"], {
+      cwd: stack.projectDir,
+      env,
+      encoding: "utf8",
+    });
+    if (proc.status !== 0) {
+      throw new Error(
+        `start failed (${proc.status})\nstdout:\n${proc.stdout}\nstderr:\n${proc.stderr}`,
+      );
+    }
+    stack.firstStartStderr = proc.stderr;
+    stack.firstStartStdout = proc.stdout;
 
     const outputsPath = join(stack.projectDir, ".warehousd", "outputs.json");
     expect(existsSync(outputsPath)).toBe(true);
@@ -252,6 +268,99 @@ taxonomies:
     stack.adminPassword = state.adminPassword;
     stack.dbPassword = state.dbPassword;
     stack.databaseUrl = `postgres://warehousd:${state.dbPassword}@localhost:${stack.dbPort}/warehousd`;
+  });
+
+  // The regression test for the reported incident. A first `start` in examples/harbor printed
+  // five Docker daemon errors — every one of them the success path of an existence probe —
+  // because execFileSync echoes a child's stderr to the parent unless `stdio` says otherwise.
+  // Fails without the stdio fix in src/docker.ts.
+  it("Step 3b: a cold start says nothing in Docker's voice", () => {
+    const stderr = stack.firstStartStderr ?? "";
+    for (const noise of [
+      "Error response from daemon",
+      "no such object",
+      "No such container",
+      "not found",
+      "no such volume",
+    ]) {
+      expect(stderr).not.toContain(noise);
+    }
+  });
+
+  it("Step 3c: start narrates on stderr and leaves stdout to the summary", () => {
+    const stderr = stack.firstStartStderr ?? "";
+    const stdout = stack.firstStartStdout ?? "";
+    // Progress is narration; the panel is the product. `start 2>/dev/null` must still be useful.
+    expect(stderr).toContain("Starting");
+    expect(stdout).toContain("warehousd is running");
+    expect(stdout).toContain(stack.mcpUrl);
+  });
+
+  it("Step 3d: the printed summary carries no secret in plaintext", () => {
+    const stdout = stack.firstStartStdout ?? "";
+    expect(stack.adminPassword).toBeTruthy();
+    expect(stack.devClientSecret).toBeTruthy();
+    expect(stdout).not.toContain(stack.adminPassword);
+    expect(stdout).not.toContain(stack.devClientSecret);
+    expect(stdout).not.toContain(stack.dbPassword);
+    // ...but it says how to get them.
+    expect(stdout).toContain("warehousd secrets --show");
+  });
+
+  it("Step 3e: nothing piped is coloured", () => {
+    const esc = String.fromCharCode(27);
+    expect(stack.firstStartStdout ?? "").not.toContain(esc);
+    expect(stack.firstStartStderr ?? "").not.toContain(esc);
+  });
+
+  it("Step 3f: secrets --show reveals what the summary masked, and --json is parseable", () => {
+    const shown = execFileSync("node", [CLI_DIST, "secrets", "--show"], {
+      cwd: stack.projectDir,
+      encoding: "utf8",
+    });
+    expect(shown).toContain(stack.adminPassword);
+
+    const json = JSON.parse(
+      execFileSync("node", [CLI_DIST, "secrets", "--json"], {
+        cwd: stack.projectDir,
+        encoding: "utf8",
+      }),
+    );
+    expect(json["Admin password"]).toBe(stack.adminPassword);
+  });
+
+  it("Step 3g: status --json is machine-readable and doctor passes on a live stack", () => {
+    const statusOut = execFileSync("node", [CLI_DIST, "status", "--json"], {
+      cwd: stack.projectDir,
+      encoding: "utf8",
+    });
+    const status = JSON.parse(statusOut);
+    expect(status.healthy).toBe(true);
+    expect(status.project).toBe(stack.projectName.toLowerCase().replace(/-/g, "_"));
+    expect(Array.isArray(status.containers)).toBe(true);
+
+    const doctorOut = execFileSync("node", [CLI_DIST, "doctor", "--json"], {
+      cwd: stack.projectDir,
+      env: { ...process.env, WAREHOUSD_IMAGE },
+      encoding: "utf8",
+    });
+    const doctor = JSON.parse(doctorOut);
+    expect(doctor.ok).toBe(true);
+    expect(doctor.checks.find((c: { id: string }) => c.id === "docker")?.ok).toBe(true);
+    // The check that would have named the reported incident outright.
+    expect(doctor.checks.find((c: { id: string }) => c.id === "image")?.detail).toContain(
+      WAREHOUSD_IMAGE,
+    );
+  });
+
+  it("Step 3h: an unknown command is refused with a suggestion, not silently ignored", () => {
+    const proc = spawnSync("node", [CLI_DIST, "statuss"], {
+      cwd: stack.projectDir,
+      encoding: "utf8",
+    });
+    expect(proc.status).not.toBe(0);
+    expect(proc.stderr).toContain("statuss");
+    expect(proc.stderr).toContain("status");
   });
 
   it("Step 4: health endpoints respond correctly", async () => {

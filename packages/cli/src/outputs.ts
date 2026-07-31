@@ -1,5 +1,8 @@
 import type { Project } from "./project";
 import type { Outputs } from "./state";
+import type { Theme } from "./ui/theme";
+import { plainTheme } from "./ui/theme";
+import { renderStartSummary } from "./ui/render";
 
 export function buildOutputs(
   p: Project,
@@ -19,41 +22,17 @@ export function buildOutputs(
 export function formatOutputs(
   o: Outputs,
   extra?: { adminEmail: string; adminPassword: string },
+  opts?: {
+    theme?: Theme | undefined;
+    showSecrets?: boolean | undefined;
+    elapsed?: string | undefined;
+  },
 ): string {
-  const lines: string[] = [
-    "═══════════════════════════════════════════════════════════",
-    "warehousd is running",
-    "═══════════════════════════════════════════════════════════",
-    "",
-    "MCP Server:",
-    `  ${o.mcpUrl}`,
-    "",
-    "API Server:",
-    `  ${o.apiUrl}`,
-    "",
-    "Admin UI:",
-    `  ${o.adminUrl}`,
-    "",
-    "Database:",
-    `  ${o.databaseUrl}`,
-    "",
-    "Environment:",
-    `  ${o.env}`,
-    "",
-    "Dev Client:",
-    `  ID:     ${o.devClient.clientId}`,
-    `  Secret: ${o.devClient.clientSecret}`,
-  ];
-
-  if (extra) {
-    lines.push("");
-    lines.push("Admin Login:");
-    lines.push(`  Email:    ${extra.adminEmail}`);
-    lines.push(`  Password: ${extra.adminPassword}`);
-  }
-
-  lines.push("");
-  lines.push("═══════════════════════════════════════════════════════════");
-
-  return lines.join("\n");
+  return renderStartSummary({
+    outputs: o,
+    ...(extra ? { admin: { email: extra.adminEmail, password: extra.adminPassword } } : {}),
+    theme: opts?.theme ?? plainTheme,
+    showSecrets: opts?.showSecrets ?? false,
+    elapsed: opts?.elapsed,
+  });
 }

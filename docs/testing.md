@@ -147,6 +147,24 @@ runs the *built* CLI against real containers and takes several minutes — run
 `warehousd` also matches the private root package), and point it at a locally
 built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 
+## What is measured, and what the CLI's split is for
+
+`packages/cli/src/program.ts` holds the commander wiring and is excluded from
+coverage alongside `docker.ts`, `start.ts`, `stop.ts` and `status.ts`. Every
+export in it is an argv-driven action callback, and the only thing that runs one
+is `packages/cli/test/e2e/lifecycle.e2e.test.ts` — a subprocess, so v8 measures
+the spawner rather than the spawned.
+
+That file exists so the exclusion can be precise. `packages/cli/src/index.ts`
+keeps `resolveDbUrl`, `runApply`, `runSeed` and `runIndex`, which the unit suites
+import directly and which stay measured. Before the split the two lived in one
+466-line module, and excluding it would have taken the library functions with it.
+
+The presentation layer under `packages/cli/src/ui/` is pure by design for the
+same reason: it takes a `Theme` and returns a string, so the CLI's entire visual
+surface is asserted without a terminal, without ANSI and without spawning
+anything. `resolveTheme` is the only place that reads `isTTY` or `NO_COLOR`.
+
 > ⚠️ **The write path needs its own two database URLs.** `DEV_WRITE_DATABASE_URL`
 > and `LIVE_WRITE_DATABASE_URL` point at the `*_write` roles, which are the only
 > ones holding `INSERT`/`UPDATE` on the base tables — the read roles see just the

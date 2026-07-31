@@ -133,4 +133,9 @@ supervisor dies, and it deliberately leaves shared state alone while another sui
 - Do not reformat, refactor, or add comments to code your change does not touch. A diff that is hard
   to review is a diff that hides things.
 - Ask before adding a dependency. `packages/broker` in particular is meant to stay thin.
+- **`@clack/prompts` is pinned to `^0.11` on purpose.** 1.x is ESM-only — no `require` condition —
+  and `packages/cli` builds to a CommonJS bundle (`tsup.config.ts`, bin `dist/index.cjs`). A caret
+  on a `0.x` will not drift there by itself, but do not widen the range or bump it by hand without
+  moving the CLI build to ESM first. `pnpm --filter ./packages/cli build && node
+  packages/cli/dist/index.cjs --help` is the check.
 - Do not report a security vulnerability through a PR or issue — see [SECURITY.md](SECURITY.md).

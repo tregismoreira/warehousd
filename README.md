@@ -63,11 +63,23 @@ npx warehousd start     # starts Postgres + server, applies config, seeds synthe
 `start` prints the outputs contract and writes it to `.warehousd/outputs.json`:
 
 ```
-MCP Server:   http://localhost:8722/mcp
-Admin UI:     http://localhost:8722/admin
-Environment:  dev
-Dev Client:   ID: … / Secret: …
-Admin Login:  admin@warehousd.local / <generated password>
+  warehousd is running  ready in 15.1s
+
+  MCP       http://localhost:8722/mcp
+  API       http://localhost:8722
+  Admin     http://localhost:8722/admin
+  Database  postgres://warehousd:7fc2…c97d@localhost:8723/warehousd
+  Env       dev
+
+  Dev client
+    ID      2f564a968b9bbaafdb7b78cddec53c63
+    Secret  4215…daf8
+
+  Admin login
+    Email     admin@warehousd.local
+    Password  7ac7…996b
+
+  Secrets are masked — reveal with `warehousd secrets --show`
 ```
 
 Then connect an assistant: in Claude, **Settings → Connectors → Add custom
@@ -279,13 +291,24 @@ grant check rather than a shared service account.
 
 | Command | Purpose |
 |---|---|
-| `warehousd init` | Scaffold `warehousd.yml` and `.gitignore` entries. |
+| `warehousd init` | Scaffold `warehousd.yml` and `.gitignore` entries. Asks, in a terminal. |
 | `warehousd start` | Start server + Postgres, apply config, seed, print outputs. |
-| `warehousd stop [--destroy --yes]` | Stop containers; optionally drop the volume. |
+| `warehousd restart` | Stop, then start again. |
+| `warehousd stop [--destroy -y]` | Stop containers; optionally drop the volume. |
 | `warehousd status` | Health and the outputs block. |
+| `warehousd doctor` | Check Docker, image, ports and config before anything breaks. |
+| `warehousd logs [-f]` | Container logs, without assembling the container name. |
+| `warehousd open [admin\|mcp\|api]` | Open it in a browser. |
+| `warehousd secrets [--show]` | The generated credentials, masked by default. |
 | `warehousd apply` | Re-apply YAML (collections, postures, views) without a restart. |
 | `warehousd seed` / `regen-synth` | Generate or regenerate synthetic data. |
 | `warehousd index <collection>` | Re-index a file collection. |
+| `warehousd deploy` | Ship to Fly.io behind a production pre-flight. |
+
+Every command takes `--json`, `-q/--quiet`, `--no-color` and `--verbose`.
+Progress goes to stderr and results to stdout, so `warehousd status --json | jq`
+works and `warehousd start 2>/dev/null` prints just the summary. Credentials are
+masked in the human output — `warehousd secrets --show` reveals them.
 
 Bring your own Postgres by setting `database.url`. After the first image pull,
 `start` works with no network at all — synthetic generation uses wordlists, not

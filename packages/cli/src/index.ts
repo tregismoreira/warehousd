@@ -1,4 +1,7 @@
-import { Command } from "commander";
+// The CLI's library surface: the functions that do work against a database, imported directly by
+// the unit suites. The commander wiring that calls them lives in program.ts, which is also the
+// build entry point — see the note at the top of that file for why the two are separate.
+
 import { Pool } from "pg";
 import { resolve } from "node:path";
 import {
@@ -11,13 +14,7 @@ import {
   loadTaxonomyBindings,
   fileMetadataFields,
 } from "@warehousd/broker";
-import { runInit } from "./init";
-import { runStart } from "./start";
-import { runStop } from "./stop";
-import { runStatus } from "./status";
-import { runDeploy } from "./deploy";
-import { formatOutputs } from "./outputs";
-import { ensureState, readOutputs } from "./state";
+import { readOutputs } from "./state";
 
 export function resolveDbUrl(dir: string, explicit?: string): string {
   if (explicit) return explicit;
@@ -79,146 +76,4 @@ export async function runIndex(
   } finally {
     await db.end();
   }
-}
-
-// WAREHOUSD_CLI_VERSION is defined by tsup at build time; fallback for source runs.
-declare const WAREHOUSD_CLI_VERSION: string | undefined;
-
-const program = new Command();
-program
-  .name("warehousd")
-  .description("warehousd CLI")
-  .version(typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "0.0.0-dev");
-program
-  .command("init")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("--force", "overwrite an existing warehousd.yml")
-  .action(async (o) => {
-    const r = await runInit(o.dir, { force: o.force });
-    for (const f of r.created) console.log(`created ${f}`);
-    for (const f of r.skipped) console.log(`skipped ${f} (already exists)`);
-    console.log("\nNext: warehousd start");
-  });
-program
-  .command("start")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("-s, --seed <n>", "synthetic seed", "42")
-  .option("--verbose", "log every docker command")
-  .action(async (o) => {
-    const outputs = await runStart(o.dir, { seed: Number(o.seed), verbose: o.verbose });
-    const st = ensureState(o.dir);
-    console.log(
-      formatOutputs(outputs, {
-        adminEmail: "admin@warehousd.local",
-        adminPassword: st.adminPassword,
-      }),
-    );
-  });
-program
-  .command("apply")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("--db <url>", "database url")
-  .action(async (o) => {
-    const db = resolveDbUrl(o.dir, o.db);
-    await runApply(o.dir, db);
-    console.log("applied");
-  });
-program
-  .command("seed")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("--db <url>", "database url")
-  .option("-s, --seed <n>", "seed", "42")
-  .action(async (o) => {
-    const db = resolveDbUrl(o.dir, o.db);
-    await runSeed(o.dir, db, Number(o.seed));
-    console.log("seeded");
-  });
-program
-  .command("index <collection>")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("--db <url>", "database url")
-  .option("--env <env>", "dev|live", "dev")
-  .option("--source <dir>", "override source directory")
-  .action(async (collection, o) => {
-    const db = resolveDbUrl(o.dir, o.db);
-    const r = await runIndex(o.dir, db, collection, { env: o.env, source: o.source });
-    console.log(`indexed=${r.indexed} skipped=${r.skipped} deleted=${r.deleted}`);
-  });
-program
-  .command("stop")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("--destroy", "remove volume and data (irreversible)")
-  .option("--yes", "skip confirmation for --destroy")
-  .action(async (o) => {
-    await runStop(o.dir, { destroy: o.destroy, yes: o.yes });
-    console.log("stopped");
-  });
-program
-  .command("status")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .action(async (o) => {
-    const result = await runStatus(o.dir);
-    process.exit(result.healthy ? 0 : 1);
-  });
-program
-  .command("deploy")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("--allow-local-login", "permit deploying without SSO configured", false)
-  .option("-y, --yes", "skip the config-diff confirmation", false)
-  .option(
-    "--local-build",
-    "build with the local Docker daemon instead of Fly's remote builder",
-    false,
-  )
-  .option("--destroy", "tear down the deployed app", false)
-  .action(async (o) => {
-    await runDeploy(o.dir, {
-      allowLocalLogin: o.allowLocalLogin,
-      yes: o.yes,
-      localBuild: o.localBuild,
-      destroy: o.destroy,
-    });
-  });
-program
-  .command("regen-synth")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("--db <url>", "database url")
-  .option("-s, --seed <n>", "seed", "42")
-  .action(async (o) => {
-    const db = resolveDbUrl(o.dir, o.db);
-    const cfg = loadConfig(o.dir);
-    const pool = new Pool({ connectionString: db });
-    try {
-      // Seed truncates, generates synthetic data, and syncs the dev term set from those rows.
-      await runSeed(o.dir, db, Number(o.seed));
-      // Re-index all file collections. `metadata` is not optional in practice: every other
-      // index call site passes it, and omitting it here would re-index a changed file with
-      // its declared metadata columns left null — the exact drift fileMetadataFields exists
-      // to prevent.
-      for (const [name, c] of Object.entries(cfg.collections)) {
-        if (c.type === "file") {
-          const env = "dev";
-          const dir = c.source!;
-          const taxonomies = await loadTaxonomyBindings(pool, cfg, name, env);
-          const metadata = fileMetadataFields(c);
-          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomies, metadata });
-        }
-      }
-    } finally {
-      await pool.end();
-    }
-    console.log("regenerated synthetic data");
-  });
-
-// Only parse argv when run as a binary, not when imported by tests.
-const isMainModule =
-  (typeof require !== "undefined" && require.main === module) ||
-  (typeof import.meta !== "undefined" && import.meta.url === `file://${process.argv[1]}`);
-if (isMainModule) {
-  // Rejections have to be handled here or not at all: `parseAsync` is the last statement, so an
-  // unhandled one printed a stack trace at a user who wanted a message and an exit code.
-  program.parseAsync().catch((err: unknown) => {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
 }
