@@ -334,7 +334,9 @@ pnpm install
 pnpm test:up                                             # Postgres 16 + pgvector on :54330
 WAREHOUSD_PROJECT_DIR=$(pwd)/examples/harbor pnpm test # unit + integration
 pnpm lint
-pnpm build                                               # production build + typecheck
+pnpm typecheck                                           # src + test + e2e + scripts
+pnpm format:check                                        # Prettier, code only
+pnpm build                                               # production build
 pnpm e2e                                                 # Playwright, real browser
 pnpm test:down
 ```
