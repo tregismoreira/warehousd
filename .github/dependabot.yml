@@ -18,14 +18,21 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     groups:
       # Grouped so a routine week is one PR to review rather than fifteen. Security updates are
       # still raised individually and immediately — that is dependabot's own behaviour and is not
       # affected by grouping.
-      dev-dependencies:
+      #
+      # Majors are deliberately outside both groups, so each arrives as its own PR. A group is only
+      # as mergeable as its worst member: the dev group once bundled six updates, of which
+      # typescript 7 (unsupported by typescript-eslint) and vitest 4 (needs a vite major it did not
+      # bring) were both red, and that held @types/node, eslint and commander hostage to two
+      # upstream problems they had nothing to do with. The limit above is 10 rather than 5 because
+      # unbundling majors means more open PRs in a week that has several.
+      dev-minor-and-patch:
         dependency-type: development
-        patterns: ["*"]
+        update-types: [minor, patch]
       production-minor-and-patch:
         dependency-type: production
         update-types: [minor, patch]
