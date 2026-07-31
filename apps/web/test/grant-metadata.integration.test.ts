@@ -43,27 +43,21 @@ describe("GET /api/grants/doc-paths", () => {
   // the grant-authoring endpoint instead of the data path.
   it("403s a member", async () => {
     const { GET } = await import("../app/api/grants/doc-paths/route");
-    const res = await GET(
-      req("/api/grants/doc-paths?collection=policies&env=dev", miaCookie),
-    );
+    const res = await GET(req("/api/grants/doc-paths?collection=policies&env=dev", miaCookie));
     expect(res.status).toBe(403);
     expect((await res.json()).error).toBe("forbidden");
   });
 
   it("lists the paths of a file collection for a manager", async () => {
     const { GET } = await import("../app/api/grants/doc-paths/route");
-    const res = await GET(
-      req("/api/grants/doc-paths?collection=policies&env=dev", marcusCookie),
-    );
+    const res = await GET(req("/api/grants/doc-paths?collection=policies&env=dev", marcusCookie));
     expect(res.status).toBe(200);
     expect(Array.isArray((await res.json()).paths)).toBe(true);
   });
 
   it("admits an admin too, since manager is a floor and not an equality", async () => {
     const { GET } = await import("../app/api/grants/doc-paths/route");
-    const res = await GET(
-      req("/api/grants/doc-paths?collection=policies&env=dev", anaCookie),
-    );
+    const res = await GET(req("/api/grants/doc-paths?collection=policies&env=dev", anaCookie));
     expect(res.status).toBe(200);
   });
 
