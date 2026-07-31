@@ -38,8 +38,13 @@ warehousd assumes the operator does these; failures caused by not doing them are
 not vulnerabilities in warehousd:
 
 - **Serve over TLS.** Sessions, OAuth codes, and tokens all cross the wire.
+  `warehousd deploy` enforces this by serving over HTTPS automatically on
+  Fly.io. Other deployments remain the operator's responsibility.
 - **Turn demo mode off** (`demo: false` / no `WAREHOUSD_DEMO`). Demo mode seeds
   three accounts with the password `demo` and shows them on the login page.
+  `warehousd deploy` refuses the deployment if demo mode is on, so the
+  expectation is mechanically enforced for Fly deployments. Local deployments
+  remain the operator's responsibility.
 - **Never point a file collection's `source` at real corporate files.** `source`
   is dev content by definition; live content is indexed only through an explicit
   `--env live` action.

@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { execFileSync } from "child_process";
+import { existsSync } from "node:fs";
 import { resolve } from "path";
 import {
   ensureSchemasAndRoles,
@@ -173,12 +174,13 @@ export async function bootstrap(): Promise<void> {
     // 5. YAML → data_synth/data_live tables + views + app.collections. Idempotent by design.
     const cfg = loadConfig(dir);
     await applyConfig(db, cfg);
+    const demoMode = process.env.WAREHOUSD_DEMO === "true" || cfg.demo;
 
     // 6. First admin. After the Better Auth migration and after applyConfig
     const adminId = await ensureAdminUser(db);
 
     // 7. Demo personas — only when opted in
-    if (process.env.WAREHOUSD_DEMO === "true" || cfg.demo) {
+    if (demoMode) {
       await seedDemoPersonas(db, cfg);
     }
 
@@ -204,7 +206,24 @@ export async function bootstrap(): Promise<void> {
         taxonomies: devTaxonomies,
         metadata,
       });
-      if (c.source_live) {
+      // `source_live` may be declared and absent. `warehousd deploy` bundles the project into the
+      // image but deliberately omits every `source_live` directory, so that live documents never
+      // leave the operator's machine and a deployed instance cannot populate data_live — real data
+      // arrives through the admin import path instead.
+      //
+      // indexCollection walks the directory with readdirSync, which throws ENOENT rather than
+      // returning nothing. Without this check the release command dies on a config that is doing
+      // exactly what it is supposed to, and the deploy aborts. Skip and say so; the dev content is
+      // already indexed and the app comes up.
+      const liveDir = c.source_live ? resolve(dir, c.source_live) : null;
+      if (liveDir && !existsSync(liveDir)) {
+        console.warn(
+          `[entrypoint] skipping live index of "${name}": ${liveDir} is not present. ` +
+            `This is expected on a deployed instance, where live sources are not shipped.`,
+        );
+        continue;
+      }
+      if (liveDir) {
         const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
         // indexCollection throws on a term its bindings don't know, and a dataset-sourced
         // vocabulary has no live terms until data_live holds rows. Indexing anyway would abort
@@ -219,7 +238,7 @@ export async function bootstrap(): Promise<void> {
           );
           continue;
         }
-        await indexCollection(db, "live", name, resolve(dir, c.source_live), {
+        await indexCollection(db, "live", name, liveDir, {
           taxonomies: liveTaxonomies,
           metadata,
         });

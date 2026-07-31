@@ -34,6 +34,14 @@ database:
   managed: true        # default: the CLI runs Postgres in Docker
   url: ${env:DATABASE_URL}   # alternative: bring your own Postgres
   port: 5432           # host port for the managed Postgres (default: server.port + 1)
+deploy:
+  target: fly          # only supported value
+  app_name: harbor-warehousd   # ^[a-z0-9][a-z0-9-]{0,62}$, globally unique on Fly
+  region: gru          # 3-letter Fly region code
+  image: warehousd:local   # optional — override the published base image
+  database:
+    managed: true      # provision Fly Postgres, OR:
+    # url: ${env:PROD_DATABASE_URL}   # attach a Postgres you already run
 taxonomies: {}         # see below
 collections: {}        # required
 synthetic:
@@ -47,6 +55,12 @@ database it does not manage.
 `demo: true` seeds `ana@demo.local` (admin), `marcus@demo.local` (manager), and
 `mia@demo.local` (member), all with the password `demo`, and shows them on the
 login page. **Never enable it on a deployment reachable by anyone else.**
+
+The `deploy:` block is optional and required only by `warehousd deploy`. It
+names the target (`fly` is the only value), the globally unique app name, the
+Fly region, and — most critically — **exactly one** of `managed: true` or a
+`database.url`. An `image:` override is optional; if unset, the published image
+is used. See [deploy-fly.md](deploy-fly.md) for the full deployment runbook.
 
 ## Collections
 

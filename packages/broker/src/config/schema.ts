@@ -293,6 +293,43 @@ export const CollectionSchema = z
     return { ...c, fields: filled };
   });
 
+// Cloud deploy target. Declared before ConfigSchema because ConfigSchema references it: a `const`
+// sits in the temporal dead zone until its initialiser runs, and both are evaluated at import.
+//
+// `database` takes exactly one of `managed: true` (provision Postgres on the target) or `url`
+// (attach one you already run). Neither leaves the deployment with no database and no error until
+// the release command fails; both is ambiguous about which one wins, and the answer would only
+// show up as data written to the wrong place.
+//
+// `image` overrides the published server image. It exists so a deploy can run against a locally
+// built or otherwise unpublished base — the same need `server.image` covers for the local CLI.
+export const DeploySchema = z
+  .object({
+    target: z.literal("fly"),
+    app_name: z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9-]{0,62}$/,
+        "app_name must be a valid Fly app name (lowercase alphanumerics and dashes)",
+      ),
+    region: z
+      .string()
+      .regex(/^[a-z]{3}$/, "region must be a 3-letter Fly region code (e.g. gru, iad)"),
+    image: z.string().optional(),
+    database: z.object({ managed: z.boolean().optional(), url: z.string().optional() }).strict(),
+  })
+  .strict()
+  .superRefine((d, ctx) => {
+    const managed = d.database.managed === true;
+    const hasUrl = typeof d.database.url === "string" && d.database.url.length > 0;
+    if (managed === hasUrl)
+      ctx.addIssue({
+        code: "custom",
+        message: "deploy.database requires exactly one of `managed: true` or `url`",
+      });
+  });
+export type DeployConfig = z.infer<typeof DeploySchema>;
+
 export const ConfigSchema = z
   .object({
     project: z.string(),
@@ -357,6 +394,7 @@ export const ConfigSchema = z
     synthetic: z
       .object({ documents_per_collection: z.record(z.string(), z.number()).default({}) })
       .default({ documents_per_collection: {} }),
+    deploy: DeploySchema.optional(),
   })
   .strict()
   .superRefine((cfg, ctx) => {

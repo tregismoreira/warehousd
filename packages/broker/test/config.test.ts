@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { loadConfig } from "../src/config/load";
+import { loadConfig, envRefs } from "../src/config/load";
 import { readPosture, ConfigSchema } from "../src/config/schema";
 import { must } from "./helpers/must";
 
@@ -460,5 +460,256 @@ describe("config schema rejects unrecognised keys", () => {
     // collections, metadata fields, synthetic settings and the writable dataset.
     const dir = resolve(__dirname, "../../../examples/harbor");
     expect(() => loadConfig(dir)).not.toThrow();
+  });
+});
+
+describe("deploy config", () => {
+  const baseWithDeploy = {
+    project: "t",
+    collections: {
+      a: { description: "d", fields: { id: { type: "uuid", posture: "allow", pk: true } } },
+    },
+  };
+
+  it("accepts a valid deploy block", () => {
+    const cfg = ConfigSchema.parse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "fly",
+        app_name: "my-app",
+        region: "gru",
+        database: { managed: true },
+      },
+    });
+    expect(cfg.deploy?.target).toBe("fly");
+    expect(cfg.deploy?.app_name).toBe("my-app");
+  });
+
+  it("rejects target other than fly", () => {
+    expect(() =>
+      ConfigSchema.parse({
+        ...baseWithDeploy,
+        deploy: {
+          target: "gcp",
+          app_name: "my-app",
+          region: "gru",
+          database: { managed: true },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects app_name with uppercase or underscore", () => {
+    expect(() =>
+      ConfigSchema.parse({
+        ...baseWithDeploy,
+        deploy: {
+          target: "fly",
+          app_name: "My_App",
+          region: "gru",
+          database: { managed: true },
+        },
+      }),
+    ).toThrow(/valid Fly app name/);
+  });
+
+  it("rejects region that is not 3 letters", () => {
+    expect(() =>
+      ConfigSchema.parse({
+        ...baseWithDeploy,
+        deploy: {
+          target: "fly",
+          app_name: "my-app",
+          region: "brazil",
+          database: { managed: true },
+        },
+      }),
+    ).toThrow(/3-letter Fly region code/);
+  });
+
+  it("rejects database with neither managed nor url", () => {
+    expect(() =>
+      ConfigSchema.parse({
+        ...baseWithDeploy,
+        deploy: {
+          target: "fly",
+          app_name: "my-app",
+          region: "gru",
+          database: {},
+        },
+      }),
+    ).toThrow(/exactly one of/);
+  });
+
+  it("rejects database with both managed and url", () => {
+    expect(() =>
+      ConfigSchema.parse({
+        ...baseWithDeploy,
+        deploy: {
+          target: "fly",
+          app_name: "my-app",
+          region: "gru",
+          database: { managed: true, url: "postgres://localhost" },
+        },
+      }),
+    ).toThrow(/exactly one of/);
+  });
+
+  it("accepts database with managed: true alone", () => {
+    const cfg = ConfigSchema.parse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "fly",
+        app_name: "my-app",
+        region: "gru",
+        database: { managed: true },
+      },
+    });
+    expect(cfg.deploy?.database.managed).toBe(true);
+  });
+
+  it("accepts database with url alone", () => {
+    const cfg = ConfigSchema.parse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "fly",
+        app_name: "my-app",
+        region: "gru",
+        database: { url: "postgres://db.example.com" },
+      },
+    });
+    expect(cfg.deploy?.database.url).toBe("postgres://db.example.com");
+  });
+
+  it("rejects unknown key inside deploy", () => {
+    const cfg = structuredClone(baseWithDeploy) as any;
+    cfg.deploy = {
+      target: "fly",
+      app_name: "my-app",
+      region: "gru",
+      database: { managed: true },
+      unknown_field: "value",
+    };
+    const r = ConfigSchema.safeParse(cfg);
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("unknown_field");
+  });
+
+  it("accepts config with no deploy block (backwards compatible)", () => {
+    const cfg = ConfigSchema.parse(baseWithDeploy);
+    expect(cfg.deploy).toBeUndefined();
+  });
+});
+
+describe("envRefs", () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "wh-env-refs-"));
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns unique env refs from warehousd.yml", () => {
+    writeFileSync(
+      join(dir, "warehousd.yml"),
+      `
+project: t
+server:
+  port: \${env:PORT}
+database:
+  url: \${env:DATABASE_URL}
+  port: \${env:DB_PORT}
+collections: {}
+`,
+    );
+    const refs = envRefs(dir);
+    expect(refs).toEqual(["DATABASE_URL", "DB_PORT", "PORT"]);
+  });
+
+  it("returns empty array when warehousd.yml has no refs", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "wh-env-refs-empty-"));
+    writeFileSync(join(dir2, "warehousd.yml"), `project: t\ncollections: {}\n`);
+    const refs = envRefs(dir2);
+    expect(refs).toEqual([]);
+    rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it("returns empty array if warehousd.yml does not exist", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "wh-env-refs-missing-"));
+    const refs = envRefs(dir2);
+    expect(refs).toEqual([]);
+    rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it("does not return a ref that appears only in a whole-line comment", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "wh-env-refs-comment-"));
+    writeFileSync(
+      join(dir2, "warehousd.yml"),
+      `
+project: t
+collections: {}
+# This line contains \${env:COMMENTED_VAR}
+`,
+    );
+    const refs = envRefs(dir2);
+    expect(refs).not.toContain("COMMENTED_VAR");
+    rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it("does not return a ref that appears only in an inline comment", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "wh-env-refs-inline-"));
+    writeFileSync(
+      join(dir2, "warehousd.yml"),
+      `
+project: t
+server:
+  port: 8722  # alternative: \${env:COMMENTED_PORT}
+collections: {}
+`,
+    );
+    const refs = envRefs(dir2);
+    expect(refs).not.toContain("COMMENTED_PORT");
+    rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it("returns a ref inside a quoted string even if it contains hash", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "wh-env-refs-quoted-"));
+    writeFileSync(
+      join(dir2, "warehousd.yml"),
+      `
+project: t
+database:
+  url: "postgres://user#pwd@host/db?ref=\${env:DB_ID}#section"
+collections: {}
+`,
+    );
+    const refs = envRefs(dir2);
+    expect(refs).toContain("DB_ID");
+    rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it("merges refs from both warehousd.yml and warehousd.local.yml", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "wh-env-refs-merge-"));
+    writeFileSync(
+      join(dir2, "warehousd.yml"),
+      `project: t\nserver:\n  port: \${env:PORT}\ncollections: {}\n`,
+    );
+    writeFileSync(join(dir2, "warehousd.local.yml"), `database:\n  url: \${env:LOCAL_DB}\n`);
+    const refs = envRefs(dir2);
+    expect(refs).toEqual(["LOCAL_DB", "PORT"]);
+    rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it("collapses duplicate refs across both files", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "wh-env-refs-dups-"));
+    writeFileSync(
+      join(dir2, "warehousd.yml"),
+      `project: t\nserver:\n  port: \${env:PORT}\ndatabase:\n  url: \${env:PORT}\ncollections: {}\n`,
+    );
+    const refs = envRefs(dir2);
+    expect(refs).toEqual(["PORT"]);
+    expect(refs.filter((r) => r === "PORT")).toHaveLength(1);
+    rmSync(dir2, { recursive: true, force: true });
   });
 });

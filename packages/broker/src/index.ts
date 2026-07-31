@@ -14,10 +14,17 @@ export {
   describeIntentError,
 } from "./intents/schema";
 export { createPools, onPoolError, type Pools, withOrg, writePool } from "./db/pools";
-export { loadConfig, grantableFields, findCollection } from "./config/load";
+export { loadConfig, grantableFields, findCollection, envRefs } from "./config/load";
 export type { WarehousdConfig } from "./config/schema";
-export { fileMetadataFields, FILE_METADATA_TYPES } from "./config/schema";
-export type { CollectionConfig, FileMetadataType } from "./config/schema";
+export {
+  fileMetadataFields,
+  FILE_METADATA_TYPES,
+  DeploySchema,
+  normalizePosture,
+  readPosture,
+  writePosture,
+} from "./config/schema";
+export type { CollectionConfig, FileMetadataType, DeployConfig } from "./config/schema";
 export { applyConfig } from "./apply/apply";
 export { generateSynthetic } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
