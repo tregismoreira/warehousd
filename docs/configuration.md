@@ -347,6 +347,6 @@ treated as zero, so a typo cannot silently remove the ceiling it meant to raise.
 ## A complete example
 
 [`examples/harbor/warehousd.yml`](../examples/harbor/warehousd.yml) is a
-working configuration for the demo company: nineteen collections including
+working configuration for the demo company: 20 collections including
 relational data, sensitive compensation records, a time series, three file
 collections with bound taxonomies, and dataset-sourced vocabulary terms.

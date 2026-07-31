@@ -342,10 +342,14 @@ pnpm test:down
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the full setup, including running the app
-against the Harbor Law demo company — seven personas, nineteen collections, planted
+against the Harbor Law demo company — seven personas, 20 collections, planted
 canary values, and a pre-seeded grant request. Demo mode seeds personnel including
 `ana@demo.local` (admin), `marcus@demo.local` (manager), and `mia@demo.local` (member),
 password `demo`.
+
+[examples/harbor/README.md](examples/harbor/README.md) walks through that project
+on its own terms — what it declares, who can see what, and how to run it with the
+published CLI without cloning anything else.
 
 The demo arc is the shortest way to understand the product: search case files
 as Mia and watch the probe refuse, have Marcus approve a trimmed grant, search
@@ -384,6 +388,7 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 | [docs/configuration.md](docs/configuration.md) | Every key in `warehousd.yml` |
 | [docs/connect-claude.md](docs/connect-claude.md) | Adding the MCP connector end to end |
 | [docs/configure-sso.md](docs/configure-sso.md) | Registering an OIDC or SAML IdP |
+| [examples/harbor/README.md](examples/harbor/README.md) | The demo project end to end — collections, personas, the grant arc |
 | [SECURITY.md](SECURITY.md) | Reporting a vulnerability, deployment expectations, known limitations |
 
 **Understanding and changing it**
