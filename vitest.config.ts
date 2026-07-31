@@ -39,10 +39,12 @@ export default defineConfig({
     // Forks, not threads: tests set APP_DATABASE_URL and friends on process.env.
     fileParallelism: true,
     pool: "forks",
-    poolOptions: {
-      // Capped, and overridable: sibling Conductor workspaces share this machine and this
-      // Postgres. Raise max_connections in docker-compose.test.yml before raising this.
-      forks: { minForks: 1, maxForks: Number(process.env.WAREHOUSD_TEST_WORKERS ?? 4) },
-    },
+    // Capped, and overridable: sibling Conductor workspaces share this machine and this
+    // Postgres. Raise max_connections in docker-compose.test.yml before raising this.
+    //
+    // vitest 4 dropped `poolOptions`, where this cap used to live as `forks.maxForks`. An unknown
+    // key is ignored at runtime rather than rejected, so the cap has to move with the API or it
+    // silently stops applying and the suite runs at whatever default the pool picks.
+    maxWorkers: Number(process.env.WAREHOUSD_TEST_WORKERS ?? 4),
   },
 });

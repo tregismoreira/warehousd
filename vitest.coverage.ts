@@ -28,7 +28,10 @@ export const coverage: Coverage = {
     // Schema definitions and generated DDL strings: executed as data, not as branches.
     "packages/broker/src/db/schema.ts",
   ],
-  all: true,
+  // No `all: true` — vitest 4 removed it. Setting `include` is now what pulls in files no test
+  // touched, which is the same thing this asked for: a file with no test at all has to count as
+  // zero, or the number measures the tested subset and flatters it.
+  //
   // Thresholds only on the merge step, never on an individual pass: the serial pass runs three
   // suites, so checking a floor against its partial coverage would fail every time and say nothing.
   // scripts/run-tests.ts sets this for the merge invocation alone.
@@ -36,16 +39,22 @@ export const coverage: Coverage = {
   // A floor, not a target — it exists to catch a regression, not to block work that has not moved
   // the number. The audit's named blind spots to attack first: refusal branches in the broker
   // verbs, sql/build.ts's operator paths, and oauth/env-scope.ts's rule interactions.
-  // Measured on the merged report, 2026-07-30: lines 87.95, statements 87.95, branches 84.77,
-  // functions 90.78 (931 tests). Each floor sits ~3 points under its measurement — close enough to
+  // Measured on the merged report, 2026-07-31: lines 87.62, statements 85.01, branches 77.98,
+  // functions 91.14 (931 tests). Each floor sits ~3 points under its measurement — close enough to
   // catch a real regression, far enough not to trip on one test moving. Raise them when a phase
   // raises the real number; `WAREHOUSD_COVERAGE_MIN` overrides all four for a one-off run.
+  //
+  // The floors dropped when @vitest/coverage-v8 went 2 → 4, and no test was lost doing it: the same
+  // 931 tests pass, and the v4 provider counts what they cover differently. Statements and lines
+  // used to report the identical figure, which is what an unremapped v8 report does; they now
+  // differ, and branches fell 84.77 → 77.98. The new numbers are the accurate ones, so they are
+  // what the floors are set against — the earlier ones were flattering, not better.
   ...(process.env.WAREHOUSD_COVERAGE_THRESHOLDS
     ? {
         thresholds: {
-          lines: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 85),
-          statements: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 85),
-          branches: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 82),
+          lines: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 84),
+          statements: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 82),
+          branches: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 75),
           functions: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 88),
         },
       }
