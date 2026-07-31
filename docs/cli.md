@@ -19,16 +19,26 @@ Requires Docker and Node 22+.
 
 Available on every command.
 
-| Flag | |
-|---|---|
-| `--json` | Machine-readable output on stdout. Secrets are **not** masked — a caller that asked for JSON asked for them. |
-| `-q, --quiet` | Suppress progress; errors and results still print. |
-| `--no-color` | Disable colour. `NO_COLOR` and `TERM=dumb` are honoured too, and colour is off automatically when output is not a terminal. |
-| `--verbose` | Echo every Docker command and its stderr. |
+| Flag          |                                                                                                                             |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `--json`      | Machine-readable output on stdout. Secrets are **not** masked — a caller that asked for JSON asked for them.                |
+| `-q, --quiet` | Suppress progress and confirmations. Errors always print, and `--json` always prints.                                       |
+| `--no-color`  | Disable colour. `NO_COLOR` and `TERM=dumb` are honoured too, and colour is off automatically when output is not a terminal. |
+| `--verbose`   | Echo every Docker and flyctl command, and its stderr.                                                                       |
 
-Progress goes to **stderr**; results and `--json` go to **stdout**. So
-`warehousd start 2>/dev/null` prints the summary alone, and
-`warehousd status --json | jq` works.
+These work on **every** command, `deploy` included. Progress goes to **stderr**;
+results and `--json` go to **stdout**. So `warehousd start 2>/dev/null` prints the
+summary alone, `warehousd status --json | jq` works, and a failed
+`warehousd deploy --json` writes its checklist to stderr while leaving stdout
+empty rather than unparseable.
+
+Two deliberate exceptions:
+
+- `--json` with `logs --follow` is an error, not a no-op — a stream has no end to
+  serialise.
+- `--verbose` never prints a failing `fly secrets` payload. flyctl echoes the
+  offending assignment on that path, so it stays redacted; a debug flag that
+  prints secrets is a secret-printing flag.
 
 ## Commands
 
@@ -45,9 +55,9 @@ In a terminal it asks for the project name, the port and whether to manage
 Postgres, then applies those answers to the template. Piped, in CI, under
 `--json` or `--no-input` it writes the default template without asking.
 
-| Flag | |
-|---|---|
-| `--force` | Overwrite an existing `warehousd.yml`. |
+| Flag         |                                           |
+| ------------ | ----------------------------------------- |
+| `--force`    | Overwrite an existing `warehousd.yml`.    |
 | `--no-input` | Never prompt; write the default template. |
 
 ### `start`
@@ -57,9 +67,9 @@ Starts the server container, plus a managed Postgres container unless
 collections, prints the outputs block, and writes `.warehousd/outputs.json`.
 Idempotent — re-running picks up YAML changes.
 
-| Flag | |
-|---|---|
-| `-s, --seed <n>` | Synthetic data PRNG seed (default `42`). |
+| Flag             |                                              |
+| ---------------- | -------------------------------------------- |
+| `-s, --seed <n>` | Synthetic data PRNG seed (default `42`).     |
 | `--show-secrets` | Print credentials in full instead of masked. |
 
 Before creating anything it checks that the ports are free and reports which
@@ -108,10 +118,10 @@ full by `warehousd secrets --show`, by `--show-secrets`, and by `--json`.
 
 Stops the containers, keeping volumes.
 
-| Flag | |
-|---|---|
+| Flag        |                                                              |
+| ----------- | ------------------------------------------------------------ |
 | `--destroy` | Also remove the Postgres container and volume. Irreversible. |
-| `-y, --yes` | Skip the confirmation. |
+| `-y, --yes` | Skip the confirmation.                                       |
 
 In a terminal `--destroy` asks before removing the volume. Piped or in CI there
 is nobody to ask, so `--yes` is required there and its absence is an error
@@ -129,8 +139,8 @@ The health check uses `apiUrl` from `.warehousd/outputs.json` when that file is
 there, and falls back to `server.port` from `warehousd.yml` when it is not — a
 missing local file is not evidence that the server is down.
 
-| Flag | |
-|---|---|
+| Flag             |                                                   |
+| ---------------- | ------------------------------------------------- |
 | `--show-secrets` | Print the database URL in full instead of masked. |
 
 ### `restart`
@@ -141,11 +151,11 @@ missing local file is not evidence that the server is down.
 
 Container logs, without having to assemble the container name yourself.
 
-| Flag | |
-|---|---|
-| `-f, --follow` | Stream until interrupted. |
-| `-n, --tail <n>` | Lines to show (default `100`). |
-| `--service <name>` | `server` (default) or `db`. |
+| Flag               |                                |
+| ------------------ | ------------------------------ |
+| `-f, --follow`     | Stream until interrupted.      |
+| `-n, --tail <n>`   | Lines to show (default `100`). |
+| `--service <name>` | `server` (default) or `db`.    |
 
 `--service db` is an error when the project brings its own Postgres via
 `database.url`, because there is no database container in that case.
@@ -173,9 +183,9 @@ you want to know which part is at fault.
 
 The generated credentials, masked unless asked otherwise.
 
-| Flag | |
-|---|---|
-| `--show` | Print them in full. |
+| Flag     |                                    |
+| -------- | ---------------------------------- |
+| `--show` | Print them in full.                |
 | `--json` | Full values as JSON, for a script. |
 
 ### `apply`
@@ -183,8 +193,8 @@ The generated credentials, masked unless asked otherwise.
 Re-applies `warehousd.yml` — schemas, tables, and `v_<collection>` views —
 without a restart. Runs against the host, not inside the container.
 
-| Flag | |
-|---|---|
+| Flag         |                                                                             |
+| ------------ | --------------------------------------------------------------------------- |
 | `--db <url>` | Database URL. Falls back to `DATABASE_URL`, then `.warehousd/outputs.json`. |
 
 ### `seed` / `regen-synth`
@@ -192,9 +202,9 @@ without a restart. Runs against the host, not inside the container.
 Generate or regenerate synthetic data for every dataset collection. Same seed,
 same data.
 
-| Flag | |
-|---|---|
-| `--db <url>` | Database URL. |
+| Flag             |                           |
+| ---------------- | ------------------------- |
+| `--db <url>`     | Database URL.             |
 | `-s, --seed <n>` | PRNG seed (default `42`). |
 
 ### `index <collection>`
@@ -202,11 +212,11 @@ same data.
 Re-index a file collection. `start` does this automatically for the dev
 environment.
 
-| Flag | |
-|---|---|
-| `--db <url>` | Database URL. |
-| `--env <env>` | `dev` or `live` (default `dev`). |
-| `--source <dir>` | Override the source directory. |
+| Flag             |                                  |
+| ---------------- | -------------------------------- |
+| `--db <url>`     | Database URL.                    |
+| `--env <env>`    | `dev` or `live` (default `dev`). |
+| `--source <dir>` | Override the source directory.   |
 
 `--env live` requires `source_live` in the config or an explicit `--source`. The
 CLI will not index one directory into both environments.
@@ -232,14 +242,14 @@ Once a release exists and the GHCR package is public, drop the `image:` override
 and the flag; nothing else changes. `--local-build` needs a local Docker daemon
 while the default `--remote-only` path does not.
 
-| Flag | |
-|---|---|
-| `-d, --dir <dir>` | Project directory (default: current). |
-| `--allow-local-login` | Enable `admin@warehousd.local` with a generated password, in addition to any configured SSO. |
-| `-y, --yes` | Skip the re-deploy diff prompt (one-time deploys always prompt). |
-| `--local-build` | Build the image locally; otherwise use the published one. |
-| `--destroy` | Tear down the Fly app and database. Requires typing the app name exactly; `--yes` does not bypass. |
-| `--show-secrets` | Print the admin password and database URL in full instead of masked. |
+| Flag                  |                                                                                                    |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| `-d, --dir <dir>`     | Project directory (default: current).                                                              |
+| `--allow-local-login` | Enable `admin@warehousd.local` with a generated password, in addition to any configured SSO.       |
+| `-y, --yes`           | Skip the re-deploy diff prompt (one-time deploys always prompt).                                   |
+| `--local-build`       | Build the image locally; otherwise use the published one.                                          |
+| `--destroy`           | Tear down the Fly app and database. Requires typing the app name exactly; `--yes` does not bypass. |
+| `--show-secrets`      | Print the admin password and database URL in full instead of masked.                               |
 
 A failed pre-flight is rendered by the same checklist as `doctor`, so it honours
 `--no-color` and `NO_COLOR` and falls back to ASCII marks off a terminal.
@@ -342,7 +352,7 @@ taxonomies:
   department:
     label: Department
     terms:
-      hr:      { label: HR }
+      hr: { label: HR }
       finance: { label: Finance }
   tags:
     label: Tags
@@ -354,10 +364,15 @@ collections:
   people:
     description: Employee directory
     fields:
-      id:               { type: uuid, posture: allow, pk: true }
-      full_name:        { type: text, posture: allow }
-      department_id:    { type: uuid, posture: allow, fk: departments.id }
-      department_name:  { type: text, posture: allow, view_join: { table: departments, column: name, on: department_id } }
+      id: { type: uuid, posture: allow, pk: true }
+      full_name: { type: text, posture: allow }
+      department_id: { type: uuid, posture: allow, fk: departments.id }
+      department_name:
+        {
+          type: text,
+          posture: allow,
+          view_join: { table: departments, column: name, on: department_id },
+        }
 
   policies:
     type: file
@@ -366,9 +381,9 @@ collections:
     source_live: ./seed/docs-live
     taxonomies: [department, tags]
     fields:
-      title:       { posture: allow }
-      content:     { posture: allow }
-      path:        { posture: deny }
+      title: { posture: allow }
+      content: { posture: allow }
+      path: { posture: deny }
       review_date: { type: date, posture: allow }
 
 synthetic:

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { traceCommand, traceFailure } from "./verbose";
 
 export class FlyError extends Error {}
 
@@ -38,6 +39,10 @@ export function assertFly(): void {
 
 export function run(args: string[], opts?: { input?: string | undefined }): string {
   const stream = args[0] !== undefined && STREAMING.has(args[0]);
+  const isSecrets = args[0] === "secrets";
+  // argv is safe to echo even here: secret material travels on stdin precisely so it never
+  // appears in a command line. The stderr below is not safe, and is handled separately.
+  traceCommand("flyctl", args);
   try {
     const output = execFileSync("flyctl", args, {
       encoding: "utf8",
@@ -47,9 +52,13 @@ export function run(args: string[], opts?: { input?: string | undefined }): stri
     return output.trim();
   } catch (err: unknown) {
     const error = err as { stderr?: string; message?: string };
-    if (args[0] === "secrets") {
+    if (isSecrets) {
+      // flyctl echoes the offending assignment when a secret fails to set, so this stderr can
+      // contain the credential itself. It is redacted out of the thrown error, and --verbose must
+      // not be a way around that: a debug flag that prints secrets is a secret-printing flag.
       throw new FlyError("Failed to manage secrets");
     }
+    traceFailure((error.stderr || error.message || "").trim());
     throw new FlyError(error.stderr || error.message);
   }
 }

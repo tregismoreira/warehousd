@@ -27,7 +27,7 @@ import { runStatus } from "./status";
 import { runDeploy } from "./deploy";
 import { formatOutputs } from "./outputs";
 import { ensureState } from "./state";
-import { setVerbose } from "./docker";
+import { setVerbose } from "./verbose";
 import { runDoctor } from "./preflight";
 import { runLogs } from "./commands/logs";
 import { runOpen, type Target } from "./commands/open";
@@ -52,7 +52,7 @@ program
   .option("--json", "machine-readable output on stdout", false)
   .option("-q, --quiet", "only errors and results", false)
   .option("--no-color", "disable colour (also honours NO_COLOR)")
-  .option("--verbose", "echo every docker command", false)
+  .option("--verbose", "echo every docker and flyctl command", false)
   .addHelpText(
     "after",
     `
@@ -97,12 +97,22 @@ function ui() {
   return { ...g, theme, reporter };
 }
 
+/**
+ * The result of a command, in whichever of the two forms was asked for. Always stdout — this is
+ * the product, not the narration.
+ *
+ * `--quiet` drops the human confirmation but never the JSON: a caller that asked for a payload and
+ * got silence would have no way to tell success from failure except the exit code, which is the
+ * thing `--json` exists to improve on.
+ */
 function emit(value: unknown, human: string): void {
-  if (globals().json) {
+  const g = globals();
+  if (g.json) {
     process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-  } else {
-    process.stdout.write(`${human}\n`);
+    return;
   }
+  if (g.quiet) return;
+  process.stdout.write(`${human}\n`);
 }
 
 program
@@ -168,33 +178,39 @@ program
   });
 program
   .command("apply")
+  .description("re-apply warehousd.yml without a restart")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .action(async (o) => {
+    ui();
     const db = resolveDbUrl(o.dir, o.db);
     await runApply(o.dir, db);
-    console.log("applied");
+    emit({ applied: true }, "applied");
   });
 program
   .command("seed")
+  .description("generate synthetic data for every dataset collection")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .option("-s, --seed <n>", "seed", "42")
   .action(async (o) => {
+    ui();
     const db = resolveDbUrl(o.dir, o.db);
     await runSeed(o.dir, db, Number(o.seed));
-    console.log("seeded");
+    emit({ seeded: true, seed: Number(o.seed) }, "seeded");
   });
 program
   .command("index <collection>")
+  .description("re-index a file collection")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .option("--env <env>", "dev|live", "dev")
   .option("--source <dir>", "override source directory")
   .action(async (collection, o) => {
+    ui();
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runIndex(o.dir, db, collection, { env: o.env, source: o.source });
-    console.log(`indexed=${r.indexed} skipped=${r.skipped} deleted=${r.deleted}`);
+    emit(r, `indexed=${r.indexed} skipped=${r.skipped} deleted=${r.deleted}`);
   });
 program
   .command("stop")
@@ -277,12 +293,23 @@ program
     if (o.service !== "server" && o.service !== "db") {
       throw new Error(`--service must be "server" or "db", not "${o.service}"`);
     }
+    const { json } = ui();
+    // A stream has no last element, so there is no object to close. Refusing beats accepting the
+    // flag and quietly emitting raw text that no parser asked for.
+    if (json && o.follow) {
+      throw new Error("--json cannot be combined with --follow: a stream has no end to serialise.");
+    }
     const out = await runLogs(o.dir, {
       follow: o.follow,
       tail: Number(o.tail),
       service: o.service,
     });
-    if (out !== null) process.stdout.write(`${out}\n`);
+    if (out === null) return; // --follow already streamed it
+    if (json) {
+      emit({ service: o.service, lines: out === "" ? [] : out.split("\n") }, "");
+      return;
+    }
+    process.stdout.write(`${out}\n`);
   });
 program
   .command("open [target]")
@@ -352,7 +379,7 @@ program
   .option("--destroy", "tear down the deployed app", false)
   .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
-    const { theme } = ui();
+    const { theme, json, quiet } = ui();
     await runDeploy(o.dir, {
       allowLocalLogin: o.allowLocalLogin,
       yes: o.yes,
@@ -360,6 +387,8 @@ program
       destroy: o.destroy,
       theme,
       showSecrets: o.showSecrets,
+      json,
+      quiet,
     });
   });
 program
@@ -390,7 +419,7 @@ program
     } finally {
       await pool.end();
     }
-    console.log("regenerated synthetic data");
+    emit({ regenerated: true, seed: Number(o.seed) }, "regenerated synthetic data");
   });
 
 // Only parse argv when run as a binary, not when imported by tests.

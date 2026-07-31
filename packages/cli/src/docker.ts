@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { traceCommand, traceFailure } from "./verbose";
 
 export class DockerError extends Error {}
 
@@ -25,12 +26,8 @@ const CAPTURED: ["pipe", "pipe", "pipe"] = ["pipe", "pipe", "pipe"];
 // download, and Docker renders it better than we would. It is the one command allowed to speak.
 const INHERIT_STDERR: ["pipe", "pipe", "inherit"] = ["pipe", "pipe", "inherit"];
 
-let verbose = false;
-
-/** `--verbose` was accepted and silently ignored before this existed. */
-export function setVerbose(on: boolean): void {
-  verbose = on;
-}
+// `--verbose` was accepted and silently ignored before this existed. The switch lives in
+// verbose.ts because fly.ts needs the same one — see the note there.
 
 export type ContainerSpec = {
   name: string;
@@ -66,7 +63,7 @@ export function assertDocker(): void {
 }
 
 export function run(args: string[], opts?: { inheritStderr?: boolean }): string {
-  if (verbose) process.stderr.write(`  $ docker ${args.join(" ")}\n`);
+  traceCommand("docker", args);
   try {
     const output = execFileSync("docker", args, {
       encoding: "utf8",
@@ -76,7 +73,7 @@ export function run(args: string[], opts?: { inheritStderr?: boolean }): string 
   } catch (err: unknown) {
     const error = err as { stderr?: string; message?: string };
     const detail = (error.stderr || error.message || "").trim();
-    if (verbose && detail) process.stderr.write(`  ! ${detail}\n`);
+    traceFailure(detail);
     throw new DockerError(detail);
   }
 }
