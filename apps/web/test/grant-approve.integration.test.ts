@@ -231,3 +231,140 @@ describe("approve — role", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// Nothing above this line exercised the two actions that take access away, which is the half of
+// the lifecycle that matters when something has gone wrong. Both are state machines enforced in
+// SQL — deny moves pending → denied, revoke moves approved → revoked — so a call from the wrong
+// starting state has to change nothing, and each asserts the row afterwards rather than the
+// status code, because a route that updated nothing would return 200 just as happily.
+const UNKNOWN_ID = "00000000-0000-0000-0000-000000000000";
+
+// `grants_one_active` is unique on (org_id, user_id, collection, env) where status='approved', and
+// the seeded template already holds approved grants for the personas. So the owner here is a
+// synthetic id per test rather than mia or marcus: the session doing the deciding is what these
+// tests are about, and the grant's owner only has to be somebody.
+async function approved(owner: string, collection: string, fields: string[]) {
+  const r = await getAppPool().query(
+    `insert into app.grants (user_id,collection,env,status,allowed_fields,purpose_label,decided_by,decided_at)
+     values ($1,$2,'dev','approved',$3,'test','marcus',now()) returning id`,
+    [owner, collection, fields],
+  );
+  return r.rows[0].id as string;
+}
+
+describe("deny", () => {
+  it("moves a pending grant to denied", async () => {
+    const id = await pending("mia", "metrics", ["id"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "deny", id }, marcusCookie) as any);
+    expect(res.status).toBe(200);
+    expect((await grantRow(id)).status).toBe("denied");
+  });
+
+  it("404s on an id that does not exist", async () => {
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "deny", id: UNKNOWN_ID }, marcusCookie) as any);
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe("unknown_grant");
+  });
+
+  // Deny is pending-only. An already-approved grant is not denied "back" — that is what revoke is
+  // for — and the grant must be left approved rather than quietly transitioned.
+  it("refuses an already-approved grant and leaves it approved", async () => {
+    const id = await approved("deny_target_approved", "metrics", ["id"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "deny", id }, marcusCookie) as any);
+    expect(res.status).toBe(404);
+    expect((await grantRow(id)).status).toBe("approved");
+  });
+
+  it("a member cannot deny", async () => {
+    const id = await pending("marcus", "metrics", ["id"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "deny", id }, miaCookie) as any);
+    expect(res.status).toBe(403);
+    expect((await grantRow(id)).status).toBe("pending");
+  });
+});
+
+describe("revoke", () => {
+  it("moves an approved grant to revoked", async () => {
+    const id = await approved("revoke_target", "announcements", ["id", "title"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "revoke", id }, marcusCookie) as any);
+    expect(res.status).toBe(200);
+    expect((await grantRow(id)).status).toBe("revoked");
+  });
+
+  it("404s on an id that does not exist", async () => {
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "revoke", id: UNKNOWN_ID }, marcusCookie) as any);
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe("unknown_grant");
+  });
+
+  // The mirror of the deny case: revoke is approved-only, so a pending grant stays pending rather
+  // than skipping a decision nobody made.
+  it("refuses a still-pending grant and leaves it pending", async () => {
+    const id = await pending("mia", "announcements", ["id"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "revoke", id }, marcusCookie) as any);
+    expect(res.status).toBe(404);
+    expect((await grantRow(id)).status).toBe("pending");
+  });
+
+  it("a member cannot revoke", async () => {
+    const id = await approved("revoke_target_member", "announcements", ["id"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "revoke", id }, miaCookie) as any);
+    expect(res.status).toBe(403);
+    expect((await grantRow(id)).status).toBe("approved");
+  });
+});
+
+describe("approve — the grant has to exist and be pending", () => {
+  it("404s on an id that does not exist", async () => {
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(
+      req({ action: "approve", id: UNKNOWN_ID, allowedFields: [] }, marcusCookie) as any,
+    );
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe("unknown_grant");
+  });
+
+  // 409, not 404: the grant is there and the caller may see it, so "already decided" is the honest
+  // answer and the one a UI can act on by refreshing.
+  it("409s on a grant that was already decided", async () => {
+    const id = await approved("approve_target_decided", "metrics", ["id", "date"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(
+      req({ action: "approve", id, allowedFields: ["id"] }, marcusCookie) as any,
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("not_pending");
+  });
+
+  // The refusal that comes back from approveGrant rather than from the route's own guards, which
+  // is a different status mapping: anything that is not unknown_grant is the caller's 400.
+  it("400s when the verbs are not a set this collection can carry", async () => {
+    const id = await pending("mia", "metrics", ["id"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(
+      req({ action: "approve", id, allowedFields: ["id"], verbs: ["fly"] }, marcusCookie) as any,
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_verbs");
+    expect((await grantRow(id)).status).toBe("pending");
+  });
+});
+
+describe("an action the route does not know", () => {
+  it("400s rather than falling through to a silent success", async () => {
+    const id = await pending("mia", "metrics", ["id"]);
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(req({ action: "obliterate", id }, marcusCookie) as any);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("unknown_action");
+    expect((await grantRow(id)).status).toBe("pending");
+  });
+});

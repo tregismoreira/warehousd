@@ -50,13 +50,13 @@ export const coverage: Coverage = {
   // A floor, not a target — it exists to catch a regression, not to block work that has not moved
   // the number. The audit's named blind spots to attack first: refusal branches in the broker
   // verbs, sql/build.ts's operator paths, and oauth/env-scope.ts's rule interactions.
-  // Measured on the merged report, 2026-07-31: lines 91.56, statements 88.54, branches 80.60,
-  // functions 94.80 (949 tests). Each floor sits ~3 points under its measurement — close enough to
+  // Measured on the merged report, 2026-07-31: lines 92.85, statements 89.89, branches 81.97,
+  // functions 95.71 (984 tests). Each floor sits ~3 points under its measurement — close enough to
   // catch a real regression, far enough not to trip on one test moving. Raise them when a phase
   // raises the real number; `WAREHOUSD_COVERAGE_MIN` overrides all four for a one-off run.
   //
-  // Lines, statements and functions are the floors this repo has always had. Branches is not: it
-  // was 82 and is 77, and that is worth stating plainly rather than leaving to be discovered.
+  // Branches is 79 where it was once 82, and that is worth stating plainly rather than leaving to
+  // be discovered.
   //
   // @vitest/coverage-v8 2 → 4 changed what counts as a branch. It now sees ~113 branch sites that
   // v2 did not count at all — `??` fallbacks and `?.` chains, most of them on values a schema
@@ -64,19 +64,26 @@ export const coverage: Coverage = {
   // no honest test can take. Same suite, same source: branches read 84.77 under v2 and 80.60 under
   // v4. The gap is arithmetic, not lost testing.
   //
-  // The 18 tests in proposal-decision-refusals.test.ts and read-path-refusals.test.ts were written
-  // against this: the broker's own branch coverage is 83.8%, and what remains below the old floor
-  // is concentrated in apps/web/app/api (68.4%), whose uncovered branches are overwhelmingly query
-  // parameter defaulting. Those routes stay measured — they carry grants, API keys and SSO
-  // registration, and dropping them from `include` to recover a number would be measuring less and
-  // calling it measuring better.
+  // Three rounds of tests have been written against the gap rather than around it:
+  // proposal-decision-refusals.test.ts and read-path-refusals.test.ts on the broker's refusal
+  // paths, then grant-approve (deny and revoke), grant-metadata.integration.test.ts and
+  // env-switch.integration.test.ts on routes that had no tests at all. That moved branches
+  // 77.98 → 81.97.
+  //
+  // What is left is mostly not testable in a way worth the tests: query-parameter defaulting
+  // (`limit ?? 50`, `name ?? null`), repeated `if (!ctx) return unauthenticated()` on sibling
+  // routes, and framework error paths reachable only by making better-auth throw. Getting to a
+  // floor of 82 needs ~106 more covered branches out of that pool. If you are here to raise the
+  // floor, the honest lever is `apps/web/app/api` — 68.4% branches against the broker's own 83.8%
+  // — and not the `include` list. Those routes carry grants, API keys and SSO registration, and
+  // dropping them to recover a number would be measuring less and calling it measuring better.
   ...(process.env.WAREHOUSD_COVERAGE_THRESHOLDS
     ? {
         thresholds: {
-          lines: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 85),
-          statements: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 85),
-          branches: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 77),
-          functions: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 88),
+          lines: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 89),
+          statements: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 87),
+          branches: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 79),
+          functions: Number(process.env.WAREHOUSD_COVERAGE_MIN ?? 92),
         },
       }
     : {}),
