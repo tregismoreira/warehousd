@@ -28,7 +28,10 @@ export const coverage: Coverage = {
     // Schema definitions and generated DDL strings: executed as data, not as branches.
     "packages/broker/src/db/schema.ts",
   ],
-  all: true,
+  // No `all: true` — vitest 4 removed it. Setting `include` is now what pulls in files no test
+  // touched, which is the same thing this asked for: a file with no test at all has to count as
+  // zero, or the number measures the tested subset and flatters it.
+  //
   // Thresholds only on the merge step, never on an individual pass: the serial pass runs three
   // suites, so checking a floor against its partial coverage would fail every time and say nothing.
   // scripts/run-tests.ts sets this for the merge invocation alone.
