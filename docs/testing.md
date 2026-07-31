@@ -167,6 +167,13 @@ CI runs lint in its own job, `pnpm test` and `pnpm build` in another, then Playw
 smoke test that installs the CLI tarball outside the workspace, and the CLI and
 SSO end-to-end suites.
 
+On a pull request each of those jobs runs only if the diff can reach it: a `changes` job
+classifies every changed path and the rest gate on its output. A CLI-only change skips the browser
+suite, a web-only change skips the packaging one, and a diff of nothing but prose and images skips
+all five — but a `.md` under `examples/*/seed/` is a fixture the suites index, so it counts as
+code. An unrecognised path runs everything, which is the direction the mistake has to fall in. A
+push to `main` is never filtered.
+
 ### Running two checkouts at once
 
 `pnpm e2e` is safe to run in two checkouts simultaneously. Nothing needs to be

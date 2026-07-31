@@ -15,9 +15,89 @@ permissions:
 # repository can move `v4` to any commit, and it would then run here with this workflow's token. The
 # trailing comment records which release each SHA is, so dependabot can bump both together.
 jobs:
+  # Which of the jobs below this diff can actually affect. Everything is code until proved
+  # otherwise: an unrecognised path turns every job on, so adding a directory can never silently
+  # switch a gate off. Getting this wrong in the safe direction costs CI minutes; getting it wrong
+  # in the other direction merges an untested change, so the default is deliberately expensive.
+  #
+  # Jobs are skipped by an `if`, not by `paths-ignore` on the trigger. A workflow that never starts
+  # leaves its checks pending forever, and a pending required check blocks the merge it was meant
+  # to wave through. A skipped job reports as skipped, which branch protection accepts.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      quality: ${{ steps.classify.outputs.quality }}
+      test: ${{ steps.classify.outputs.test }}
+      playwright: ${{ steps.classify.outputs.playwright }}
+      pack: ${{ steps.classify.outputs.pack }}
+      e2e: ${{ steps.classify.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The classifier diffs against the merge base, which a shallow clone does not have.
+          fetch-depth: 0
+
+      - id: classify
+        # Context values arrive as environment variables rather than `${{ }}` interpolated into the
+        # script. Both of these are commit SHAs and so are harmless, but interpolating *any* context
+        # into a `run:` body is how a branch name on a fork pull request becomes shell.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          quality=false test=false playwright=false pack=false e2e=false
+          all() { quality=true; test=true; playwright=true; pack=true; e2e=true; }
+
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            # A push to main or a manual run gets everything. Filtering is an optimisation for
+            # review, not for the branch that ships.
+            all
+          elif ! base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"; then
+            # No common ancestor to diff against. Run the lot rather than guess.
+            all
+          else
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              case "$f" in
+                # A `.md` under a seed directory is a fixture the suites index, not prose. This
+                # case has to precede the prose one below or every seed document reads as inert.
+                examples/*/seed/*) quality=true; test=true; playwright=true; e2e=true ;;
+                # Read by people, run by nothing: `.prettierignore` already excludes *.md from
+                # `format:check`, and no suite loads any of these.
+                *.md|LICENSE|.github/assets/*) ;;
+                # The browser suite never drives the CLI, so a CLI-only change skips it.
+                packages/cli/*) quality=true; test=true; pack=true; e2e=true ;;
+                # The web app is not in the CLI tarball, so a web-only change skips `pack`.
+                apps/web/*) quality=true; test=true; playwright=true; e2e=true ;;
+                # The demo project is the fixture every suite runs against — and `seed/live.ts`
+                # is linted and type-checked — but it ships in no package.
+                examples/*) quality=true; test=true; playwright=true; e2e=true ;;
+                # Everything else, `packages/broker/` included. The broker is behind the web app,
+                # the CLI and the tarball alike, so there is nothing for it to skip.
+                *) all ;;
+              esac
+            done < <(git diff --name-only "$base" "$HEAD_SHA")
+          fi
+
+          {
+            echo "| job | runs |"
+            echo "| --- | --- |"
+            for job in quality test playwright pack e2e; do
+              echo "$job=${!job}" >> "$GITHUB_OUTPUT"
+              echo "| $job | ${!job} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Quality gates run on their own and before the suite: a lint, type or format failure is seconds
   # of feedback and should not sit behind twenty minutes of Postgres.
   quality:
+    needs: changes
+    if: needs.changes.outputs.quality == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,6 +130,8 @@ jobs:
       - run: pnpm audit --prod --audit-level high
 
   test:
+    needs: changes
+    if: needs.changes.outputs.test == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -96,7 +178,8 @@ jobs:
         run: pnpm test:down
 
   playwright:
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.playwright == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -129,7 +212,8 @@ jobs:
   # path, a missing shebang, a `files` omission, or an unresolvable external `pg` fails here
   # rather than after publishing.
   pack:
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.pack == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -164,7 +248,8 @@ jobs:
           test -f warehousd.yml
 
   e2e:
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
