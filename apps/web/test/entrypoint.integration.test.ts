@@ -254,6 +254,29 @@ collections:
     const grantCount = await db.query(`select count(*) as cnt from app.grants`);
     expect(Number(grantCount.rows[0].cnt)).toBeGreaterThan(0);
 
+    // Assert data_live table for file collections is populated when the live source is present
+    const documentsLiveResult = await db.query(
+      `select count(*) as cnt from data_live."documents__files"`,
+    );
+    expect(Number(documentsLiveResult.rows[0].cnt)).toBeGreaterThan(0);
+
+    await db.end();
+  });
+
+  // `warehousd deploy` bundles the project into the image but omits every `source_live` directory,
+  // so a deployed instance boots with source_live declared and absent. indexCollection walks the
+  // directory with readdirSync, which throws ENOENT rather than returning nothing — so without the
+  // guard in the entrypoint this exact shape kills the Fly release command and aborts the deploy.
+  it("skips live indexing when source_live is declared but absent, and still boots", async () => {
+    rmSync(join(fixture, "seed", "docs-live"), { recursive: true, force: true });
+
+    const { bootstrap } = await import("../scripts/entrypoint");
+    await expect(bootstrap()).resolves.not.toThrow();
+
+    const db = new Pool({ connectionString: setup.appUrl });
+    // Dev content is still indexed — the app comes up fully usable.
+    const dev = await db.query(`select count(*) as cnt from data_synth."documents__files"`);
+    expect(Number(dev.rows[0].cnt)).toBe(2);
     await db.end();
   });
 });

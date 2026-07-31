@@ -15,6 +15,7 @@ import { runInit } from "./init";
 import { runStart } from "./start";
 import { runStop } from "./stop";
 import { runStatus } from "./status";
+import { runDeploy } from "./deploy";
 import { formatOutputs } from "./outputs";
 import { ensureState, readOutputs } from "./state";
 
@@ -158,6 +159,25 @@ program
   .action(async (o) => {
     const result = await runStatus(o.dir);
     process.exit(result.healthy ? 0 : 1);
+  });
+program
+  .command("deploy")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--allow-local-login", "permit deploying without SSO configured", false)
+  .option("-y, --yes", "skip the config-diff confirmation", false)
+  .option(
+    "--local-build",
+    "build with the local Docker daemon instead of Fly's remote builder",
+    false,
+  )
+  .option("--destroy", "tear down the deployed app", false)
+  .action(async (o) => {
+    await runDeploy(o.dir, {
+      allowLocalLogin: o.allowLocalLogin,
+      yes: o.yes,
+      localBuild: o.localBuild,
+      destroy: o.destroy,
+    });
   });
 program
   .command("regen-synth")

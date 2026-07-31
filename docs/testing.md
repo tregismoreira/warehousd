@@ -380,7 +380,7 @@ The interesting ones, and where they live:
 
 ## What is still manual
 
-The Playwright suite covers every web surface. Three things are still
+The Playwright suite covers every web surface. Four things are still
 checked by hand, because they need credentials or a product UI no test can drive:
 
 1. **Connecting a real assistant.** [connect-claude.md](connect-claude.md) — add
@@ -396,7 +396,11 @@ checked by hand, because they need credentials or a product UI no test can drive
    sign-in through to the authorize endpoint. Two gaps remain: no test sends
    `providerType: "saml"`, and no test asserts what the page *looks* like. Check
    those by eye against a registered SAML provider.
+4. **Deploying to Fly.io.** [deploy-fly.md](deploy-fly.md) — end-to-end
+   provisioning: configuring the `deploy:` block, ensuring demo is off and SSO
+   is configured, running the deploy, verifying the stack reaches health checks,
+   and connecting Claude to the deployed server.
 
-Re-run all three whenever the OAuth flow, the login page, or the env-scope rules
-change materially — they are the only checks that exercise the full chain the way
-a user experiences it.
+Re-run all four whenever the OAuth flow, the login page, the env-scope rules,
+or the deploy machinery change materially — they are the only checks that
+exercise the full chain the way a user experiences it.

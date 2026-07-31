@@ -110,10 +110,66 @@ environment.
 `--env live` requires `source_live` in the config or an explicit `--source`. The
 CLI will not index one directory into both environments.
 
+### `deploy`
+
+Provisions a warehousd stack to Fly.io from the same `warehousd.yml`. A
+pre-flight checklist must pass before anything is created: the `deploy:` block
+exists, all `${env:VAR}` references resolve, demo mode is off, SSO or
+`--allow-local-login` is configured, and `flyctl` is installed and authenticated.
+Every check is printed if any fail — nothing is created until all pass.
+
+The server image is not yet published (the repo is private and no release tag
+exists). Until it is, build the base locally and pass `--local-build`:
+
+```bash
+docker build -f apps/web/Dockerfile -t warehousd:local .
+# then in warehousd.yml:  deploy: { image: warehousd:local, ... }
+warehousd deploy --local-build
+```
+
+Once a release exists and the GHCR package is public, drop the `image:` override
+and the flag; nothing else changes. `--local-build` needs a local Docker daemon
+while the default `--remote-only` path does not.
+
+| Flag | |
+|---|---|
+| `-d, --dir <dir>` | Project directory (default: current). |
+| `--allow-local-login` | Enable `admin@warehousd.local` with a generated password, in addition to any configured SSO. |
+| `-y, --yes` | Skip the re-deploy diff prompt (one-time deploys always prompt). |
+| `--local-build` | Build the image locally; otherwise use the published one. |
+| `--destroy` | Tear down the Fly app and database. Requires typing the app name exactly; `--yes` does not bypass. |
+
+Re-deploys print a diff of posture changes (field access changes called out
+separately from other config changes) and prompt unless `--yes` is passed.
+
+```
+Posture changes:
+─ people.email: allow → deny (read)
++ people.phone: (new, allow read)
+
+Other changes:
+~ people: description updated
+...
+
+Deploy y/n (without --yes)?
+```
+
+The deployment creates a Fly app, provisions or attaches Postgres, sets secrets
+via `flyctl secrets import --stage` on **stdin** (never argv, never written to
+disk), builds a thin `FROM <published-image>` layer containing only the project
+bundle, and runs the existing container bootstrap as Fly's `release_command`
+(so a failed migration aborts the deploy and the previous release stays serving).
+The bundle deliberately excludes `source_live` directories and
+`warehousd.local.yml` — live documents never leave the operator's machine.
+
+Then it polls `/api/health` and writes `.warehousd/outputs.deploy.json`.
+
+`--destroy` requires typing the app name exactly (e.g. `harbor-warehousd`), with
+no `--yes` bypass, to prevent accidental teardown.
+
 ## The outputs contract
 
-`start` prints it and writes `.warehousd/outputs.json` so a host app can read it
-programmatically:
+`start` prints and writes `.warehousd/outputs.json` (mode 0644):
 
 ```json
 {
@@ -129,6 +185,28 @@ programmatically:
 `devClient` is an auto-created OAuth client whose policy allows `env:dev` only,
 so a host app can obtain dev tokens immediately — the local development
 experience and the production security model are the same machinery.
+
+`deploy` prints the deployed stack info and writes `.warehousd/outputs.deploy.json`
+(mode 0600, strictly more limited due to containing production URLs):
+
+```json
+{
+  "apiUrl": "https://harbor-warehousd.fly.dev",
+  "mcpUrl": "https://harbor-warehousd.fly.dev/mcp",
+  "adminUrl": "https://harbor-warehousd.fly.dev/admin",
+  "databaseUrl": null,
+  "env": "dev",
+  "devClient": null
+}
+```
+
+When Fly manages Postgres, `databaseUrl` is `null` — use `fly postgres connect`
+instead. Writing a production Postgres URL into a file in the repo is exactly the
+credential-at-rest the pre-flight exists to prevent. It is echoed back only when
+the operator supplied `deploy.database.url` themselves.
+
+There is no `devClient` in a deploy — that is a local `start` affordance only.
+`env` is `"dev"` because deploys seed `data_synth` only.
 
 `.warehousd/` also holds `state.json` (generated passwords and secrets).
 **Neither file is ever committed** — `init` adds the directory to `.gitignore`.

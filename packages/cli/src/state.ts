@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import type { WarehousdConfig } from "@warehousd/broker";
 
 export type State = {
   dbPassword: string;
@@ -25,6 +26,19 @@ export type Outputs = {
   };
 };
 
+// Outputs written to disk after a Fly deployment. Unlike the local outputs contract, databaseUrl
+// is null when Fly manages Postgres — never write a production URL into a file at rest. devClient
+// does not apply to production deploys.
+export type DeployOutputs = {
+  mcpUrl: string;
+  apiUrl: string;
+  adminUrl: string;
+  databaseUrl: string | null;
+  env: "dev";
+  deployedAt: string;
+  configSnapshot: WarehousdConfig;
+};
+
 export function stateDir(dir: string): string {
   return join(dir, ".warehousd");
 }
@@ -35,6 +49,10 @@ function statePath(dir: string): string {
 
 function outputsPath(dir: string): string {
   return join(stateDir(dir), "outputs.json");
+}
+
+function deployOutputsPath(dir: string): string {
+  return join(stateDir(dir), "outputs.deploy.json");
 }
 
 export function readState(dir: string): State | null {
@@ -82,6 +100,19 @@ export function writeOutputs(dir: string, outputs: Outputs): void {
 
 export function readOutputs(dir: string): Outputs | null {
   const path = outputsPath(dir);
+  if (!existsSync(path)) return null;
+  const content = readFileSync(path, "utf8");
+  return JSON.parse(content);
+}
+
+export function writeDeployOutputs(dir: string, outputs: DeployOutputs): void {
+  mkdirSync(stateDir(dir), { recursive: true });
+  const path = deployOutputsPath(dir);
+  writeFileSync(path, JSON.stringify(outputs, null, 2), { mode: 0o600 });
+}
+
+export function readDeployOutputs(dir: string): DeployOutputs | null {
+  const path = deployOutputsPath(dir);
   if (!existsSync(path)) return null;
   const content = readFileSync(path, "utf8");
   return JSON.parse(content);
