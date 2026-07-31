@@ -47,7 +47,7 @@ export const coverage: Coverage = {
   // The floors dropped when @vitest/coverage-v8 went 2 → 4, and no test was lost doing it: the same
   // 931 tests pass, and the v4 provider counts what they cover differently. Statements and lines
   // used to report the identical figure, which is what an unremapped v8 report does; they now
-  // differ, and branches fell 84.77 → 78.06. The new numbers are the accurate ones, so they are
+  // differ, and branches fell 84.77 → 77.98. The new numbers are the accurate ones, so they are
   // what the floors are set against — the earlier ones were flattering, not better.
   ...(process.env.WAREHOUSD_COVERAGE_THRESHOLDS
     ? {
