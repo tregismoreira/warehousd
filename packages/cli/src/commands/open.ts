@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { readOutputs } from "./../state";
+import { resolveProject } from "./../project";
+import { containerState } from "./../docker";
 
 export type Target = "admin" | "mcp" | "api";
 
@@ -7,6 +9,15 @@ export function resolveUrl(dir: string, target: Target = "admin"): string {
   const outputs = readOutputs(dir);
   if (!outputs) {
     throw new Error("Nothing to open — no .warehousd/outputs.json. Run `warehousd start` first.");
+  }
+  // A plain `stop` leaves outputs.json behind — only `--destroy` removes it (stop.ts) — so the
+  // file existing is not evidence that anything is listening. Without this check `open` launched a
+  // browser at a dead port and said nothing.
+  const state = containerState(resolveProject(dir).ns.server);
+  if (state !== "running") {
+    throw new Error(
+      `The server container is ${state === "absent" ? "not there" : state}. Run \`warehousd start\` first.`,
+    );
   }
   if (target === "mcp") return outputs.mcpUrl;
   if (target === "api") return outputs.apiUrl;

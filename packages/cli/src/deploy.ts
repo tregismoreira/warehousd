@@ -10,6 +10,8 @@ import { renderConfigDiff } from "./deploy/diff";
 import { confirmDestroy } from "./deploy/destroy";
 import { buildDeployOutputs, formatDeployOutputs } from "./deploy/outputs";
 import { run, tryRun, appExists } from "./fly";
+import { renderChecks } from "./ui/render";
+import { plainTheme, type Theme } from "./ui/theme";
 
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_INTERVAL_MS = 1000;
@@ -61,8 +63,19 @@ async function pollHealth(url: string, timeoutMs: number): Promise<void> {
 
 export async function runDeploy(
   dir: string,
-  opts: { allowLocalLogin?: boolean; yes?: boolean; destroy?: boolean; localBuild?: boolean },
+  opts: {
+    allowLocalLogin?: boolean;
+    yes?: boolean;
+    destroy?: boolean;
+    localBuild?: boolean;
+    theme?: Theme | undefined;
+    showSecrets?: boolean | undefined;
+  },
 ): Promise<void> {
+  // Defaults to the inert theme so a caller that passes nothing still gets plain, colourless
+  // output rather than escape codes it did not ask for.
+  const theme = opts.theme ?? plainTheme;
+
   // Destroy path first: if opts.destroy, prompt and confirm
   if (opts.destroy) {
     const cfg = loadConfig(dir);
@@ -113,18 +126,28 @@ export async function runDeploy(
   });
 
   if (!preflightResult.ok) {
-    for (const check of preflightResult.checks) {
-      if (!check.ok) {
-        console.log(`  ✗ ${check.id}: ${check.detail}`);
-      }
-    }
+    // Through the shared renderer, so a failed pre-flight degrades to ASCII off a terminal and
+    // honours NO_COLOR — the ✗ used to be hardcoded here, which neither did.
+    const failed = preflightResult.checks.filter((c) => !c.ok);
+    console.log(`\n${renderChecks(failed, theme)}\n`);
     process.exit(1);
   }
 
   // Load config and extract deploy section
   const cfg = loadConfig(dir);
   if (!cfg.deploy) {
-    console.log("  ✗ deploy-block-present: Add a deploy: block to warehousd.yml");
+    console.log(
+      `\n${renderChecks(
+        [
+          {
+            id: "deploy-block-present",
+            ok: false,
+            detail: "add a `deploy:` block to warehousd.yml",
+          },
+        ],
+        theme,
+      )}\n`,
+    );
     process.exit(1);
   }
 
@@ -278,5 +301,11 @@ export async function runDeploy(
   writeDeployOutputs(dir, outputs);
 
   const adminEmail = `admin@${appName}.fly.dev`;
-  console.log(formatDeployOutputs(outputs, { adminEmail, adminPassword: state.adminPassword }));
+  console.log(
+    formatDeployOutputs(
+      outputs,
+      { adminEmail, adminPassword: state.adminPassword },
+      { theme, showSecrets: opts.showSecrets ?? false },
+    ),
+  );
 }

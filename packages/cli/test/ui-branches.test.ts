@@ -14,7 +14,7 @@ vi.mock("@clack/prompts", () => ({
 import * as clack from "@clack/prompts";
 import { promptInit } from "../src/ui/prompt";
 import { collectSecrets } from "../src/commands/secrets";
-import { renderDeploySummary, renderStatus } from "../src/ui/render";
+import { renderDeploySummary, renderStatus, renderChecks } from "../src/ui/render";
 import { applyAnswers } from "../src/init";
 import { plainTheme } from "../src/ui/theme";
 
@@ -130,6 +130,38 @@ describe("applyAnswers", () => {
   it("keeps the rest of the template intact", () => {
     const out = applyAnswers(TEMPLATE, { project: "acme", port: 9001, managed: true });
     expect(out).toContain("collections: {}");
+  });
+});
+
+// `deploy` used to hand-roll its failed pre-flight as `  ✗ ${id}: ${detail}` with the glyph
+// hardcoded, so it ignored NO_COLOR and could not fall back to ASCII. It goes through the shared
+// renderer now; these assert the two properties that hardcoding lost.
+describe("renderChecks under a plain theme", () => {
+  const failed = [
+    { id: "sso-or-local-login", ok: false, detail: "no SSO configured" },
+    { id: "env-refs-resolve", ok: false, detail: "SSO_CLIENT_ID is not set" },
+  ];
+
+  it("uses ASCII glyphs and no escape codes", () => {
+    const s = renderChecks(failed, plainTheme);
+    expect(s).not.toContain("✗");
+    expect(s).toContain("x");
+    expect(s).not.toContain(String.fromCharCode(27));
+  });
+
+  it("keeps every id and detail", () => {
+    const s = renderChecks(failed, plainTheme);
+    for (const c of failed) {
+      expect(s).toContain(c.id);
+      expect(s).toContain(c.detail);
+    }
+  });
+
+  it("aligns the details past the longest id", () => {
+    const lines = renderChecks(failed, plainTheme).split("\n");
+    expect(lines[0]!.indexOf("no SSO configured")).toBe(
+      lines[1]!.indexOf("SSO_CLIENT_ID is not set"),
+    );
   });
 });
 

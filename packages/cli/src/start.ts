@@ -44,7 +44,9 @@ async function pollHealth(url: string, timeoutMs: number): Promise<void> {
 
 export async function runStart(
   dir: string,
-  opts: { seed?: number; pull?: boolean; verbose?: boolean; reporter?: Reporter } = {},
+  // No `verbose` here: it is a process-wide concern that program.ts hands to setVerbose() before
+  // any Docker call, so threading it through this signature only offered a second way to set it.
+  opts: { seed?: number; pull?: boolean; reporter?: Reporter } = {},
 ): Promise<Outputs> {
   const report = opts.reporter ?? silentReporter;
 

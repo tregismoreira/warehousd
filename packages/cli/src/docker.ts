@@ -32,10 +32,6 @@ export function setVerbose(on: boolean): void {
   verbose = on;
 }
 
-export function isVerbose(): boolean {
-  return verbose;
-}
-
 export type ContainerSpec = {
   name: string;
   image: string;

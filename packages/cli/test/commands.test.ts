@@ -8,6 +8,7 @@ vi.mock("node:child_process", () => ({
   spawn: vi.fn(() => ({ unref: vi.fn(), on: vi.fn() })),
 }));
 
+import { execFileSync } from "node:child_process";
 import { resolveLogTarget } from "../src/commands/logs";
 import { resolveUrl, openerFor } from "../src/commands/open";
 import { collectSecrets, secretsJson } from "../src/commands/secrets";
@@ -75,8 +76,11 @@ describe("logs", () => {
 });
 
 describe("open", () => {
+  const serverRunning = () => vi.mocked(execFileSync).mockReturnValue("running");
+
   it("resolves each target from outputs.json", () => {
     writeStateFiles();
+    serverRunning();
     expect(resolveUrl(dir, "admin")).toBe(OUTPUTS.adminUrl);
     expect(resolveUrl(dir, "mcp")).toBe(OUTPUTS.mcpUrl);
     expect(resolveUrl(dir, "api")).toBe(OUTPUTS.apiUrl);
@@ -84,6 +88,22 @@ describe("open", () => {
 
   it("says what to run when the stack has never been started", () => {
     expect(() => resolveUrl(dir, "admin")).toThrow(/warehousd start/);
+  });
+
+  // `stop` keeps outputs.json — only `--destroy` removes it — so the file being there is not
+  // evidence that anything is listening. Without this, `open` launched a browser at a dead port.
+  it("refuses to open a stopped stack rather than launching a dead URL", () => {
+    writeStateFiles();
+    vi.mocked(execFileSync).mockReturnValue("exited");
+    expect(() => resolveUrl(dir, "admin")).toThrow(/warehousd start/);
+  });
+
+  it("refuses when the container is gone entirely", () => {
+    writeStateFiles();
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error("No such object");
+    });
+    expect(() => resolveUrl(dir, "admin")).toThrow(/not there/);
   });
 
   it("picks the platform opener", () => {

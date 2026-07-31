@@ -350,12 +350,16 @@ program
     false,
   )
   .option("--destroy", "tear down the deployed app", false)
+  .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
+    const { theme } = ui();
     await runDeploy(o.dir, {
       allowLocalLogin: o.allowLocalLogin,
       yes: o.yes,
       localBuild: o.localBuild,
       destroy: o.destroy,
+      theme,
+      showSecrets: o.showSecrets,
     });
   });
 program

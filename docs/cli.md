@@ -239,6 +239,10 @@ while the default `--remote-only` path does not.
 | `-y, --yes` | Skip the re-deploy diff prompt (one-time deploys always prompt). |
 | `--local-build` | Build the image locally; otherwise use the published one. |
 | `--destroy` | Tear down the Fly app and database. Requires typing the app name exactly; `--yes` does not bypass. |
+| `--show-secrets` | Print the admin password and database URL in full instead of masked. |
+
+A failed pre-flight is rendered by the same checklist as `doctor`, so it honours
+`--no-color` and `NO_COLOR` and falls back to ASCII marks off a terminal.
 
 Re-deploys print a diff of posture changes (field access changes called out
 separately from other config changes) and prompt unless `--yes` is passed.

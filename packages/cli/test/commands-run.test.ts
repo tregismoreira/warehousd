@@ -101,6 +101,8 @@ describe("runLogs", () => {
 
 describe("runOpen", () => {
   beforeEach(() => {
+    // resolveUrl checks the server container before handing back a URL.
+    vi.mocked(execFileSync).mockReturnValue("running");
     mkdirSync(join(dir, ".warehousd"), { recursive: true });
     writeFileSync(
       join(dir, ".warehousd", "outputs.json"),
