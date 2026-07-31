@@ -357,6 +357,52 @@ taxonomies:
     expect(body).toBeTruthy();
     // Response should contain MCP event data
     expect(body).toMatch(/event:|data:/);
+
+    // `tools/list` is a static listing and `list_collections` reads app.collections — both answer
+    // from the app pool, so neither can tell a working stack from one whose *dev* pool was built
+    // from `undefined`. That is exactly how a container which never received DEV_DATABASE_URL kept
+    // this suite green while every governed query in it pointed at libpq's defaults.
+    //
+    // Only a successful query_collection reaches data_synth through the warehousd_dev role, and
+    // only an approved grant gets there — so grant first, then query.
+    const grantDb = new Pool({ connectionString: stack.databaseUrl });
+    const adminId = await grantDb.query<{ id: string }>(
+      `select id from app."user" where email = $1`,
+      [stack.adminEmail],
+    );
+    await grantDb.query(
+      `insert into app.grants (user_id, collection, allowed_fields, env, status)
+       values ($1, 'dataset_col', $2, 'dev', 'approved')`,
+      [adminId.rows[0]?.id, ["id", "name"]],
+    );
+    await grantDb.end();
+
+    const queryRes = await fetch(stack.mcpUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "query_collection",
+          arguments: { collection: "dataset_col", fields: ["id", "name"], limit: 1 },
+        },
+      }),
+    });
+
+    expect(queryRes.ok).toBe(true);
+    const queryBody = await queryRes.text();
+    // A dev pool that cannot connect refuses with internal_error — which is exactly what this
+    // returned before the role URLs were derived server-side. Success has to be asserted on the
+    // payload, not on the HTTP status: the transport is 200 either way.
+    expect(queryBody).not.toMatch(/internal_error/i);
+    expect(queryBody).toContain('\\"ok\\":true');
+    expect(queryBody).toContain("documents");
   });
 
   it("Step 7: YAML change re-applies without changing devClient", async () => {

@@ -120,3 +120,37 @@ export function supportedVerbs(
   if (c.type === "file") return ["create"];
   return ["create", "update", "delete"];
 }
+
+// Every `${env:NAME}` referenced by the config, without resolving any of them.
+//
+// `interpolate` throws on the first unresolved reference, which is right for loading but useless
+// for a pre-flight check: an operator fixing a deploy wants the whole list at once, not one name
+// per run. This is the read-only counterpart, and it deliberately does not throw — a caller that
+// wants resolution still goes through loadConfig.
+//
+// Comment handling has to match `interpolate` exactly. `docs/configuration.md` ships a
+// commented-out `# url: ${env:PROD_DATABASE_URL}`, and reporting that as a real reference would
+// refuse a deploy over a line that does nothing.
+export function envRefs(dir: string): string[] {
+  const names = new Set<string>();
+
+  const scan = (path: string): void => {
+    if (!existsSync(path)) return;
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      if (line.trim().startsWith("#")) continue;
+      const { code } = splitInlineComment(line);
+      // A fresh regex per line: a shared /g literal carries lastIndex between calls.
+      for (const m of code.matchAll(/\$\{env:([A-Z0-9_]+)\}/g)) {
+        const name = m[1];
+        if (name) names.add(name);
+      }
+    }
+  };
+
+  const basePath = join(dir, "warehousd.yml");
+  if (!existsSync(basePath)) return [];
+  scan(basePath);
+  scan(join(dir, "warehousd.local.yml"));
+
+  return [...names].sort();
+}

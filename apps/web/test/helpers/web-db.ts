@@ -17,6 +17,12 @@ export const PERSONAS = [
 // module load.
 function setAuthEnv(appUrl: string, projectDir?: string) {
   process.env.APP_DATABASE_URL = appUrl;
+  // The data-role read/write pools are derived from APP_DATABASE_URL plus this password when
+  // DEV_DATABASE_URL and friends are not set explicitly (apps/web/app/lib/broker.ts). Every test
+  // role is created by ensureSchemasAndRoles with "pw", so this is the password that matches —
+  // and setting it here means the suite exercises the derivation the container relies on rather
+  // than only the explicit-URL path.
+  process.env.WAREHOUSD_DATA_ROLE_PASSWORD ??= "pw";
   process.env.BETTER_AUTH_SECRET ??= "test-secret-at-least-32-chars-long-000";
   process.env.BETTER_AUTH_URL ??= "http://localhost:8722";
   // Keycloak only. The fake IdP binds an ephemeral port and appends its own origin in

@@ -317,7 +317,7 @@ yet built:
 | Real-data import | *simplified* | Admin-only CSV/JSON append into `data_live` through an `INSERT`-only role. No update or delete path. |
 | App-schema migrations | *simplified* | Create-if-not-exists plus add-column-if-not-exists, so adding a field or binding a vocabulary lands on an existing collection. Type changes, renames and drops are not applied; versioned migrations are planned. |
 | Semantic / vector search | *stubbed* | `vector(1536)` column and pgvector are reserved but not populated. |
-| `warehousd deploy` | *not built* | Planned; deploy by running the published image yourself for now. |
+| `warehousd deploy` | **real** | Provisions to Fly.io; enforces the demo-off expectation mechanically. |
 | Write path (MCP, REST, and review queue) | **real** | Append-only revisions; `proposal_only` grants hold writes pending until a human approves. Approve/reject are never MCP tools. |
 | Masking / transform postures | *not built* | Fields are allow or deny — nothing in between. |
 | Connect-in-place to external databases | *not built* | Collections live in warehousd's Postgres. |
@@ -388,6 +388,7 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 | [docs/configuration.md](docs/configuration.md) | Every key in `warehousd.yml` |
 | [docs/connect-claude.md](docs/connect-claude.md) | Adding the MCP connector end to end |
 | [docs/configure-sso.md](docs/configure-sso.md) | Registering an OIDC or SAML IdP |
+| [docs/deploy-fly.md](docs/deploy-fly.md) | End-to-end Fly.io deployment runbook |
 | [examples/harbor/README.md](examples/harbor/README.md) | The demo project end to end — collections, personas, the grant arc |
 | [SECURITY.md](SECURITY.md) | Reporting a vulnerability, deployment expectations, known limitations |
 

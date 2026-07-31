@@ -2,11 +2,34 @@ import {
   createPools,
   makeBroker,
   loadConfig,
+  dataRoleUrl,
   type Pools,
   type WarehousdConfig,
 } from "@warehousd/broker";
 import { statSync, existsSync } from "node:fs";
 import { join } from "node:path";
+
+// The four role-scoped URLs are derived here rather than supplied, because the process that used
+// to compute them cannot hand them over. The image entrypoint sets them on its own `process.env`
+// and exits; the Dockerfile runs it as `sh -c "entrypoint && next start"`, so the server is a
+// sibling process that never inherits them. Neither `warehousd start` nor docker-compose.yml
+// passes them either, and `createPools` does not invent them — so every dev/live query in a
+// container was reaching a pool built from libpq defaults. `/api/health` never touches those
+// pools, which is why the stack still reported healthy and CI stayed green.
+//
+// Deriving is also the only option a Fly deployment has: Fly generates the Postgres credentials
+// at `postgres attach` time and exposes them as DATABASE_URL, so no caller can know them in
+// advance to pass in.
+//
+// An explicit variable always wins — CONTRIBUTING.md's local setup and the test harnesses point
+// the roles at a database whose owner URL is not theirs to derive from.
+function roleUrl(explicit: string | undefined, role: string): string | undefined {
+  if (explicit) return explicit;
+  const owner = process.env.APP_DATABASE_URL;
+  const password = process.env.WAREHOUSD_DATA_ROLE_PASSWORD;
+  if (!owner || !password) return undefined;
+  return dataRoleUrl(owner, role, password);
+}
 
 // One set of pools per server process. URLs come from env (see docker-compose.yml).
 // Config is cached per-process but reloaded when warehousd.yml or warehousd.local.yml
@@ -51,13 +74,24 @@ function ensureConfigAndBroker(dir: string): CachedState {
     // The write URLs are optional: a deployment that sets neither has no mutation path at
     // all, which is the safer default. broker.mutate reports that as not_writable rather
     // than failing at connect time.
+    const dev = roleUrl(process.env.DEV_DATABASE_URL, "warehousd_dev");
+    const live = roleUrl(process.env.LIVE_DATABASE_URL, "warehousd_live");
+    if (!dev || !live) {
+      // Failing here beats connecting to whatever libpq defaults to. `new Pool({ connectionString:
+      // undefined })` does not throw — it quietly targets localhost as the OS user, so the fault
+      // surfaces later as an unrelated connection error on the first governed query.
+      throw new Error(
+        "Cannot resolve the data-role database URLs. Set DEV_DATABASE_URL and LIVE_DATABASE_URL, " +
+          "or set APP_DATABASE_URL and WAREHOUSD_DATA_ROLE_PASSWORD so they can be derived.",
+      );
+    }
     const pools = createPools({
       app: process.env.APP_DATABASE_URL!,
-      dev: process.env.DEV_DATABASE_URL!,
-      live: process.env.LIVE_DATABASE_URL!,
+      dev,
+      live,
       imp: process.env.IMPORT_DATABASE_URL,
-      devWrite: process.env.DEV_WRITE_DATABASE_URL,
-      liveWrite: process.env.LIVE_WRITE_DATABASE_URL,
+      devWrite: roleUrl(process.env.DEV_WRITE_DATABASE_URL, "warehousd_dev_write"),
+      liveWrite: roleUrl(process.env.LIVE_WRITE_DATABASE_URL, "warehousd_live_write"),
     });
     cached = {
       pools,
