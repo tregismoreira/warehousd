@@ -38,7 +38,7 @@
   "devDependencies": {
     "@better-auth/cli": "^1.4.21",
     "@playwright/test": "^1.62.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.1.2",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.0.0"
   }
