@@ -169,10 +169,15 @@ SSO end-to-end suites.
 
 On a pull request each of those jobs runs only if the diff can reach it: a `changes` job
 classifies every changed path and the rest gate on its output. A CLI-only change skips the browser
-suite, a web-only change skips the packaging one, and a diff of nothing but prose and images skips
-all five — but a `.md` under `examples/*/seed/` is a fixture the suites index, so it counts as
-code. An unrecognised path runs everything, which is the direction the mistake has to fall in. A
-push to `main` is never filtered.
+suite, a web-only change skips the packaging one, and a diff of nothing but prose and `.github/`
+skips all five — but a `.md` under `examples/*/seed/` is a fixture the suites index, so it counts
+as code. An unrecognised path runs everything, which is the direction the mistake has to fall in.
+A push to `main` is never filtered.
+
+That `.github/` exemption cuts both ways: editing a job's own steps does not exercise them on the
+pull request that edits them. `changes` still runs every time and still fails loudly if the
+classifier itself breaks, but a change to what `test` or `e2e` actually does is proved by the
+unfiltered run on `main` after the merge.
 
 ### Running two checkouts at once
 

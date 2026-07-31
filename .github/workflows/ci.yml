@@ -69,7 +69,15 @@ jobs:
                 examples/*/seed/*) quality=true; test=true; playwright=true; e2e=true ;;
                 # Read by people, run by nothing: `.prettierignore` already excludes *.md from
                 # `format:check`, and no suite loads any of these.
-                *.md|LICENSE|.github/assets/*) ;;
+                *.md|LICENSE) ;;
+                # Repository and CI configuration — workflows, dependabot, issue templates,
+                # banner assets. Nothing under `.github/` is read by a suite: these files say how
+                # the jobs run, not what they prove. That includes this file, which means a change
+                # to a job's *steps* is not exercised by the pull request making it. `changes`
+                # itself still runs on every pull request and still fails loudly if the classifier
+                # below breaks; the steps it gates are proved by the next push to `main`, which is
+                # never filtered.
+                .github/*) ;;
                 # The browser suite never drives the CLI, so a CLI-only change skips it.
                 packages/cli/*) quality=true; test=true; pack=true; e2e=true ;;
                 # The web app is not in the CLI tarball, so a web-only change skips `pack`.
