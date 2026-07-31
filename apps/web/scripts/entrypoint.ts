@@ -142,6 +142,12 @@ async function seedDemoPersonas(db: Pool, cfg: WarehousdConfig): Promise<void> {
 }
 
 export async function bootstrap(): Promise<void> {
+  // Fly sets DATABASE_URL itself when `postgres attach` runs, and those credentials are generated
+  // on its side — nothing upstream can pass them in as APP_DATABASE_URL. Accept either, preferring
+  // the explicit one so every other deployment path keeps behaving exactly as before.
+  if (!process.env.APP_DATABASE_URL && process.env.DATABASE_URL) {
+    process.env.APP_DATABASE_URL = process.env.DATABASE_URL;
+  }
   const appUrl = requireEnv("APP_DATABASE_URL");
   const dir = requireEnv("WAREHOUSD_PROJECT_DIR");
   const rolePw = requireEnv("WAREHOUSD_DATA_ROLE_PASSWORD");

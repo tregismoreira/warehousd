@@ -5,12 +5,70 @@ export type PreflightCheck = { id: string; ok: boolean; detail: string };
 export type PreflightResult =
   { ok: true; checks: PreflightCheck[] } | { ok: false; checks: PreflightCheck[] };
 
-export async function preflight(input: {
+export type PreflightInput = {
   projectDir: string;
   env: NodeJS.ProcessEnv;
   allowLocalLogin: boolean;
   ssoLookup?: ((dbUrl: string) => Promise<boolean>) | undefined;
-}): Promise<PreflightResult> {
+};
+
+// Deploying with local password login still enabled, and no identity provider behind it, is the
+// difference between a demo and a public front door. It is allowed — some operators genuinely want
+// it — but only when asked for explicitly, never by omission.
+//
+// Two sources, because neither alone covers the lifecycle. The env trio is what a first deploy has:
+// with `database.managed: true` there is no database yet to hold a provider, so a DB-only check
+// could never pass and the gate would be unsatisfiable. The database is what a running deployment
+// has: an admin who registered an IdP through the admin UI has no SSO variables in their shell, and
+// asking them to invent some, or to pass --allow-local-login when SSO is genuinely configured,
+// would train them to reach for the override.
+async function ssoOrLocalLoginCheck(
+  input: PreflightInput,
+  cfg: WarehousdConfig | null,
+): Promise<PreflightCheck> {
+  const id = "sso-or-local-login";
+
+  if (input.allowLocalLogin) {
+    return { id, ok: true, detail: "--allow-local-login passed; local password login stays on" };
+  }
+
+  if (input.env.SSO_ISSUER && input.env.SSO_CLIENT_ID && input.env.SSO_CLIENT_SECRET) {
+    return { id, ok: true, detail: "SSO_ISSUER, SSO_CLIENT_ID and SSO_CLIENT_SECRET are all set" };
+  }
+
+  const dbUrl = cfg?.deploy?.database.url;
+  if (dbUrl && input.ssoLookup) {
+    try {
+      if (await input.ssoLookup(dbUrl)) {
+        return { id, ok: true, detail: "an SSO provider is registered in the target database" };
+      }
+      return {
+        id,
+        ok: false,
+        detail:
+          "no SSO provider is registered in the target database, and no SSO_ISSUER/SSO_CLIENT_ID/" +
+          "SSO_CLIENT_SECRET in the environment. Register one in the admin UI, set those " +
+          "variables, or pass --allow-local-login.",
+      };
+    } catch (err: unknown) {
+      // A database that cannot be reached is not evidence that SSO is configured. Refuse, and say
+      // it was the lookup that failed rather than reporting it as "SSO is not set up".
+      const reason = err instanceof Error ? err.message : String(err);
+      return { id, ok: false, detail: `could not check the target database for SSO: ${reason}` };
+    }
+  }
+
+  return {
+    id,
+    ok: false,
+    detail:
+      "no SSO configured. Set SSO_ISSUER, SSO_CLIENT_ID and SSO_CLIENT_SECRET, register a " +
+      "provider in the admin UI (requires deploy.database.url so it can be read), or pass " +
+      "--allow-local-login to deploy with local password login enabled.",
+  };
+}
+
+export async function preflight(input: PreflightInput): Promise<PreflightResult> {
   const checks: PreflightCheck[] = [];
 
   // env-refs-resolve: check that every name from envRefs is in input.env
@@ -82,65 +140,7 @@ export async function preflight(input: {
     detail: demoOffDetail,
   });
 
-  // sso-or-local-login: check allowLocalLogin OR (SSO_ISSUER && SSO_CLIENT_ID && SSO_CLIENT_SECRET) OR (cfg.deploy?.database.url && ssoLookup)
-  let ssoCheck: PreflightCheck | null;
-  if (input.allowLocalLogin) {
-    ssoCheck = {
-      id: "sso-or-local-login",
-      ok: true,
-      detail: "Local login allowed",
-    };
-  } else {
-    const ssoEnv = input.env.SSO_ISSUER && input.env.SSO_CLIENT_ID && input.env.SSO_CLIENT_SECRET;
-    if (ssoEnv) {
-      ssoCheck = {
-        id: "sso-or-local-login",
-        ok: true,
-        detail: "SSO configured",
-      };
-    } else if (cfg?.deploy?.database.url && input.ssoLookup) {
-      // Async check needed; will be handled separately
-      ssoCheck = null;
-    } else {
-      ssoCheck = {
-        id: "sso-or-local-login",
-        ok: false,
-        detail:
-          "allowLocalLogin is false and neither SSO trio nor ssoLookup with database.url is configured",
-      };
-    }
-  }
-
-  if (ssoCheck) {
-    checks.push(ssoCheck);
-  } else if (cfg?.deploy?.database.url && input.ssoLookup && !input.allowLocalLogin) {
-    // Perform the async ssoLookup
-    try {
-      const ssoPresent = await input.ssoLookup(cfg.deploy.database.url);
-      checks.push({
-        id: "sso-or-local-login",
-        ok: ssoPresent,
-        detail: ssoPresent ? "SSO configured in database" : "No local login and no SSO configured",
-      });
-    } catch (err: unknown) {
-      const detail = err instanceof Error ? err.message : "ssoLookup failed";
-      checks.push({
-        id: "sso-or-local-login",
-        ok: false,
-        detail: `Failed to check SSO: ${detail}`,
-      });
-    }
-  } else if (cfg?.deploy?.database.url && !input.ssoLookup && !input.allowLocalLogin) {
-    const ssoEnv =
-      !!input.env.SSO_ISSUER && !!input.env.SSO_CLIENT_ID && !!input.env.SSO_CLIENT_SECRET;
-    checks.push({
-      id: "sso-or-local-login",
-      ok: ssoEnv,
-      detail: ssoEnv
-        ? "SSO configured"
-        : "No local login, no SSO trio in env, and no ssoLookup provided",
-    });
-  }
+  checks.push(await ssoOrLocalLoginCheck(input, cfg));
 
   // flyctl-ready: check assertFly() doesn't throw
   let flyReady = true;

@@ -107,7 +107,7 @@ collections:
     expect(allArgvs).not.toContain(canaryPassword);
   });
 
-  it("all four role URLs are present in secrets payload", async () => {
+  it("sends the data-role password and no fabricated role URLs", async () => {
     writeFileSync(
       join(projectDir, "warehousd.yml"),
       `
@@ -163,15 +163,27 @@ collections:
     );
     const payload = secretsCall?.input ?? "";
 
-    expect(payload).toContain("warehousd_dev");
-    expect(payload).toContain("warehousd_live");
-    expect(payload).toContain("warehousd_dev_write");
-    expect(payload).toContain("warehousd_live_write");
+    // The server derives the role URLs from these two (apps/web/app/lib/broker.ts). The password
+    // must travel; the URLs must not.
+    expect(payload).toContain("WAREHOUSD_DATA_ROLE_PASSWORD=");
 
-    expect(payload).toContain("DEV_DATABASE_URL=");
-    expect(payload).toContain("LIVE_DATABASE_URL=");
-    expect(payload).toContain("DEV_WRITE_DATABASE_URL=");
-    expect(payload).toContain("LIVE_WRITE_DATABASE_URL=");
+    // An earlier version sent all four, built by handing dataRoleUrl the app's public HTTPS
+    // address instead of the owner database URL — so every one of them was an `https://` string
+    // that no Postgres driver could use. The previous assertions here passed anyway, because
+    // `toContain("warehousd_dev")` is true of the broken value too.
+    for (const key of [
+      "DEV_DATABASE_URL",
+      "LIVE_DATABASE_URL",
+      "DEV_WRITE_DATABASE_URL",
+      "LIVE_WRITE_DATABASE_URL",
+    ]) {
+      expect(payload).not.toContain(`${key}=`);
+    }
+    expect(payload).not.toContain("https://test-app.fly.dev/");
+
+    // Managed Postgres: Fly owns the credentials and exposes them as DATABASE_URL, so inventing an
+    // APP_DATABASE_URL here would ship a password that was generated for a local Docker container.
+    expect(payload).not.toContain("APP_DATABASE_URL=");
   });
 
   it("WAREHOUSD_DISABLE_LOCAL_LOGIN=true by default", async () => {

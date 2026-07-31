@@ -209,7 +209,7 @@ collections:
 
     const ssoCheck = result.checks.find((c) => c.id === "sso-or-local-login");
     expect(ssoCheck?.ok).toBe(true);
-    expect(ssoCheck?.detail).toContain("Local login");
+    expect(ssoCheck?.detail).toContain("--allow-local-login");
   });
 
   it("SSO trio in env → sso-or-local-login passes even with allowLocalLogin: false", async () => {
@@ -282,6 +282,75 @@ collections:
     const ssoCheck = result.checks.find((c) => c.id === "sso-or-local-login");
     expect(ssoCheck?.ok).toBe(true);
     expect(mockSsoLookup).toHaveBeenCalledWith("postgres://localhost/db");
+  });
+
+  it("ssoLookup returning false → refuses, and points at all three ways out", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+deploy:
+  target: fly
+  app_name: my-app
+  region: iad
+  database:
+    url: postgres://localhost/db
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const result = await preflight({
+      projectDir,
+      env: {},
+      allowLocalLogin: false,
+      ssoLookup: vi.fn().mockResolvedValue(false),
+    });
+
+    const ssoCheck = result.checks.find((c) => c.id === "sso-or-local-login");
+    expect(ssoCheck?.ok).toBe(false);
+    expect(ssoCheck?.detail).toContain("--allow-local-login");
+  });
+
+  // A database that cannot be reached is not evidence that SSO is absent. Both refuse, but the
+  // operator has to be able to tell "you have not set SSO up" from "I could not find out".
+  it("distinguishes an unreachable database from a database with no provider", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+deploy:
+  target: fly
+  app_name: my-app
+  region: iad
+  database:
+    url: postgres://localhost/db
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const result = await preflight({
+      projectDir,
+      env: {},
+      allowLocalLogin: false,
+      ssoLookup: vi.fn().mockRejectedValue(new Error("ECONNREFUSED 10.0.0.1:5432")),
+    });
+
+    const ssoCheck = result.checks.find((c) => c.id === "sso-or-local-login");
+    expect(ssoCheck?.ok).toBe(false);
+    expect(ssoCheck?.detail).toContain("could not check");
+    expect(ssoCheck?.detail).toContain("ECONNREFUSED");
   });
 
   it("flyctl missing (ENOENT) → refuses with install instructions in detail", async () => {

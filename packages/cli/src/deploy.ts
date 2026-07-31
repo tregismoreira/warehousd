@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
+import { Pool } from "pg";
 import { join } from "node:path";
-import { loadConfig, dataRoleUrl, envRefs } from "@warehousd/broker";
+import { loadConfig, envRefs } from "@warehousd/broker";
 import { preflight } from "./deploy/preflight";
 import { readDeployOutputs, ensureState, writeDeployOutputs, stateDir } from "./state";
 import { writeBundle } from "./deploy/bundle";
@@ -12,6 +13,32 @@ import { run, appExists } from "./fly";
 
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_INTERVAL_MS = 1000;
+const SSO_LOOKUP_TIMEOUT_MS = 5000;
+
+// Better Auth's SSO plugin owns this table, so the column casing is its own — quoted, not
+// snake_case like the rest of app.*. Reads one row and nothing from it: whether a provider exists
+// is the entire question, and issuer URLs and client ids are not this command's business.
+//
+// A brand-new database has no app schema at all yet, which is not a failure — it is a deployment
+// that has never booted, and it genuinely has no SSO provider. 42P01 (undefined_table) is
+// therefore `false`, while a refused connection or a bad password propagates: pre-flight has to be
+// able to tell "no SSO configured" from "could not find out".
+async function ssoConfiguredInDatabase(dbUrl: string): Promise<boolean> {
+  const db = new Pool({
+    connectionString: dbUrl,
+    connectionTimeoutMillis: SSO_LOOKUP_TIMEOUT_MS,
+    statement_timeout: SSO_LOOKUP_TIMEOUT_MS,
+  });
+  try {
+    const res = await db.query(`select 1 from app."ssoProvider" limit 1`);
+    return (res.rowCount ?? 0) > 0;
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code === "42P01") return false;
+    throw err;
+  } finally {
+    await db.end();
+  }
+}
 
 async function pollHealth(url: string, timeoutMs: number): Promise<void> {
   const startTime = Date.now();
@@ -76,6 +103,7 @@ export async function runDeploy(
     projectDir: dir,
     env: process.env,
     allowLocalLogin: !!opts.allowLocalLogin,
+    ssoLookup: ssoConfiguredInDatabase,
   });
 
   if (!preflightResult.ok) {
@@ -127,34 +155,37 @@ export async function runDeploy(
     run(["apps", "create", appName]);
   }
 
-  // Create database if managed
-  let databaseUrl: string;
+  // Create database if managed.
+  //
+  // `null` for the managed case is the point, not an omission. `postgres attach` generates a user
+  // and password and sets DATABASE_URL on the app itself; those credentials are Fly's, are shown
+  // once, and cannot be read back out. Any URL invented here — the old code built one from the
+  // *local* Docker password in state.json — would simply be wrong. The entrypoint falls back to
+  // DATABASE_URL, which is the value that actually works.
+  let databaseUrl: string | null;
   if (deploy.database.managed) {
     const dbAppName = `${appName}-db`;
     if (!appExists(dbAppName)) {
       run(["postgres", "create", "--name", dbAppName, "--region", region]);
       run(["postgres", "attach", "--app", appName, dbAppName]);
     }
-    // When database is managed by Fly, we don't have a hardcoded URL, but the container
-    // entrypoint will compute it. Set APP_DATABASE_URL to the internal service URL.
-    databaseUrl = `postgres://warehousd:${state.dbPassword}@${appName}-db.internal:5432/warehousd`;
+    databaseUrl = null;
   } else {
-    // Use the explicit database URL
-    databaseUrl = deploy.database.url!;
+    databaseUrl = deploy.database.url ?? null;
   }
 
   // Build secrets input as KEY=VALUE lines
   const appUrl = `https://${appName}.fly.dev`;
 
-  // All four role URLs are mandatory; the container entrypoint computes them into its own
-  // process.env and then exits. The server is a sibling process and never sees them, so
-  // without these the deployed MCP tools connect to nothing.
+  // The four role-scoped URLs are deliberately NOT set here. They are derived server-side from
+  // APP_DATABASE_URL and WAREHOUSD_DATA_ROLE_PASSWORD (apps/web/app/lib/broker.ts), which is the
+  // only thing that can work for `database.managed`: Fly generates the Postgres credentials during
+  // `postgres attach` and exposes them to the app as DATABASE_URL, so no value this process could
+  // compute would be the real one. Sending a derived URL from here shipped four `https://` strings
+  // — dataRoleUrl takes the owner *database* URL, and it was being handed the app's public HTTPS
+  // address.
   const secretsInput = [
-    `APP_DATABASE_URL=${databaseUrl}`,
-    `DEV_DATABASE_URL=${dataRoleUrl(appUrl, "warehousd_dev", state.dataRolePassword)}`,
-    `LIVE_DATABASE_URL=${dataRoleUrl(appUrl, "warehousd_live", state.dataRolePassword)}`,
-    `DEV_WRITE_DATABASE_URL=${dataRoleUrl(appUrl, "warehousd_dev_write", state.dataRolePassword)}`,
-    `LIVE_WRITE_DATABASE_URL=${dataRoleUrl(appUrl, "warehousd_live_write", state.dataRolePassword)}`,
+    ...(databaseUrl ? [`APP_DATABASE_URL=${databaseUrl}`] : []),
     `WAREHOUSD_DATA_ROLE_PASSWORD=${state.dataRolePassword}`,
     `BETTER_AUTH_SECRET=${state.betterAuthSecret}`,
     `BETTER_AUTH_URL=${appUrl}`,

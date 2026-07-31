@@ -46,8 +46,12 @@ not vulnerabilities in warehousd:
   expectation is mechanically enforced for Fly deployments. Local deployments
   remain the operator's responsibility.
 - **Never point a file collection's `source` at real corporate files.** `source`
-  is dev content by definition; live content is indexed only through an explicit
-  `--env live` action.
+  is dev content by definition. `source_live` is not: the container bootstrap
+  indexes it into `data_live` on every start where the directory is present, so
+  treat naming it as granting the deployment read access to that content.
+  `warehousd deploy` never ships those directories into the image, so a Fly
+  deployment cannot index them; local and self-managed containers can, and
+  `warehousd index <collection> --env live` remains the explicit one-off path.
 - **Keep `warehousd.yml` and `warehousd.local.yml` operator-controlled.** Config
   is trusted input — it is the file that decides what can ever be granted.
 
