@@ -8,6 +8,16 @@ import { runDeploy } from "../src/deploy";
 // Mock child_process to control flyctl behavior
 vi.mock("node:child_process");
 
+// The destroy path reads a typed confirmation from stdin. ESM exports cannot be spied on, so the
+// module is mocked outright; `promptAnswer` is what each test hands back.
+let promptAnswer = "";
+vi.mock("node:readline/promises", () => ({
+  createInterface: () => ({
+    question: () => Promise.resolve(promptAnswer),
+    close: () => undefined,
+  }),
+}));
+
 describe("runDeploy", () => {
   let projectDir: string;
   let recordedCalls: { cmd: string; args: string[]; input?: string | undefined }[] = [];
@@ -492,5 +502,81 @@ collections:
     expect(mutatingCommands).toHaveLength(0);
 
     exitSpy.mockRestore();
+  });
+
+  // A deploy that died between `apps create` and `postgres create` leaves an app and no database.
+  // Teardown has to survive that: the app is destroyed first, so throwing on the missing database
+  // would leave the operator with an error and nothing left to retry against.
+  it("destroy succeeds when the managed database app was never created", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+deploy:
+  target: fly
+  app_name: test-app
+  region: sea
+  database:
+    managed: true
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const { execFileSync } = await import("node:child_process");
+    const destroyed: string[] = [];
+    vi.mocked(execFileSync).mockImplementation((_cmd: string, args?: readonly string[]) => {
+      const argv = args ? Array.from(args) : [];
+      if (argv[0] === "apps" && argv[1] === "destroy") {
+        if (argv[2] === "test-app-db") throw new Error("Could not find App test-app-db");
+        destroyed.push(String(argv[2]));
+        return "Destroyed\n";
+      }
+      return "";
+    });
+
+    promptAnswer = "test-app";
+
+    await expect(runDeploy(projectDir, { destroy: true })).resolves.toBeUndefined();
+    expect(destroyed).toEqual(["test-app"]);
+  });
+
+  it("destroy refuses and touches nothing when the typed name does not match", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+deploy:
+  target: fly
+  app_name: test-app
+  region: sea
+  database:
+    managed: true
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const { execFileSync } = await import("node:child_process");
+    const calls: string[][] = [];
+    vi.mocked(execFileSync).mockImplementation((_cmd: string, args?: readonly string[]) => {
+      calls.push(args ? Array.from(args) : []);
+      return "";
+    });
+
+    promptAnswer = "test-ap";
+
+    await runDeploy(projectDir, { destroy: true });
+    expect(calls.filter((c) => c[1] === "destroy")).toHaveLength(0);
   });
 });

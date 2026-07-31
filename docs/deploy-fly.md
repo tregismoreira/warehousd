@@ -162,12 +162,27 @@ printed during deploy. If you used SSO, sign in through your IdP.
 
 ### 7. Verify data isolation
 
-The deploy seeds synthetic data (`data_synth`) only. Real data arrives only
-through the admin import path. Confirm `data_live` is empty:
+The deploy seeds synthetic data (`data_synth`) only, and never ships a
+collection's `source_live` directory into the image, so nothing can populate
+`data_live` during boot. Confirm it directly:
 
-1. Log into the admin panel.
-2. Navigate to **Import**.
-3. No live documents should be present.
+```bash
+fly postgres connect --app <app_name>-db
+# then, for each file collection:
+select count(*) from data_live."policies__files";
+```
+
+Every count should be `0`.
+
+> **Known limitation — the admin import path is not yet configured on a
+> deployed instance.** `data_live` is written only by the admin import, which
+> needs the `warehousd_import` role and `IMPORT_DATABASE_URL`. The container
+> bootstrap (`ensureSchemasAndRoles`) provisions the four read/write data roles
+> but not `warehousd_import`, and no container path sets that variable, so
+> `POST /api/admin/import` answers `503 import_not_configured`. This predates
+> `warehousd deploy` and affects `warehousd start` identically. Until it is
+> fixed, a deployed instance can serve synthetic data but has no supported way
+> to receive real data.
 
 ### 8. Connect Claude
 

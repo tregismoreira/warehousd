@@ -9,7 +9,7 @@ import { resolveBaseImage, renderDeployDockerfile, renderFlyToml } from "./deplo
 import { renderConfigDiff } from "./deploy/diff";
 import { confirmDestroy } from "./deploy/destroy";
 import { buildDeployOutputs, formatDeployOutputs } from "./deploy/outputs";
-import { run, appExists } from "./fly";
+import { run, tryRun, appExists } from "./fly";
 
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_INTERVAL_MS = 1000;
@@ -89,10 +89,16 @@ export async function runDeploy(
     // Destroy the app
     run(["apps", "destroy", appName, "--yes"]);
 
-    // Destroy the database if managed
+    // Destroy the database if managed. `tryRun`, not `run`: a deploy that failed between
+    // `apps create` and `postgres create` leaves no database app, and throwing here would make
+    // the teardown of a half-provisioned deploy impossible — the app itself is already gone by
+    // this point, so the operator would be left with an error and nothing left to retry.
     if (cfg.deploy.database.managed) {
       const dbAppName = `${appName}-db`;
-      run(["apps", "destroy", dbAppName, "--yes"]);
+      const removed = tryRun(["apps", "destroy", dbAppName, "--yes"]);
+      if (!removed.ok) {
+        console.log(`No database app ${dbAppName} to destroy.`);
+      }
     }
 
     return;
