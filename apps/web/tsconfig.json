@@ -14,7 +14,9 @@
     "allowJs": true,
     "incremental": true,
     "isolatedModules": true,
-    "baseUrl": ".",
+    // No `baseUrl`: typescript 6 deprecates it (TS5101) and 7 removes it. It was set to "." here,
+    // and a `paths` entry with no baseUrl resolves against the directory holding this file, which
+    // is the same "." — so `@/*` keeps pointing at apps/web and nothing else has to move.
     "paths": { "@/*": ["./*"] }
   },
   "include": ["app", "components", "lib", "middleware.ts", "next-env.d.ts", ".next/types/**/*.ts"],
