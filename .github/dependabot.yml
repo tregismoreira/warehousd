@@ -38,3 +38,10 @@ updates:
     directory: /apps/web
     schedule:
       interval: weekly
+    ignore:
+      # Digest and patch updates are what this entry is for. Major node versions are not: dependabot
+      # follows the highest tag, which for node means the six-month current release — it offered 25,
+      # already end-of-life, over the 24 LTS the image runs. Which LTS line to be on is a decision
+      # with a support window attached, so it is made in apps/web/Dockerfile by hand.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
