@@ -10,6 +10,8 @@ import { renderConfigDiff } from "./deploy/diff";
 import { confirmDestroy } from "./deploy/destroy";
 import { buildDeployOutputs, formatDeployOutputs } from "./deploy/outputs";
 import { run, tryRun, appExists } from "./fly";
+import { renderChecks } from "./ui/render";
+import { plainTheme, type Theme } from "./ui/theme";
 
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_INTERVAL_MS = 1000;
@@ -61,8 +63,29 @@ async function pollHealth(url: string, timeoutMs: number): Promise<void> {
 
 export async function runDeploy(
   dir: string,
-  opts: { allowLocalLogin?: boolean; yes?: boolean; destroy?: boolean; localBuild?: boolean },
+  opts: {
+    allowLocalLogin?: boolean;
+    yes?: boolean;
+    destroy?: boolean;
+    localBuild?: boolean;
+    theme?: Theme | undefined;
+    showSecrets?: boolean | undefined;
+    json?: boolean | undefined;
+    quiet?: boolean | undefined;
+  },
 ): Promise<void> {
+  // Defaults to the inert theme so a caller that passes nothing still gets plain, colourless
+  // output rather than escape codes it did not ask for.
+  const theme = opts.theme ?? plainTheme;
+  const json = opts.json ?? false;
+
+  // Same split as every other command: narration and failures on stderr, the result on stdout, so
+  // `warehousd deploy --json | jq` gets JSON and nothing else. All of this used to be console.log.
+  const say = (msg: string) => {
+    if (!opts.quiet && !json) process.stderr.write(`${msg}\n`);
+  };
+  const complain = (msg: string) => process.stderr.write(`${msg}\n`);
+
   // Destroy path first: if opts.destroy, prompt and confirm
   if (opts.destroy) {
     const cfg = loadConfig(dir);
@@ -82,7 +105,7 @@ export async function runDeploy(
     rl.close();
 
     if (!confirmDestroy(typed, appName)) {
-      console.log("Not confirmed. Exiting without destroying.");
+      complain("Not confirmed. Exiting without destroying.");
       return;
     }
 
@@ -97,7 +120,7 @@ export async function runDeploy(
       const dbAppName = `${appName}-db`;
       const removed = tryRun(["apps", "destroy", dbAppName, "--yes"]);
       if (!removed.ok) {
-        console.log(`No database app ${dbAppName} to destroy.`);
+        say(`No database app ${dbAppName} to destroy.`);
       }
     }
 
@@ -113,18 +136,28 @@ export async function runDeploy(
   });
 
   if (!preflightResult.ok) {
-    for (const check of preflightResult.checks) {
-      if (!check.ok) {
-        console.log(`  ✗ ${check.id}: ${check.detail}`);
-      }
-    }
+    // Through the shared renderer, so a failed pre-flight degrades to ASCII off a terminal and
+    // honours NO_COLOR — the ✗ used to be hardcoded here, which neither did.
+    const failed = preflightResult.checks.filter((c) => !c.ok);
+    complain(`\n${renderChecks(failed, theme)}\n`);
     process.exit(1);
   }
 
   // Load config and extract deploy section
   const cfg = loadConfig(dir);
   if (!cfg.deploy) {
-    console.log("  ✗ deploy-block-present: Add a deploy: block to warehousd.yml");
+    complain(
+      `\n${renderChecks(
+        [
+          {
+            id: "deploy-block-present",
+            ok: false,
+            detail: "add a `deploy:` block to warehousd.yml",
+          },
+        ],
+        theme,
+      )}\n`,
+    );
     process.exit(1);
   }
 
@@ -135,7 +168,7 @@ export async function runDeploy(
   // Diff with previous state
   const prevOutputs = readDeployOutputs(dir);
   const diffText = renderConfigDiff(prevOutputs?.configSnapshot ?? null, cfg);
-  console.log(diffText);
+  say(diffText);
 
   // Prompt for confirmation unless --yes
   if (!opts.yes) {
@@ -148,7 +181,7 @@ export async function runDeploy(
     rl.close();
 
     if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") {
-      console.log("Aborted.");
+      complain("Aborted.");
       return;
     }
   }
@@ -278,5 +311,19 @@ export async function runDeploy(
   writeDeployOutputs(dir, outputs);
 
   const adminEmail = `admin@${appName}.fly.dev`;
-  console.log(formatDeployOutputs(outputs, { adminEmail, adminPassword: state.adminPassword }));
+  if (json) {
+    // The machine contract, matching `start --json`: full values, because a caller that asked for
+    // JSON asked for the credential too. This is the payload a CI deploy wants back.
+    process.stdout.write(
+      `${JSON.stringify({ ...outputs, adminEmail, adminPassword: state.adminPassword }, null, 2)}\n`,
+    );
+    return;
+  }
+  process.stdout.write(
+    `${formatDeployOutputs(
+      outputs,
+      { adminEmail, adminPassword: state.adminPassword },
+      { theme, showSecrets: opts.showSecrets ?? false },
+    )}\n`,
+  );
 }

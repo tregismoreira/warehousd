@@ -117,18 +117,29 @@ describe("formatDeployOutputs", () => {
     expect(formatted).toContain("https://myapp.fly.dev/mcp");
   });
 
-  it("contains the admin password", () => {
+  // Was "contains the admin password". It deliberately no longer does: the panel is what ends up
+  // in scrollback and in screen shares, so the plaintext is masked there and reachable through
+  // `warehousd secrets --show` or `--json` instead.
+  it("masks the admin password, and shows it only when asked", () => {
     const outputs = buildDeployOutputs({
       appName: "myapp",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const formatted = formatDeployOutputs(outputs, {
+    const masked = formatDeployOutputs(outputs, {
       adminEmail: "admin@example.com",
       adminPassword: "mysecretpassword",
     });
-    expect(formatted).toContain("mysecretpassword");
+    expect(masked).not.toContain("mysecretpassword");
+    expect(masked).toContain("myse...word");
+
+    const shown = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "mysecretpassword" },
+      { showSecrets: true },
+    );
+    expect(shown).toContain("mysecretpassword");
   });
 
   it("mentions fly postgres connect when databaseUrl is null", () => {
@@ -145,8 +156,8 @@ describe("formatDeployOutputs", () => {
     expect(formatted).toContain("fly postgres connect");
   });
 
-  it("includes the database URL when provided", () => {
-    const dbUrl = "postgres://user:pass@prod.example.com/db";
+  it("includes the database URL, with only its password masked", () => {
+    const dbUrl = "postgres://user:supersecretpassword@prod.example.com/db";
     const outputs = buildDeployOutputs({
       appName: "myapp",
       cfg,
@@ -157,7 +168,18 @@ describe("formatDeployOutputs", () => {
       adminEmail: "admin@example.com",
       adminPassword: "secret123",
     });
-    expect(formatted).toContain(dbUrl);
+    // Host, user and database name are the reason anyone reads this line; the credential is not.
+    expect(formatted).toContain("prod.example.com/db");
+    expect(formatted).toContain("postgres://user:");
+    expect(formatted).not.toContain("supersecretpassword");
+
+    expect(
+      formatDeployOutputs(
+        outputs,
+        { adminEmail: "admin@example.com", adminPassword: "secret123" },
+        { showSecrets: true },
+      ),
+    ).toContain(dbUrl);
   });
 });
 

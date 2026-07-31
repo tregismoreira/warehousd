@@ -2,7 +2,10 @@ import { defineConfig } from "tsup";
 import pkg from "./package.json" with { type: "json" };
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  // Keyed so the bundle stays dist/index.cjs — the published `bin` path — while the entry moves to
+  // program.ts, which holds the commander wiring. src/index.ts is the library half the unit suites
+  // import.
+  entry: { index: "src/program.ts" },
   format: ["cjs"],
   target: "node22",
   platform: "node",

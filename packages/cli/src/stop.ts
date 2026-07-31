@@ -1,12 +1,12 @@
 import { resolveProject } from "./project";
 import { tryRun, removeVolume, removeNetwork } from "./docker";
+import { confirm, isInteractive } from "./ui/prompt";
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 
-// eslint-disable-next-line @typescript-eslint/require-await -- keeps the runX signatures uniform
 export async function runStop(
   dir: string,
-  opts: { destroy?: boolean; yes?: boolean } = {},
+  opts: { destroy?: boolean; yes?: boolean; interactive?: boolean } = {},
 ): Promise<void> {
   const p = resolveProject(dir);
 
@@ -20,11 +20,15 @@ export async function runStop(
   }
 
   if (opts.destroy) {
-    // Require confirmation for destructive action
+    // Destroying a volume is irreversible, so it is confirmed rather than assumed. Interactively
+    // that is a prompt; piped or in CI there is nobody to ask, so --yes stays mandatory there.
     if (!opts.yes) {
-      console.log(`about to remove volume ${p.ns.volume} (all data)`);
-      // In a real CLI, this would be interactive. For now, throw if not --yes.
-      throw new Error("Pass --yes to confirm destruction");
+      const confirmed = await confirm({
+        message: `Remove volume ${p.ns.volume} and every document in it? This cannot be undone.`,
+        flag: "--yes",
+        interactive: opts.interactive ?? isInteractive(),
+      });
+      if (!confirmed) return;
     }
 
     removeVolume(p.ns.volume);

@@ -38,6 +38,12 @@ export const coverage: Coverage = {
     "packages/cli/src/start.ts",
     "packages/cli/src/stop.ts",
     "packages/cli/src/status.ts",
+    // The commander wiring, for the same reason and on the same evidence. Every export in it is an
+    // argv-driven action callback; the only thing that runs them is the e2e suite, as a subprocess.
+    // It was split out of index.ts precisely so that this exclusion covers the CLI surface and not
+    // the library functions beside it — resolveDbUrl, runApply, runSeed and runIndex stay measured,
+    // and are what apply-seed.test.ts, cli.test.ts and db-resolve.test.ts import.
+    "packages/cli/src/program.ts",
   ],
   // No `all: true` — vitest 4 removed it. Setting `include` is now what pulls in files no test
   // touched, which is the same thing this asked for: a file with no test at all has to count as
