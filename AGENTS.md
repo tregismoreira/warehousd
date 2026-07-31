@@ -20,13 +20,16 @@ pnpm install
 pnpm test:up                                       # Postgres + Keycloak, required before tests
 WAREHOUSD_PROJECT_DIR=examples/harbor pnpm test    # parallel pass, then serial pass
 pnpm lint
-pnpm build                                         # production build — and the typecheck
+pnpm typecheck                                     # src + test + e2e + scripts
+pnpm format:check                                  # Prettier, code only
+pnpm build                                         # production build
 pnpm e2e                                           # Playwright, real browser
 ```
 
-All four of `lint`, `test`, `build`, `e2e` must be clean before a PR. **`pnpm test` does not
-typecheck** — `pnpm build` is what catches type errors, so a green test run proves less than it
-looks like.
+All six of `lint`, `typecheck`, `format:check`, `test`, `build`, `e2e` must be clean before a PR —
+CI runs every one of them. **`pnpm test` does not typecheck** — vitest transpiles without checking,
+so `pnpm typecheck` is what catches a type error and a green test run proves less than it looks
+like.
 
 `pnpm test:down` takes the volume with it and forces the next run to rebuild the cached template
 databases from scratch. Use `docker compose -f docker-compose.test.yml stop` unless you actually
@@ -52,7 +55,10 @@ Each of these is enforced somewhere. Breaking one is a release blocker, not a cl
 
 ## Code conventions
 
-There is **no formatter** in this repo. Do not run `prettier`; match the file you are editing.
+Code is formatted by **Prettier** (`.prettierrc.json`), and `pnpm format:check` is a CI gate. Run
+`pnpm format` before you open a PR rather than hand-aligning anything. Prose is deliberately out of
+scope — `.prettierignore` excludes `*.md`, fixtures and seed content, so in those files match what
+is already there and keep the hand-wrapped line breaks.
 
 - Filenames kebab-case (`migrate-app.ts`, `env-scope.ts`). Named exports, no default exports.
 - Functions and plain types. No domain classes — `interface`/`type` for shapes, a module per

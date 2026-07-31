@@ -23,6 +23,7 @@ is scoped by a grant, and that every decision is audited (`README.md`, `SECURITY
 
 - [ ] `pnpm lint`
 - [ ] `pnpm typecheck`
+- [ ] `pnpm format:check`
 - [ ] `pnpm test`
 - [ ] `pnpm build`
 - [ ] e2e run, if this touches the container, the CLI lifecycle, or SSO
