@@ -304,18 +304,21 @@ export function ImportForm() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm import</AlertDialogTitle>
+            {/* Radix renders AlertDialogDescription as a <p>, so these two are block spans
+                rather than paragraphs — a nested <p> is invalid DOM and React says so on every
+                open of this dialog. */}
             <AlertDialogDescription className="space-y-2">
-              <p>
+              <span className="block">
                 This imports {file && (file.size / 1024 / 1024).toFixed(1)} MB into{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
                   data_live.{selectedCollection}
                 </code>
                 .
-              </p>
-              <p className="text-xs">
+              </span>
+              <span className="block text-xs">
                 Imports are append-only — nothing already there is modified, and this cannot be
                 undone from the UI.
-              </p>
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">

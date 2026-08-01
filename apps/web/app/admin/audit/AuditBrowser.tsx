@@ -42,11 +42,22 @@ type Collection = {
 
 // via/onBack turn this into the scoped "events for one API key" view used from a client's
 // detail page — same filters and columns, just a fixed `via` and a back link instead of a title.
+//
+// defaultEnv is the console's own environment, read from the `wh_env` cookie by the page that
+// renders this. Without it the audit page opened on "Any" while every other admin page was
+// scoped to one environment — so flipping the switcher changed what you were looking at
+// everywhere except the record of what you had looked at.
 export function AuditBrowser({
   via,
   onBack,
   backLabel,
-}: { via?: string; onBack?: () => void; backLabel?: string } = {}) {
+  defaultEnv,
+}: {
+  via?: string;
+  onBack?: () => void;
+  backLabel?: string;
+  defaultEnv?: "dev" | "live";
+} = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -57,7 +68,10 @@ export function AuditBrowser({
   const user = searchParams.get("user") ?? "";
   const collection = searchParams.get("collection") ?? "";
   const outcome = searchParams.get("outcome") ?? "";
-  const env = searchParams.get("env") ?? "";
+  // `get` answers "" for a present-but-empty parameter and null for an absent one, and the
+  // difference is load-bearing here: absent means "first load, use the console's env", empty
+  // means "the reader chose Any". Collapsing them would make Any unreachable.
+  const env = searchParams.get("env") ?? defaultEnv ?? "";
   const limit = Math.max(1, Math.min(parseInt(searchParams.get("limit") ?? "50"), 200));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0"));
 
@@ -98,7 +112,10 @@ export function AuditBrowser({
 
   function updateParam(key: string, value: string) {
     const qs = new URLSearchParams(searchParams);
-    if (value) {
+    // An empty value normally means "no filter", which is spelled by dropping the key. `env` is
+    // the exception: dropping it would fall back to the console's environment, so choosing "Any"
+    // would do nothing. Keep the key, empty.
+    if (value || (key === "env" && defaultEnv)) {
       qs.set(key, value);
     } else {
       qs.delete(key);

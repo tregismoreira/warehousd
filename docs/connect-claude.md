@@ -40,6 +40,59 @@ here means the instance is misconfigured (most likely `BETTER_AUTH_URL`, which i
 what the header's origin is derived from — never the `Host` header) rather than a
 code regression.
 
+## Connecting to a local instance
+
+`http://localhost:8722/mcp` is reachable from two kinds of client, and only one
+of them can actually see your machine.
+
+### Claude Code, on the same machine — no tunnel
+
+```bash
+claude mcp add --transport http warehousd http://localhost:8722/mcp
+```
+
+Claude Code runs locally, so it connects to your loopback address directly and
+the OAuth flow opens in your own browser. Nothing needs to be exposed. Use
+`claude mcp list` to confirm it registered, and `/mcp` inside a session to check
+the connection and re-run authorization if it lapsed.
+
+### claude.ai and the desktop app — a tunnel, and one variable
+
+Those clients connect from Anthropic's infrastructure, which cannot route to your
+`localhost`. Publish the port with a tunnel and give Claude the tunnel URL:
+
+```bash
+cloudflared tunnel --url http://localhost:8722    # or: ngrok http 8722
+```
+
+**Set `BETTER_AUTH_URL` to the tunnel URL and restart warehousd.** This is the
+load-bearing step and the one that is easy to miss, because the connector fails
+with an unhelpful error rather than a wrong-origin one:
+
+```bash
+BETTER_AUTH_URL=https://your-tunnel.example.com warehousd start
+```
+
+Both halves of the discovery chain derive their origin from that variable and
+never from the `Host` header — the `WWW-Authenticate` header
+(`app/mcp/route.ts`) and the OAuth issuer in the discovery documents alike. That
+is deliberate: a connector URL derived from an attacker-controlled header would
+send a user's OAuth flow somewhere else. The consequence is that a tunnel whose
+URL warehousd has not been told about advertises `http://localhost:8722` to a
+client that cannot reach it, and the flow stalls with nothing useful in the log.
+
+Verify before adding the connector, from anywhere:
+
+```bash
+curl -s https://your-tunnel.example.com/.well-known/oauth-protected-resource | jq .
+# → "resource" and "authorization_servers" must both name the tunnel URL,
+#   not localhost.
+```
+
+A tunnel URL that changes on every restart — ngrok's free tier does — has to be
+put back into `BETTER_AUTH_URL` and the connector re-added each time. A named
+tunnel is worth the setup if you do this more than once.
+
 ## 1. Add the connector in Claude
 
 In Claude's connector settings, add a new MCP connector pointing at `mcpUrl`.

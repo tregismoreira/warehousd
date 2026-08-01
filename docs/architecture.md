@@ -552,6 +552,26 @@ GIN index the file branch already emits, and makes `broker.searchDocuments` work
 against datasets. A dataset with no searchable field still refuses
 `invalid_intent`.
 
+### A live grant cannot be approved by the person who asked for it
+
+`approveGrant` refuses with `self_approval_denied` when `grant.env` is `live` and
+`grant.user_id` is the approver. It is the same rule `approveProposal` applies to
+a pending revision — see [Approval authorization](#approval-authorization) — and
+the same reason code, mapped to 403 by `lib/rest.ts`.
+
+Without it, a manager could hand themselves access to real data in two calls and
+the audit trail would show a decision with one name on both sides of it. The
+request is left `pending` rather than denied, so another approver can still
+decide it; the requester simply is not that approver.
+
+**`dev` is deliberately exempt.** Its rows are `generateSynthetic` output,
+regenerable from the console's overview page, and a rule that makes someone wait
+for a colleague to unlock fabricated data is a rule they learn to route around.
+This is also what gives the console's environment switcher a concrete meaning: on
+`dev` the "Request & approve access" button in the data browser completes both
+legs; on `live` the approve leg comes back `self_approval_denied` and the UI says
+the request is waiting for somebody else.
+
 ## Revisions, and immutability by privilege
 
 A `writable: true` **dataset** is append-only. There is no in-place `UPDATE` of
@@ -1091,6 +1111,28 @@ determine `via` (how the client authenticated), and applying the collection
 ceiling — then translates HTTP requests into broker intents and returns reason
 codes on refusal. See `apps/web/lib/rest-context.ts` and `apps/web/app/v1/`
 for the reference implementation.
+
+### The console is an adapter too
+
+The admin console's data browser (`/admin/collections/{name}`, Data tab) is not a
+privileged view onto the database. It posts to `/api/collections/{c}/query` and
+`/api/collections/{c}/search`, which derive a `BrokerContext` from the session
+(`lib/session.ts`, `deriveContext`) and call the same two verbs the MCP and REST
+adapters call. So an admin browsing a collection sees exactly what their own
+grants allow, no more, and each page of results writes one audit row naming the
+fields it returned. A collection nobody has granted them answers `no_grant`, and
+the console renders that as an empty state offering to request access rather than
+as an error.
+
+Those two routes are deliberately **not** role-gated. A role gate in front of them
+would be a second, weaker access rule standing where the real one already is.
+
+The console's inventory surfaces — document counts, the file list, term usage —
+are a different thing and are admin-gated: they report *how much* is there, never
+*what* is in it. They still go through the broker (`documents/inventory.ts`),
+because invariant 1 admits no exception for counting, and the file list still
+drops a `posture: deny` field such as `path` unless the caller's own grant names
+it (invariant 4).
 
 `broker.query` is read-only. Naming is deliberately kept open for an additive
 `broker.mutate` with its own validation and audit; the audit outcome column is

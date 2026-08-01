@@ -58,7 +58,8 @@ describe("approve — document scoping actually persists", () => {
   });
 
   it("term selection lands in documentFilters array on the taxonomy field", async () => {
-    const id = await pending("marcus", "policies", ["title", "content"], "live");
+    // Not marcus: he is the approver below, and a live grant may not be self-approved.
+    const id = await pending("terms_target", "policies", ["title", "content"], "live");
     const { POST } = await import("../app/api/grants/route");
     await POST(
       req(
@@ -229,6 +230,32 @@ describe("approve — role", () => {
     const { POST } = await import("../app/api/grants/route");
     const res = await POST(req({ action: "approve", id, allowedFields: ["id"] }, miaCookie) as any);
     expect(res.status).toBe(403);
+  });
+});
+
+// The route's half of the live self-approval rule: the reason code has to survive as a 403 with
+// its own name, because the console's one-click "request & approve" branches on exactly that
+// string to tell the user their request is waiting for somebody else.
+describe("approve — self-approval", () => {
+  it("403s with self_approval_denied on live, and leaves the grant pending", async () => {
+    const id = await pending("marcus", "metrics", ["id"], "live");
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(
+      req({ action: "approve", id, allowedFields: ["id"] }, marcusCookie) as any,
+    );
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("self_approval_denied");
+    expect((await grantRow(id)).status).toBe("pending");
+  });
+
+  it("allows the same person to approve their own dev grant", async () => {
+    const id = await pending("marcus", "vendors", ["id", "name"], "dev");
+    const { POST } = await import("../app/api/grants/route");
+    const res = await POST(
+      req({ action: "approve", id, allowedFields: ["id", "name"] }, marcusCookie) as any,
+    );
+    expect(res.status).toBe(200);
+    expect((await grantRow(id)).status).toBe("approved");
   });
 });
 

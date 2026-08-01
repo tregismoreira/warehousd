@@ -112,11 +112,18 @@ export async function POST(req: NextRequest) {
       verbs: body.verbs,
       orgId: org,
     });
-    if (!approved.ok)
-      return Response.json(
-        { error: approved.error },
-        { status: approved.error === "unknown_grant" ? 404 : 400 },
-      );
+    if (!approved.ok) {
+      // 403 for self-approval, not 400: the request is well-formed and the grant is fine, it is
+      // the caller who may not be the one to decide it. Only a different person changes that.
+      // Same mapping lib/rest.ts gives the identical reason code on the proposal path.
+      const status =
+        approved.error === "unknown_grant"
+          ? 404
+          : approved.error === "self_approval_denied"
+            ? 403
+            : 400;
+      return Response.json({ error: approved.error }, { status });
+    }
     return Response.json({ ok: true });
   }
   if (action === "deny") {

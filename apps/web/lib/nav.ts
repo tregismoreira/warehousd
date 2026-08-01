@@ -6,6 +6,7 @@ import {
   KeyRound,
   ScrollText,
   ShieldCheck,
+  Tags,
   Users,
   Inbox,
   ListChecks,
@@ -23,6 +24,7 @@ export const NAV: Record<Role, NavItem[]> = {
   admin: [
     { href: "/admin", label: "Overview", icon: LayoutDashboard },
     { href: "/admin/collections", label: "Collections", icon: Boxes },
+    { href: "/admin/taxonomies", label: "Taxonomies", icon: Tags },
     { href: "/admin/users", label: "Users & roles", icon: Users },
     { href: "/admin/clients", label: "Clients", icon: KeyRound },
     { href: "/admin/api-keys", label: "API keys", icon: Key },

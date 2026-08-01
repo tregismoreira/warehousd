@@ -206,9 +206,13 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
     const metadataSels = fileMetadataFields(c)
       .map((m) => `, d."${m.field}"`)
       .join("");
+    // `checksum` is structural, like document_seq and file_id: it names no configured field, so
+    // no grant can carry it and no client intent can select it (buildSelect draws its columns
+    // from the YAML field set). It is here because it is the indexer's change-detection key, and
+    // the console's file inventory reads this view — the read role holds SELECT on nothing else.
     return `${recreate}
       select c.id as document_id, c.document_seq, c.content, c.tsv,
-             d.id as file_id, d.title, d.path, d.owner, d.updated_at${termSels}${metadataSels}
+             d.id as file_id, d.title, d.path, d.owner, d.updated_at, d.checksum${termSels}${metadataSels}
       from ${schema}."${collection}__documents" c
       join ${schema}."${collection}__files" d on d.id = c.file_id and d.org_id = c.org_id
       where d.org_id = current_setting('warehousd.org_id', true);`;
