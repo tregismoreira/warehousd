@@ -113,7 +113,7 @@ export async function requestGrant(
   return r.rows[0].id;
 }
 
-export type ApproveGrantError = "unknown_grant" | "invalid_verbs";
+export type ApproveGrantError = "unknown_grant" | "invalid_verbs" | "self_approval_denied";
 
 // Every decision is scoped to the grant's org as well as its id. A grant id is a uuid, so
 // this is a backstop rather than the primary gate — but it is the difference between a
@@ -140,11 +140,23 @@ export async function approveGrant(
 ): Promise<{ ok: true } | { ok: false; error: ApproveGrantError; detail?: string }> {
   const orgId = opts.orgId ?? DEFAULT_ORG_ID;
   const grantRes = await app.query(
-    `select collection, allowed_fields, verbs, mode from app.grants where id=$1 and org_id=$2`,
+    `select collection, allowed_fields, verbs, mode, user_id, env from app.grants
+     where id=$1 and org_id=$2`,
     [id, orgId],
   );
   if (grantRes.rowCount === 0) return { ok: false, error: "unknown_grant" };
   const grant = grantRes.rows[0];
+
+  // Segregation of duties, on the environment where it buys something. An approver who is also
+  // the requester is the only party in the decision, and on `live` the thing being decided is
+  // access to real data — so the second person has to be a second person. This mirrors
+  // approveProposal's four-eyes rule (verbs/propose.ts), down to the reason code.
+  //
+  // `dev` is deliberately exempt. Its contents are generateSynthetic output, regenerable from
+  // the console, and requiring a colleague to unlock fabricated rows teaches people to route
+  // around the rule rather than to respect it.
+  if (grant.env === "live" && grant.user_id === by)
+    return { ok: false, error: "self_approval_denied" };
 
   const collection = grant.collection;
   const allowedFields = opts.allowedFields ?? grant.allowed_fields ?? [];
