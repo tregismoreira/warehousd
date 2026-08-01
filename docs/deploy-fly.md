@@ -119,13 +119,35 @@ can drop this flag and the `image:` override from the YAML.
 - Postgres is provisioned (if `managed: true`).
 - Secrets are set via stdin (no command-line storage).
 - The image layer is built and pushed.
-- The release command runs (schema setup, seeding).
+- The release command runs (migrations, seeding).
 - The server starts and health checks pass.
 
 Watch the logs live:
 
 ```bash
 flyctl logs -a harbor-warehousd
+```
+
+### Health checks
+
+The generated `fly.toml` points Fly at `/api/health` every 15 seconds, with a 5-second timeout
+and a 30-second grace period after boot. The endpoint is unauthenticated on purpose — Fly's
+checker has no session — and answers only `{"ok":true}` or a 503, never anything about why.
+
+The grace period covers process start, not schema work: migrations run in the release command,
+on a one-off machine, before this one takes traffic. A migration that fails aborts the deploy
+and leaves the previous release serving.
+
+`deploy` also polls the same endpoint once itself, so a deploy that returns cleanly has been
+answered at least once. The check is what keeps watching afterwards.
+
+A machine that goes unhealthy after a successful deploy is almost always the database rather
+than the app — `/api/health` returns 503 when it cannot reach Postgres:
+
+```bash
+flyctl status -a harbor-warehousd            # which machines are failing the check
+flyctl logs -a harbor-warehousd              # what they said on the way down
+flyctl postgres list                         # is the database itself up
 ```
 
 **Re-deploy:**

@@ -36,6 +36,9 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Added
 
+- The generated `fly.toml` configures a Fly health check against `/api/health`. The deploy polled
+  that endpoint once and then stopped looking, so nothing noticed a machine that wedged after a
+  healthy release — it stayed in rotation.
 - App-schema changes are versioned. Ordered migrations are applied under a Postgres advisory
   lock, each in its own transaction, and recorded in `app.schema_migrations` — replacing a single
   create-if-not-exists function that could express no change to an existing table. A failed

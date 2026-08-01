@@ -39,6 +39,11 @@ COPY --chown=node:node context /project`;
  *   the entrypoint runs ONLY as the release command, not a second time per machine.
  * - WAREHOUSD_DEMO is deliberately ABSENT — its absence is what keeps demo personas from being
  *   seeded.
+ * - [[http_service.checks]] hits /api/health, the same endpoint `warehousd status` polls. The
+ *   deploy polls it once after the release and then stops looking, so without this nothing
+ *   notices a machine that wedges after a healthy release — it stays in rotation serving errors.
+ *   grace_period covers boot only: migrations run in release_command, on a one-off machine,
+ *   before this one takes traffic.
  */
 export function renderFlyToml(o: { appName: string; region: string }): string {
   return `app = "${o.appName}"
@@ -62,5 +67,12 @@ primary_region = "${o.region}"
   internal_port = 8722
   force_https = true
   auto_stop_machines = "suspend"
-  min_machines_running = 1`;
+  min_machines_running = 1
+
+[[http_service.checks]]
+  path = "/api/health"
+  method = "GET"
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "30s"`;
 }
