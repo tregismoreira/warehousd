@@ -8,7 +8,7 @@ import {
   loadConfig,
   applyConfig,
   regenerateSynthetic,
-  createAppSchema,
+  migrateApp,
   indexCollection,
   syncDatasetTerms,
   loadTaxonomyBindings,
@@ -28,7 +28,7 @@ export async function runApply(projectDir: string, dbUrl: string): Promise<void>
   const cfg = loadConfig(projectDir);
   const db = new Pool({ connectionString: dbUrl });
   try {
-    await createAppSchema(db);
+    await migrateApp(db);
     await applyConfig(db, cfg);
   } finally {
     await db.end();
