@@ -11,14 +11,7 @@
 // tsup's entry is this file, emitted as dist/index.cjs so the bin path is unchanged.
 
 import { Command } from "commander";
-import { Pool } from "pg";
 import { resolve, basename } from "node:path";
-import {
-  loadConfig,
-  indexCollection,
-  loadTaxonomyBindings,
-  fileMetadataFields,
-} from "@warehousd/broker";
 import { resolveDbUrl, runApply, runSeed, runIndex } from "./index";
 import { runInit } from "./init";
 import { runStart } from "./start";
@@ -46,6 +39,8 @@ program
   .name("warehousd")
   .description("warehousd CLI")
   .version(typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "0.0.0-dev")
+  // `--help` is on every command already; the `help [command]` subcommand only pads the list.
+  .helpCommand(false)
   // clig.dev: suggest, do not correct. Commander gives both for free and neither was switched on.
   .showHelpAfterError("(run `warehousd --help` for the full list)")
   .showSuggestionAfterError(true)
@@ -189,15 +184,19 @@ program
   });
 program
   .command("seed")
-  .description("generate synthetic data for every dataset collection")
+  .description("regenerate synthetic data, then re-index file collections")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .option("-s, --seed <n>", "seed", "42")
+  .option("--no-reindex", "leave file collections as they are")
   .action(async (o) => {
     ui();
     const db = resolveDbUrl(o.dir, o.db);
-    await runSeed(o.dir, db, Number(o.seed));
-    emit({ seeded: true, seed: Number(o.seed) }, "seeded");
+    const r = await runSeed(o.dir, db, Number(o.seed), { reindex: o.reindex });
+    emit(
+      { seeded: true, seed: r.seed, reindexed: r.reindexed },
+      r.reindexed.length ? `seeded, re-indexed ${r.reindexed.join(", ")}` : "seeded",
+    );
   });
 program
   .command("index <collection>")
@@ -368,6 +367,7 @@ program
   });
 program
   .command("deploy")
+  .description("deploy this project to Fly.io, or tear it down with --destroy")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--allow-local-login", "permit deploying without SSO configured", false)
   .option("-y, --yes", "skip the config-diff confirmation", false)
@@ -391,42 +391,11 @@ program
       quiet,
     });
   });
-program
-  .command("regen-synth")
-  .option("-d, --dir <dir>", "project dir", process.cwd())
-  .option("--db <url>", "database url")
-  .option("-s, --seed <n>", "seed", "42")
-  .action(async (o) => {
-    const db = resolveDbUrl(o.dir, o.db);
-    const cfg = loadConfig(o.dir);
-    const pool = new Pool({ connectionString: db });
-    try {
-      // Seed truncates, generates synthetic data, and syncs the dev term set from those rows.
-      await runSeed(o.dir, db, Number(o.seed));
-      // Re-index all file collections. `metadata` is not optional in practice: every other
-      // index call site passes it, and omitting it here would re-index a changed file with
-      // its declared metadata columns left null — the exact drift fileMetadataFields exists
-      // to prevent.
-      for (const [name, c] of Object.entries(cfg.collections)) {
-        if (c.type === "file") {
-          const env = "dev";
-          const dir = c.source!;
-          const taxonomies = await loadTaxonomyBindings(pool, cfg, name, env);
-          const metadata = fileMetadataFields(c);
-          await indexCollection(pool, env, name, resolve(o.dir, dir), { taxonomies, metadata });
-        }
-      }
-    } finally {
-      await pool.end();
-    }
-    emit({ regenerated: true, seed: Number(o.seed) }, "regenerated synthetic data");
-  });
 
-// Only parse argv when run as a binary, not when imported by tests.
-const isMainModule =
-  (typeof require !== "undefined" && require.main === module) ||
-  (typeof import.meta !== "undefined" && import.meta.url === `file://${process.argv[1]}`);
-if (isMainModule) {
+// Only parse argv when run as a binary, not when imported by tests. The shipped bundle is CommonJS
+// (tsup.config.ts, bin dist/index.cjs), so `require.main` is the only check that can ever be true —
+// an `import.meta.url` fallback is empty under a cjs build and warns at every build.
+if (typeof require !== "undefined" && require.main === module) {
   // Rejections have to be handled here or not at all: `parseAsync` is the last statement, so an
   // unhandled one printed a stack trace at a user who wanted a message and an exit code.
   program.parseAsync().catch((err: unknown) => {

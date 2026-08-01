@@ -210,7 +210,7 @@ published CLI.
 ```bash
 warehousd status                        # health + the outputs block
 warehousd apply                         # re-apply YAML without a restart
-warehousd regen-synth --seed 7          # different data, same shape
+warehousd seed --seed 7                 # different data, same shape
 warehousd index policies                # re-index after editing seed/docs-dev
 warehousd start --verbose               # log every Docker command
 ```

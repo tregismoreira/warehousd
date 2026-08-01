@@ -197,15 +197,22 @@ without a restart. Runs against the host, not inside the container.
 | ------------ | --------------------------------------------------------------------------- |
 | `--db <url>` | Database URL. Falls back to `DATABASE_URL`, then `.warehousd/outputs.json`. |
 
-### `seed` / `regen-synth`
+### `seed`
 
-Generate or regenerate synthetic data for every dataset collection. Same seed,
-same data.
+Regenerate synthetic data for every dataset collection, then re-index the file
+collections. Same seed, same data.
 
-| Flag             |                           |
-| ---------------- | ------------------------- |
-| `--db <url>`     | Database URL.             |
-| `-s, --seed <n>` | PRNG seed (default `42`). |
+The re-index is part of the command rather than a follow-up because seeding
+truncates the dataset collections and rebuilds the dev term set from the rows it
+has just generated — the term set every file row's taxonomy links point at.
+`--no-reindex` skips it, which is for iterating on a dataset generator in a
+project whose file collections are not involved.
+
+| Flag             |                                         |
+| ---------------- | --------------------------------------- |
+| `--db <url>`     | Database URL.                           |
+| `-s, --seed <n>` | PRNG seed (default `42`).               |
+| `--no-reindex`   | Leave the file collections as they are. |
 
 ### `index <collection>`
 
