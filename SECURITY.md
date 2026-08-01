@@ -154,15 +154,6 @@ deployment that follows the expectations above, but each is worth knowing:
   single credential cannot both propose and promote. The admin CSV/JSON import is
   separate and append-only through an `INSERT`-only Postgres role.
 
-- **`app.login_attempts` has no pruning.** The lockout table is keyed by email
-  address, and an address that is not an account is recorded exactly like one
-  that is — that is deliberate, since counting only real accounts would make the
-  lock itself an enumeration oracle. The cost is that spraying distinct addresses
-  grows the table by one small row each, with nothing reclaiming them; a
-  successful sign-in clears only that address's own row. Insertion rate is capped
-  by Better Auth's per-IP limiter, not the total. Prune it with the rest of your
-  operational hygiene if you run an internet-facing deployment.
-
 ## Out of scope
 
 Absence here is a decision, not an oversight. These are things warehousd does not

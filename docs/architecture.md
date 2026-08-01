@@ -312,14 +312,18 @@ warehousd builds authorization, not authentication.
 Two controls sit on the local-credential path, for the deployments that keep it
 enabled:
 
-- **Per-account lockout.** Five failed attempts lock an address for fifteen
-  minutes, and the lock refuses the *correct* password too — one that the right
-  password walks through protects nothing. The existing limiters are per-IP
-  (Better Auth) and per-client (`/v1/token`), so neither sees a guess spread
-  thinly across addresses. Attempts against addresses that are not accounts are
-  counted identically, so the lock cannot be used to enumerate users, and a lock
-  is not extended by continued guessing — that would hand an attacker a denial of
-  service against the account's owner.
+- **Per-account lockout.** Five failures within fifteen minutes lock an address
+  for fifteen minutes, and the lock refuses the *correct* password too — one that
+  the right password walks through protects nothing. The existing limiters are
+  per-IP (Better Auth) and per-client (`/v1/token`), so neither sees a guess
+  spread thinly across addresses. Attempts against addresses that are not
+  accounts are counted identically, so the lock cannot be used to enumerate
+  users, and a lock is not extended by continued guessing — that would hand an
+  attacker a denial of service against the account's owner. Failures outside the
+  window do not accumulate: a stale row is collected on the next failed attempt,
+  which is also what stops a spray of distinct addresses growing
+  `app.login_attempts` without bound. A row carrying a live lock is never
+  collected, or waiting out the window would be easier than waiting out the lock.
 - **An origin check on sign-in and sign-up.** Better Auth's own `originCheck`
   guards routes carrying a redirect target and validates *that URL*, which makes
   `trustedOrigins` an open-redirect allowlist rather than a CSRF one. Nothing

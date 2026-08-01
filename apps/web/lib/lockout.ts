@@ -5,6 +5,10 @@ import type { Pool } from "pg";
 export const MAX_FAILURES = 5;
 export const LOCKOUT_MINUTES = 15;
 
+// How long a failure counts toward a lock. Failures further apart than this are not one attack,
+// and treating them as one would lock a legitimate user who mistypes occasionally over months.
+export const ATTEMPT_WINDOW_MINUTES = 15;
+
 /**
  * Per-account lockout on local credentials.
  *
@@ -58,6 +62,26 @@ export function lockoutPlugin(app: Pool) {
               await app.query(`delete from app.login_attempts where email = $1`, [email]);
               return;
             }
+
+            // Collect rows that no longer say anything, before counting this failure.
+            //
+            // It does two jobs, because they are the same job. A failure older than the window
+            // must not count toward a lock — without this the counter never decays, so four
+            // failures today and one next year would lock the account. And a row whose count
+            // cannot contribute to a lock is pure residue: the table is keyed by email address
+            // and records addresses that are not accounts exactly like ones that are (deliberate,
+            // since counting only real accounts would make the lock an enumeration oracle), so
+            // spraying distinct addresses would otherwise grow it with nothing reclaiming them.
+            //
+            // Not scoped to this email on purpose: scoping it would fix the decay and leave the
+            // growth. Indexed on last_failure_at by migration 0003 — the partial index from 0002
+            // covers locked rows, which is the opposite of the set being collected here.
+            await app.query(
+              `delete from app.login_attempts
+                where last_failure_at < now() - ($1 || ' minutes')::interval
+                  and (locked_until is null or locked_until < now())`,
+              [String(ATTEMPT_WINDOW_MINUTES)],
+            );
 
             // locked_until is only stamped on the attempt that crosses the threshold, and left
             // alone afterwards: recomputing it on every later failure would let an attacker who
