@@ -1,4 +1,5 @@
 import { m0001Init } from "./0001-init";
+import { m0002LoginAttempts } from "./0002-login-attempts";
 
 export type Migration = { version: string; sql: string };
 
@@ -9,4 +10,4 @@ export type Migration = { version: string; sql: string };
 // NEVER reorder, renumber, or edit the sql of a migration that has shipped: the ledger records
 // versions, not contents, so an edited migration is silently skipped on every database that
 // already ran it. Add a new one.
-export const MIGRATIONS: readonly Migration[] = [m0001Init];
+export const MIGRATIONS: readonly Migration[] = [m0001Init, m0002LoginAttempts];

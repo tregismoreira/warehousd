@@ -22,6 +22,12 @@ matching the CLI's own version. An entry below therefore describes both.
   exempt — it is a legitimate cross-origin POST from the IdP.
 - Session cookies are `Secure` on an https origin, `HttpOnly` and `SameSite=Lax` always, and the
   session lifetime is 8 hours rather than the default 7 days.
+- Local credentials lock for 15 minutes after 5 failed attempts on one account, refusing even the
+  correct password for the duration. The existing limiters cap cost per IP and per client id, so
+  a guess spread thinly across addresses tripped neither. Attempts against addresses that are not
+  accounts are counted identically, so the lock cannot be used to enumerate users, and a lock is
+  not extended by continued guessing — that would hand an attacker a denial of service against
+  the account's owner.
 - The MCP and REST query paths validate every client-supplied intent against a shared schema
   before any of it is read, closing a remotely-exploitable SQL injection through an aggregate
   function name. Refused intents are audited.
