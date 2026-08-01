@@ -14,6 +14,8 @@ warehousd.local.yml
 
 apps/web/test-results/
 apps/web/playwright-report/
+# Persona session cookies saved by the playwright `setup` project (apps/web/e2e/auth.setup.ts).
+apps/web/e2e/.auth/
 
 # Scratch review artifacts (browser screenshots taken during design/QA passes)
 .playwright-mcp/

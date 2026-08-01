@@ -1,6 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { as, signOut } from "./helpers/auth";
+import { as } from "./helpers/auth";
 
+// The handovers below are `as()` alone, with no sign-out in between: it clears the cookie jar
+// before adopting the next persona's, so the previous session is gone from the browser either
+// way — and signing out would revoke a session the rest of the run still needs. That the sign-out
+// control itself works is login.spec.ts's subject.
 test("request → approve with trimmed fields → revoke, all through the UI", async ({
   page,
   context,
@@ -17,7 +21,6 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   await page.getByRole("button", { name: "Submit request" }).click();
   await expect(page.getByText("Access requested")).toBeVisible();
   await expect(page.getByRole("row", { name: /departments/ }).last()).toContainText("Pending");
-  await signOut(page);
 
   // 2. Marcus sees it, trims to one field, sets no expiry, approves.
   await as(page, "manager");
@@ -27,7 +30,6 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   await page.getByRole("checkbox", { name: "id", exact: true }).uncheck();
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText("Grant approved")).toBeVisible();
-  await signOut(page);
 
   // 3. Mia sees an approved grant scoped to the single remaining field.
   await as(page, "member");
@@ -35,7 +37,6 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   await expect(mine).toContainText("Approved");
   await expect(mine).toContainText("name");
   await expect(mine).not.toContainText(/\bid\b/);
-  await signOut(page);
 
   // 4. Marcus revokes it.
   await as(page, "manager");
@@ -46,12 +47,10 @@ test("request → approve with trimmed fields → revoke, all through the UI", a
   // on another row's button instead of this dialog's confirm.
   await page.getByRole("alertdialog").getByRole("button", { name: "Revoke" }).click();
   await expect(page.getByText("Grant revoked")).toBeVisible();
-  await signOut(page);
 
   // 5. Mia's grant is revoked, and the audit browser has the whole story for Ana.
   await as(page, "member");
   await expect(page.getByRole("row", { name: /departments/ }).last()).toContainText("Revoked");
-  await signOut(page);
 
   // Broker query decisions (allow/deny) are only produced by an actual data access — the
   // MCP/console path, not the grant-lifecycle admin actions above. This browser session has
