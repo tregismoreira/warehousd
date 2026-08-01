@@ -52,8 +52,8 @@ export async function bootstrapWebDb(appUrl: string): Promise<void> {
 
   setAuthEnv(appUrl);
 
-  const { createAppSchema } = await import("@warehousd/broker");
-  await createAppSchema(db);
+  const { migrateApp } = await import("@warehousd/broker");
+  await migrateApp(db);
 
   const { auth } = await import("../../lib/auth");
   // Run the Better Auth migration via the CLI that pnpm installed, addressed through its bin

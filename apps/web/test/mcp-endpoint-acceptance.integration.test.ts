@@ -247,3 +247,96 @@ describe("§10 test 6: env parity", () => {
     expect(devRow.email).not.toBe(liveRow.email);
   });
 });
+
+// The corpus reaches the MCP surface here rather than in a file of its own, because the token
+// minting and the streamable-HTTP parsing already live above. `surface: "mcp"` probes carry a
+// `tool` and `args` instead of an `intent`: they are hostile in ways a broker-level intent cannot
+// express, because what they forge is the caller's identity and environment — which the adapter
+// derives from the token and the tool arguments must never influence.
+describe("§10 test 4 extended: hostile tool arguments over MCP", () => {
+  const mcpProbes = JSON.parse(
+    readFileSync(
+      new URL("../../../packages/broker/test/fixtures/probes.json", import.meta.url),
+      "utf8",
+    ),
+  ).filter((p: { surface?: string }) => p.surface === "mcp") as {
+    name: string;
+    tool: string;
+    args: Record<string, unknown>;
+    expect: "allowed" | "refused";
+    expectReason?: string;
+    assertDevOnly?: boolean;
+  }[];
+
+  it("ignores forged env, org and identity in tool arguments and leaks no canary", async () => {
+    expect(mcpProbes.length).toBeGreaterThan(0);
+    const token = await mintAccessToken("env:dev");
+
+    for (const probe of mcpProbes) {
+      const out = await callTool(token, probe.tool, probe.args);
+      const outcome = out.ok ? "allowed" : "refused";
+      expect(outcome, `probe "${probe.name}"`).toBe(probe.expect);
+      // Pinned where the reason is the point. "metrics" is a real collection in harbor, so a
+      // no_grant refusal proves the forged userId bought nothing; unknown_collection would mean
+      // the probe was refused for a reason that has nothing to do with identity.
+      if (probe.expectReason) {
+        expect(out.reason, `refusal reason for "${probe.name}"`).toBe(probe.expectReason);
+      }
+
+      const payload = JSON.stringify(out);
+      for (const canary of [DENIED_CANARY, SSN_CANARY, DOC_RESTRICTED_CANARY]) {
+        expect(payload.includes(canary), `canary in response of "${probe.name}"`).toBe(false);
+      }
+      // A forged env must be ignored rather than honoured — and rather than errored, since an
+      // error would tell the caller the parameter was noticed at all.
+      if (probe.assertDevOnly) {
+        expect(payload.includes(LIVE_ONLY_CANARY), `live data via "${probe.name}"`).toBe(false);
+      }
+    }
+  });
+});
+
+// §6.1 rule 1: a client whose policy lacks env:live can ask for anything and still only ever
+// receives env:dev. Repeating the scope is the shape worth checking — a rule that de-duplicates
+// before intersecting, or intersects only the first occurrence, passes the single-value test and
+// fails this one.
+describe("scope stuffing at the token endpoint", () => {
+  it("yields exactly one env scope, and it is env:dev", async () => {
+    const reg = await db.auth.api.registerMcpClient({
+      body: {
+        redirect_uris: ["http://localhost:9999/callback"],
+        client_name: "Scope Stuffing Client",
+      },
+      asResponse: true,
+    } as never);
+    const { client_id, client_secret } = await reg.json();
+    // Policy allows dev only; the request below asks for live repeatedly anyway.
+    await upsertClientPolicy(admin, client_id, "Scope Stuffing Client", ["env:dev"]);
+
+    const { verifier, challenge } = pkcePair();
+    const { code } = await authorizeAndGetCode(db.auth, {
+      clientId: client_id,
+      scope: "openid profile email offline_access env:live env:dev env:live env:live",
+      cookie: miaCookie,
+      challenge,
+    });
+    expect(code, "authorize did not return a code").toBeTruthy();
+
+    // Exchanged through mcpOAuthToken, as oauth-scope.integration.test.ts does: the granted
+    // scope is only observable in the token response, and the exchange needs the client secret.
+    const tokenRes = await db.auth.api.mcpOAuthToken({
+      body: {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "http://localhost:9999/callback",
+        client_id,
+        client_secret,
+        code_verifier: verifier,
+      },
+      asResponse: true,
+    } as never);
+    const tokens = (await tokenRes.json()) as { scope?: string };
+    const envScopes = (tokens.scope ?? "").split(" ").filter((s) => s.startsWith("env:"));
+    expect(envScopes).toEqual(["env:dev"]);
+  });
+});

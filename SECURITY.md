@@ -154,6 +154,34 @@ deployment that follows the expectations above, but each is worth knowing:
   single credential cannot both propose and promote. The admin CSV/JSON import is
   separate and append-only through an `INSERT`-only Postgres role.
 
+## Out of scope
+
+Absence here is a decision, not an oversight. These are things warehousd does not
+attempt, so that a report of "X is missing" can be answered quickly and a report
+of something genuinely broken is not buried among them.
+
+- **Masking and transform postures.** A field is allow or deny; there is nothing
+  in between, and no partial-value redaction on the read path.
+- **Connect-in-place over an external database.** Collections live in
+  warehousd's own Postgres.
+- **Multi-tenancy beyond the org column.** Every grant, audit event and document
+  carries an org, isolated by a view predicate and RLS, but one deployment is
+  intended to serve one organization. It is not a hostile-tenant boundary.
+- **A malicious administrator, or anyone with Postgres superuser.** An admin can
+  grant themselves access and the audit trail will record it; that is the
+  control. Superuser is outside the model entirely — it can rewrite the trail.
+- **Abuse detection beyond rate limiting and lockout.** Per-IP throttling
+  (Better Auth), per-client throttling on `/v1/token` and per-account lockout on
+  local credentials. No behavioural analysis, no anomaly detection.
+- **Distributed rate limiting.** The `/v1/token` limiter is in-memory and
+  per-process *by design* — it is a CPU cost cap, not a quota. Behind several
+  machines each holds its own window. A real quota belongs at the ingress.
+- **Semantic/vector search, PDF and DOCX extraction, an upload UI.** The
+  `vector(1536)` column is reserved and unpopulated; indexing reads local
+  directories of `.md` and `.txt`.
+- **SCIM, compliance exports, IdP group→role mapping.** JIT provisioning creates
+  a `member`; role changes are manual.
+
 ## Dependency advisories
 
 CI runs `pnpm audit --prod --audit-level high` (the `quality` job in
@@ -180,8 +208,8 @@ One advisory is handled by an override rather than a suppression.
 (`drizzle-orm <0.45.2`, SQL injection through improperly escaped identifiers) reached
 the production tree twice over. The first path was a direct dependency of
 `packages/broker` supporting a typed schema mirror that nothing imported; the file and
-both `drizzle` dependencies are gone, and `db/migrate-app.ts` remains the only
-definition of the `app` schema. The second path survives that removal:
+both `drizzle` dependencies are gone, and `db/migrations/` is now the only definition
+of the `app` schema. The second path survives that removal:
 `@better-auth/cli` is still on 1.4.21 — there is no 1.6.x — and that older
 `better-auth` declares the optional peer as `>=0.41.0`, so pnpm resolved 0.41.0 and
 deduplicated it into the production `better-auth@1.6.25`, which asks for `^0.45.2`.

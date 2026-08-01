@@ -5,7 +5,7 @@ import {
   loadConfig,
   applyConfig,
   regenerateSynthetic,
-  createAppSchema,
+  migrateApp,
   indexCollection,
   syncDatasetTerms,
   loadTaxonomyBindings,
@@ -79,7 +79,7 @@ async function main() {
     end $$;
     grant usage on schema data_live to warehousd_import;`);
   const cfg = loadConfig(dir);
-  await createAppSchema(db);
+  await migrateApp(db);
   // Ensure Better Auth tables exist (user/session/account/verification) before seeding users.
   execSync("npx @better-auth/cli migrate --config apps/web/lib/auth.ts -y", {
     cwd: process.cwd(),

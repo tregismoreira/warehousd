@@ -301,6 +301,25 @@ The interesting ones, and where they live:
   string values, shape fuzzing. Denied canary values are planted in the seed data
   and grepped for across response bodies, error messages, and logs. New hostile
   intents are added to the JSON, not to code.
+
+  The corpus is keyed by `surface`. Entries with none — or `query` /
+  `searchDocuments` — carry an `intent` and run against the broker directly, and
+  are replayed over MCP by `apps/web/test/mcp-endpoint-acceptance.integration.test.ts`.
+  Entries marked `mcp` carry a `tool` and `args` instead, and only run over the
+  adapter: they forge the caller's `env`, `orgId` and `userId` in the tool
+  arguments, which a broker-level intent cannot express because the adapter
+  derives all three from the token. `assertDevOnly` means the call must succeed
+  and return no live data — a forged `env` has to be *ignored*, not rejected,
+  since rejecting it would tell the caller the parameter was read at all.
+  `expectReason` pins the refusal code where the reason is the point.
+
+  The log grep is worth one caution: the capture in
+  `packages/broker/test/helpers/log-capture.ts` serialises object arguments
+  before searching them. It used to stringify them, which renders
+  `{ collection, err }` as `[object Object]` — so the canary assertions searched
+  a string that could not contain a canary, and passed whether or not anything
+  leaked. It also captures raw `process.stdout` / `process.stderr`, because
+  Next.js and Better Auth write there rather than through `console`.
 - **Deny by default and field enforcement** (`broker-query`, `grant-eval`) — a
   user with no grant gets `no_grant` everywhere but still sees names and
   descriptions from `list_collections`; a grant excluding `email` makes the key

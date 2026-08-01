@@ -14,5 +14,13 @@
   { "surface": "searchDocuments", "name": "restricted-content-term", "intent": { "collection": "policies", "q": "DOC-RESTRICTED-CANARY-9e4b" }, "expect": "allowed" },
   { "surface": "searchDocuments", "name": "oversized-limit",         "intent": { "collection": "policies", "q": "policy", "limit": 999999 }, "expect": "allowed" },
   { "surface": "searchDocuments", "name": "tsv-as-field",            "intent": { "collection": "policies", "q": "policy", "fields": ["tsv"] }, "expect": "refused" },
-  { "surface": "query",            "name": "document-filter-bypass-via-filters", "intent": { "collection": "policies", "fields": ["title"], "filters": [{ "field": "path", "op": "eq", "value": "restricted/secret.md" }] }, "expect": "refused" }
+  { "surface": "query",            "name": "document-filter-bypass-via-filters", "intent": { "collection": "policies", "fields": ["title"], "filters": [{ "field": "path", "op": "eq", "value": "restricted/secret.md" }] }, "expect": "refused" },
+
+  { "surface": "mcp", "name": "forged env in query args",          "tool": "query_collection",  "args": { "collection": "people", "fields": ["id","full_name"], "limit": 500, "env": "live" }, "expect": "allowed", "assertDevOnly": true },
+  { "surface": "mcp", "name": "forged env in search args",         "tool": "search_documents",  "args": { "collection": "policies", "q": "policy", "env": "live" }, "expect": "allowed", "assertDevOnly": true },
+  { "surface": "mcp", "name": "forged orgId in args",              "tool": "query_collection",  "args": { "collection": "people", "fields": ["id"], "orgId": "other-org" }, "expect": "allowed", "assertDevOnly": true },
+  { "surface": "mcp", "name": "forged userId cannot reach an ungranted collection", "tool": "query_collection", "args": { "collection": "metrics", "fields": ["id"], "userId": "ana" }, "expect": "refused", "expectReason": "no_grant" },
+  { "surface": "mcp", "name": "denied field via tool args",        "tool": "query_collection",  "args": { "collection": "people", "fields": ["id","home_address"] }, "expect": "refused", "expectReason": "field_denied" },
+  { "surface": "mcp", "name": "unknown tool",                      "tool": "drop_everything",   "args": {}, "expect": "refused" },
+  { "surface": "mcp", "name": "write verb under a read-only grant", "tool": "create_document",  "args": { "collection": "people", "values": { "full_name": "x" } }, "expect": "refused" }
 ]
