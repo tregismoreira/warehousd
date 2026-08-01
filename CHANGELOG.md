@@ -47,6 +47,10 @@ matching the CLI's own version. An entry below therefore describes both.
   richest context the broker produces — it is the only remaining trace of a decision that went
   unrecorded. It now passes through a redaction helper that masks `detail`, `where` and
   `internalQuery` along with credentials, keeping the message so the constraint is still named.
+- The adversarial probe corpus reaches the MCP surface. `surface: "mcp"` entries carry tool
+  arguments rather than a broker intent, so they can forge the caller's `env`, `orgId` and
+  `userId` — which the adapter derives from the token and the arguments must never influence. A
+  new hostile argument shape is now a line of JSON rather than a new test.
 - The adversarial probe harness captures raw `process.stdout` and `process.stderr` as well as
   `console.*`, and serialises object arguments before grepping them. It stringified them as
   `[object Object]`, so the canary assertions searched a string that could not contain a canary
