@@ -28,7 +28,8 @@ export type { CollectionConfig, FileMetadataType, DeployConfig } from "./config/
 export { applyConfig } from "./apply/apply";
 export { generateSynthetic } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
-export { createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-app";
+export { migrateApp, createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-app";
+export { MIGRATIONS, type Migration } from "./db/migrations";
 export * from "./grants/manage";
 export {
   getClientPolicy,

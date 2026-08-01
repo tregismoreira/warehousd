@@ -36,6 +36,11 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Added
 
+- App-schema changes are versioned. Ordered migrations are applied under a Postgres advisory
+  lock, each in its own transaction, and recorded in `app.schema_migrations` — replacing a single
+  create-if-not-exists function that could express no change to an existing table. A failed
+  migration rolls back and records nothing, so the Fly release command can abort a deploy and
+  leave the previous release serving against a database it still understands.
 - `pnpm typecheck` covers `test/`, `e2e/` and `scripts/` as well as `src` — previously ~16.7k
   lines of test code were type-checked nowhere.
 - ESLint enforces rules for the first time, including `no-floating-promises` and

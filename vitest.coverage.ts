@@ -25,8 +25,11 @@ export const coverage: Coverage = {
   ],
   exclude: [
     "**/*.d.ts",
-    // Schema definitions and generated DDL strings: executed as data, not as branches.
-    "packages/broker/src/db/schema.ts",
+    // Schema definitions and generated DDL strings: executed as data, not as branches. Each
+    // migration is one exported const holding a SQL string, so there is nothing in them a test
+    // could cover or miss — counting them only drags `functions` down for files that have none.
+    // The runner that applies them, db/migrate.ts, stays measured: that one has real branches.
+    "packages/broker/src/db/migrations/**",
     // The CLI's container orchestration. These are covered — thoroughly — by
     // packages/cli/test/e2e/lifecycle.e2e.test.ts, which drives the built bundle as a subprocess
     // against real Docker, and that suite deliberately collects no coverage (see
