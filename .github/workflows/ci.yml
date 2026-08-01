@@ -191,6 +191,17 @@ jobs:
   # `test` produces — this job builds its own containers — so the only thing the gate bought was
   # not spending browser minutes on a branch whose unit tests were already red. Feedback latency
   # on the green path is worth more than those minutes. Both jobs still block the merge.
+  #
+  # Sharded across runners rather than parallelised on one. A shard is a whole machine with its own
+  # Postgres, its own `next dev` and its own database, so the specs stay exactly as isolated from
+  # each other as they are on one runner — `workers: 1` still holds inside a shard. Splitting them
+  # *within* a runner would mean sharing one database and one dev server between workers, which the
+  # suite is not written for.
+  #
+  # Three is where the returns stop: about 180s of each shard is fixed cost it cannot share
+  # (install, `test:up`, the browser download, `e2e:setup`, the dev server and route warm-up), so a
+  # fourth shard buys ~24s of wall clock for another whole runner. Change the `3` in both places
+  # below together — the matrix and the `--shard` denominator have to agree.
   playwright:
     needs: changes
     if: needs.changes.outputs.playwright == 'true'
@@ -198,6 +209,12 @@ jobs:
     permissions:
       contents: read
     timeout-minutes: 30
+    strategy:
+      # One shard failing must not cancel the others: a red suite should report everything that is
+      # wrong in one go, not just whichever file happened to fail first.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -217,7 +234,19 @@ jobs:
 
       - run: pnpm --filter @warehousd/web exec playwright install --with-deps chromium
 
-      - run: pnpm e2e
+      # `pnpm e2e` is `e2e:setup && playwright test`, split here so the shard flag reaches the
+      # second half. Every shard provisions the whole database: `e2e:setup` is what seeds the
+      # personas and grants the specs read, and a shard holding only some of the files still needs
+      # all of it.
+      - run: pnpm e2e:setup
+
+      # The shard number arrives as an environment variable rather than interpolated into the
+      # script body, matching the `changes` job above. It is a literal from the matrix and so is
+      # harmless either way, but the habit is what keeps a future context value from becoming
+      # shell.
+      - run: pnpm --filter @warehousd/web exec playwright test --shard="$SHARD/3"
+        env:
+          SHARD: ${{ matrix.shard }}
 
       - if: always()
         run: pnpm test:down

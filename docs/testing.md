@@ -181,9 +181,12 @@ built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 > in the realm actually loaded. Run
 > `docker compose -f docker-compose.test.yml up -d --force-recreate keycloak`.
 
-CI runs lint in its own job, `pnpm test` and `pnpm build` in another, and Playwright in a third
-that starts *alongside* those rather than after them — it is the longest job in the workflow, so
-gating it on the suite added its minutes to the wait instead of overlapping them. The packaging
+CI runs lint in its own job, `pnpm test` and `pnpm build` in another, and Playwright across three
+sharded runners that start *alongside* those rather than after them — it is the longest job in the
+workflow, so gating it on the suite added its minutes to the wait instead of overlapping them. Each
+shard is a whole machine with its own Postgres, dev server and database, so `workers: 1` and the
+isolation it buys still hold inside one; only the spread of files over machines changes. The
+packaging
 smoke test that installs the CLI tarball outside the workspace, and the CLI and SSO end-to-end
 suites, do still wait for `pnpm test`.
 
