@@ -24,6 +24,24 @@ change enforcement, the pull request must carry a test that fails without it.
 Postgres comes from `pnpm test:up` (pgvector on `127.0.0.1:54330`, plus Keycloak
 for the SSO suite); `pnpm test:down` tears it down with its volume.
 
+### How the browser suite signs in
+
+`pnpm e2e` runs two Playwright projects. `setup` (`apps/web/e2e/auth.setup.ts`) signs each of the
+three personas in through the login form once and saves its cookies under `apps/web/e2e/.auth/`;
+`e2e` declares it as a dependency, so the sessions are there however far down you filter the run.
+Specs then call `as(page, "manager")`, which swaps the stored jar into the browser context rather
+than driving the form. Nearly every test signs in only in order to *be* someone, and the form costs
+a page load, a POST and a password hash every time — that was the bulk of the suite's runtime.
+
+Two things follow, and both matter before you write a spec:
+
+- **The session is shared for the whole run.** `signOut()` revokes it server-side, so calling it
+  after `as()` breaks every later test that wanted that persona. Switch persona by calling `as()`
+  again — it clears cookies first, so nothing of the previous one survives. `as()` fails loudly,
+  naming the persona, if the jar it loads is no longer accepted.
+- **That signing in works at all is `login.spec.ts`'s subject**, not a side effect of the other
+  fourteen files. It signs in for itself, which is why it is also the one file that may sign out.
+
 ```bash
 pnpm test:up
 pnpm lint
@@ -163,9 +181,11 @@ built image with `WAREHOUSD_IMAGE=warehousd:ci`.
 > in the realm actually loaded. Run
 > `docker compose -f docker-compose.test.yml up -d --force-recreate keycloak`.
 
-CI runs lint in its own job, `pnpm test` and `pnpm build` in another, then Playwright, a packaging
-smoke test that installs the CLI tarball outside the workspace, and the CLI and
-SSO end-to-end suites.
+CI runs lint in its own job, `pnpm test` and `pnpm build` in another, and Playwright in a third
+that starts *alongside* those rather than after them — it is the longest job in the workflow, so
+gating it on the suite added its minutes to the wait instead of overlapping them. The packaging
+smoke test that installs the CLI tarball outside the workspace, and the CLI and SSO end-to-end
+suites, do still wait for `pnpm test`.
 
 On a pull request each of those jobs runs only if the diff can reach it: a `changes` job
 classifies every changed path and the rest gate on its output. A CLI-only change skips the browser

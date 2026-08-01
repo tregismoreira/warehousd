@@ -185,8 +185,14 @@ jobs:
       - if: always()
         run: pnpm test:down
 
+  # Deliberately not `needs: test`, unlike `pack` and `e2e` below. This is the longest job in the
+  # workflow, so gating it on the suite put its ~9 minutes *after* the suite's ~4 rather than
+  # alongside them, for a 13-minute wait on a green pull request. Nothing here consumes what
+  # `test` produces — this job builds its own containers — so the only thing the gate bought was
+  # not spending browser minutes on a branch whose unit tests were already red. Feedback latency
+  # on the green path is worth more than those minutes. Both jobs still block the merge.
   playwright:
-    needs: [changes, test]
+    needs: changes
     if: needs.changes.outputs.playwright == 'true'
     runs-on: ubuntu-latest
     permissions:

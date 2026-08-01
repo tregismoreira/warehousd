@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { as, resetEnv, selectOption, signOut } from "./helpers/auth";
+import { as, resetEnv, selectOption } from "./helpers/auth";
 
 // dev-bootstrap seeds mia with announcements/people/policies approved and a *pending*
 // salaries request ("comp benchmarking") already sitting in Marcus's inbox. That leaves only
@@ -22,8 +22,9 @@ test.describe("manager review", () => {
     await page.getByLabel("Purpose").fill("capacity planning");
     await page.getByRole("button", { name: "Submit request" }).click();
     await expect(page.getByText("Access requested")).toBeVisible();
-    await signOut(page);
 
+    // Handover is `as()` alone — it clears the cookie jar before adopting the next persona's,
+    // and signing out would revoke a session the rest of the run shares.
     await as(page, "manager");
     const row = page.getByRole("row", { name: new RegExp(`mia.*${DENIED}`) }).last();
     await expect(row).toContainText("capacity planning");
@@ -32,7 +33,6 @@ test.describe("manager review", () => {
     await page.getByRole("button", { name: "Deny" }).click();
     await expect(page.getByText("Request denied")).toBeVisible();
     await expect(page.getByRole("row", { name: new RegExp(`mia.*${DENIED}`) })).toHaveCount(0);
-    await signOut(page);
 
     await as(page, "member");
     await expect(page.getByRole("row", { name: new RegExp(DENIED) }).last()).toContainText(
@@ -59,7 +59,6 @@ test.describe("manager review", () => {
     await sheet.getByLabel("Expires").fill(expiry);
     await sheet.getByRole("button", { name: "Approve" }).click();
     await expect(page.getByText("Grant approved")).toBeVisible();
-    await signOut(page);
 
     await as(page, "member");
     const mine = page.getByRole("row", { name: new RegExp(SEEDED_PENDING) }).last();
