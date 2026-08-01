@@ -430,6 +430,25 @@ The interesting ones, and where they live:
   non-numeric `limit`, over both the REST and MCP paths.
 - **Four eyes** (`proposal-authz`, `rest-api.integration`) — a proposer cannot
   approve or reject their own proposal, whatever verbs their grant carries.
+- **Four eyes, on grants** (`grant-self-approval`, `grant-approve.integration`) —
+  a `live` grant cannot be approved by the person who requested it; it stays
+  pending so a second approver can still decide it, and the refusal comes before
+  the verb rules so it names the real problem. `dev` is exempt, and that is
+  asserted too, because the exemption is what the console's one-click
+  request-and-approve depends on.
+- **Console reads are governed, not privileged**
+  (`apps/web/test/console-browse.integration.test.ts`) — the admin console's own
+  query route refuses an admin with no grant exactly as it refuses a member,
+  returns only granted fields, writes exactly one audit row per call including
+  refusals, and never lets a denied field's canary value into the response —
+  whether it is selected, named explicitly, or used as a filter (which would
+  otherwise be a match/no-match oracle).
+- **Inventory reads stay inside the tenant and the environment**
+  (`documents-inventory`) — counts, file listings and term usage all read through
+  the env-scoped pool inside `withOrg`, so one org's documents never enter
+  another's totals and a collection with no view in this environment is reported
+  as absent rather than aborting the transaction that was counting its
+  neighbours.
 
 ## What is still manual
 
