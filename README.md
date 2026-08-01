@@ -425,14 +425,17 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 | [AGENTS.md](AGENTS.md) | Instructions for coding agents — conventions, test placement, machine load |
 | [docs/testing.md](docs/testing.md) | The suites, what they assert, what is still manual |
 | [docs/releasing.md](docs/releasing.md) | Cutting a tagged release of the image and the CLI |
+| [docs/roadmap.md](docs/roadmap.md) | What is planned, and where the open-source line sits |
 
 ## Roadmap
 
 Semantic search over the reserved embedding column · document upload with
-PDF/DOCX extraction · a governed write path (`broker.mutate`) ·
-connect-in-place collections over external Postgres · masking postures ·
-aggregate-only postures with inference-leak protection · deploy targets ·
-IdP group→role mapping.
+PDF/DOCX extraction · connect-in-place collections over external Postgres ·
+masking postures · aggregate-only postures with inference-leak protection ·
+deploy targets · IdP group→role mapping.
+
+[docs/roadmap.md](docs/roadmap.md) has the detail, and states where the
+open-source line sits: everything shipped is MIT and stays MIT.
 
 ## License
 

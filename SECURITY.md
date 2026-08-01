@@ -154,6 +154,34 @@ deployment that follows the expectations above, but each is worth knowing:
   single credential cannot both propose and promote. The admin CSV/JSON import is
   separate and append-only through an `INSERT`-only Postgres role.
 
+## Out of scope
+
+Absence here is a decision, not an oversight. These are things warehousd does not
+attempt, so that a report of "X is missing" can be answered quickly and a report
+of something genuinely broken is not buried among them.
+
+- **Masking and transform postures.** A field is allow or deny; there is nothing
+  in between, and no partial-value redaction on the read path.
+- **Connect-in-place over an external database.** Collections live in
+  warehousd's own Postgres.
+- **Multi-tenancy beyond the org column.** Every grant, audit event and document
+  carries an org, isolated by a view predicate and RLS, but one deployment is
+  intended to serve one organization. It is not a hostile-tenant boundary.
+- **A malicious administrator, or anyone with Postgres superuser.** An admin can
+  grant themselves access and the audit trail will record it; that is the
+  control. Superuser is outside the model entirely — it can rewrite the trail.
+- **Abuse detection beyond rate limiting and lockout.** Per-IP throttling
+  (Better Auth), per-client throttling on `/v1/token` and per-account lockout on
+  local credentials. No behavioural analysis, no anomaly detection.
+- **Distributed rate limiting.** The `/v1/token` limiter is in-memory and
+  per-process *by design* — it is a CPU cost cap, not a quota. Behind several
+  machines each holds its own window. A real quota belongs at the ingress.
+- **Semantic/vector search, PDF and DOCX extraction, an upload UI.** The
+  `vector(1536)` column is reserved and unpopulated; indexing reads local
+  directories of `.md` and `.txt`.
+- **SCIM, compliance exports, IdP group→role mapping.** JIT provisioning creates
+  a `member`; role changes are manual.
+
 ## Dependency advisories
 
 CI runs `pnpm audit --prod --audit-level high` (the `quality` job in

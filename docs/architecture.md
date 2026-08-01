@@ -183,8 +183,33 @@ the very next query; nothing about a grant is ever baked into a token.
 
 A driver error becomes `internal_error` and nothing else. Postgres messages name
 columns, tables, and values — precisely what invariant 4 forbids leaking — so the
-raw error goes to the server log and the caller gets a bare reason code. The
-audit row is still written: an unaudited probe would leave no trace.
+error goes to the server log and the caller gets a bare reason code. The audit
+row is still written: an unaudited probe would leave no trace.
+
+### Logging
+
+Invariant 4 ends "…or a log line", and that clause is the one that is easy to
+lose. A response is obviously a place a denied value must not appear; a log is
+not obviously anything, until you notice that the driver error you logged for
+debugging carries the row that failed. Postgres puts it in `DETAIL` — `Key
+(home_address)=(…) already exists` — so logging a `pg` error whole is a way for a
+denied field to reach a log line while every response stayed correctly clean.
+
+`redact()` in `packages/broker/src/log/redact.ts` is the policy in code. It masks
+credentials and grant material (passwords, tokens, cookies, client secrets), the
+field names the example config denies, and the `pg` error fields that carry row
+values — `detail`, `where`, `internalQuery`. It deliberately keeps the error's
+`message`: that names the constraint rather than the value, and is what makes the
+log worth having. `packages/cli/src/ui/mask.ts` does the same job for values the
+CLI prints to an operator.
+
+Be honest about what this is: **defence in depth, not the control.** Redaction is
+key-name-based, so it cannot catch a denied value that arrives under a name it
+does not know. The control is that the broker never selects a denied field in the
+first place. What keeps the two aligned is the probe suite, which plants canaries
+and greps every response, error and captured log line for them — including raw
+`process.stdout` and `process.stderr`, because Next.js and Better Auth write
+there rather than through `console`. See [testing.md](testing.md).
 
 **Aggregation is permitted only over fields the caller could already read row by
 row.** That is deliberate: an aggregate can then never reveal anything new, so no
@@ -754,6 +779,19 @@ outside the filter.
 bound on a writable collection. The eventual answer is a retention policy or
 partitioning on `_rev_at` / `at`; until then an operator should plan for growth
 rather than discover it.
+
+The audit trail is the same problem with a sharper edge. `app.audit_events` also
+grows without bound, and the application *cannot* prune it: `revoke update,
+delete` is what stops a compromised app role erasing its own trail, and it stops
+the app tidying up for exactly the same reason. Pruning is a superuser action,
+and therefore a deliberate and attributable one. That is the intended trade —
+unbounded growth is the price of a trail the application cannot rewrite.
+
+For backups, the order that matters is: `app.grants`, `app.audit_events` and
+`app.change_log` are irreplaceable; `data_synth` regenerates from the config with
+a fixed seed (`warehousd regen-synth`); `data_live` has its own upstream and an
+append-only import path. See [deploy-fly.md](deploy-fly.md#backups) for the
+mechanics on Fly.
 
 ## Client credentials and the collection ceiling
 

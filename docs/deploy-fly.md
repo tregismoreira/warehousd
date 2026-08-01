@@ -242,6 +242,44 @@ Deploy y/n?
 
 Posture changes (field access) are listed first. Approve with `y` or `--yes`.
 
+## Backups
+
+Fly Postgres takes daily volume snapshots and keeps them for a limited window
+(five days by default). They are the only copy of anything here, so treat the
+retention window as the real recovery limit.
+
+```bash
+flyctl volumes list -a harbor-warehousd-db
+flyctl volumes snapshots list <volume-id>
+```
+
+**What is worth recovering, in order.** Not everything in the database costs the
+same to lose:
+
+| Data | If lost | Why |
+|---|---|---|
+| `app.grants`, `app.audit_events`, `app.change_log` | **Unrecoverable** | Who approved what, who read what, and when. Nothing can regenerate a decision history. |
+| `app.client_policies`, `app.client_secrets`, `app.trusted_issuers` | Re-issue | Credentials can be recreated; every integration has to be re-pointed. |
+| `data_live` | Re-import | The customer's own data, with its own upstream and an append-only import path. |
+| `data_synth` | Regenerate | `warehousd regen-synth` rebuilds it from the config with a fixed seed. |
+
+The audit trail is the one to plan around: the application cannot prune it by
+design (see [architecture.md](architecture.md#the-app-schema)), so it grows
+without bound and your snapshots grow with it. Budget for that rather than
+discover it.
+
+**A restore is not a backup until it has been restored.** Test it against a
+throwaway app rather than against the deployment you care about:
+
+```bash
+flyctl postgres create --name harbor-restore-test --snapshot-id <snapshot-id>
+```
+
+Then point a scratch deploy at it and confirm the three things worth confirming:
+`app.schema_migrations` lists every migration, `select count(*) from
+app.audit_events` is non-zero, and an approved grant still resolves. Destroy the
+restore app afterwards — it holds a full copy of live data.
+
 ## Tearing down the deployment
 
 To destroy the app and its database:
