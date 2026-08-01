@@ -39,7 +39,14 @@ export function AppShell({
           <EnvSwitcher initial={env} />
           <UserMenu email={email} role={role} />
         </header>
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        {/* Keyed on env. The switcher writes the cookie and calls router.refresh(), which
+            re-renders the server tree but deliberately preserves client state — so a page that
+            fetched its data in an effect would go on showing the other environment's documents,
+            counts and terms with the toggle reading `live`. Remounting on the change is what
+            makes the switcher switch anything. */}
+        <main key={env} className="flex-1 overflow-y-auto p-6">
+          {children}
+        </main>
       </div>
     </div>
   );
