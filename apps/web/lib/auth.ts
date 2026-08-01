@@ -12,6 +12,13 @@ export const LOCAL_LOGIN_DISABLED = process.env.WAREHOUSD_DISABLE_LOCAL_LOGIN ==
 const SHORT_PASSWORDS_OK =
   process.env.NODE_ENV !== "production" || process.env.WAREHOUSD_DEMO === "true";
 
+const BASE_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:8722";
+// The Secure flag follows the deployed scheme rather than NODE_ENV, for the same reason
+// SHORT_PASSWORDS_OK does not key off NODE_ENV alone: a production build served over plain http
+// (docker compose on a laptop) has to stay loggable-into, and a dev build behind an https tunnel
+// still needs Secure cookies.
+const IS_HTTPS = BASE_URL.startsWith("https://");
+
 const appPool = new Pool({
   connectionString: process.env.APP_DATABASE_URL,
   options: "-c search_path=app",
@@ -27,7 +34,7 @@ export const auth = betterAuth({
   // Keep Better Auth tables in the `app` schema (not public), matching the rest of the platform.
   database: appPool,
   secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:8722",
+  baseURL: BASE_URL,
   emailAndPassword: {
     // Local credentials are the bootstrap/demo fallback (see docs/architecture.md). Kill switch disables them entirely.
     enabled: !LOCAL_LOGIN_DISABLED,
@@ -42,6 +49,26 @@ export const auth = betterAuth({
       role: { type: "string", defaultValue: "member", input: false },
       orgId: { type: "string", defaultValue: "default", input: false },
     },
+  },
+  session: {
+    // 8 hours — a working day. The default is 7, which for a console that approves grants and
+    // reads governed data is a long time for a walked-away-from laptop to stay live.
+    expiresIn: 60 * 60 * 8,
+    updateAge: 60 * 60,
+  },
+  advanced: {
+    useSecureCookies: IS_HTTPS,
+    defaultCookieAttributes: {
+      httpOnly: true,
+      secure: IS_HTTPS,
+      // "lax", never "strict": the OAuth authorize step and the SSO callback both return through
+      // a cross-site redirect, and a Strict cookie is withheld on that hop — the MCP connector
+      // and every SSO login would break. The CSRF gap Lax leaves on the credential endpoints is
+      // closed by the Origin check in middleware.ts.
+      sameSite: "lax",
+    },
+    // Deliberately no cookiePrefix: middleware.ts calls getSessionCookie(req) with no config, and
+    // a custom prefix would make that lookup miss on every gated route.
   },
   trustedOrigins: trustedOrigins(),
   plugins: [mcpPlugin, envScopePlugin(appPool), ssoPlugin(appPool), ssoAdminPlugin()],

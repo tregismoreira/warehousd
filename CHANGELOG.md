@@ -13,6 +13,15 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Security
 
+- The credential endpoints refuse a request carrying an untrusted `Origin`. Better Auth's own
+  `originCheck` guards only routes that carry a redirect target and validates that URL, so
+  `trustedOrigins` was an open-redirect allowlist rather than a CSRF one: a cross-site
+  form-encoded POST to `/api/auth/sign-in/email` returned 200 and a `Set-Cookie`, logging the
+  victim into an account the attacker controls. Form-encoded posts are "simple requests" and get
+  no CORS preflight, so nothing else stopped it. The SAML assertion callback is deliberately
+  exempt — it is a legitimate cross-origin POST from the IdP.
+- Session cookies are `Secure` on an https origin, `HttpOnly` and `SameSite=Lax` always, and the
+  session lifetime is 8 hours rather than the default 7 days.
 - The MCP and REST query paths validate every client-supplied intent against a shared schema
   before any of it is read, closing a remotely-exploitable SQL injection through an aggregate
   function name. Refused intents are audited.
