@@ -6,6 +6,7 @@ import type {
   MutationResult,
 } from "../types";
 import { writeAudit, type AuditIntent } from "./write";
+import { redact } from "../log/redact";
 
 // One decision, one audit row. Every broker verb ends in exactly one of these two calls.
 //
@@ -109,15 +110,29 @@ export function makeAuditWriter(app: Pool, ctx: BrokerContext): AuditWriter {
     } catch (err) {
       // Loud, and with enough to reconstruct the decision that went unrecorded — this line is the
       // only remaining trace of it.
-      console.error("[broker] AUDIT WRITE FAILED — decision not recorded", {
-        collection,
-        outcome,
-        reason,
-        userId: ctx.userId,
-        orgId: ctx.orgId,
-        env: ctx.env,
-        err,
-      });
+      //
+      // Through redact() because of what a pg error carries: Postgres puts row values in the
+      // DETAIL field ("Key (email)=(a@b.com) already exists"), so logging the driver error whole
+      // is a way for a denied value to reach a log line — the half of invariant 4 that is easiest
+      // to forget. See packages/broker/src/log/redact.ts.
+      console.error(
+        "[broker] AUDIT WRITE FAILED — decision not recorded",
+        redact({
+          collection,
+          outcome,
+          reason,
+          userId: ctx.userId,
+          orgId: ctx.orgId,
+          env: ctx.env,
+          // Spread separately from name/message: those two are non-enumerable on an Error, while
+          // a driver's own fields (detail, table, column) are enumerable and are what redact()
+          // needs to see.
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message, ...(err as unknown as object) }
+              : err,
+        }),
+      );
       return null;
     }
   }

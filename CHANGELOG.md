@@ -42,6 +42,15 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Changed
 
+- The audit-failure log no longer carries a driver error's row values. Postgres reports them in
+  the error's `DETAIL` field ("Key (home_address)=(...) already exists"), and that line logs the
+  richest context the broker produces — it is the only remaining trace of a decision that went
+  unrecorded. It now passes through a redaction helper that masks `detail`, `where` and
+  `internalQuery` along with credentials, keeping the message so the constraint is still named.
+- The adversarial probe harness captures raw `process.stdout` and `process.stderr` as well as
+  `console.*`, and serialises object arguments before grepping them. It stringified them as
+  `[object Object]`, so the canary assertions searched a string that could not contain a canary
+  and passed whether or not a value had leaked.
 - Every database statement is bounded by a `statement_timeout`, and connection acquisition by a
   `connectionTimeoutMillis`, so a stalled Postgres surfaces as a refusal rather than a hang.
 - Read and write paths now agree about a grant's document filter for every declared field type.

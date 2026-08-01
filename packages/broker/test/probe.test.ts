@@ -12,6 +12,7 @@ import { loadConfig } from "../src/config/load";
 import { DENIED_CANARY, SSN_CANARY } from "./fixtures/canaries";
 import type { QueryIntent } from "../src/types";
 import { makeCtx } from "./helpers/ctx";
+import { captureLogs } from "./helpers/log-capture";
 import { ConfigSchema } from "../src/config/schema";
 
 const cfg = loadConfig(join(__dirname, "../../../examples/harbor"));
@@ -24,10 +25,7 @@ const allProbes = JSON.parse(readFileSync(join(__dirname, "fixtures/probes.json"
 // Skip document-specific probes (tested separately via searchDocuments)
 const probes = allProbes.filter((p) => !p.surface || p.surface === "query");
 
-let p: Provisioned,
-  admin: Pool,
-  pools: Pools,
-  logs: string[] = [];
+let p: Provisioned, admin: Pool, pools: Pools;
 beforeAll(async () => {
   p = await provision("probe");
   admin = new Pool({ connectionString: p.urls.admin });
@@ -62,13 +60,6 @@ beforeAll(async () => {
       [c, fields],
     );
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
-  logs = [];
-  vi.spyOn(console, "log").mockImplementation((...a) => {
-    logs.push(a.join(" "));
-  });
-  vi.spyOn(console, "error").mockImplementation((...a) => {
-    logs.push(a.join(" "));
-  });
 });
 afterAll(async () => {
   vi.restoreAllMocks();
@@ -79,18 +70,36 @@ afterAll(async () => {
 
 it("no probe leaks any denied canary; outcomes match expectations", async () => {
   const broker = makeBroker(pools, cfg);
-  for (const probe of probes) {
-    const r = await broker.query(makeCtx({ userId: "mia" }), probe.intent);
-    const outcome = r.ok ? "allowed" : "refused";
-    expect(outcome, `probe "${probe.name}"`).toBe(probe.expect);
-    const payload = JSON.stringify(r);
+  // Capture console AND the raw streams, for the probe loop only: mocking process.stdout.write
+  // for the whole file swallows Vitest's own reporter output. Results are collected first and
+  // asserted after restore(), so a failure can actually print.
+  const capture = captureLogs();
+  const results: { name: string; outcome: string; payload: string }[] = [];
+  try {
+    for (const probe of probes) {
+      const r = await broker.query(makeCtx({ userId: "mia" }), probe.intent);
+      results.push({
+        name: probe.name,
+        outcome: r.ok ? "allowed" : "refused",
+        payload: JSON.stringify(r),
+      });
+    }
+  } finally {
+    capture.restore();
+  }
+
+  for (const [i, probe] of probes.entries()) {
+    expect(results[i]?.outcome, `probe "${probe.name}"`).toBe(probe.expect);
     for (const canary of [DENIED_CANARY, SSN_CANARY]) {
-      expect(payload.includes(canary), `canary in response of "${probe.name}"`).toBe(false);
+      expect(results[i]?.payload.includes(canary), `canary in response of "${probe.name}"`).toBe(
+        false,
+      );
     }
   }
-  // no canary reached any captured log line
+  // no canary reached any captured log line — console or raw stream
+  const logText = capture.text();
   for (const canary of [DENIED_CANARY, SSN_CANARY])
-    expect(logs.join("\n").includes(canary)).toBe(false);
+    expect(logText.includes(canary), "canary in captured logs").toBe(false);
   // the table still exists (sql-injection probe did not drop it)
   const still = await admin.query(`select count(*)::int c from data_synth.people`);
   expect(still.rows[0].c).toBeGreaterThan(0);
@@ -124,7 +133,6 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
   let p2: Provisioned;
   let db2: Pool;
   let pools2: Pools;
-  let logs2: string[] = [];
   afterAll(async () => {
     vi.restoreAllMocks();
     await db2?.end();
@@ -187,13 +195,6 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
     });
 
     pools2 = createPools({ app: p2.urls.admin, dev: p2.urls.dev, live: p2.urls.live });
-    logs2 = [];
-    vi.spyOn(console, "log").mockImplementation((...a) => {
-      logs2.push(a.join(" "));
-    });
-    vi.spyOn(console, "error").mockImplementation((...a) => {
-      logs2.push(a.join(" "));
-    });
   });
 
   it("hostile q and document_filter bypass probes do not leak canary; outcomes match", async () => {
@@ -229,22 +230,35 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
       (p) => p.surface === "searchDocuments" || p.name === "document-filter-bypass-via-filters",
     );
 
-    for (const probe of newProbes) {
-      const surface = probe.surface || "query";
-      const r =
-        surface === "searchDocuments"
-          ? await broker.searchDocuments(makeCtx({ userId: "u_doc" }), probe.intent)
-          : await broker.query(makeCtx({ userId: "u_doc" }), probe.intent);
-      const outcome = r.ok ? "allowed" : "refused";
-      expect(outcome, `probe "${probe.name}"`).toBe(probe.expect);
-      const payload = JSON.stringify(r);
-      expect(payload.includes(DOC_RESTRICTED_CANARY), `canary in response of "${probe.name}"`).toBe(
-        false,
-      );
+    const capture = captureLogs();
+    const results: { name: string; outcome: string; payload: string }[] = [];
+    try {
+      for (const probe of newProbes) {
+        const surface = probe.surface || "query";
+        const r =
+          surface === "searchDocuments"
+            ? await broker.searchDocuments(makeCtx({ userId: "u_doc" }), probe.intent)
+            : await broker.query(makeCtx({ userId: "u_doc" }), probe.intent);
+        results.push({
+          name: probe.name,
+          outcome: r.ok ? "allowed" : "refused",
+          payload: JSON.stringify(r),
+        });
+      }
+    } finally {
+      capture.restore();
     }
 
-    // no canary reached any log
-    expect(logs2.join("\n").includes(DOC_RESTRICTED_CANARY)).toBe(false);
+    for (const [i, probe] of newProbes.entries()) {
+      expect(results[i]?.outcome, `probe "${probe.name}"`).toBe(probe.expect);
+      expect(
+        results[i]?.payload.includes(DOC_RESTRICTED_CANARY),
+        `canary in response of "${probe.name}"`,
+      ).toBe(false);
+    }
+
+    // no canary reached any log — console or raw stream
+    expect(capture.text().includes(DOC_RESTRICTED_CANARY), "canary in captured logs").toBe(false);
   });
 });
 

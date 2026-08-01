@@ -30,6 +30,7 @@ export { generateSynthetic } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
 export { migrateApp, createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-app";
 export { MIGRATIONS, type Migration } from "./db/migrations";
+export { redact, redactString } from "./log/redact";
 export * from "./grants/manage";
 export {
   getClientPolicy,
