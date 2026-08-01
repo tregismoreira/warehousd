@@ -92,6 +92,15 @@ describe("credential-endpoint origin gate (middleware)", () => {
     );
   }
 
+  // Every other test here calls middleware() directly, which proves the logic but not the
+  // wiring: Next only invokes it for paths in `config.matcher`, so dropping the credential
+  // entries would disable the gate entirely while leaving all of them green.
+  it("is actually wired to the credential paths", async () => {
+    const { config } = await import("../middleware");
+    expect(config.matcher).toContain("/api/auth/sign-in/:path*");
+    expect(config.matcher).toContain("/api/auth/sign-up/:path*");
+  });
+
   it("refuses a cross-site form POST to sign-in", async () => {
     process.env.BETTER_AUTH_URL = "http://localhost:8722";
     const res = await post("https://evil.example.com");

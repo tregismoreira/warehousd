@@ -309,6 +309,28 @@ warehousd builds authorization, not authentication.
   your company account", never a new password.
 - **Tokens carry no grant data** — only subject, client id, and one env scope.
 
+Two controls sit on the local-credential path, for the deployments that keep it
+enabled:
+
+- **Per-account lockout.** Five failed attempts lock an address for fifteen
+  minutes, and the lock refuses the *correct* password too — one that the right
+  password walks through protects nothing. The existing limiters are per-IP
+  (Better Auth) and per-client (`/v1/token`), so neither sees a guess spread
+  thinly across addresses. Attempts against addresses that are not accounts are
+  counted identically, so the lock cannot be used to enumerate users, and a lock
+  is not extended by continued guessing — that would hand an attacker a denial of
+  service against the account's owner.
+- **An origin check on sign-in and sign-up.** Better Auth's own `originCheck`
+  guards routes carrying a redirect target and validates *that URL*, which makes
+  `trustedOrigins` an open-redirect allowlist rather than a CSRF one. Nothing
+  gated the credential endpoints on `Origin`, and a cross-site form-encoded POST
+  is a "simple request" that gets no CORS preflight — so it succeeded, and the
+  browser honoured the `Set-Cookie`, logging the victim into an account the
+  attacker controls. `middleware.ts` refuses an `Origin` that is present and
+  untrusted. A request with no `Origin` passes: browsers always send it
+  cross-site, so its absence is a server or a CLI. The SAML assertion callback is
+  exempt by design — it is a legitimate cross-origin POST from the IdP.
+
 **Environment is never a request parameter.** It exists only as an OAuth scope,
 `env:dev` or `env:live`, decided server-side at issuance:
 
@@ -948,22 +970,51 @@ create table app.change_log (          -- the change feed; carries no field data
   seq bigserial pk, org_id text, env text, collection text, document_id text,
   rev uuid, op text, status text, at timestamptz, by text
 );
+
+create table app.login_attempts (      -- credential lockout; keyed by email, not user id
+  email text pk, failures int, last_failure_at timestamptz, locked_until timestamptz
+);
+
+create table app.schema_migrations (   -- the migration ledger; written by the runner itself
+  version text pk, applied_at timestamptz
+);
 -- audit_events is INSERT-only for the app role: no UPDATE, no DELETE privilege.
 ```
 
-Drizzle manages the `app` schema. `warehousd apply` owns everything in
-`data_synth` and `data_live` — tables and views — idempotently, diffing against
-`app.collections.config`. Broker data queries and view DDL are raw SQL through
-`pg` with the two role-scoped pools.
+**The `app` schema is versioned.** `packages/broker/src/db/migrations/` holds an
+ordered, append-only list of SQL modules, and `migrateApp()` applies the ones a
+database has not seen, recording each in `app.schema_migrations`. Two properties
+make that safe to run on every boot, which the container entrypoint does — and
+which the Fly release command depends on, since a failed migration there aborts
+the deploy and leaves the previous release serving:
 
-What re-applying will and will not migrate: every table is `create table if not
-exists`, and every non-primary-key column — plain field, bound vocabulary, file
-metadata — is followed by `add column if not exists`. Views are dropped and
-recreated rather than replaced, since `create or replace view` can only append
-columns. So adding a field to a collection that already exists, or binding a new
-vocabulary to it, lands on both the table and the view no matter where in the
-YAML it goes. Changing a field's type, renaming it, or removing it does not: the
-old column stays as it was. Those are the cases versioned migrations are for.
+- **One advisory lock**, so a rolling deploy starting two instances at once
+  cannot have both applying the same migration.
+- **One transaction per migration**, so a failure rolls back and records nothing.
+  A corrected migration is retried on the next boot rather than needing the
+  database repaired by hand.
+
+Migration `0001` is the pre-ledger schema verbatim, and every statement in it is
+`if not exists` or a `pg_constraint`-guarded `add constraint`. That is what lets
+an existing deployment adopt the ledger with no baseline step: it runs once
+against a schema that already matches, changes nothing, and records the version.
+Migrations after `0001` inherit none of that and must be forward-only. Never edit
+one that has shipped — the ledger records versions, not contents, so an edited
+migration is silently skipped everywhere it already ran.
+
+`warehousd apply` owns everything in `data_synth` and `data_live` — tables and
+views — separately and idempotently, diffing against `app.collections.config`.
+Broker data queries and view DDL are raw SQL through `pg` with the two
+role-scoped pools.
+
+Collection DDL is **not** versioned, and that distinction matters. Re-applying
+creates every table `if not exists` and follows every non-primary-key column —
+plain field, bound vocabulary, file metadata — with `add column if not exists`.
+Views are dropped and recreated rather than replaced, since `create or replace
+view` can only append columns. So adding a field to an existing collection, or
+binding a new vocabulary to it, lands on both the table and the view no matter
+where in the YAML it goes. Changing a field's type, renaming it, or removing it
+still does not: the old column stays as it was.
 
 ## The MCP surface
 

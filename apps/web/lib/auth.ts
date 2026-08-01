@@ -28,9 +28,11 @@ const appPool = new Pool({
 // and the process exits — a Postgres restart would take the app down with it.
 appPool.on("error", onPoolError("auth"));
 
-// Better Auth manages user/session/account/verification tables in the `app` schema,
-// alongside the hand-written app.grants / app.audit_events (createAppSchema). The two
-// never touch the same table names, so create-if-not-exists on both sides is safe.
+// Better Auth manages user/session/account/verification tables in the `app` schema, alongside the
+// ones our own migrations own — app.grants, app.audit_events, app.login_attempts. The two
+// migrators never touch the same table names, so running both against one schema is safe. Ours
+// runs first: migration 0001 deliberately carries no FK to Better Auth's tables, because they do
+// not exist yet at that point.
 export const auth = betterAuth({
   // Keep Better Auth tables in the `app` schema (not public), matching the rest of the platform.
   database: appPool,
