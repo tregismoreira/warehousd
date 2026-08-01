@@ -52,6 +52,14 @@ export { indexCollection } from "./indexing";
 export { syncDatasetTerms, loadTaxonomyBindings, slugify, type TaxonomyBinding } from "./taxonomy";
 export type { DocSearchIntent } from "./types";
 export { listDocumentPaths } from "./documents/paths";
+export {
+  countDocuments,
+  countDocumentsIn,
+  countTermUsage,
+  listFiles,
+  type FileSummary,
+  type Scope,
+} from "./documents/inventory";
 export { importCollection } from "./import/run";
 export { validateImportRows, type ImportError } from "./import/validate";
 export { parseImportPayload, parseCsv } from "./import/csv";

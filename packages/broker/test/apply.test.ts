@@ -92,6 +92,7 @@ describe("file collection apply", () => {
       );
       expect(v.rows.map((r) => r.column_name).sort()).toEqual(
         [
+          "checksum",
           "content",
           "document_id",
           "document_seq",
