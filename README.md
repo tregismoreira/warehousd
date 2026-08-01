@@ -338,7 +338,7 @@ yet built:
 | Admin / manager / member web UI | **real** | |
 | Audit log | **real** | Insert-only for the app role. |
 | Real-data import | *simplified* | Admin-only CSV/JSON append into `data_live` through an `INSERT`-only role. No update or delete path. |
-| App-schema migrations | *simplified* | Create-if-not-exists plus add-column-if-not-exists, so adding a field or binding a vocabulary lands on an existing collection. Type changes, renames and drops are not applied; versioned migrations are planned. |
+| App-schema migrations | **real** | Ordered and versioned, recorded in `app.schema_migrations`. Applied under an advisory lock so concurrent boots cannot race, each in its own transaction so a failure rolls back and can be retried rather than leaving a half-applied schema. Collection DDL remains additive — type changes, renames and drops are still not applied to an existing collection. |
 | Semantic / vector search | *stubbed* | `vector(1536)` column and pgvector are reserved but not populated. |
 | `warehousd deploy` | **real** | Provisions to Fly.io; enforces the demo-off expectation mechanically. |
 | Write path (MCP, REST, and review queue) | **real** | Append-only revisions; `proposal_only` grants hold writes pending until a human approves. Approve/reject are never MCP tools. |
