@@ -35,7 +35,21 @@ export async function runApply(projectDir: string, dbUrl: string): Promise<void>
   }
 }
 
-export async function runSeed(projectDir: string, dbUrl: string, seed = 42): Promise<void> {
+/**
+ * Regenerate the dev synthetic data, then re-index the file collections that depend on it.
+ *
+ * The re-index is the default because it is a repair, not an extra: `regenerateSynthetic`
+ * truncates the dataset collections `cascade` and `syncDatasetTerms` rebuilds the dev term set
+ * from the rows just generated, which leaves every file row's taxonomy links pointing at the
+ * term set that was replaced. `reindex: false` is for iterating on a dataset generator in a
+ * project whose file collections are not involved.
+ */
+export async function runSeed(
+  projectDir: string,
+  dbUrl: string,
+  seed = 42,
+  opts: { reindex?: boolean } = {},
+): Promise<{ seed: number; reindexed: string[] }> {
   const cfg = loadConfig(projectDir);
   const db = new Pool({ connectionString: dbUrl });
   // Dataset-backed vocabularies read their terms out of the rows just generated, so the sync
@@ -43,6 +57,21 @@ export async function runSeed(projectDir: string, dbUrl: string, seed = 42): Pro
   try {
     await regenerateSynthetic(db, cfg, seed);
     await syncDatasetTerms(db, cfg, "dev");
+    if (opts.reindex === false) return { seed, reindexed: [] };
+    const reindexed: string[] = [];
+    for (const [name, c] of Object.entries(cfg.collections)) {
+      if (c.type !== "file") continue;
+      // `metadata` is not optional in practice: every other index call site passes it, and
+      // omitting it here would re-index a changed file with its declared metadata columns left
+      // null — the exact drift fileMetadataFields exists to prevent.
+      const taxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
+      await indexCollection(db, "dev", name, resolve(projectDir, c.source!), {
+        taxonomies,
+        metadata: fileMetadataFields(c),
+      });
+      reindexed.push(name);
+    }
+    return { seed, reindexed };
   } finally {
     await db.end();
   }

@@ -301,7 +301,7 @@ grant check rather than a shared service account.
 | `warehousd open [admin\|mcp\|api]` | Open it in a browser. |
 | `warehousd secrets [--show]` | The generated credentials, masked by default. |
 | `warehousd apply` | Re-apply YAML (collections, postures, views) without a restart. |
-| `warehousd seed` / `regen-synth` | Generate or regenerate synthetic data. |
+| `warehousd seed [--no-reindex]` | Regenerate synthetic data, then re-index file collections. |
 | `warehousd index <collection>` | Re-index a file collection. |
 | `warehousd deploy` | Ship to Fly.io behind a production pre-flight. |
 

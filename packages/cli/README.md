@@ -21,8 +21,7 @@ npx warehousd
 - `stop` - Stop the running platform
 - `status` - Check platform status
 - `apply` - Apply configuration changes
-- `seed` - Seed the database with initial data
+- `seed` - Regenerate synthetic data, then re-index file collections
 - `index` - Index data for search
-- `regen-synth` - Regenerate synthetic data
 
 After `start`, the platform outputs a contract file to `.warehousd/outputs.json` with deployment and connection details.
