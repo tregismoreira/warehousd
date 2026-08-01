@@ -24,7 +24,11 @@ describe("app schema", () => {
       "client_secrets",
       "collections",
       "grants",
+      "login_attempts",
       "organizations",
+      // The migration ledger itself. It is created by the runner rather than by a migration,
+      // so it exists before 0001 does anything — see packages/broker/src/db/migrate.ts.
+      "schema_migrations",
       "terms",
       "trusted_issuers",
       "vocabularies",

@@ -85,6 +85,27 @@ describe("renderFlyToml", () => {
     const toml = renderFlyToml({ appName: "test-app", region: "sea" });
     expect(toml).toContain("[deploy]");
   });
+
+  // deploy.ts polls /api/health once after the release and then stops looking. Without a check
+  // block Fly never looks at all, so a machine that wedges after a healthy release stays in
+  // rotation serving errors.
+  it("configures a Fly health check against /api/health", () => {
+    const toml = renderFlyToml({ appName: "test-app", region: "sea" });
+    expect(toml).toContain("[[http_service.checks]]");
+    expect(toml).toContain('path = "/api/health"');
+    expect(toml).toContain('method = "GET"');
+    expect(toml).toContain("interval =");
+    expect(toml).toContain("timeout =");
+  });
+
+  // The grace period covers boot, not migrations — those run in release_command, on a one-off
+  // machine, before this machine takes traffic. It still has to outlast `next start`.
+  it("gives the check a grace period long enough to cover boot", () => {
+    const toml = renderFlyToml({ appName: "test-app", region: "sea" });
+    const grace = /grace_period = "(\d+)s"/.exec(toml);
+    expect(grace, "no grace_period on the health check").not.toBeNull();
+    expect(Number(grace?.[1])).toBeGreaterThanOrEqual(30);
+  });
 });
 
 describe("resolveBaseImage", () => {

@@ -338,7 +338,7 @@ yet built:
 | Admin / manager / member web UI | **real** | |
 | Audit log | **real** | Insert-only for the app role. |
 | Real-data import | *simplified* | Admin-only CSV/JSON append into `data_live` through an `INSERT`-only role. No update or delete path. |
-| App-schema migrations | *simplified* | Create-if-not-exists plus add-column-if-not-exists, so adding a field or binding a vocabulary lands on an existing collection. Type changes, renames and drops are not applied; versioned migrations are planned. |
+| App-schema migrations | **real** | Ordered and versioned, recorded in `app.schema_migrations`. Applied under an advisory lock so concurrent boots cannot race, each in its own transaction so a failure rolls back and can be retried rather than leaving a half-applied schema. Collection DDL remains additive — type changes, renames and drops are still not applied to an existing collection. |
 | Semantic / vector search | *stubbed* | `vector(1536)` column and pgvector are reserved but not populated. |
 | `warehousd deploy` | **real** | Provisions to Fly.io; enforces the demo-off expectation mechanically. |
 | Write path (MCP, REST, and review queue) | **real** | Append-only revisions; `proposal_only` grants hold writes pending until a human approves. Approve/reject are never MCP tools. |
@@ -425,14 +425,17 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 | [AGENTS.md](AGENTS.md) | Instructions for coding agents — conventions, test placement, machine load |
 | [docs/testing.md](docs/testing.md) | The suites, what they assert, what is still manual |
 | [docs/releasing.md](docs/releasing.md) | Cutting a tagged release of the image and the CLI |
+| [docs/roadmap.md](docs/roadmap.md) | What is planned, and where the open-source line sits |
 
 ## Roadmap
 
 Semantic search over the reserved embedding column · document upload with
-PDF/DOCX extraction · a governed write path (`broker.mutate`) ·
-connect-in-place collections over external Postgres · masking postures ·
-aggregate-only postures with inference-leak protection · deploy targets ·
-IdP group→role mapping.
+PDF/DOCX extraction · connect-in-place collections over external Postgres ·
+masking postures · aggregate-only postures with inference-leak protection ·
+deploy targets · IdP group→role mapping.
+
+[docs/roadmap.md](docs/roadmap.md) has the detail, and states where the
+open-source line sits: everything shipped is MIT and stays MIT.
 
 ## License
 

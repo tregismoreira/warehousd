@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "path";
 import {
   ensureSchemasAndRoles,
-  createAppSchema,
+  migrateApp,
   migrateUserOrg,
   loadConfig,
   applyConfig,
@@ -156,11 +156,11 @@ export async function bootstrap(): Promise<void> {
   const db = await waitForPostgres(appUrl, 60_000);
 
   try {
-    // 2. Schemas + data roles. Must precede createAppSchema, which grants to those roles.
+    // 2. Schemas + data roles. Must precede migrateApp, which grants to those roles.
     await ensureSchemasAndRoles(db, rolePw);
 
     // 3. app.* tables. MUST run before the Better Auth migration
-    await createAppSchema(db);
+    await migrateApp(db);
 
     // 4. Better Auth's own tables (user/session/account/verification/oauthApplication).
     //    Skip if WAREHOUSD_SKIP_BA_MIGRATE is set (for testing, since cwd:/app doesn't exist on host).

@@ -7,6 +7,10 @@ import type { BrokerContext } from "../src/types";
 import type { Pools } from "../src/db/pools";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
+import { captureLogs } from "./helpers/log-capture";
+
+// Planted in a driver error's DETAIL field, which is where Postgres reports row values.
+const AUDIT_LEAK_CANARY = "CANARY_AUDIT_DETAIL_LEAK_4c1d";
 
 // The audit write is the one thing the broker treats as non-negotiable, and until Phase 4 it was
 // also the one thing nothing guarded: ~25 `await writeAudit(…)` calls, none of them wrapped. A
@@ -178,5 +182,49 @@ describe("an audit write that fails", () => {
       process.off("unhandledRejection", onUnhandled);
     }
     expect(unhandled).toEqual([]);
+  });
+
+  // The audit-failure log is the only remaining trace of an unrecorded decision, so it carries the
+  // most context of any line the broker writes — and a pg error brings row values with it.
+  // Postgres puts them in DETAIL ("Key (email)=(a@b.com) already exists"), so logging the driver
+  // error whole is a way for a denied value to reach a log line: the half of invariant 4 that is
+  // easiest to forget, because the response was correctly clean the whole time.
+  it("does not put a driver error's DETAIL values into the failure log", async () => {
+    const leaky = new Proxy(pools.app, {
+      get(target, prop, receiver) {
+        if (prop !== "query") return Reflect.get(target, prop, receiver);
+        return (text: unknown, ...rest: unknown[]) => {
+          if (typeof text === "string" && text.includes("app.audit_events")) {
+            // Shaped like node-postgres' error: enumerable fields alongside the message.
+            const err = Object.assign(new Error("duplicate key value violates unique constraint"), {
+              code: "23505",
+              detail: `Key (home_address)=(${AUDIT_LEAK_CANARY}) already exists.`,
+              table: "audit_events",
+            });
+            return Promise.reject(err);
+          }
+          return (target.query as (...a: unknown[]) => unknown)(text, ...rest);
+        };
+      },
+    });
+    const leakyBroker = makeBroker({ ...pools, app: leaky }, cfg);
+
+    const capture = captureLogs();
+    let result: unknown;
+    try {
+      result = await leakyBroker.query(ctx, { collection: "people", fields: ["email"] });
+    } finally {
+      capture.restore();
+    }
+
+    // Still a controlled refusal — the redaction must not have changed the outcome.
+    expect((result as { ok: boolean }).ok).toBe(false);
+
+    // The log fired at all, so an empty capture cannot be why this passes.
+    expect(capture.text()).toContain("AUDIT WRITE FAILED");
+    expect(capture.text()).toContain("[redacted]");
+    expect(capture.text().includes(AUDIT_LEAK_CANARY), "driver DETAIL value reached the log").toBe(
+      false,
+    );
   });
 });

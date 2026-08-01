@@ -90,8 +90,10 @@ describe("imported live data is subject to the same enforcement as seeded data",
 
   it("the full hostile-intent suite leaks no imported denied value", async () => {
     for (const probe of probes) {
-      // Skip probes not applicable to the people collection (e.g., searchDocuments surface or collection-specific fields)
-      if (probe.surface === "searchDocuments") continue;
+      // Only the broker-query probes are replayable here. An allowlist rather than a list of
+      // surfaces to skip: `surface: "mcp"` probes carry `args` for a tool call and no `intent`
+      // at all, so a denylist reaches straight through to `probe.intent.collection` and throws.
+      if (probe.surface && probe.surface !== "query") continue;
       if (probe.intent.collection && probe.intent.collection !== "people") continue;
 
       const intent = { ...probe.intent, collection: "people" };
@@ -121,7 +123,7 @@ describe("imported live data is subject to the same enforcement as seeded data",
   it("every probe above is audited", async () => {
     // Count applicable probes: non-searchDocuments that target people (or have no collection, which we override to people)
     const applicableProbes = probes.filter((p) => {
-      if (p.surface === "searchDocuments") return false;
+      if (p.surface && p.surface !== "query") return false;
       if (p.intent.collection && p.intent.collection !== "people") return false;
       return true;
     }).length;
