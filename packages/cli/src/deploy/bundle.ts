@@ -11,11 +11,19 @@ import { type WarehousdConfig } from "@warehousd/broker";
  * Returns paths relative to the project directory, in stable sorted order so the Docker layer is reproducible.
  * Deduplicates (several collections may share a source directory).
  */
-export function collectBundlePaths(cfg: WarehousdConfig): string[] {
+export function collectBundlePaths(cfg: WarehousdConfig, projectDir?: string): string[] {
   const paths = new Set<string>();
 
   // Always include warehousd.yml
   paths.add("warehousd.yml");
+
+  // The project's own migrations, when it has any. These are what let a destructive collection
+  // change through, and the release command applies them before applyConfig — so a deploy that
+  // left them out of the image would ship a config the container then refuses to apply.
+  //
+  // Unlike `source_live`, there is nothing sensitive here: a migration is DDL the operator wrote,
+  // not live content.
+  if (projectDir && existsSync(join(projectDir, "migrations"))) paths.add("migrations");
 
   // Add all collection source directories (not source_live)
   for (const collection of Object.values(cfg.collections)) {
@@ -34,7 +42,7 @@ export function collectBundlePaths(cfg: WarehousdConfig): string[] {
  * docs do not linger from a previous deploy.
  */
 export function writeBundle(cfg: WarehousdConfig, projectDir: string, outDir: string): void {
-  const paths = collectBundlePaths(cfg);
+  const paths = collectBundlePaths(cfg, projectDir);
 
   // Clear outDir if it exists
   if (existsSync(outDir)) {

@@ -9,6 +9,7 @@ export function buildDeployOutputs(args: {
   cfg: WarehousdConfig;
   databaseUrl: string | null;
   now: Date;
+  migrationVersions?: string[];
 }): DeployOutputs {
   const base = `https://${args.appName}.fly.dev`;
   return {
@@ -19,6 +20,7 @@ export function buildDeployOutputs(args: {
     env: "dev",
     deployedAt: args.now.toISOString(),
     configSnapshot: args.cfg,
+    migrationVersions: args.migrationVersions ?? [],
   };
 }
 
