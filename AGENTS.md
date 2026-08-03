@@ -31,6 +31,10 @@ CI runs every one of them. **`pnpm test` does not typecheck** — vitest transpi
 so `pnpm typecheck` is what catches a type error and a green test run proves less than it looks
 like.
 
+**Do not run the full suite to check your own work** — CI is the gate. Run `pnpm test <filter>` for
+what you changed, plus `typecheck` and `lint`; a bare `test`, `build` or `e2e` only when asked or
+when no filter covers the change.
+
 `pnpm test:down` takes the volume with it and forces the next run to rebuild the cached template
 databases from scratch. Use `docker compose -f docker-compose.test.yml stop` unless you actually
 want that.
