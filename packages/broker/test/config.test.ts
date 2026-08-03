@@ -407,6 +407,65 @@ collections:
   rmSync(dir, { recursive: true, force: true });
 });
 
+it("defaults audit to enabled", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
+  writeFileSync(
+    join(dir, "warehousd.yml"),
+    `
+project: p
+collections:
+  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
+`,
+  );
+  expect(loadConfig(dir).audit.enabled).toBe(true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+it("accepts audit.enabled: false", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
+  writeFileSync(
+    join(dir, "warehousd.yml"),
+    `
+project: p
+audit: { enabled: false }
+collections:
+  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
+`,
+  );
+  expect(loadConfig(dir).audit.enabled).toBe(false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// The point of the key is being able to turn it off per environment without editing the file that
+// is checked in. Both routes have to yield a real boolean: interpolation is textual and runs
+// before the YAML parse, so `${env:WH_AUDIT}` with "false" arrives as the bare token `false` — but
+// nothing enforces that, and a schema that quietly coerced would read "false" as true.
+it("turns audit off through warehousd.local.yml and through ${env:...}", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
+  writeFileSync(
+    join(dir, "warehousd.yml"),
+    `
+project: p
+audit: { enabled: true }
+collections:
+  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
+`,
+  );
+  writeFileSync(join(dir, "warehousd.local.yml"), `audit: { enabled: false }\n`);
+  expect(loadConfig(dir).audit.enabled).toBe(false);
+
+  writeFileSync(join(dir, "warehousd.local.yml"), `audit: { enabled: \${env:WH_TEST_AUDIT} }\n`);
+  process.env.WH_TEST_AUDIT = "false";
+  try {
+    expect(loadConfig(dir).audit.enabled).toBe(false);
+    process.env.WH_TEST_AUDIT = "true";
+    expect(loadConfig(dir).audit.enabled).toBe(true);
+  } finally {
+    delete process.env.WH_TEST_AUDIT;
+  }
+  rmSync(dir, { recursive: true, force: true });
+});
+
 describe("config schema rejects unrecognised keys", () => {
   // A typo in warehousd.yml used to parse cleanly and change policy. `postur: deny` left the field
   // with no declared posture at all, which is not the same thing as a field that denies — so the

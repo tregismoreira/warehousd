@@ -3,12 +3,13 @@ import type { Pools } from "../db/pools";
 import { withOrg } from "../db/pools";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
 import { writeAudit } from "../audit/write";
+import { auditEnabled } from "../config/load";
 import { parseImportPayload } from "./csv";
 import { validateImportRows, type ImportError } from "./validate";
 import { loadTaxonomyBindings, syncDatasetTerms, type TaxonomyBinding } from "../taxonomy";
 
 export type ImportResult =
-  | { ok: true; imported: number; columns: string[]; auditId: string }
+  | { ok: true; imported: number; columns: string[]; auditId: string | null }
   | { ok: false; reason: string; errors?: ImportError[]; auditId: string | null };
 
 // The single write path into data_live: real data arrives through the admin import path,
@@ -17,8 +18,9 @@ export type ImportResult =
 //   1. Atomic — a partially applied file is worse than a rejected one.
 //   2. Append-only — no ON CONFLICT DO UPDATE. The role has no UPDATE privilege, so a
 //      duplicate key surfaces as a refusal instead of silently rewriting real data.
-//   3. Audited on every outcome, through the app pool. The import role cannot reach `app`,
-//      which is deliberate: the writer of data is not the writer of its own audit trail.
+//   3. Audited on every outcome, through the app pool — unless the deployment has turned the
+//      trail off (`audit.enabled: false`). The import role cannot reach `app`, which is
+//      deliberate: the writer of data is not the writer of its own audit trail.
 export async function importCollection(
   pools: Pools,
   cfg: WarehousdConfig,
@@ -27,25 +29,30 @@ export async function importCollection(
   payload: { text: string; format: "csv" | "json" },
   orgId: string = DEFAULT_ORG_ID,
 ): Promise<ImportResult> {
+  // Import writes its own row rather than going through audit/decision.ts, so it has to honour
+  // `audit.enabled` itself — an environment configured as unaudited must not still collect a row
+  // per import.
   const audit = (
     outcome: "allowed" | "refused",
     reason: string | null,
     extra: Record<string, unknown>,
-  ) =>
-    writeAudit(pools.app, {
-      userId: actor,
-      env: "live",
-      collection,
-      orgId,
-      // Column names and counts only — never a cell value. An import file may carry real
-      // personal data and the audit log is queryable by every admin.
-      intent: { op: "import", format: payload.format, ...extra },
-      fieldsReturned: [],
-      grantId: null,
-      outcome,
-      reason,
-      via: "session",
-    });
+  ): Promise<string | null> =>
+    !auditEnabled(cfg)
+      ? Promise.resolve(null)
+      : writeAudit(pools.app, {
+          userId: actor,
+          env: "live",
+          collection,
+          orgId,
+          // Column names and counts only — never a cell value. An import file may carry real
+          // personal data and the audit log is queryable by every admin.
+          intent: { op: "import", format: payload.format, ...extra },
+          fieldsReturned: [],
+          grantId: null,
+          outcome,
+          reason,
+          via: "session",
+        });
 
   if (!pools.imp) {
     return { ok: false, reason: "import_not_configured", auditId: null };

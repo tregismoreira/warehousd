@@ -65,6 +65,7 @@ export async function runDeploy(
   dir: string,
   opts: {
     allowLocalLogin?: boolean;
+    allowDisabledAudit?: boolean;
     yes?: boolean;
     destroy?: boolean;
     localBuild?: boolean;
@@ -132,6 +133,7 @@ export async function runDeploy(
     projectDir: dir,
     env: process.env,
     allowLocalLogin: !!opts.allowLocalLogin,
+    allowDisabledAudit: !!opts.allowDisabledAudit,
     ssoLookup: ssoConfiguredInDatabase,
   });
 

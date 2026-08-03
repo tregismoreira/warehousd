@@ -232,9 +232,10 @@ CLI will not index one directory into both environments.
 
 Provisions a warehousd stack to Fly.io from the same `warehousd.yml`. A
 pre-flight checklist must pass before anything is created: the `deploy:` block
-exists, all `${env:VAR}` references resolve, demo mode is off, SSO or
-`--allow-local-login` is configured, and `flyctl` is installed and authenticated.
-Every check is printed if any fail — nothing is created until all pass.
+exists, all `${env:VAR}` references resolve, demo mode is off, the audit trail is
+on or `--allow-disabled-audit` is passed, SSO or `--allow-local-login` is
+configured, and `flyctl` is installed and authenticated. Every check is printed
+if any fail — nothing is created until all pass.
 
 The server image is not yet published (the repo is private and no release tag
 exists). Until it is, build the base locally and pass `--local-build`:
@@ -253,6 +254,7 @@ while the default `--remote-only` path does not.
 | --------------------- | -------------------------------------------------------------------------------------------------- |
 | `-d, --dir <dir>`     | Project directory (default: current).                                                              |
 | `--allow-local-login` | Enable `admin@warehousd.local` with a generated password, in addition to any configured SSO.       |
+| `--allow-disabled-audit` | Deploy a project configured with `audit.enabled: false`. Nothing it does will be recorded.      |
 | `-y, --yes`           | Skip the re-deploy diff prompt (one-time deploys always prompt).                                   |
 | `--local-build`       | Build the image locally; otherwise use the published one.                                          |
 | `--destroy`           | Tear down the Fly app and database. Requires typing the app name exactly; `--yes` does not bypass. |

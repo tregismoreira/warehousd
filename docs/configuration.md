@@ -27,6 +27,8 @@ is grantable.
 ```yaml
 project: acme          # required. Namespace for containers, volumes, and state
 demo: false            # default false. true seeds the three demo personas
+audit:
+  enabled: true        # default true. false records nothing at all
 server:
   port: 8722           # default 8722
   image: ...           # optional. Override the published server image
@@ -55,6 +57,29 @@ database it does not manage.
 `demo: true` seeds `ana@demo.local` (admin), `marcus@demo.local` (manager), and
 `mia@demo.local` (member), all with the password `demo`, and shows them on the
 login page. **Never enable it on a deployment reachable by anyone else.**
+
+`audit.enabled: false` turns the audit trail off for the whole deployment.
+Nothing is written to `app.audit_events` — allows, refusals and imports alike —
+and every result comes back with `auditId: null` instead of a row id. Decisions
+themselves are unchanged: a refusal still refuses, a grant is still required,
+and the only difference is that no record survives the response. This exists for
+lower environments; `warehousd deploy` refuses a project configured this way
+unless you pass `--allow-disabled-audit`, and the admin audit page says plainly
+that it is off rather than showing an empty table.
+
+Because it is a plain boolean it overrides cleanly per machine, either from
+`warehousd.local.yml`:
+
+```yaml
+audit: { enabled: false }
+```
+
+or from the environment, since `${env:…}` is substituted before the YAML is
+parsed and so yields a real boolean:
+
+```yaml
+audit: { enabled: ${env:WAREHOUSD_AUDIT} }   # WAREHOUSD_AUDIT=false
+```
 
 The `deploy:` block is optional and required only by `warehousd deploy`. It
 names the target (`fly` is the only value), the globally unique app name, the

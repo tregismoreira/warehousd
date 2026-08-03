@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import type { Pools } from "../db/pools";
 import type { WarehousdConfig } from "../config/schema";
+import { auditEnabled } from "../config/load";
 
 // What every verb family needs, handed over explicitly rather than closed over.
 //
@@ -18,6 +19,9 @@ export type VerbDeps = {
   // buildSelect has to reach for `&&`/`= any` rather than `in`/`=`. Omitting this makes it
   // compare text[] against text, which Postgres rejects outright.
   isMultiValueField: (field: string) => boolean;
+  // Resolved once here rather than read from `cfg` at each verb's audit writer, so that "is this
+  // deployment audited" has one answer for the life of the broker rather than one per verb.
+  auditEnabled: boolean;
 };
 
 export function makeVerbDeps(pools: Pools, cfg: WarehousdConfig): VerbDeps {
@@ -28,5 +32,6 @@ export function makeVerbDeps(pools: Pools, cfg: WarehousdConfig): VerbDeps {
     // `taxonomies` is optional-chained, not indexed: callers that hand-build a config object and
     // cast it never get zod's default, so the key is genuinely absent for most of the test suite.
     isMultiValueField: (field: string) => cfg.taxonomies?.[field]?.multiple ?? false,
+    auditEnabled: auditEnabled(cfg),
   };
 }

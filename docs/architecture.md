@@ -124,8 +124,14 @@ tests in the suite.
    schema-name resolution cannot cross the wall, because the database refuses.
 6. **Env parity.** Dev and live run identical postures and grant logic. The only
    difference is the source schema; the response shape is the same.
-7. **Everything is audited**, before the response is returned — refusals
-   included.
+7. **Every decision passes through exactly one audit call**, before the response
+   is returned — refusals included — and the configured sink decides whether
+   that call lands in a row. With the trail on, which is the default, an allow
+   whose row could not be written is downgraded to `internal_error` rather than
+   returned unrecorded. A deployment can turn the trail off with
+   `audit.enabled: false` for lower environments; then nothing is recorded and
+   every `auditId` is null. Nothing ever invents an id to stand in for a row
+   that is not there.
 8. **Tenants are separated by the database, not by a predicate the broker
    remembers.** See [Organizations](#organizations-and-tenant-isolation).
 
@@ -152,11 +158,12 @@ type QueryIntent = {
 };
 
 type BrokerResult =
-  | { ok: true;  documents: Document[]; fieldsReturned: string[]; auditId: string }
+  | { ok: true;  documents: Document[]; fieldsReturned: string[]; auditId: string | null }
   | { ok: false; reason: "no_grant" | "expired_grant" | "field_denied"
                | "unknown_collection" | "unknown_field" | "invalid_intent"
                | "not_found" | "internal_error";
-      auditId: string };       // reason codes only — never a denied value, never SQL
+      auditId: string | null }; // reason codes only — never a denied value, never SQL
+                                // null id: audit is off (ok) or the row failed (refusal)
 
 broker.query(ctx, intent)
 broker.searchDocuments(ctx, intent)     // file collections, and datasets with a searchable field
@@ -184,7 +191,9 @@ the very next query; nothing about a grant is ever baked into a token.
 A driver error becomes `internal_error` and nothing else. Postgres messages name
 columns, tables, and values — precisely what invariant 4 forbids leaking — so the
 error goes to the server log and the caller gets a bare reason code. The audit
-row is still written: an unaudited probe would leave no trace.
+row is still written: an unaudited probe would leave no trace. (Unless the
+deployment set `audit.enabled: false`, which is the one way to have no trace on
+purpose — see invariant 7.)
 
 ### Logging
 
@@ -651,9 +660,9 @@ type MutationIntent =
   | { collection: string; op: "delete"; id: string; expect?: string };
 
 type MutationResult =
-  | { ok: true; status: "applied"; documentId: string; rev: string; auditId: string }
-  | { ok: true; status: "pending"; proposalId: string; auditId: string }
-  | { ok: false; reason: MutationRefusalReason; auditId: string };
+  | { ok: true; status: "applied"; documentId: string; rev: string; auditId: string | null }
+  | { ok: true; status: "pending"; proposalId: string; auditId: string | null }
+  | { ok: false; reason: MutationRefusalReason; auditId: string | null };
 ```
 
 `MutationRefusalReason` extends the read set with `verb_denied`,

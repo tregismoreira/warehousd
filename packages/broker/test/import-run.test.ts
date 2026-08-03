@@ -156,6 +156,29 @@ describe("importCollection", () => {
     });
   });
 
+  // The import path writes its own audit row rather than going through the broker's audit writer,
+  // so `audit.enabled: false` has to be honoured here separately — otherwise an environment that
+  // looks unaudited still accumulates a row per import.
+  it("writes no audit row when audit.enabled is false", async () => {
+    const before = Number(
+      (await admin.query(`select count(*)::int as n from app.audit_events`)).rows[0].n,
+    );
+    const r = await importCollection(
+      pools,
+      { ...cfg, audit: { enabled: false } },
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${U(19)},Unaudited` },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r.auditId).toBeNull();
+    const after = Number(
+      (await admin.query(`select count(*)::int as n from app.audit_events`)).rows[0].n,
+    );
+    expect(after).toBe(before);
+  });
+
   it("never records imported values in the audit intent", async () => {
     const r = await importCollection(pools, cfg, "ana", "departments", {
       format: "csv",

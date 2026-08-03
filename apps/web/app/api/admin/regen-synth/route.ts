@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { regenerateSynthetic } from "@warehousd/broker";
+import { auditEnabled, regenerateSynthetic } from "@warehousd/broker";
 import { getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
 
@@ -18,7 +18,10 @@ export async function POST(req: NextRequest) {
   // Destroying and rebuilding a whole environment is a governance event. Audited per
   // collection so the audit browser's collection filter finds it. env is the literal 'dev':
   // this operation cannot touch live, so the caller's env cookie is irrelevant here.
-  for (const collection of collections) {
+  //
+  // The gate is here rather than inside a shared writer because this is the one audit insert in
+  // the codebase that does not go through writeAudit. It should; that is a separate change.
+  for (const collection of auditEnabled(cfg) ? collections : []) {
     await app.query(
       `insert into app.audit_events (user_id, env, collection, intent, fields_returned, outcome, reason)
        values ($1, 'dev', $2, $3, '{}', 'allowed', null)`,

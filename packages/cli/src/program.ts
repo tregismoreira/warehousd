@@ -370,6 +370,7 @@ program
   .description("deploy this project to Fly.io, or tear it down with --destroy")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--allow-local-login", "permit deploying without SSO configured", false)
+  .option("--allow-disabled-audit", "permit deploying with audit.enabled: false", false)
   .option("-y, --yes", "skip the config-diff confirmation", false)
   .option(
     "--local-build",
@@ -382,6 +383,7 @@ program
     const { theme, json, quiet } = ui();
     await runDeploy(o.dir, {
       allowLocalLogin: o.allowLocalLogin,
+      allowDisabledAudit: o.allowDisabledAudit,
       yes: o.yes,
       localBuild: o.localBuild,
       destroy: o.destroy,

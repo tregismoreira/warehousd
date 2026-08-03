@@ -14,7 +14,7 @@ export {
   describeIntentError,
 } from "./intents/schema";
 export { createPools, onPoolError, type Pools, withOrg, writePool } from "./db/pools";
-export { loadConfig, grantableFields, findCollection, envRefs } from "./config/load";
+export { loadConfig, grantableFields, findCollection, envRefs, auditEnabled } from "./config/load";
 export type { WarehousdConfig } from "./config/schema";
 export {
   fileMetadataFields,
