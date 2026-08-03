@@ -1,7 +1,33 @@
+import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
 import { loadTaxonomyBindings, syncDatasetTerms } from "../taxonomy";
 import { makeRng, genValue } from "./generators";
+
+// Generated rows are revisions like any other: every dataset table carries REV_COLS, so a plain
+// insert would fail on the NOT NULL bookkeeping columns. A synthetic document is the `create`
+// revision of a document that has never been edited — seq 1, approved, current — and `_rev_by`
+// names the generator rather than a person, so the change feed and the revision history read
+// truthfully for data nobody wrote.
+const SYNTHETIC_AUTHOR = "synthetic";
+const REV_INSERT_COLS = [
+  `"_rev"`,
+  `"_rev_seq"`,
+  `"_rev_by"`,
+  `"_rev_op"`,
+  `"_rev_status"`,
+  `"_rev_fields"`,
+  `"_current"`,
+];
+const revInsertValues = (fields: string[]): unknown[] => [
+  randomUUID(),
+  1,
+  SYNTHETIC_AUTHOR,
+  "create",
+  "approved",
+  fields,
+  true,
+];
 
 // Generates in FK dependency order so parent ids exist before children reference them.
 export async function generateSynthetic(
@@ -20,9 +46,9 @@ export async function generateSynthetic(
     if (!c) throw new Error(`Unknown collection: ${name}`);
     // Skip file collections — they are populated via indexCollection, not synthetic generation
     if (c.type === "file") continue;
-    // Skip writable collections — their base table has NOT NULL revision columns
-    // (_rev_seq, _rev_by, _rev_op, ...) that a plain synthetic insert doesn't populate;
-    // content comes from real writes/proposals, not synthetic filler.
+    // Skip writable collections — their content comes from real writes and proposals, not from
+    // synthetic filler, and truncating one would destroy a pending proposal. (Revision columns
+    // are no longer the reason: every dataset has them, and the insert below fills them.)
     if (c.writable) continue;
     const n = cfg.synthetic.documents_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
@@ -115,8 +141,14 @@ export async function generateSynthetic(
             }),
           );
       }
-      const ph = vals.map((_, k) => `$${k + 1}`).join(",");
-      await db.query(`insert into data_synth.${name} (${cols.join(",")}) values (${ph})`, vals);
+      // Revision bookkeeping ahead of the data columns, matching the column list built beside it.
+      const allCols = [...REV_INSERT_COLS, ...cols];
+      const allVals = [...revInsertValues(cols.map((c2) => c2.replace(/"/g, ""))), ...vals];
+      const ph = allVals.map((_, k) => `$${k + 1}`).join(",");
+      await db.query(
+        `insert into data_synth.${name} (${allCols.join(",")}) values (${ph})`,
+        allVals,
+      );
     }
     idsByCollection[name] = ids;
   }

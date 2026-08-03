@@ -36,7 +36,7 @@ describe("importCollection", () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("unreachable");
-    expect(r.imported).toBe(2);
+    expect(r).toMatchObject({ mode: "append", dryRun: false, inserted: 2, updated: 0, deleted: 0 });
     expect(await liveCount("departments")).toBe(before + 2);
   });
 
@@ -136,7 +136,12 @@ describe("importCollection", () => {
       collection: "metrics",
       outcome: "allowed",
     });
-    expect(ev.rows[0].intent).toMatchObject({ op: "import", format: "csv", rows: 1 });
+    expect(ev.rows[0].intent).toMatchObject({
+      op: "import:append",
+      format: "csv",
+      rows: 1,
+      inserted: 1,
+    });
   });
 
   it("audits a refused import with the reason", async () => {
@@ -176,6 +181,354 @@ describe("importCollection", () => {
       U(10),
     ]);
     expect(stored.rows[0].home_address).toBe("1 Main St");
+  });
+});
+
+// Update and delete, and the property that makes them safe: neither rewrites nor removes a
+// stored row. Everything below asserts against the BASE table through the admin pool, because
+// the view deliberately hides exactly what these tests are checking is still there.
+describe("importCollection: upsert and delete write revisions", () => {
+  // Each test owns its ids so the file's tests stay order-independent.
+  const D = (n: number) => `0000${n}00-0000-4000-8000-00000000d000`.slice(-36);
+
+  const revs = async (id: string) =>
+    (
+      await admin.query(
+        `select _rev_seq, _rev_op, _rev_status, _current, name
+         from data_live.departments where id=$1 order by _rev_seq`,
+        [id],
+      )
+    ).rows;
+  // What a reader would see: the view, not the table.
+  const visible = async (id: string) =>
+    (await admin.query(`select name from data_live.v_departments where id=$1`, [id])).rows;
+
+  beforeAll(async () => {
+    // The view filters on the org GUC, which is unset on a bare admin connection.
+    await admin.query(`select set_config('warehousd.org_id', 'default', false)`);
+  });
+
+  it("upsert creates a document that does not exist yet", async () => {
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(1)},Fresh` },
+      { mode: "upsert" },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r).toMatchObject({ mode: "upsert", inserted: 1, updated: 0, deleted: 0 });
+    expect(await revs(D(1))).toMatchObject([
+      { _rev_seq: "1", _rev_op: "create", _current: true, name: "Fresh" },
+    ]);
+  });
+
+  it("upsert revises a document that does, keeping the superseded revision", async () => {
+    await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(2)},Before` },
+      { mode: "append" },
+    );
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(2)},After` },
+      { mode: "upsert" },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r).toMatchObject({ inserted: 0, updated: 1 });
+
+    // Two rows, not one: the first is history, and it still holds the value it held.
+    expect(await revs(D(2))).toMatchObject([
+      { _rev_seq: "1", _rev_op: "create", _current: false, name: "Before" },
+      { _rev_seq: "2", _rev_op: "update", _current: true, name: "After" },
+    ]);
+    expect(await visible(D(2))).toMatchObject([{ name: "After" }]);
+  });
+
+  it("upsert carries untouched columns forward rather than blanking them", async () => {
+    await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "people",
+      {
+        format: "csv",
+        text: `id,full_name,email,department_id,home_address,phone\n${D(3)},Ada,ada@x.com,${U(1)},1 Main St,555-1`,
+      },
+      { mode: "append" },
+    );
+    // Only the email column. Everything else must survive — this is the difference between an
+    // upsert and a replace, and getting it wrong silently destroys columns the file omitted.
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "people",
+      { format: "csv", text: `id,email\n${D(3)},ada@new.com` },
+      { mode: "upsert" },
+    );
+    expect(r.ok).toBe(true);
+    const row = await admin.query(
+      `select full_name, email, home_address, phone from data_live.people where id=$1 and _current`,
+      [D(3)],
+    );
+    expect(row.rows[0]).toMatchObject({
+      full_name: "Ada",
+      email: "ada@new.com",
+      home_address: "1 Main St",
+      phone: "555-1",
+    });
+  });
+
+  it("delete retires a document from the view while its history survives in full", async () => {
+    await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(4)},Doomed` },
+      { mode: "append" },
+    );
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id\n${D(4)}` },
+      { mode: "delete" },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r).toMatchObject({ mode: "delete", deleted: 1 });
+
+    expect(await visible(D(4))).toHaveLength(0);
+    // Nothing was erased: both revisions are on the table, and the original still holds its value.
+    expect(await revs(D(4))).toMatchObject([
+      { _rev_seq: "1", _rev_op: "create", _current: false, name: "Doomed" },
+      { _rev_seq: "2", _rev_op: "delete", _current: true, name: "Doomed" },
+    ]);
+  });
+
+  it("delete takes a pk-only file — no other column has to be supplied", async () => {
+    // people has several non-nullable columns. A delete file carrying only the pk is the
+    // normal case, and validation must not hold it to the shape an append needs.
+    await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "people",
+      {
+        format: "csv",
+        text: `id,full_name,email,department_id,home_address,phone\n${D(5)},Gone,g@x.com,${U(1)},2 Main St,555-2`,
+      },
+      { mode: "append" },
+    );
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "people",
+      { format: "csv", text: `id\n${D(5)}` },
+      { mode: "delete" },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("refuses a whole delete file when any row names a document that is not there", async () => {
+    await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(6)},Real` },
+      { mode: "append" },
+    );
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id\n${D(6)}\n${D(7)}` },
+      { mode: "delete" },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.reason).toBe("validation_failed");
+    expect(r.errors?.[0]).toMatchObject({ row: 1, reason: "not_found" });
+    // All-or-nothing: the row that DID match is still there.
+    expect(await visible(D(6))).toHaveLength(1);
+  });
+
+  it("refuses an upsert-create that omits a required column", async () => {
+    // The pk is all upsert validation demands, so this row passes validation and is caught
+    // where it has to be: at the point the row turns out to be a create rather than an edit.
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "people",
+      { format: "csv", text: `id,email\n${D(8)},nobody@x.com` },
+      { mode: "upsert" },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.reason).toBe("validation_failed");
+    expect(r.errors?.map((e) => e.column)).toContain("full_name");
+    const stored = await admin.query(`select 1 from data_live.people where id=$1`, [D(8)]);
+    expect(stored.rowCount).toBe(0);
+  });
+
+  it("refuses upsert and delete on a collection with no primary key", async () => {
+    // Nothing addresses a document without one, so both modes are structurally unavailable.
+    const noPk = ConfigSchema.parse({
+      project: "t",
+      server: { port: 1 },
+      collections: {
+        readings: {
+          description: "d",
+          fields: { label: { type: "text", posture: "allow" } },
+        },
+      },
+    });
+    for (const mode of ["upsert", "delete"] as const) {
+      const r = await importCollection(
+        pools,
+        noPk,
+        "ana",
+        "readings",
+        { format: "csv", text: `label\nx` },
+        { mode },
+      );
+      expect(r.ok).toBe(false);
+      if (r.ok) throw new Error("unreachable");
+      expect(r.reason).toBe("no_primary_key");
+    }
+  });
+
+  it("refuses an unknown mode outright", async () => {
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(9)},X` },
+      { mode: "replace" as never },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.reason).toBe("unknown_mode");
+  });
+
+  it("records every mode's counts in the audit intent, and never a value", async () => {
+    await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(10)},AuditSubject` },
+      { mode: "append" },
+    );
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(10)},SecretRenamed` },
+      { mode: "upsert" },
+    );
+    if (!r.ok) throw new Error("unreachable");
+    const ev = await admin.query(`select intent from app.audit_events where id=$1`, [r.auditId]);
+    expect(ev.rows[0].intent).toMatchObject({ op: "import:upsert", updated: 1, inserted: 0 });
+    expect(JSON.stringify(ev.rows[0].intent)).not.toContain("SecretRenamed");
+  });
+
+  it("writes one change feed entry per row, through the app pool", async () => {
+    await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${D(11)},Feed1\n${D(12)},Feed2` },
+      { mode: "append" },
+    );
+    const feed = await admin.query(
+      `select document_id, op, by from app.change_log
+       where collection='departments' and document_id = any($1)`,
+      [[D(11), D(12)]],
+    );
+    expect(feed.rowCount).toBe(2);
+    expect(feed.rows.every((r) => r.op === "create" && r.by === "ana")).toBe(true);
+  });
+});
+
+describe("importCollection: dry run", () => {
+  const P = (n: number) => `0000${n}00-0000-4000-8000-0000000000dd`.slice(-36);
+
+  it("reports what would happen and writes nothing at all", async () => {
+    await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${P(1)},Existing` },
+      { mode: "append" },
+    );
+    const before = await liveCount("departments");
+    const auditBefore = Number(
+      (await admin.query(`select count(*)::int as n from app.audit_events`)).rows[0].n,
+    );
+
+    // One row that exists and one that does not: the counts are the whole point of a preview.
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${P(1)},Revised\n${P(2)},Brand New` },
+      { mode: "upsert", dryRun: true },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r).toMatchObject({ dryRun: true, inserted: 1, updated: 1 });
+
+    // Rolled back: no new rows, and the existing document still holds its original value.
+    expect(await liveCount("departments")).toBe(before);
+    const row = await admin.query(
+      `select name from data_live.departments where id=$1 and _current`,
+      [P(1)],
+    );
+    expect(row.rows[0].name).toBe("Existing");
+    // The audit row is NOT rolled back — it goes through the app pool, which is a different
+    // connection and a different transaction. A preview is a decision and gets recorded.
+    const auditAfter = Number(
+      (await admin.query(`select count(*)::int as n from app.audit_events`)).rows[0].n,
+    );
+    expect(auditAfter).toBe(auditBefore + 1);
+  });
+
+  it("surfaces per-row problems without writing, exactly as the real run would", async () => {
+    const before = await liveCount("departments");
+    const r = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id\n${P(3)}` },
+      { mode: "delete", dryRun: true },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.errors?.[0]).toMatchObject({ reason: "not_found" });
+    expect(await liveCount("departments")).toBe(before);
   });
 });
 

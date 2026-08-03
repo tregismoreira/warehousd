@@ -1,7 +1,13 @@
 import type { Pool } from "pg";
 import type { DocumentFilter } from "../types";
 import type { WarehousdConfig } from "../config/schema";
-import { findCollection, grantableFields, writableFields, supportedVerbs } from "../config/load";
+import {
+  findCollection,
+  grantableFields,
+  writableFields,
+  unmaskableFields,
+  supportedVerbs,
+} from "../config/load";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
 
 export type GrantRequestError = "unknown_collection" | "purpose_required" | "field_not_grantable";
@@ -113,7 +119,8 @@ export async function requestGrant(
   return r.rows[0].id;
 }
 
-export type ApproveGrantError = "unknown_grant" | "invalid_verbs" | "self_approval_denied";
+export type ApproveGrantError =
+  "unknown_grant" | "invalid_verbs" | "invalid_unmask" | "self_approval_denied";
 
 // Every decision is scoped to the grant's org as well as its id. A grant id is a uuid, so
 // this is a backstop rather than the primary gate — but it is the difference between a
@@ -135,6 +142,10 @@ export async function approveGrant(
     documentFilters?: DocumentFilter[];
     verbs?: string[];
     mode?: "direct" | "proposal_only";
+    // Fields whose RAW value this grant carries. Every entry must be in allowedFields AND be
+    // declared `unmask: allow` in the config — a manager can only widen a mask the YAML offered
+    // to widen, which is what keeps the posture the ceiling rather than the starting point.
+    unmaskedFields?: string[];
     orgId?: string;
   } = {},
 ): Promise<{ ok: true } | { ok: false; error: ApproveGrantError; detail?: string }> {
@@ -166,10 +177,32 @@ export async function approveGrant(
   const v = validateVerbs(verbs, cfg, collection, allowedFields);
   if (!v.ok) return { ok: false, error: "invalid_verbs", detail: v.error };
 
+  const unmaskedFields = opts.unmaskedFields ?? [];
+  if (unmaskedFields.length) {
+    const unmaskable = new Set(unmaskableFields(cfg, collection));
+    const notGranted = unmaskedFields.filter((f) => !allowedFields.includes(f));
+    if (notGranted.length)
+      return {
+        ok: false,
+        error: "invalid_unmask",
+        detail: `not in allowed_fields: ${notGranted.join(", ")}`,
+      };
+    // A field that is not masked at all, or is masked with `unmask: deny`, cannot be unmasked
+    // by any grant. Refused rather than ignored: silently dropping it would tell the approver
+    // they granted something they did not.
+    const notUnmaskable = unmaskedFields.filter((f) => !unmaskable.has(f));
+    if (notUnmaskable.length)
+      return {
+        ok: false,
+        error: "invalid_unmask",
+        detail: `not declared unmask: allow: ${notUnmaskable.join(", ")}`,
+      };
+  }
+
   const result = await app.query(
     `update app.grants set status='approved', decided_by=$2, decided_at=now(),
        allowed_fields=coalesce($3, allowed_fields), expires_at=$4, document_filter=$5,
-       verbs=$6, mode=$7
+       verbs=$6, mode=$7, unmasked_fields=$9
      where id=$1 and org_id=$8 and status='pending'`,
     [
       id,
@@ -182,6 +215,7 @@ export async function approveGrant(
       verbs,
       mode,
       orgId,
+      unmaskedFields,
     ],
   );
   // Zero rows means the grant was not pending — already decided, or raced.

@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import type { Pool, PoolClient } from "pg";
+import type { Pool } from "pg";
 import type { BrokerContext, MutationIntent, MutationResult } from "../types";
 import type { CollectionConfig } from "../config/schema";
 import { writePosture } from "../config/schema";
@@ -7,8 +7,9 @@ import type { ActiveGrant } from "../grants/eval";
 import { loadActiveGrant } from "../grants/eval";
 import { matchesFilters, validateDocumentFilters } from "../grants/filters";
 import { withOrg, writePool } from "../db/pools";
+import { insertRevision, currentRevision, reviseDocument } from "../db/revisions";
 import { findCollection, supportedVerbs } from "../config/load";
-import { pkOf, dataColsOf, dataSchema, REV_COLS, type RevisionRow } from "../config/collection";
+import { pkOf, dataColsOf, dataSchema } from "../config/collection";
 import { ident } from "../sql/ident";
 import { chunkText } from "../indexing/chunk";
 import { coerce } from "../import/validate";
@@ -263,33 +264,7 @@ async function mutateDataset(
 
   // Storable columns, in one fixed order shared by every insert below.
   const dataCols = dataColsOf(c);
-
-  const insertRevision = async (
-    client: PoolClient,
-    rev: { seq: number; op: string; fields: string[]; base: number | null; current: boolean },
-    row: Record<string, unknown>,
-  ): Promise<string> => {
-    const revId = randomUUID();
-    const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
-    const vals: unknown[] = [
-      revId,
-      rev.seq,
-      new Date(),
-      ctx.userId,
-      rev.op,
-      "approved",
-      rev.fields,
-      rev.base,
-      rev.current,
-      ctx.orgId,
-      ...dataCols.map((k) => row[k] ?? null),
-    ];
-    await client.query(
-      `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`,
-      vals,
-    );
-    return revId;
-  };
+  const actor = { by: ctx.userId, orgId: ctx.orgId };
 
   try {
     return await withOrg(pool, ctx.orgId, async (client) => {
@@ -316,7 +291,17 @@ async function mutateDataset(
 
         const revId = await insertRevision(
           client,
-          { seq: 1, op: "create", fields: Object.keys(coerced), base: null, current: true },
+          table,
+          dataCols,
+          {
+            seq: 1,
+            op: "create",
+            status: "approved",
+            fields: Object.keys(coerced),
+            base: null,
+            current: true,
+            ...actor,
+          },
           coerced,
         );
         await writeChangeLog(
@@ -341,12 +326,8 @@ async function mutateDataset(
 
       // update and delete both revise an existing document, and differ only in the op they
       // record and whether they carry values.
-      const cur = await client.query(
-        `select * from ${table} where ${ident(pk)} = $1 and _current`,
-        [intent.id],
-      );
-      if (cur.rowCount === 0) return audit.refuseMutation(intent, grant.id, "not_found");
-      const current = cur.rows[0] as RevisionRow;
+      const current = await currentRevision(client, table, pk, intent.id);
+      if (!current) return audit.refuseMutation(intent, grant.id, "not_found");
 
       // A document the grant's filter excludes is not_found, never a distinct refusal —
       // the same rule as getDocument. $self is already bound by loadActiveGrant.
@@ -358,24 +339,13 @@ async function mutateDataset(
         return audit.refuseMutation(intent, grant.id, "conflict");
 
       const isDelete = intent.op === "delete";
-      // Untouched columns carry forward, so a revision is a complete document, not a patch.
-      const next: Record<string, unknown> = {};
-      for (const f of dataCols) next[f] = f in coerced ? coerced[f] : current[f];
-
-      // Demote the old revision BEFORE promoting the new one: both are _current between the
-      // two statements otherwise, and the partial unique index would reject the insert.
-      await client.query(`update ${table} set _current = false where _rev = $1`, [current._rev]);
-      const revId = await insertRevision(
-        client,
-        {
-          seq: Number(current._rev_seq) + 1,
-          op: isDelete ? "delete" : "update",
-          fields: isDelete ? [] : Object.keys(coerced),
-          base: Number(current._rev_seq),
-          current: true,
-        },
-        next,
-      );
+      // Demote-then-promote, untouched columns carried forward: reviseDocument owns both, and is
+      // the same call the import path makes, so the two cannot drift.
+      const revId = await reviseDocument(client, table, dataCols, current, coerced, {
+        op: isDelete ? "delete" : "update",
+        status: "approved",
+        ...actor,
+      });
 
       await writeChangeLog(
         client,

@@ -14,7 +14,15 @@ export {
   describeIntentError,
 } from "./intents/schema";
 export { createPools, onPoolError, type Pools, withOrg, writePool } from "./db/pools";
-export { loadConfig, grantableFields, findCollection, envRefs } from "./config/load";
+export {
+  loadConfig,
+  grantableFields,
+  unmaskableFields,
+  maskedFieldsFor,
+  findCollection,
+  envRefs,
+} from "./config/load";
+export { maskExpr, UnsupportedMask, MASK_KEY_ENV } from "./sql/mask";
 export type { WarehousdConfig } from "./config/schema";
 export {
   fileMetadataFields,
@@ -24,7 +32,15 @@ export {
   readPosture,
   writePosture,
 } from "./config/schema";
-export type { CollectionConfig, FileMetadataType, DeployConfig } from "./config/schema";
+export type {
+  CollectionConfig,
+  FileMetadataType,
+  DeployConfig,
+  MaskConfig,
+  ReadPosture,
+  NormalizedPosture,
+} from "./config/schema";
+export { unmaskPosture, isGrantable, READ_POSTURES, MaskSchema } from "./config/schema";
 export { applyConfig } from "./apply/apply";
 export { generateSynthetic } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
@@ -62,7 +78,24 @@ export {
   type FileSummary,
   type Scope,
 } from "./documents/inventory";
-export { importCollection } from "./import/run";
+export {
+  importCollection,
+  IMPORT_MODES,
+  type ImportMode,
+  type ImportResult,
+  type ImportCounts,
+} from "./import/run";
+export {
+  insertRevision,
+  currentRevision,
+  demoteRevision,
+  reviseDocument,
+  SEED_REV_COLUMNS,
+  SEED_REV_VALUES,
+  type RevisionMeta,
+  type RevisionOp,
+  type RevisionStatus,
+} from "./db/revisions";
 export { validateImportRows, type ImportError } from "./import/validate";
 export { parseImportPayload, parseCsv } from "./import/csv";
 export * from "./credentials/keys";

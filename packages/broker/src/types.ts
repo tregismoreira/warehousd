@@ -120,7 +120,15 @@ export type MutationResult =
   | { ok: true; status: "pending"; proposalId: string; auditId: string }
   | { ok: false; reason: MutationRefusalReason; auditId: AuditId };
 
-export type VisibleField = { name: string; type: string; pk?: boolean | undefined };
+// `masked` is present only when true, so an unmasked schema is byte-identical to what it was
+// before masking existed. A masked field is readable but transformed, and cannot be filtered,
+// ordered, grouped or aggregated on — see collectComputed in verbs/read.ts.
+export type VisibleField = {
+  name: string;
+  type: string;
+  pk?: boolean | undefined;
+  masked?: true | undefined;
+};
 export type VisibleSchema = {
   collection: string;
   description: string;

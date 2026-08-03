@@ -124,28 +124,34 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
     searchAlters += `\n      create index if not exists "${collection}_${name}_tsv_idx" on ${schema}.${collection} using gin ("${name}_tsv");`;
   }
 
-  // Writable datasets get revision columns and drop pk constraint; the declared pk becomes document identity
-  if (c.writable) {
-    // Find the pk field name for the unique index on _current
-    let pkField = "id";
-    for (const [name, f] of Object.entries(c.fields)) {
-      if (f.pk) {
-        pkField = name;
-        break;
-      }
+  // EVERY dataset gets revision columns, and the declared pk becomes document identity rather
+  // than a table constraint.
+  //
+  // This used to be gated on `writable`, which tied "can a client write this?" to "is this table
+  // append-only?" — two different questions. The admin import path needs update and delete, and
+  // the only way to have those without granting the import role UPDATE and DELETE on data columns
+  // is for both to be new revisions. So revisions are structural now, and `writable` gates only
+  // the client write path (broker.mutate) as its name says.
+  // Find the pk field name for the unique index on _current
+  let pkField = "id";
+  for (const [name, f] of Object.entries(c.fields)) {
+    if (f.pk) {
+      pkField = name;
+      break;
     }
+  }
 
-    // `superseded` is the status of a pending revision that an approval merged into a new one
-    // rather than promoting in place. approveProposal has to write a merged row — the current
-    // document may have moved on in fields the proposal did not touch, and per the design a stale
-    // base with no overlap still promotes — so the pending row it consumed has to be marked as
-    // something that is not history. It used to be flipped to `approved`, which left two approved
-    // rows carrying the same `_rev_fields`, duplicating the document's history and giving two rows
-    // the same `_rev_seq`. The row is kept rather than deleted: it is the immutable record of what
-    // was proposed, as distinct from what was applied, and the write role has no DELETE anyway.
-    const statusValues = `'pending','approved','rejected','superseded'`;
-    const statusCheck = `${collection}__rev_status_check`;
-    const revCols = `
+  // `superseded` is the status of a pending revision that an approval merged into a new one
+  // rather than promoting in place. approveProposal has to write a merged row — the current
+  // document may have moved on in fields the proposal did not touch, and per the design a stale
+  // base with no overlap still promotes — so the pending row it consumed has to be marked as
+  // something that is not history. It used to be flipped to `approved`, which left two approved
+  // rows carrying the same `_rev_fields`, duplicating the document's history and giving two rows
+  // the same `_rev_seq`. The row is kept rather than deleted: it is the immutable record of what
+  // was proposed, as distinct from what was applied, and the write role has no DELETE anyway.
+  const statusValues = `'pending','approved','rejected','superseded'`;
+  const statusCheck = `${collection}__rev_status_check`;
+  const revCols = `
         _rev        uuid primary key default gen_random_uuid(),
         _rev_seq    bigint      not null,
         _rev_at     timestamptz not null default now(),
@@ -156,25 +162,17 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
         _rev_base   bigint,
         _current    boolean     not null default false,
         org_id      text        not null default 'default',`;
-    // Remove pk constraint from data columns
-    const dataColsNoPk = cols.map((col) => col.replace(/ primary key$/, ""));
-    let ddl = `create table if not exists ${schema}.${collection} (${revCols} ${dataColsNoPk.join(", ")});`;
-    ddl += ` alter table ${schema}.${collection} add column if not exists org_id text not null default 'default';`;
-    // `create table if not exists` is a no-op on a table that predates a value being added to the
-    // check, so the constraint is re-asserted explicitly. Naming it means the drop/add pair is
-    // idempotent whether the constraint was created inline here or auto-named by Postgres — the
-    // generated name for this column is the same string.
-    ddl += ` alter table ${schema}.${collection} drop constraint if exists "${statusCheck}";`;
-    ddl += ` alter table ${schema}.${collection} add constraint "${statusCheck}" check (_rev_status in (${statusValues}));`;
-    ddl += ` create unique index if not exists "${collection}_current_idx" on ${schema}.${collection} (org_id, "${pkField}") where _current;`;
-    ddl += fieldAlters.join("");
-    ddl += vocabAlters;
-    ddl += searchAlters;
-    return ddl;
-  }
-
-  let ddl = `create table if not exists ${schema}.${collection} (org_id text not null default 'default', ${cols.join(", ")});`;
+  // Remove pk constraint from data columns
+  const dataColsNoPk = cols.map((col) => col.replace(/ primary key$/, ""));
+  let ddl = `create table if not exists ${schema}.${collection} (${revCols} ${dataColsNoPk.join(", ")});`;
   ddl += ` alter table ${schema}.${collection} add column if not exists org_id text not null default 'default';`;
+  // `create table if not exists` is a no-op on a table that predates a value being added to the
+  // check, so the constraint is re-asserted explicitly. Naming it means the drop/add pair is
+  // idempotent whether the constraint was created inline here or auto-named by Postgres — the
+  // generated name for this column is the same string.
+  ddl += ` alter table ${schema}.${collection} drop constraint if exists "${statusCheck}";`;
+  ddl += ` alter table ${schema}.${collection} add constraint "${statusCheck}" check (_rev_status in (${statusValues}));`;
+  ddl += ` create unique index if not exists "${collection}_current_idx" on ${schema}.${collection} (org_id, "${pkField}") where _current;`;
   ddl += fieldAlters.join("");
   ddl += vocabAlters;
   ddl += searchAlters;
@@ -233,9 +231,11 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
     }
   }
 
-  const whereClause = c.writable
-    ? `where base.org_id = current_setting('warehousd.org_id', true) and base._current and base._rev_op <> 'delete'`
-    : `where base.org_id = current_setting('warehousd.org_id', true)`;
+  // Every dataset is revisioned, so every dataset view shows the current, non-tombstoned
+  // revision and nothing else. Pending revisions never appear — unapproved agent output cannot
+  // leak into an ordinary query — and neither does a document a delete revision retired, whether
+  // that delete came from the write path or from an admin import.
+  const whereClause = `where base.org_id = current_setting('warehousd.org_id', true) and base._current and base._rev_op <> 'delete'`;
 
   return `${recreate}
     select ${selects.join(", ")} from ${schema}.${collection} base ${joins.join(" ")}
@@ -278,14 +278,26 @@ export function rlsDDL(env: "dev" | "live", collection: string, cfg: WarehousdCo
 }
 
 // The import role writes live BASE tables (not views — a view insert would need rules) and
-// gets nothing else: no SELECT, no UPDATE, no DELETE, and nothing at all in data_synth.
-// Synthetic data is generated, never imported, so there is no dev counterpart by design.
+// nothing at all in data_synth. Synthetic data is generated, never imported, so there is no dev
+// counterpart by design.
+//
+// Its privileges are exactly the write role's, and for the same reason: import's update and
+// delete modes are new REVISIONS, so what they need is INSERT plus the ability to retire the row
+// they supersede. It holds **no UPDATE on any data column and no DELETE at all** — an import
+// cannot rewrite or destroy a value that is already in data_live, only append the revision that
+// replaces it. Immutability here is a privilege, not a code path that could be bypassed.
+//
+// SELECT is needed to find the current revision to supersede, and to answer a dry run.
 export function grantImportDDL(collection: string, cfg: WarehousdConfig): string {
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
   // File collections are populated by the indexer under the owner role, not by import.
   if (c.type === "file") return "";
-  return `grant insert on data_live.${collection} to warehousd_import;`;
+  return `
+grant insert on data_live.${collection} to warehousd_import;
+grant update (_current, _rev_status) on data_live.${collection} to warehousd_import;
+grant select on data_live.${collection} to warehousd_import;
+  `.trim();
 }
 
 // Write roles can insert, can select base table (for concurrency/merge), can update only

@@ -31,11 +31,12 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
     const c = cfg.collections[name];
     if (!c) throw new Error(`Unknown collection: ${name}`);
 
-    // Migration detection: if the collection is now writable: true but the table already
-    // exists without _rev* columns, fail the apply with a clear error. The _rev* columns are
-    // the marker for a revisioned table. Migrating existing data into revisions is explicitly
-    // out of scope and deferred to manual tooling (Phase 3 acceptance criterion).
-    if (c.writable && c.type === "dataset") {
+    // Migration detection: every dataset is revisioned now, so a pre-existing table WITHOUT
+    // _rev* columns cannot be brought forward by `create table if not exists` — the alters
+    // below would add the data columns and leave the NOT NULL bookkeeping ones missing, and
+    // the first insert would fail a long way from the cause. The _rev* columns are the marker.
+    // Migrating existing rows into revisions is explicitly out of scope: fail loudly here.
+    if (c.type === "dataset") {
       for (const env of ["dev", "live"] as const) {
         const schema = env === "dev" ? "data_synth" : "data_live";
         const check = await db.query(
@@ -49,9 +50,9 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
           );
           if (hasRev.rowCount === 0) {
             throw new Error(
-              `Cannot apply writable: true to ${name} — the table in ${schema} already exists ` +
-                `without revision columns. Migrating existing data into revisions is out of scope. ` +
-                `Drop the table manually or use a different collection name.`,
+              `Cannot apply ${name} — the table in ${schema} already exists without revision ` +
+                `columns. Every dataset is revisioned; migrating existing data into revisions is ` +
+                `out of scope. Drop the table manually or use a different collection name.`,
             );
           }
         }

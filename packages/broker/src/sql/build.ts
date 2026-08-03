@@ -1,6 +1,8 @@
 import type { QueryIntent, FilterOp, DocumentFilter, Aggregate } from "../types";
 import { MAX_LIMIT, DEFAULT_LIMIT } from "../types";
 import { ident } from "./ident";
+import { maskExpr } from "./mask";
+import type { MaskConfig } from "../config/schema";
 import { dataSchema } from "../config/collection";
 
 // A filter the builder can express no SQL for. Distinct from the generic Error below so the
@@ -51,11 +53,15 @@ export function buildSelect(
   // searchFields: the dataset fields carrying a generated "<f>_tsv" column. Omitted means a
   // file collection, whose view exposes a single fixed `tsv`. Field names go through q() like
   // every other identifier — they are config-validated, but that is the builder's rule to keep.
+  // maskFor: the transform to apply to a field, or null to select it raw. Supplied by the read
+  // verbs, which are the only place that knows both the posture and whether this caller's grant
+  // carries an unmask for it. Returning null for everything is the unmasked behaviour.
   opts: {
     documentFilters?: DocumentFilter[];
     q?: string;
     isMultiValueField?: (field: string) => boolean;
     searchFields?: string[];
+    maskFor?: (field: string) => MaskConfig | null;
   } = {},
 ): { text: string; values: unknown[] } {
   const schema = dataSchema(env);
@@ -68,6 +74,9 @@ export function buildSelect(
 
   let selectClause: string;
   if (intent.aggregate && intent.aggregate.length) {
+    // No masking branch here on purpose. An aggregate over a masked field is refused before this
+    // function is called (verbs/read.ts) — avg() of a bucketed column is not a masked average,
+    // it is a different number presented as one, and min()/max() would leak the raw extremes.
     const groupCols = (intent.groupBy ?? []).map(q);
     const aggs = intent.aggregate.map((a) => {
       const fn = lookup(AGG_SQL, a.fn, "aggregate function");
@@ -78,7 +87,14 @@ export function buildSelect(
     });
     selectClause = [...groupCols, ...aggs].join(", ");
   } else {
-    const cols = (intent.fields && intent.fields.length ? intent.fields : grantedFields).map(q);
+    // The one place a column becomes a select-list entry, and therefore the one place masking
+    // has to be applied for it to be applied at all.
+    const cols = (intent.fields && intent.fields.length ? intent.fields : grantedFields).map(
+      (f) => {
+        const mask = opts.maskFor?.(f) ?? null;
+        return mask ? maskExpr(f, mask, param) : q(f);
+      },
+    );
     selectClause = cols.join(", ");
   }
 

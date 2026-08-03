@@ -14,13 +14,13 @@ import type { ActiveGrant } from "../grants/eval";
 import { loadActiveGrant } from "../grants/eval";
 import { matchesFilters, validateDocumentFilters } from "../grants/filters";
 import { withOrg, writePool } from "../db/pools";
-import { findCollection } from "../config/load";
+import { insertRevision, demoteRevision } from "../db/revisions";
+import { findCollection, maskedFieldsFor } from "../config/load";
 import {
   pkOf,
   dataColsOf,
   revisableCollections,
   dataSchema,
-  REV_COLS,
   type RevisionRow,
 } from "../config/collection";
 import { ident } from "../sql/ident";
@@ -93,24 +93,22 @@ export async function proposeDataset(
         );
         if ((clash.rowCount ?? 0) > 0) return audit.refuseMutation(intent, grant.id, "conflict");
 
-        const revId = randomUUID();
-        const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
-        const vals: unknown[] = [
-          revId,
-          1,
-          new Date(),
-          ctx.userId,
-          "create",
-          "pending",
-          Object.keys(coerced),
-          null,
-          false,
-          ctx.orgId,
-          ...dataCols.map((k) => coerced[k] ?? null),
-        ];
-        await client.query(
-          `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`,
-          vals,
+        // Not current: a pending revision is invisible to every read path until it is approved.
+        const revId = await insertRevision(
+          client,
+          table,
+          dataCols,
+          {
+            seq: 1,
+            op: "create",
+            status: "pending",
+            fields: Object.keys(coerced),
+            base: null,
+            current: false,
+            by: ctx.userId,
+            orgId: ctx.orgId,
+          },
+          coerced,
         );
 
         await writeChangeLog(
@@ -144,29 +142,27 @@ export async function proposeDataset(
         return audit.refuseMutation(intent, grant.id, "not_found");
 
       const isDelete = intent.op === "delete";
-      // For pending revisions, store the proposed changes in _rev_fields (the field names).
-      // The data columns store the proposed state (the values).
+      // For pending revisions, _rev_fields holds the proposed field names and the data columns
+      // hold the proposed state. Not `current`, and no demotion: the document keeps the revision
+      // it has until someone approves this one. That is why this cannot call reviseDocument.
       const next: Record<string, unknown> = {};
       for (const f of dataCols) next[f] = f in coerced ? coerced[f] : current[f];
 
-      const revId = randomUUID();
-      const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
-      const vals: unknown[] = [
-        revId,
-        Number(current._rev_seq) + 1,
-        new Date(),
-        ctx.userId,
-        isDelete ? "delete" : "update",
-        "pending",
-        isDelete ? [] : Object.keys(coerced),
-        Number(current._rev_seq),
-        false,
-        ctx.orgId,
-        ...dataCols.map((k) => next[k] ?? null),
-      ];
-      await client.query(
-        `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`,
-        vals,
+      const revId = await insertRevision(
+        client,
+        table,
+        dataCols,
+        {
+          seq: Number(current._rev_seq) + 1,
+          op: isDelete ? "delete" : "update",
+          status: "pending",
+          fields: isDelete ? [] : Object.keys(coerced),
+          base: Number(current._rev_seq),
+          current: false,
+          by: ctx.userId,
+          orgId: ctx.orgId,
+        },
+        next,
       );
 
       await writeChangeLog(
@@ -349,34 +345,26 @@ export function makeProposeVerbs(d: VerbDeps) {
         // what mutateDataset does on the direct path (`Number(current._rev_seq) + 1`).
         const newSeq = proposal._rev_op === "create" ? 1 : Number(currentRev!._rev_seq) + 1;
 
-        // Write the new current revision
-        const newRevId = randomUUID();
-        const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
-        const vals: unknown[] = [
-          newRevId,
-          newSeq,
-          new Date(),
-          proposal._rev_by,
-          proposal._rev_op,
-          "approved",
-          proposal._rev_fields,
-          proposal._rev_base,
-          true,
-          ctx.orgId,
-          ...dataCols.map((k) => merged[k] ?? null),
-        ];
-
         // If there's a current revision, demote it BEFORE promoting the new one
-        if (currentRev) {
-          await client.query(`update ${table} set _current = false where _rev = $1`, [
-            currentRev._rev,
-          ]);
-        }
+        if (currentRev) await demoteRevision(client, table, currentRev._rev);
 
-        // Insert the new merged revision
-        await client.query(
-          `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`,
-          vals,
+        // Write the new current revision. `_rev_by` carries the PROPOSER, not the approver:
+        // authorship survives the merge, and the approver's identity is the audit row's job.
+        const newRevId = await insertRevision(
+          client,
+          table,
+          dataCols,
+          {
+            seq: newSeq,
+            op: proposal._rev_op as "create" | "update" | "delete",
+            status: "approved",
+            fields: proposal._rev_fields ?? [],
+            base: proposal._rev_base === null ? null : Number(proposal._rev_base),
+            current: true,
+            by: proposal._rev_by,
+            orgId: ctx.orgId,
+          },
+          merged,
         );
 
         // The pending row was consumed by the merged revision above, so it is marked `superseded`,
@@ -593,6 +581,7 @@ export function makeProposeVerbs(d: VerbDeps) {
         proposedAt: string;
         fields: string[];
         values: Document;
+        maskedFields: string[];
         fieldsReturned: string[];
         auditId: string;
       }
@@ -634,10 +623,28 @@ export function makeProposeVerbs(d: VerbDeps) {
 
       // Same rule as every other read: a field is visible only if the grant carries it.
       const readable = grant.allowedFields.filter((f) => Object.hasOwn(c.fields, f));
-      const values: Document = {};
-      for (const f of readable) values[f] = row[f];
 
-      const rec = await audit.allow(coll, { fieldsReturned: readable, grantId: grant.id });
+      // Masked fields are ELIDED here rather than transformed.
+      //
+      // Every other read path masks in SQL, so the raw value never leaves Postgres. This one
+      // cannot: it reads the pending revision through the write pool with `select *`, and the
+      // row is already in memory by the time the grant is known. Masking it here would mean a
+      // second implementation of maskExpr in TypeScript — and two evaluators of one rule is the
+      // drift hazard grants/filters.ts already documents at length.
+      //
+      // So the value is withheld and the field is named. A reviewer learns that the proposal
+      // touches `ssn` without learning either the proposed value or the current one, which is
+      // enough to decide whether the change is in scope — and getDocument, which does mask
+      // properly, is where they look if they need the content.
+      const masked = new Set(maskedFieldsFor(cfg, coll, grant.unmaskedFields));
+      const values: Document = {};
+      for (const f of readable) if (!masked.has(f)) values[f] = row[f];
+
+      const rec = await audit.allow(coll, {
+        fieldsReturned: readable.filter((f) => !masked.has(f)),
+        unmaskedFields: readable.filter((f) => grant.unmaskedFields.includes(f)),
+        grantId: grant.id,
+      });
       if (!rec.ok) return rec;
 
       return {
@@ -649,7 +656,10 @@ export function makeProposeVerbs(d: VerbDeps) {
         proposedAt: new Date(row._rev_at).toISOString(),
         fields: row._rev_fields ?? [],
         values,
-        fieldsReturned: readable,
+        // The names of the fields whose values were withheld, so a reviewer can tell "this
+        // proposal does not touch ssn" from "it does and you may not see the value".
+        maskedFields: readable.filter((f) => masked.has(f)),
+        fieldsReturned: readable.filter((f) => !masked.has(f)),
         auditId: rec.auditId,
       };
     } catch (err) {

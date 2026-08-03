@@ -76,12 +76,27 @@ export function coerce(
  * cannot reach — it is synchronous and pure so that the unit tests need no database. Supply
  * the bindings and such a column is validated against `slugs` exactly like a YAML one; omit
  * them and it is refused as `unvalidatable_term`. The default stays closed.
+ *
+ * @param opts.mode Which import mode the payload is for. It changes only which columns the
+ * payload must carry, never how a value is coerced:
+ *
+ *   - `append` creates a document, so every non-nullable column has to be there.
+ *   - `upsert` addresses one, so the pk has to be there and nothing else does — a file that
+ *     sets one column on 500 existing documents is the case this mode exists for. A row that
+ *     turns out to be a create is re-checked for required columns by the caller, which is the
+ *     only place that knows whether the document already existed.
+ *   - `delete` names documents, so the pk is the only column it needs — and the only one it is
+ *     allowed to be missing values for.
  */
 export function validateImportRows(
   cfg: WarehousdConfig,
   collection: string,
   rows: Record<string, unknown>[],
-  opts: { maxRows?: number | undefined; taxonomies?: TaxonomyBinding[] | undefined } = {},
+  opts: {
+    maxRows?: number | undefined;
+    taxonomies?: TaxonomyBinding[] | undefined;
+    mode?: "append" | "upsert" | "delete" | undefined;
+  } = {},
 ): ImportValidation {
   const c = findCollection(cfg, collection);
   if (!c) return { ok: false, errors: [{ row: -1, column: null, reason: "unknown_collection" }] };
@@ -145,11 +160,20 @@ export function validateImportRows(
   }
   if (errors.length) return { ok: false, errors };
 
-  // Every non-nullable storable column must be present in the payload's column set.
-  for (const [name, f] of storable) {
-    if (columns.includes(name)) continue;
-    if (f.nullable) continue;
-    push({ row: 0, column: name, reason: "missing_required" });
+  const mode = opts.mode ?? "append";
+  if (mode === "append") {
+    // Creating a document: every non-nullable storable column must be in the payload's columns.
+    for (const [name, f] of storable) {
+      if (columns.includes(name)) continue;
+      if (f.nullable) continue;
+      push({ row: 0, column: name, reason: "missing_required" });
+    }
+  } else {
+    // Addressing existing documents: the pk is what does the addressing, so it is the one
+    // column that must be there. A collection with no pk cannot be upserted or deleted into at
+    // all, which run.ts refuses before it gets here — this is the belt to that's braces.
+    if (!pk) push({ row: 0, column: null, reason: "no_primary_key" });
+    else if (!columns.includes(pk)) push({ row: 0, column: pk, reason: "missing_required" });
   }
   if (errors.length) return { ok: false, errors };
 
@@ -169,7 +193,11 @@ export function validateImportRows(
       const empty =
         raw === null || raw === undefined || (typeof raw === "string" && raw.trim() === "");
       if (empty) {
-        if (!f.nullable) {
+        // An empty cell in a column the config says must carry a value is a refusal — on the
+        // modes that write that value. A delete uses the pk and ignores every other column, so
+        // holding its file to the full shape would refuse files that are perfectly valid.
+        const enforced = mode === "delete" ? col === pk : !f.nullable;
+        if (enforced) {
           push({ row: idx, column: col, reason: "missing_required" });
           out.push(null);
           continue;

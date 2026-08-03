@@ -1,0 +1,132 @@
+import { randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
+import { REV_COLS, type RevisionRow } from "../config/collection";
+import { ident } from "../sql/ident";
+
+// The revision writer. Every dataset table carries the REV_COLS bookkeeping columns, and every
+// path that adds a row to one goes through here: the direct write path (verbs/mutate.ts), the
+// proposal path and its promotion (verbs/propose.ts), and the admin import path (import/run.ts).
+//
+// There were four verbatim copies of the insert below before this module existed. REV_COLS is a
+// *positional* contract with the value array built beside it, so a column added to one copy and
+// not the others shifts every value after it into the wrong column — silently, because the types
+// are all `unknown`. One writer is the only way that stays impossible.
+
+export type RevisionOp = "create" | "update" | "delete";
+export type RevisionStatus = "pending" | "approved" | "rejected" | "superseded";
+
+export type RevisionMeta = {
+  seq: number;
+  op: RevisionOp;
+  status: RevisionStatus;
+  // The field names this revision claims to have set. Empty for a delete: a tombstone changes no
+  // field, and listing them would make the delete look like an edit in the change feed.
+  fields: string[];
+  base: number | null;
+  current: boolean;
+  // Deliberately not derived from a BrokerContext. On promotion, approveProposal writes the
+  // *proposer* here rather than the approver, so authorship survives the merge — the audit row
+  // is where the approver's identity is recorded.
+  by: string;
+  orgId: string;
+};
+
+// Seeders and fixtures write straight SQL against a dataset table rather than going through
+// insertRevision — they run as the owner, before any broker exists, and they have no dataCols
+// list to hand it. Every dataset is revisioned, so a bare `insert into data_live.people (...)`
+// now fails on the NOT NULL bookkeeping columns. These two constants are the literal fragment
+// that makes such an insert a well-formed `create` revision.
+//
+// `_rev`, `_rev_at` and `org_id` are omitted deliberately: each has a column default, and a
+// seeder that spelled them out would be one more copy to keep in step with the DDL.
+export const SEED_REV_COLUMNS = "_rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields, _current";
+export const SEED_REV_VALUES = "1, 'seed', 'create', 'approved', '{}', true";
+
+/** Append one revision row. Returns its `_rev`. */
+export async function insertRevision(
+  client: PoolClient,
+  table: string,
+  dataCols: string[],
+  meta: RevisionMeta,
+  row: Record<string, unknown>,
+): Promise<string> {
+  const revId = randomUUID();
+  const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
+  // Positional, and in REV_COLS order. Do not reorder without reordering REV_COLS.
+  const vals: unknown[] = [
+    revId,
+    meta.seq,
+    new Date(),
+    meta.by,
+    meta.op,
+    meta.status,
+    meta.fields,
+    meta.base,
+    meta.current,
+    meta.orgId,
+    ...dataCols.map((k) => row[k] ?? null),
+  ];
+  await client.query(
+    `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`,
+    vals,
+  );
+  return revId;
+}
+
+/**
+ * Clear `_current` on one revision. Always call this BEFORE inserting its replacement: both rows
+ * are `_current` between the two statements otherwise, and the partial unique index on
+ * (org_id, pk) where _current rejects the insert.
+ */
+export async function demoteRevision(
+  client: PoolClient,
+  table: string,
+  rev: string,
+): Promise<void> {
+  await client.query(`update ${table} set _current = false where _rev = $1`, [rev]);
+}
+
+/** The revision a document currently holds, or null if it has none (or was deleted). */
+export async function currentRevision(
+  client: PoolClient,
+  table: string,
+  pk: string,
+  id: unknown,
+): Promise<RevisionRow | null> {
+  const r = await client.query(`select * from ${table} where ${ident(pk)} = $1 and _current`, [id]);
+  return r.rowCount ? (r.rows[0] as RevisionRow) : null;
+}
+
+/**
+ * Demote the current revision and append its successor, carrying untouched columns forward so a
+ * revision is a complete document rather than a patch. The shared shape behind "update" and
+ * "delete" on both the direct path and the import path.
+ */
+export async function reviseDocument(
+  client: PoolClient,
+  table: string,
+  dataCols: string[],
+  current: RevisionRow,
+  changed: Record<string, unknown>,
+  meta: Pick<RevisionMeta, "op" | "status" | "by" | "orgId">,
+): Promise<string> {
+  const next: Record<string, unknown> = {};
+  for (const f of dataCols) next[f] = f in changed ? changed[f] : current[f];
+  await demoteRevision(client, table, current._rev);
+  return insertRevision(
+    client,
+    table,
+    dataCols,
+    {
+      seq: Number(current._rev_seq) + 1,
+      op: meta.op,
+      status: meta.status,
+      fields: meta.op === "delete" ? [] : Object.keys(changed),
+      base: Number(current._rev_seq),
+      current: true,
+      by: meta.by,
+      orgId: meta.orgId,
+    },
+    next,
+  );
+}
