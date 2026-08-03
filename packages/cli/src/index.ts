@@ -9,6 +9,8 @@ import {
   applyConfig,
   regenerateSynthetic,
   migrateApp,
+  runProjectMigrations,
+  planFromSchema,
   indexCollection,
   syncDatasetTerms,
   loadTaxonomyBindings,
@@ -24,12 +26,50 @@ export function resolveDbUrl(dir: string, explicit?: string): string {
   throw new Error("No database. Pass --db, set DATABASE_URL, or run `warehousd start` first.");
 }
 
-export async function runApply(projectDir: string, dbUrl: string): Promise<void> {
+/**
+ * The same lookup, for callers where "no database" is an answer rather than a failure.
+ *
+ * `warehousd migrate plan` is the case: before a stack is running, and against a Fly deployment
+ * whose Postgres credentials the CLI never holds, the last deployed config snapshot is the only
+ * previous state there is — and a plan built from it is still worth printing.
+ */
+export function tryResolveDbUrl(dir: string, explicit?: string): string | undefined {
+  try {
+    return resolveDbUrl(dir, explicit);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Apply the config, running the project's pending migrations first.
+ *
+ * The order is the contract, and it is the same one the container entrypoint uses. Migrations run
+ * before applyConfig so that a reviewed ALTER has already happened by the time applyConfig
+ * re-derives the plan from the live schema — which is also why the ledger records no intent. The
+ * check is the schema, so a migration that claims to fix a type but does not still blocks.
+ *
+ * `migrated` is the versions this call applied; `rebuilt` names the data_synth tables it dropped
+ * and recreated, so the caller can say that `warehousd seed` will repopulate them.
+ */
+export async function runApply(
+  projectDir: string,
+  dbUrl: string,
+): Promise<{ migrated: string[]; rebuilt: string[] }> {
   const cfg = loadConfig(projectDir);
   const db = new Pool({ connectionString: dbUrl });
   try {
     await migrateApp(db);
+    const migrated = await runProjectMigrations(db, projectDir);
+    const rebuilt = [
+      ...new Set(
+        (await planFromSchema(db, cfg))
+          .filter((c) => c.destructive && c.env === "dev")
+          .map((c) => c.table),
+      ),
+    ];
     await applyConfig(db, cfg);
+    return { migrated, rebuilt };
   } finally {
     await db.end();
   }

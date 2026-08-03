@@ -122,6 +122,11 @@ storage tables. Anything else is rejected at config load rather than reaching DD
 | `gen` | Names a synthetic generator for this field, overriding the field-name heuristics. See below. |
 | `searchable` | Dataset text fields only. Generates a `<field>_tsv` column and GIN index so `search_documents` reaches this collection. |
 
+Changing `type` on a field, removing a field, or moving `pk` is a **breaking
+change** once a collection holds live content: `apply` refuses it rather than
+leaving the column and the config disagreeing about what it holds. See
+[migrations.md](migrations.md) for the flow that gets you past it.
+
 #### `nullable`
 
 `nullable` governs two things and only two: whether the synthetic generator emits

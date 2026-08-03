@@ -26,6 +26,24 @@ export {
 } from "./config/schema";
 export type { CollectionConfig, FileMetadataType, DeployConfig } from "./config/schema";
 export { applyConfig } from "./apply/apply";
+export { declaredTables, declaredPkField } from "./apply/ddl";
+export type { DeclaredTable, DeclaredColumn } from "./apply/ddl";
+export {
+  planFromSchema,
+  planFromConfigs,
+  classifyCast,
+  destructive,
+  type SchemaChange,
+  type ChangeKind,
+} from "./apply/plan";
+export { renderMigrationSql, nextMigrationFilename } from "./apply/migration-sql";
+export {
+  runProjectMigrations,
+  readProjectMigrations,
+  projectMigrationStatus,
+  type ProjectMigration,
+  type ProjectMigrationStatus,
+} from "./db/project-migrations";
 export { generateSynthetic } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
 export { migrateApp, createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-app";

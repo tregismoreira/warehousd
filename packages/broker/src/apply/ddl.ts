@@ -12,6 +12,99 @@ const PG_TYPE: Record<string, string> = {
   json: "jsonb",
 };
 
+// The revision columns a writable dataset carries. Structural: no field declares them, no grant
+// can name them, and no schema change can strand data in one.
+const REV_COLS = [
+  "_rev",
+  "_rev_seq",
+  "_rev_at",
+  "_rev_by",
+  "_rev_op",
+  "_rev_status",
+  "_rev_fields",
+  "_rev_base",
+  "_current",
+] as const;
+
+export type DeclaredColumn = { name: string; pgType: string; pk: boolean };
+
+/**
+ * What a table is supposed to look like, split into the columns the YAML declares and the ones
+ * the DDL owns.
+ *
+ * Only `columns` can hold data a config change would strand, so only `columns` is compared
+ * against the live database in `plan.ts` — `structural` exists so the planner can tell a column
+ * it is not responsible for from one the operator deleted. This is the single source of truth
+ * for the mapping: `tableDDL` builds its `create table` list from it rather than repeating the
+ * "a bound vocabulary is text, or text[] when it is `multiple`" rule a second time.
+ */
+export type DeclaredTable = { table: string; columns: DeclaredColumn[]; structural: string[] };
+
+export function declaredTables(collection: string, cfg: WarehousdConfig): DeclaredTable[] {
+  const c = cfg.collections[collection];
+  if (!c) throw new Error(`Unknown collection: ${collection}`);
+
+  if (c.type === "file") {
+    const columns: DeclaredColumn[] = [];
+    for (const taxSlug of c.taxonomies ?? [])
+      columns.push({
+        name: taxSlug,
+        pgType: cfg.taxonomies[taxSlug]?.multiple ? "text[]" : "text",
+        pk: false,
+      });
+    for (const m of fileMetadataFields(c))
+      columns.push({ name: m.field, pgType: PG_TYPE[m.type]!, pk: false });
+    return [
+      {
+        table: `${collection}__files`,
+        columns,
+        structural: ["id", "org_id", "title", "path", "owner", "checksum", "updated_at"],
+      },
+      {
+        table: `${collection}__documents`,
+        columns: [],
+        structural: ["id", "org_id", "file_id", "document_seq", "content", "tsv", "embedding"],
+      },
+    ];
+  }
+
+  const boundVocabs = new Set(c.taxonomies ?? []);
+  const columns: DeclaredColumn[] = [];
+  const structural = ["org_id", ...(c.writable ? REV_COLS : [])];
+  for (const [name, f] of Object.entries(c.fields)) {
+    // Join columns are resolved in the view and stored nowhere, so nothing can be stranded in one.
+    if (f.view_join) continue;
+    const pgType = boundVocabs.has(name)
+      ? cfg.taxonomies[name]?.multiple
+        ? "text[]"
+        : "text"
+      : PG_TYPE[f.type!]!;
+    columns.push({ name, pgType, pk: !!f.pk });
+    // Structural for every field, not just a `searchable` one. A `<field>_tsv` column is always
+    // generated — it holds nothing that is not derived from `<field>` — so a field that stops
+    // being searchable leaves one behind that must not be reported as data the operator deleted.
+    // A field genuinely *declared* as `<name>_tsv` is unaffected: it is in `columns`, which is
+    // what drives type and addition planning; `structural` only suppresses drop detection.
+    structural.push(`${name}_tsv`);
+  }
+  return [{ table: collection, columns, structural }];
+}
+
+/**
+ * The field the declared primary key sits on, or null when the collection declares none.
+ *
+ * A writable dataset's real primary key is `_rev` — the declared pk becomes document identity,
+ * carried by the `<collection>_current_idx` unique index instead. Both cases answer the same
+ * question, so both come from here.
+ */
+export function declaredPkField(collection: string, cfg: WarehousdConfig): string | null {
+  const c = cfg.collections[collection];
+  if (!c) throw new Error(`Unknown collection: ${collection}`);
+  if (c.type === "file") return null;
+  for (const [name, f] of Object.entries(c.fields)) if (f.pk) return name;
+  return null;
+}
+
 export function tableDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const c = cfg.collections[collection];
@@ -75,22 +168,19 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
   }
 
   // CollectionSchema's transform materialises every bound vocabulary as a text field, so the
-  // taxonomy slugs are already in `c.fields`. The vocabulary loop below owns their columns —
-  // it is the only place that knows a `multiple` vocabulary needs text[] — so they are taken
-  // from there rather than from the field's declared type.
+  // taxonomy slugs are already in `c.fields`. declaredTables owns their type — it is the only
+  // place that knows a `multiple` vocabulary needs text[] — so it is taken from there rather
+  // than from the field's declared type.
   const boundVocabs = new Set(c.taxonomies ?? []);
-  const cols: string[] = [];
+  // The column list, and the type of each, comes from declaredTables — the same function the
+  // schema planner compares against the live database, so the DDL and the planner cannot drift
+  // apart on what a field's Postgres type is meant to be.
+  const cols = declaredTables(collection, cfg)[0]!.columns.map(
+    (col) => `"${col.name}" ${col.pgType}${col.pk ? " primary key" : ""}`,
+  );
   const fieldAlters: string[] = [];
   for (const [name, f] of Object.entries(c.fields)) {
     if (f.view_join) continue; // join columns are not stored on the base table
-    const pk = f.pk ? " primary key" : "";
-    // type is guaranteed by CollectionSchema refinement for structured collections
-    const colType = boundVocabs.has(name)
-      ? cfg.taxonomies[name]?.multiple
-        ? "text[]"
-        : "text"
-      : PG_TYPE[f.type!];
-    cols.push(`"${name}" ${colType}${pk}`);
     // Upgrade path for a field added to an already-created collection, mirroring what the
     // file branch does for its metadata fields — without this, `create table if not exists`
     // silently leaves the new column off an existing table. Field names are IDENT-validated
@@ -126,14 +216,9 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
 
   // Writable datasets get revision columns and drop pk constraint; the declared pk becomes document identity
   if (c.writable) {
-    // Find the pk field name for the unique index on _current
-    let pkField = "id";
-    for (const [name, f] of Object.entries(c.fields)) {
-      if (f.pk) {
-        pkField = name;
-        break;
-      }
-    }
+    // The pk field name for the unique index on _current. `id` when none is declared, which is
+    // the fallback this has always used.
+    const pkField = declaredPkField(collection, cfg) ?? "id";
 
     // `superseded` is the status of a pending revision that an approval merged into a new one
     // rather than promoting in place. approveProposal has to write a merged row — the current

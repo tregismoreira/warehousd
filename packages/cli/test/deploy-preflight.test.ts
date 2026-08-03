@@ -636,6 +636,7 @@ collections:
       "deploy-block-present",
       "demo-off",
       "audit-on",
+      "schema-migrations-present",
       "sso-or-local-login",
       "flyctl-ready",
     ];

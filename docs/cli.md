@@ -193,9 +193,50 @@ The generated credentials, masked unless asked otherwise.
 Re-applies `warehousd.yml` — schemas, tables, and `v_<collection>` views —
 without a restart. Runs against the host, not inside the container.
 
+Applies the project's pending migrations first, then the config. `apply` is
+additive: it creates tables and adds columns, and it will not rewrite a column
+underneath live rows. A change that would — a field's type, a removed field, a
+moved primary key — is refused, and `warehousd migrate` is how you get past it.
+See [migrations.md](migrations.md).
+
 | Flag         |                                                                             |
 | ------------ | --------------------------------------------------------------------------- |
 | `--db <url>` | Database URL. Falls back to `DATABASE_URL`, then `.warehousd/outputs.json`. |
+
+### `migrate plan`
+
+What a config change would do to data that already exists. Reads the live schema
+when a database is reachable — that is the only source that can see drift no
+config change explains — and falls back to the config recorded by the last
+deploy when it is not.
+
+Each pending change is either `ready` (the cast cannot lose anything) or
+`needs review` (it can).
+
+| Flag         |               |
+| ------------ | ------------- |
+| `--db <url>` | Database URL. |
+
+### `migrate generate`
+
+Writes the pending changes to `migrations/NNNN-<name>.sql` as SQL you can read
+and edit. Lossless statements are written ready to run; lossy ones are commented
+out under a `-- REVIEW:` header that says what would be lost and lists the
+alternatives.
+
+| Flag              |                                                 |
+| ----------------- | ----------------------------------------------- |
+| `--db <url>`      | Database URL.                                   |
+| `-n, --name <s>`  | Name for the file (default `schema-change`).    |
+
+### `migrate status`
+
+Which of the project's migrations have been applied to a database, and which
+files have been edited since they were.
+
+| Flag         |               |
+| ------------ | ------------- |
+| `--db <url>` | Database URL. |
 
 ### `seed`
 
