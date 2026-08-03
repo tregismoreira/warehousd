@@ -1,5 +1,7 @@
-import { loadConfig, envRefs, type WarehousdConfig } from "@warehousd/broker";
+import { loadConfig, envRefs, planFromConfigs, type WarehousdConfig } from "@warehousd/broker";
 import { FlyError, assertFly } from "../fly";
+import { readDeployOutputs } from "../state";
+import { existingMigrations } from "../migrate";
 
 export type PreflightCheck = { id: string; ok: boolean; detail: string };
 export type PreflightResult =
@@ -65,6 +67,49 @@ async function ssoOrLocalLoginCheck(
       "no SSO configured. Set SSO_ISSUER, SSO_CLIENT_ID and SSO_CLIENT_SECRET, register a " +
       "provider in the admin UI (requires deploy.database.url so it can be read), or pass " +
       "--allow-local-login to deploy with local password login enabled.",
+  };
+}
+
+/**
+ * Catch a change that would destroy live data before the image is pushed, not after.
+ *
+ * This runs on the operator's machine, where the target database is usually unreachable — with
+ * `database.managed: true` there is no URL at all, because Fly generates those credentials during
+ * `postgres attach` and never hands them back. So the comparison is against the config snapshot
+ * from the last deploy, and the question it can answer is narrow: did a destructive change appear,
+ * and has the operator written a migration since?
+ *
+ * It cannot confirm the migration is correct — only the release command, which has the real
+ * database, can do that, and it refuses the boot if the drift is still there. This check exists so
+ * that failure happens here instead, before a broken release is on its way to Fly.
+ */
+function schemaMigrationsCheck(projectDir: string, cfg: WarehousdConfig | null): PreflightCheck {
+  const id = "schema-migrations-present";
+  if (!cfg) return { id, ok: true, detail: "not evaluated: the config did not load" };
+
+  const previous = readDeployOutputs(projectDir);
+  if (!previous)
+    return { id, ok: true, detail: "no previous deploy on this machine — nothing to compare" };
+
+  const blocking = planFromConfigs(previous.configSnapshot, cfg).filter((c) => c.destructive);
+  if (blocking.length === 0) return { id, ok: true, detail: "no change needs a migration" };
+
+  const before = new Set(previous.migrationVersions ?? []);
+  const added = existingMigrations(projectDir).filter((m) => !before.has(m));
+  if (added.length > 0)
+    return {
+      id,
+      ok: true,
+      detail: `${added.length} new migration(s) since the last deploy: ${added.join(", ")}. The release command verifies they resolved the change.`,
+    };
+
+  return {
+    id,
+    ok: false,
+    detail:
+      `${blocking.length} change(s) would destroy or strand live data and no migration has been ` +
+      `added since the last deploy: ${blocking.map((c) => c.detail).join("; ")}. ` +
+      `Run \`warehousd migrate generate\`, review the SQL, and deploy again.`,
   };
 }
 
@@ -139,6 +184,8 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
     ok: demoOffOk,
     detail: demoOffDetail,
   });
+
+  checks.push(schemaMigrationsCheck(input.projectDir, cfg));
 
   checks.push(await ssoOrLocalLoginCheck(input, cfg));
 

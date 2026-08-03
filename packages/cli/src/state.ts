@@ -37,6 +37,10 @@ export type DeployOutputs = {
   env: "dev";
   deployedAt: string;
   configSnapshot: WarehousdConfig;
+  // The migration filenames present at deploy time. Optional because it genuinely may be absent:
+  // readDeployOutputs is a bare JSON.parse of a file an earlier CLI wrote. Pre-flight reads it to
+  // tell "the operator wrote a migration for this change" from "they have not yet".
+  migrationVersions?: string[];
 };
 
 export function stateDir(dir: string): string {

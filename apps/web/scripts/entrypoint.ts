@@ -8,6 +8,7 @@ import {
   migrateUserOrg,
   loadConfig,
   applyConfig,
+  runProjectMigrations,
   generateSynthetic,
   indexCollection,
   loadTaxonomyBindings,
@@ -177,8 +178,19 @@ export async function bootstrap(): Promise<void> {
     //     Must follow step 4 — the table does not exist before it.
     await migrateUserOrg(db);
 
-    // 5. YAML → data_synth/data_live tables + views + app.collections. Idempotent by design.
+    // 5. The project's own migrations, then YAML → data_synth/data_live tables + views +
+    //    app.collections. Idempotent by design.
+    //
+    //    The order is the contract. applyConfig is additive and will not rewrite a column
+    //    underneath live rows — it refuses instead — so a reviewed migration has to have run
+    //    first. It then re-derives the plan from the schema, which is why a migration that did not
+    //    actually resolve the change still stops the boot. A throw here aborts the Fly release and
+    //    the previous version keeps serving, which is exactly what should happen: the alternative
+    //    is a release whose config and database disagree about what a column holds.
     const cfg = loadConfig(dir);
+    const migrated = await runProjectMigrations(db, dir);
+    if (migrated.length > 0)
+      console.log(`[entrypoint] applied project migrations: ${migrated.join(", ")}`);
     await applyConfig(db, cfg);
     const demoMode = process.env.WAREHOUSD_DEMO === "true" || cfg.demo;
 

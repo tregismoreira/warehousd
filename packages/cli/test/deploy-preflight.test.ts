@@ -560,6 +560,7 @@ collections:
       "env-refs-resolve",
       "deploy-block-present",
       "demo-off",
+      "schema-migrations-present",
       "sso-or-local-login",
       "flyctl-ready",
     ];
