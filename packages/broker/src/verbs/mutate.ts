@@ -54,6 +54,10 @@ export function makeMutateVerb(d: VerbDeps) {
 
     // 3. collection is writable
     if (!c.writable) return audit.refuse(intent.collection, "not_writable");
+    // An external collection's rows belong to the remote system. The database refuses the write
+    // too — the foreign table is `updatable 'false'` and no role holds INSERT on it — so this is
+    // the readable refusal in front of a privilege wall, not the wall itself.
+    if (c.source_ref) return audit.refuse(intent.collection, "not_writable");
 
     // 4. op supported for this collection type
     const supported = supportedVerbs(cfg, intent.collection);

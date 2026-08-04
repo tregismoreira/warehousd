@@ -70,6 +70,22 @@ deployment that follows the expectations above, but each is worth knowing:
   body, but that is a caller-side guarantee rather than one the broker enforces,
   so a future adapter calling `approveGrant` directly could widen a grant beyond
   what the config allows.
+- **A connect-in-place collection has one isolation wall, not two.** Every other
+  collection is confined to its org by the view's `org_id` predicate *and* by an
+  RLS policy on the base table. A `postgres_fdw` foreign table can carry neither:
+  it has no `org_id` column, and RLS does not apply to it. The view instead
+  compares the request's org against the constant `org:` declared on the source,
+  which is enforcement in the database rather than in broker code — but it is one
+  mechanism where the rest of the system has two.
+- **An external source is trusted to the extent of its user mapping.** warehousd
+  reads it with the credential you supply, so that credential should be a
+  read-only role scoped to the tables you declared. warehousd cannot narrow it
+  further: `updatable 'false'` stops warehousd writing, it does not stop the
+  credential from being over-privileged.
+- **`embedding.provider: openai` / `http` sends document text to a third party.**
+  That is the point of the setting and it is opt-in — `local` is the default and
+  keeps content on the machine — but a deployment that turns it on has moved
+  governed content outside the boundary the rest of this document describes.
 - **No multi-tenancy.** One deployment is one organization. There is no boundary
   between tenants because there are no tenants.
 - **A token carrying no `env:` scope is read as `env:dev`.** The env rules leave a

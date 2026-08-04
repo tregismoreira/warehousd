@@ -258,16 +258,33 @@ project whose file collections are not involved.
 ### `index <collection>`
 
 Re-index a file collection. `start` does this automatically for the dev
-environment.
+environment. `.md`, `.txt`, `.pdf` and `.docx` are all picked up; a binary's
+owner, terms and typed metadata come from a sidecar `<file>.yml` beside it.
 
-| Flag             |                                  |
-| ---------------- | -------------------------------- |
-| `--db <url>`     | Database URL.                    |
-| `--env <env>`    | `dev` or `live` (default `dev`). |
-| `--source <dir>` | Override the source directory.   |
+| Flag             |                                              |
+| ---------------- | -------------------------------------------- |
+| `--db <url>`     | Database URL.                                |
+| `--env <env>`    | `dev` or `live` (default `dev`).             |
+| `--source <dir>` | Override the source directory.               |
+| `--no-embed`     | Skip embedding new chunks (see `embed`).     |
 
 `--env live` requires `source_live` in the config or an explicit `--source`. The
 CLI will not index one directory into both environments.
+
+### `embed [collection]`
+
+Fill the embedding column for file collections, so `search_documents` can answer
+`mode: semantic` and `mode: hybrid`. Every file collection unless one is named.
+
+| Flag          |                                  |
+| ------------- | -------------------------------- |
+| `--db <url>`  | Database URL.                    |
+| `--env <env>` | `dev` or `live` (default `dev`). |
+
+Requires an `embedding:` block in `warehousd.yml`; without one the command says
+so rather than doing nothing. It only ever touches chunks that have no embedding,
+so it is safe to re-run and cheap to resume after an interruption — which matters
+when a remote provider rate-limits halfway through a corpus.
 
 ### `deploy`
 

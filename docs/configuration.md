@@ -36,6 +36,15 @@ database:
   managed: true        # default: the CLI runs Postgres in Docker
   url: ${env:DATABASE_URL}   # alternative: bring your own Postgres
   port: 5432           # host port for the managed Postgres (default: server.port + 1)
+sources:                 # optional. External databases to read through — see Connect-in-place
+  crm:
+    type: postgres
+    url: ${env:CRM_DATABASE_URL}
+    schema: public       # default public
+embedding:               # optional. Absent means semantic search is off
+  provider: local        # local (default) | openai | http
+  model: bge-small-en-v1.5
+  dimensions: 384        # required — must match the model
 deploy:
   target: fly          # only supported value
   app_name: harbor-warehousd   # ^[a-z0-9][a-z0-9-]{0,62}$, globally unique on Fly
@@ -112,7 +121,7 @@ storage tables. Anything else is rejected at config load rather than reaching DD
 
 | Key | Meaning |
 |---|---|
-| `posture` | **Required.** `allow` / `deny`, or `{ read: …, write: … }`. |
+| `posture` | **Required.** `allow` / `deny`, or `{ read: allow\|mask\|deny, write: …, unmask: … }`. |
 | `type` | Required on dataset collections: `uuid`, `text`, `numeric`, `int`, `timestamptz`, `date`, `boolean`, `json`. Inferred for file collections. |
 | `pk` | Marks the primary key. On a `writable` dataset this is *document* identity, not row identity. |
 | `fk` | `collection.field` — honored by the synthetic generator so references resolve. |
@@ -121,6 +130,8 @@ storage tables. Anything else is rejected at config load rather than reaching DD
 | `min` / `max` | Range for generated numerics. |
 | `gen` | Names a synthetic generator for this field, overriding the field-name heuristics. See below. |
 | `searchable` | Dataset text fields only. Generates a `<field>_tsv` column and GIN index so `search_documents` reaches this collection. |
+| `mask` | Required with `read: mask`, invalid without it. The transform applied in SQL — see [Masking](#masking). |
+| `column` | Only on a `source_ref` collection: the column's name on the remote table, when it differs. |
 
 Changing `type` on a field, removing a field, or moving `pk` is a **breaking
 change** once a collection holds live content: `apply` refuses it rather than
@@ -311,6 +322,121 @@ populated from frontmatter (YAML at the top of the file).
 never at real corporate documents. Live content is indexed only by an explicit
 `warehousd index <collection> --env live`, which requires `source_live` or an
 explicit `--source`.
+
+## Semantic search
+
+```yaml
+embedding:
+  provider: local            # runs in-process, nothing leaves the machine
+  model: bge-small-en-v1.5
+  dimensions: 384
+```
+
+Absent, and semantic search is simply off: `search_documents` behaves exactly as
+it always has and the embedding column stays empty. That is the honest default —
+embedding a corpus costs something, and for a remote provider it is a disclosure.
+
+`dimensions` has no default because it has to match the model. Get it wrong and
+Postgres reports a cast error on insert that names neither the model nor this
+key, so warehousd checks it at construction instead.
+
+`provider: local` is the default deliberately. An embedding request is the whole
+document text, and warehousd's argument is that governed content does not leave
+the deployment. Sending it to an API is a legitimate trade — a better model is a
+better search — but it is one someone states in writing:
+
+```yaml
+embedding:
+  provider: openai           # or `http`, which requires base_url
+  model: text-embedding-3-small
+  dimensions: 1536
+  api_key: ${env:OPENAI_API_KEY}
+```
+
+Fill the column with `warehousd embed`, which is resumable — it only ever touches
+chunks that have none, so an interrupted run costs nothing already done.
+`warehousd index` and `warehousd seed` embed new chunks as they go when
+`embedding:` is configured; `--no-embed` skips that.
+
+The `search_documents` tool then takes a `mode`:
+
+| mode | ranking |
+|---|---|
+| `text` (default) | `ts_rank_cd` over the full-text index — matches words |
+| `semantic` | cosine distance over the embedding — matches meaning, and will find a document that shares no words with the query |
+| `hybrid` | Reciprocal Rank Fusion over both |
+
+Semantic and hybrid apply to file collections only, and refuse rather than
+silently falling back to a text search: a caller who asked for one and got the
+other has no way to tell.
+
+## PDF and DOCX
+
+`.pdf` and `.docx` are indexed alongside `.md` and `.txt`, from the same `source`
+directory, with the original bytes stored so the console can hand the document
+back.
+
+A binary has no frontmatter, so its owner, terms and typed metadata come from a
+**sidecar** beside it — `contract.pdf` is described by `contract.pdf.yml`:
+
+```yaml
+owner: legal@acme.example
+client: c-0001
+tags: [urgent, confidential]
+review_date: 2026-06-01
+```
+
+The rule that a bound vocabulary is *required* still holds: a binary with no
+sidecar term fails the index rather than becoming a document no grant can scope.
+A scanned PDF with no extractable text is refused too — OCR is out of scope, and
+storing an empty document is the failure that looks like success.
+
+## Connect-in-place
+
+A collection can read from an external Postgres instead of storing rows in
+warehousd:
+
+```yaml
+sources:
+  crm:
+    type: postgres
+    url: ${env:CRM_DATABASE_URL}
+    schema: public
+
+collections:
+  accounts:
+    description: CRM accounts
+    source_ref: { source: crm, table: accounts, org: default }
+    fields:
+      id:   { type: uuid, posture: allow, pk: true }
+      name: { type: text, posture: allow, column: acct_name }
+      tier: { type: text, posture: allow }
+```
+
+The connection is made by `postgres_fdw` — by **Postgres**, not by warehousd. A
+foreign table lives inside `data_live`, so the collection's view, its grant, its
+field postures and the broker's SQL builder all work on it completely unchanged.
+
+Three consequences worth knowing before you point one at production:
+
+- **`url` is dialled by the database server**, so the host and port have to be
+  reachable *from Postgres*, which is not always the address your client uses. A
+  warehousd running its own Postgres in a container cannot reach a source
+  published on that container's host port.
+- **Columns are declared, never imported.** A column added upstream is invisible
+  to warehousd until someone writes it into the YAML. `warehousd apply` verifies
+  the remote actually matches and fails naming the collection if it does not.
+- **Read-only, and not by convention.** The server and the foreign table are both
+  `updatable 'false'`, and no role is granted anything but `SELECT` on the
+  wrapping view. `writable: true` is a config error on these collections.
+
+`dev` is unaffected: an external collection gets an ordinary synthetic table in
+`data_synth`, so developers never touch the remote system and env parity holds.
+
+The one genuine narrowing is tenant isolation. A foreign table cannot carry an
+RLS policy and has no `org_id` column, so the view compares the request's org
+against the `org:` the source declares — one wall instead of two. See
+[architecture.md](architecture.md).
 
 ## Taxonomies
 

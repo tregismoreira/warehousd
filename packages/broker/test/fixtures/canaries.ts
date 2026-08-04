@@ -15,3 +15,10 @@ export const IMPORT_DENIED_CANARY = "CANARY_IMPORTED_DENIED_8b2f"; // people.hom
 // still never reach a response, an error or a log line. A grant carrying `unmask` is the one
 // case where seeing it is correct.
 export const MASK_RAW_CANARY = "CANARY_MASK_RAW_4c8d";
+
+// Connect-in-place. Two canaries because an external collection has two distinct ways to leak:
+// a row the grant should not reach, and a REMOTE COLUMN warehousd never declared. The second is
+// the one the foreign-table design exists to make impossible — columns are written out one at a
+// time in the YAML, so a column added upstream is invisible until someone adds it here.
+export const EXTERNAL_CANARY = "CANARY_EXTERNAL_ROW_a91f";
+export const EXTERNAL_UNDECLARED_CANARY = "CANARY_EXT_UNDECLARED_77b2";

@@ -131,6 +131,11 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
 
+  // An external collection's live rows are the remote system's; the foreign table stands in for
+  // a base table. Dev is generated as usual — that is what keeps env parity true, and what keeps
+  // a developer's queries off someone else's production database.
+  if (c.source_ref && env === "live") return "";
+
   if (c.type === "file") {
     // Each bound vocabulary gets a column (text or text[] depending on cardinality)
     const termCols: string[] = [];
@@ -340,6 +345,20 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
       where d.org_id = current_setting('warehousd.org_id', true);`;
   }
 
+  // An external collection's live view reads the foreign table. It has no org_id column — the
+  // remote system knows nothing about warehousd's tenants — so the predicate compares the
+  // request's org against the constant the config declared for this source. That is a genuine
+  // narrowing of the two-wall model: RLS cannot apply to a foreign table, so this predicate is
+  // the only wall. It is stated in docs/architecture.md and SECURITY.md rather than left implicit.
+  if (c.source_ref && env === "live") {
+    const cols = Object.entries(c.fields)
+      .filter(([, f]) => !f.view_join)
+      .map(([name]) => `base."${name}"`);
+    return `${recreate}
+      select ${cols.join(", ")} from ${schema}."_ext_${collection}" base
+      where current_setting('warehousd.org_id', true) = '${c.source_ref.org.replace(/'/g, "''")}';`;
+  }
+
   const selects: string[] = [];
   const joins: string[] = [];
   for (const [name, f] of Object.entries(c.fields)) {
@@ -366,6 +385,75 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
     ${whereClause};`;
 }
 
+// The foreign table an external collection reads through, plus the server and user mapping it
+// needs. Live only: `dev` gets an ordinary synthetic table like every other collection, so a
+// developer never touches the external system and invariant 6 (env parity) still holds.
+//
+// Three properties are enforced by the DATABASE here rather than by broker code:
+//
+//   - Read-only. `updatable 'false'` on both server and table, and no role is granted anything
+//     but SELECT on the wrapping view. `mutate` also refuses structurally, but that is the
+//     second line, not the first.
+//   - The exact column set. Columns are declared from the YAML, one CREATE FOREIGN TABLE at a
+//     time, rather than imported wholesale — so a column added upstream is invisible to
+//     warehousd until someone writes it down here.
+//   - The credential's blast radius. It lives in a user mapping, readable only by its owner, and
+//     never in a warehousd table.
+export function foreignTableDDL(collection: string, cfg: WarehousdConfig): string {
+  const c = cfg.collections[collection];
+  if (!c?.source_ref) return "";
+  const src = cfg.sources[c.source_ref.source];
+  if (!src) throw new Error(`Unknown source: ${c.source_ref.source}`);
+
+  const server = `wh_src_${c.source_ref.source}`;
+  const foreign = `data_live."_ext_${collection}"`;
+  const u = new URL(src.url);
+  const port = u.port || "5432";
+  const database = u.pathname.replace(/^\//, "");
+  const user = decodeURIComponent(u.username);
+  const password = decodeURIComponent(u.password);
+  // Single-quoted FDW option values. Every one of these comes from warehousd.yml (via ${env:VAR}),
+  // never from a request, and a quote inside one would end the literal — so they are escaped
+  // rather than trusted, the same rule param() keeps for values on the query path.
+  const q1 = (v: string) => `'${v.replace(/'/g, "''")}'`;
+
+  const cols = Object.entries(c.fields)
+    .filter(([, f]) => !f.view_join)
+    .map(([name, f]) => {
+      const pgType = (c.taxonomies ?? []).includes(name)
+        ? cfg.taxonomies[name]?.multiple
+          ? "text[]"
+          : "text"
+        : PG_TYPE[f.type!];
+      // `column_name` maps a differing remote name onto the field name, so everything downstream
+      // — view, grant, buildSelect — sees the name the YAML declared.
+      const opt = f.column ? ` options (column_name ${q1(f.column)})` : "";
+      return `"${name}" ${pgType}${opt}`;
+    });
+
+  return `
+    do $$ begin
+      if not exists (select 1 from pg_foreign_server where srvname = '${server}') then
+        execute format('create server %I foreign data wrapper postgres_fdw options (host %L, port %L, dbname %L, updatable %L, fetch_size %L)',
+          '${server}', ${q1(u.hostname)}, ${q1(port)}, ${q1(database)}, 'false', '1000');
+      end if;
+    end $$;
+    do $$ begin
+      if not exists (
+        select 1 from pg_user_mappings
+        where srvname = '${server}' and (usename = current_user or usename is null)
+      ) then
+        execute format('create user mapping for current_user server %I options (user %L, password %L)',
+          '${server}', ${q1(user)}, ${q1(password)});
+      end if;
+    end $$;
+    drop foreign table if exists ${foreign} cascade;
+    create foreign table ${foreign} (${cols.join(", ")})
+      server ${server}
+      options (schema_name ${q1(src.schema)}, table_name ${q1(c.source_ref.table)}, updatable 'false');
+  `;
+}
+
 export function grantViewDDL(env: "dev" | "live", collection: string): string {
   const schema = env === "dev" ? "data_synth" : "data_live";
   const role = env === "dev" ? "warehousd_dev" : "warehousd_live";
@@ -380,6 +468,10 @@ export function rlsDDL(env: "dev" | "live", collection: string, cfg: WarehousdCo
   const schema = env === "dev" ? "data_synth" : "data_live";
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
+
+  // A foreign table cannot carry an RLS policy, and there is no local row to police. The view's
+  // constant org predicate is the wall for these — see viewDDL.
+  if (c.source_ref && env === "live") return "";
 
   const tables: string[] = [];
   if (c.type === "file") {
@@ -417,6 +509,9 @@ export function grantImportDDL(collection: string, cfg: WarehousdConfig): string
   if (!c) throw new Error(`Unknown collection: ${collection}`);
   // File collections are populated by the indexer under the owner role, not by import.
   if (c.type === "file") return "";
+  // An external collection's rows belong to the remote system. Import writes data_live tables,
+  // and there is no data_live table here to write.
+  if (c.source_ref) return "";
   return `
 grant insert on data_live.${collection} to warehousd_import;
 grant update (_current, _rev_status) on data_live.${collection} to warehousd_import;

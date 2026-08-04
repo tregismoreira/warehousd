@@ -948,6 +948,63 @@ overlap. That reconstructs the _chunked_ text, not the source file byte-for-byte
 — chunking trims and rejoins paragraphs, and nothing stores the original body.
 A caller needing the exact source must keep it.
 
+## Semantic search
+
+`{collection}__documents.embedding` is a `vector(N)` column, N from
+`embedding.dimensions`, indexed with HNSW over `vector_cosine_ops`. HNSW rather
+than IVFFlat because IVFFlat has to be built over existing rows to choose its
+lists, and `applyConfig` creates the index on an empty table.
+
+The broker declares `Embedder` (`packages/broker/src/providers.ts`) and consumes
+it through `VerbDeps`; the implementations live in `@warehousd/providers` and are
+injected by the adapter, exactly as `Pools` is. That is what keeps the broker
+free of an ONNX runtime and of any outbound HTTP call — the purity the package
+exists to have.
+
+**The query vector is derived server-side from `q`, after the caller's grant has
+been loaded.** There is no way to supply one: a client-supplied vector is an
+oracle over the embedding space of documents the grant excludes, letting a caller
+read similarity out of a corpus they cannot read.
+
+`hybrid` is Reciprocal Rank Fusion over two CTEs, chosen over a weighted score
+sum because `ts_rank_cd` and cosine similarity share no scale and RRF uses only
+each list's *order*. Both CTEs read one `scoped` CTE, so the grant's predicates
+are applied **before either ranking and before either LIMIT**. Ranking first and
+filtering afterwards would leak: a caller asking for five would receive however
+many of the global top five their grant allowed, and the shortfall itself reports
+how many documents they cannot see.
+
+## Connect-in-place collections
+
+A collection with `source_ref` reads through a `postgres_fdw` foreign table that
+lives inside `data_live`. Everything downstream is unchanged — same view, same
+`grantViewDDL`, same `dataPool`, same `buildSelect` — because the foreign table
+occupies the position a base table would. A second connection pool inside the
+broker was the alternative, and would have needed a variant of `dataPool`,
+`withOrg`, the RLS policy and the org predicate: four new ways to get tenant
+isolation wrong.
+
+Read-only is enforced by the database. The server and the foreign table are both
+`updatable 'false'`, no role holds anything but `SELECT` on the wrapping view, and
+`mutate` refuses `not_writable` structurally in front of that.
+
+The column set is enumerated from the YAML, one `create foreign table` at a time,
+rather than by `import foreign schema`. A column added upstream is therefore
+absent from the local schema entirely — not merely ungranted — so no query,
+broker-built or otherwise, can reach it. `applyConfig` verifies the remote matches
+what was declared and fails at boot, in front of the operator, rather than letting
+drift surface at request time as an `internal_error` nobody can diagnose.
+
+**Tenant isolation is one wall here, not two.** Every other collection has both
+the view's `org_id` predicate and an RLS policy on the base table. A foreign table
+can carry neither: it has no `org_id` column, and RLS does not apply to it. The
+view instead compares the request's org against the constant `org:` the source
+declares. That is a real narrowing and is stated in
+[SECURITY.md](../SECURITY.md) as well as here.
+
+`dev` never touches the external system: an external collection gets an ordinary
+generated table in `data_synth`, which is what keeps invariant 6 true.
+
 ## Taxonomies
 
 A vocabulary is declared once under `taxonomies` and bound to a collection with

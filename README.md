@@ -307,7 +307,8 @@ grant check rather than a shared service account.
 | `warehousd secrets [--show]` | The generated credentials, masked by default. |
 | `warehousd apply` | Re-apply YAML (collections, postures, views) without a restart. |
 | `warehousd seed [--no-reindex]` | Regenerate synthetic data, then re-index file collections. |
-| `warehousd index <collection>` | Re-index a file collection. |
+| `warehousd index <collection>` | Re-index a file collection (`.md`, `.txt`, `.pdf`, `.docx`). |
+| `warehousd embed [collection]` | Fill embeddings for semantic search. Resumable. |
 | `warehousd deploy` | Ship to Fly.io behind a production pre-flight. |
 
 Every command takes `--json`, `-q/--quiet`, `--no-color` and `--verbose`.
@@ -344,12 +345,13 @@ yet built:
 | Audit log | **real** | Insert-only for the app role. |
 | Real-data import | **real** | Admin-only CSV/JSON, with append, upsert and delete modes and a dry-run preview. Every mode writes revisions: the import role holds no UPDATE on a data column and no DELETE at all, so a correction supersedes a value rather than overwriting it. |
 | App-schema migrations | **real** | Ordered and versioned, recorded in `app.schema_migrations`. Applied under an advisory lock so concurrent boots cannot race, each in its own transaction so a failure rolls back and can be retried rather than leaving a half-applied schema. Collection DDL remains additive — type changes, renames and drops are still not applied to an existing collection. |
-| Semantic / vector search | *stubbed* | `vector(1536)` column and pgvector are reserved but not populated. |
+| Semantic / vector search | **real** | `text`, `semantic` and `hybrid` modes on `search_documents`; HNSW over pgvector, dimension from config. Hybrid is Reciprocal Rank Fusion over two CTEs that both read one scoped CTE, so grant predicates apply before either ranking and either LIMIT. The query vector is derived server-side — a client cannot supply one. Local ONNX embedder by default; OpenAI-compatible endpoints are opt-in. |
 | `warehousd deploy` | **real** | Provisions to Fly.io; enforces the demo-off expectation mechanically. |
 | Write path (MCP, REST, and review queue) | **real** | Append-only revisions; `proposal_only` grants hold writes pending until a human approves. Approve/reject are never MCP tools. |
 | Masking / transform postures | **real** | `read: mask` with seven transforms, computed in SQL so the raw value is never fetched. Masked fields are projection-only — filtering, ordering, grouping and aggregating over one are refused, which is what stops a mask being decorative. `unmask: allow` makes the raw value separately grantable. |
-| Connect-in-place to external databases | *not built* | Collections live in warehousd's Postgres. |
-| PDF/DOCX extraction, upload UI | *not built* | Indexing reads local directories. |
+| Connect-in-place to external databases | **real** | `postgres_fdw` foreign tables inside `data_live`, so views, grants, postures and the SQL builder are unchanged. Read-only enforced by the database; columns declared rather than imported; `apply` verifies the remote matches. Tenant isolation is the view predicate alone — one wall rather than two, see SECURITY.md. |
+| PDF/DOCX extraction | **real** | `.pdf` and `.docx` indexed beside `.md`/`.txt`, originals stored, sidecar `.yml` supplies owner and terms. A scanned PDF with no extractable text is refused rather than indexed empty. |
+| Document upload UI | *not built* | Indexing reads local directories; there is no browser upload path yet. |
 | Multi-tenancy (`org_id`) | *partial* | Every grant, audit event and document carries an org, isolated by a view predicate and RLS. A single implicit org is created at bootstrap; there is no UI for creating or switching orgs yet. |
 | SCIM, compliance exports, IdP group→role mapping | *not built* | JIT provisioning creates a `member`. |
 
@@ -434,10 +436,8 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 
 ## Roadmap
 
-Semantic search over the reserved embedding column · document upload with
-PDF/DOCX extraction · connect-in-place collections over external Postgres ·
-aggregate-only postures with inference-leak protection · deploy targets ·
-IdP group→role mapping.
+Document upload UI · aggregate-only postures with inference-leak protection ·
+more deploy targets · IdP group→role mapping.
 
 [docs/roadmap.md](docs/roadmap.md) has the detail, and states where the
 open-source line sits: everything shipped is MIT and stays MIT.

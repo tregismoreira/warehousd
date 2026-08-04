@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
 import {
   tableDDL,
+  foreignTableDDL,
   viewDDL,
   grantViewDDL,
   grantImportDDL,
@@ -84,6 +85,11 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
   // collection declares that transform: a later `warehousd apply` adding one must not be the
   // first thing that needs a superuser, long after the deployment stopped having one.
   await db.query(`create extension if not exists pgcrypto`);
+  // postgres_fdw, for `sources:` / `source_ref:`. Created only when the config declares one —
+  // unlike vector and pgcrypto it is not needed by a default project, and a deployment whose
+  // Postgres forbids it should not fail to boot over a feature it does not use.
+  if (Object.keys(cfg.sources ?? {}).length > 0)
+    await db.query(`create extension if not exists postgres_fdw`);
 
   // Before any DDL: nothing below this line can alter or drop a column, so a change that needs one
   // has to be settled here or refused here.
@@ -166,7 +172,14 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
     }
 
     for (const env of ["dev", "live"] as const) {
-      await db.query(tableDDL(env, name, cfg));
+      const ddl = tableDDL(env, name, cfg);
+      if (ddl.trim()) await db.query(ddl);
+    }
+    // The foreign table replaces the live base table for an external collection, so it has to
+    // exist before the views below are built over it.
+    if (c.source_ref) {
+      await db.query(foreignTableDDL(name, cfg));
+      await verifyExternalShape(db, name, cfg);
     }
   }
   // views after all tables (joins reference sibling tables)
@@ -180,7 +193,8 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
     for (const env of ["dev", "live"] as const) {
       await db.query(viewDDL(env, name, cfg));
       await db.query(grantViewDDL(env, name));
-      await db.query(rlsDDL(env, name, cfg));
+      const rls = rlsDDL(env, name, cfg);
+      if (rls.trim()) await db.query(rls);
     }
     const importGrant = grantImportDDL(name, cfg);
     if (hasImportRole && importGrant) await db.query(importGrant);
@@ -200,6 +214,55 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
        on conflict (name) do update set description=excluded.description,
          config=excluded.config, updated_at=now()`,
       [name, c.description, JSON.stringify(c)],
+    );
+  }
+}
+
+/**
+ * Check that the remote table actually looks like the YAML says it does.
+ *
+ * Without this, a column renamed or retyped upstream surfaces at REQUEST time, as a driver error
+ * the broker has to swallow as `internal_error` — a governed query failing for a reason nobody
+ * can see. Here it fails at apply time, naming the collection, the field and what the remote
+ * actually has, in front of the operator who can fix it.
+ *
+ * The check is a real query against the foreign table with `limit 0`: it costs one round trip,
+ * needs no extra privilege, and proves the exact thing that matters — that every declared column
+ * can be selected at its declared type — rather than approximating it from catalogue metadata.
+ */
+async function verifyExternalShape(
+  db: Pool,
+  collection: string,
+  cfg: WarehousdConfig,
+): Promise<void> {
+  const c = cfg.collections[collection];
+  if (!c?.source_ref) return;
+  const cols = Object.entries(c.fields)
+    .filter(([, f]) => !f.view_join)
+    .map(([name]) => `"${name}"`);
+  try {
+    await db.query(`select ${cols.join(", ")} from data_live."_ext_${collection}" limit 0`);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    // Every name here comes from the config or from Postgres's own reply about a table the
+    // operator configured, and it is written to the boot log. No broker caller reaches it.
+    //
+    // A connection failure and a shape mismatch get different messages because they have
+    // different fixes, and telling someone to check their column names when the real problem is
+    // that Postgres cannot reach the host sends them a long way in the wrong direction.
+    if (/could not connect|password|authentication|no pg_hba|timeout/i.test(detail))
+      throw new Error(
+        `Source "${c.source_ref.source}" is unreachable: ${detail}\n` +
+          `The connection is made by POSTGRES, not by warehousd, so \`sources.${c.source_ref.source}.url\` ` +
+          `must name a host and port the database server itself can reach — which is not always ` +
+          `the one your client uses (a containerised Postgres cannot reach its own published ` +
+          `host port).`,
+        { cause: err },
+      );
+    throw new Error(
+      `Collection "${collection}" does not match its source (${c.source_ref.source}.${c.source_ref.table}): ${detail}\n` +
+        `Declare the columns as they exist upstream, or use \`column:\` to map a differing name.`,
+      { cause: err },
     );
   }
 }

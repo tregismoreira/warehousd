@@ -124,6 +124,10 @@ export const FieldSchema = z
       .optional(),
     posture: PostureSchema,
     mask: MaskSchema.optional(), // required by, and only valid with, read: mask
+    // The column's name on the REMOTE table, when it differs from the field name. Only
+    // meaningful on a collection with `source_ref`. Declared explicitly rather than imported so
+    // a column added upstream never silently appears in warehousd.
+    column: z.string().regex(IDENT).optional(),
     pk: z.boolean().optional(),
     fk: z.string().optional(), // "people.id"
     view_join: ViewJoinSchema.optional(), // { table: "people", column: "full_name", on: "responsible_attorney_id" }
@@ -205,12 +209,54 @@ export function isGrantable(f: FieldConfig): boolean {
   return readPosture(f) !== "deny";
 }
 
+// An external Postgres warehousd reads through rather than copies from.
+//
+// The connection is made by the DATABASE, via postgres_fdw, not by the broker. That is the whole
+// design: a foreign table lives inside data_live, so the collection's view, its grant, its RLS
+// policy, `dataPool` and `buildSelect` all work on it unchanged. A second connection pool in the
+// broker would have needed a variant of every one of those, which is four new ways to get
+// tenant isolation wrong.
+export const SourceSchema = z
+  .object({
+    type: z.literal("postgres"),
+    // Interpolated by ${env:VAR} at load time. It reaches Postgres as a user mapping, which only
+    // the mapping's owner can read back — it is never stored in a warehousd table.
+    //
+    // Resolved BY POSTGRES, not by warehousd: the host and port have to be reachable from the
+    // database server, which is not always the address your client uses. A warehousd running its
+    // own Postgres in a container cannot reach a source published on that container's host port.
+    url: z.string(),
+    schema: z.string().regex(IDENT).default("public"),
+    // Read-only is the default and turning it off is not implemented: writing into someone
+    // else's database through a governed layer is a different feature with different questions
+    // (who owns the transaction, what happens to a failed write's audit row) and pretending
+    // otherwise by flipping a flag would be worse than not offering it.
+    read_only: z.literal(true).default(true),
+  })
+  .strict();
+export type SourceConfig = z.infer<typeof SourceSchema>;
+
+// Where a collection's rows actually live, when they do not live in warehousd.
+export const SourceRefSchema = z
+  .object({
+    source: z.string(),
+    table: z.string().regex(IDENT),
+    // The org every row of the remote table belongs to. A foreign table has no org_id column to
+    // filter on, so the view compares this constant against the request's org instead — see
+    // viewDDL. Declaring it is what keeps an external collection inside the tenant model rather
+    // than beside it.
+    org: z.string().default("default"),
+  })
+  .strict();
+export type SourceRefConfig = z.infer<typeof SourceRefSchema>;
+
 export const CollectionSchema = z
   .object({
     description: z.string(),
     type: z.enum(["dataset", "file"]).default("dataset"),
     source: z.string().optional(),
     source_live: z.string().optional(),
+    source_ref: SourceRefSchema.optional(),
     taxonomies: z.array(z.string()).default([]), // vocabulary slugs — validated against `taxonomies` at ConfigSchema level
     writable: z.boolean().optional(), // opt-in to write path; verb support is structural
     fields: z.record(z.string(), FieldSchema),
@@ -334,6 +380,50 @@ export const CollectionSchema = z
             message: `field "${name}" has view_join and write: allow; view_join fields are always write-deny`,
           });
       }
+    }
+
+    // Connect-in-place. A collection either stores its rows in warehousd or reads them from
+    // somewhere else; the two are different enough that mixing them is always a mistake.
+    if (c.source_ref) {
+      if (c.type === "file")
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "`source_ref` is for dataset collections; a file collection is indexed from `source`",
+        });
+      if (c.source || c.source_live)
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "a collection with `source_ref` reads from an external database, so it has no `source` directory",
+        });
+      if (c.writable)
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "`writable: true` is not supported on a `source_ref` collection — warehousd reads external data, it does not write it",
+        });
+      for (const [name, f] of Object.entries(c.fields)) {
+        // A join reaches a sibling table in the SAME schema. Resolving one across a foreign
+        // table would silently pull the whole remote relation over the wire per row.
+        if (f.view_join)
+          ctx.addIssue({
+            code: "custom",
+            message: `field "${name}" has view_join on an external collection; joins are not resolved across a source_ref`,
+          });
+        if (f.searchable)
+          ctx.addIssue({
+            code: "custom",
+            message: `field "${name}" has searchable: true on an external collection; the generated tsv column would have to live on the remote table`,
+          });
+      }
+    } else {
+      for (const [name, f] of Object.entries(c.fields))
+        if (f.column)
+          ctx.addIssue({
+            code: "custom",
+            message: `field "${name}" declares \`column\` but the collection has no \`source_ref\`; there is no remote column to rename`,
+          });
     }
 
     // Masking. Every rule here closes a way for a mask to be decorative rather than real.
@@ -562,6 +652,7 @@ export const ConfigSchema = z
           });
       }
     }),
+    sources: z.record(z.string().regex(IDENT), SourceSchema).default({}),
     synthetic: z
       .object({ documents_per_collection: z.record(z.string(), z.number()).default({}) })
       .default({ documents_per_collection: {} }),
@@ -571,6 +662,11 @@ export const ConfigSchema = z
   .strict()
   .superRefine((cfg, ctx) => {
     for (const [name, c] of Object.entries(cfg.collections)) {
+      if (c.source_ref && !cfg.sources[c.source_ref.source])
+        ctx.addIssue({
+          code: "custom",
+          message: `collection "${name}" references unknown source "${c.source_ref.source}"`,
+        });
       // Validate that each bound taxonomy exists
       for (const taxSlug of c.taxonomies) {
         if (!cfg.taxonomies[taxSlug])
