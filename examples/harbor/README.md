@@ -164,6 +164,16 @@ assistant proposes a task, and a `proposal_only` grant holds it pending until a
 human approves it. It has no foreign key, so a proposal does not have to resolve
 a matter first.
 
+**One collection with per-document ACLs.** `announcements` is `acl: true`, so an
+individual announcement can be taken out of a grant that otherwise covers the
+whole collection. Restrict one in **Admin → Collections → announcements →
+Access** and every read narrows at once: it stops appearing in queries and
+searches, `get_document` answers `not_found`, and a `count` over the collection
+comes back one lower — not a total with a gap, which would itself report how
+many documents you cannot see. Removing every principal makes it public again.
+A document with no ACL, which is all forty of them to begin with, is readable by
+anyone the grant covers.
+
 **Synthetic volume** is set per collection under `synthetic:` — 1,200 time
 entries, 320 matters, 150 clients, 730 days of metrics, and so on. The client
 count is load-bearing rather than decorative: `clients.client_number` generates

@@ -167,11 +167,20 @@ describe("the read roles remain unchanged", () => {
 });
 
 describe("no DELETE privilege anywhere", () => {
-  it("information_schema confirms no DELETE on data_live base tables for write role", async () => {
-    const privs = await admin.query(
-      `select privilege_type from information_schema.table_privileges
+  it("information_schema confirms no DELETE on data_live CONTENT tables for write role", async () => {
+    const privs = await admin.query<{ table_name: string }>(
+      `select table_name from information_schema.table_privileges
        where table_schema='data_live' and grantee='warehousd_live_write' and privilege_type='DELETE'`,
     );
-    expect(privs.rowCount, "warehousd_live_write should have no DELETE privilege").toBe(0);
+    // `_acl` is the single, deliberate exception, and the assertion names it rather than
+    // excluding it silently. An ACL is not content: it has no revision model and nothing
+    // references it, so removing the row is the only way to make a restricted document public
+    // again — a tombstone would force "no principals" and "no row" to mean different things, and
+    // they do not. Everything holding actual document data stays DELETE-free, which is what makes
+    // immutability a privilege rather than a code path. See grantAclWriteDDL in apply/ddl.ts.
+    expect(
+      privs.rows.map((r) => r.table_name),
+      "only _acl may be deletable by the write role",
+    ).toEqual(["_acl"]);
   });
 });

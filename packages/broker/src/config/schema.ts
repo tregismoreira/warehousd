@@ -2,6 +2,16 @@ import { z } from "zod";
 
 export const FILE_FIELDS = ["title", "content", "path", "owner", "updated_at"] as const;
 
+// The per-document ACL, as a column on the view and as the table the rows live in.
+//
+// Structural in exactly the way `tsv`, `checksum` and `embedding` are: it names no configured
+// field, so no grant can carry it and `buildSelect` can never project it — the select list is
+// drawn from the YAML field set. Declared here rather than in apply/ddl.ts because "a collection
+// may not have a field called this" is a config rule, and the DDL, the SQL builder and the
+// in-process evaluator all have to spell it the same way.
+export const ACL_COLUMN = "_acl";
+export const ACL_TABLE = "_acl";
+
 // Column names a vocabulary slug may never take: the fixed file fields plus
 // structural columns emitted by document DDL/views and reserved result keys.
 export const TAXONOMY_RESERVED_SLUGS = new Set<string>([
@@ -12,6 +22,7 @@ export const TAXONOMY_RESERVED_SLUGS = new Set<string>([
   "document_seq",
   "tsv",
   "_rank",
+  ACL_COLUMN,
 ]);
 
 // Every part lands in a generated SQL identifier, so each is constrained to the same
@@ -259,17 +270,34 @@ export const CollectionSchema = z
     source_ref: SourceRefSchema.optional(),
     taxonomies: z.array(z.string()).default([]), // vocabulary slugs — validated against `taxonomies` at ConfigSchema level
     writable: z.boolean().optional(), // opt-in to write path; verb support is structural
+    // Per-document ACLs. Off unless a collection asks for them, because turning them on costs a
+    // join on every read of the collection and a document with no ACL row is readable by anyone
+    // the grant covers — so a project that never restricts an individual document pays nothing.
+    //
+    // The rule, once on: a document with no ACL is readable by anyone the grant covers; a document
+    // WITH an ACL is readable only by the principals listed on it. See docs/architecture.md.
+    acl: z.boolean().default(false),
     fields: z.record(z.string(), FieldSchema),
   })
   .strict()
   .superRefine((c, ctx) => {
     const FIELD_NAME = /^[a-z_][a-z0-9_]*$/i;
-    for (const name of Object.keys(c.fields))
+    for (const name of Object.keys(c.fields)) {
       if (!FIELD_NAME.test(name))
         ctx.addIssue({
           code: "custom",
           message: `field name "${name}" invalid (must match [a-z_][a-z0-9_]*)`,
         });
+      // `_acl` is the view's ACL column. A field of that name would collide with it, and the
+      // collision would arrive as a duplicate-column error from `create view`, a long way from
+      // the line that caused it — and on a collection with `acl: false` it would quietly become
+      // a grantable field that the ACL evaluator then reads as a policy.
+      if (name === ACL_COLUMN)
+        ctx.addIssue({
+          code: "custom",
+          message: `field name "${ACL_COLUMN}" is reserved — it is the per-document ACL column`,
+        });
+    }
 
     // Validate each bound taxonomy field
     for (const taxSlug of c.taxonomies) {
@@ -367,6 +395,33 @@ export const CollectionSchema = z
         ctx.addIssue({
           code: "custom",
           message: `collection has writable: true but no field with write:allow`,
+        });
+    }
+
+    // Per-document ACLs. Each refusal here is a shape v1 has no answer for, refused while the
+    // author is looking at the file rather than as a broken join at apply time.
+    if (c.acl) {
+      // A file collection's documents are chunks of a file, so an ACL would have to key on
+      // `file_id` rather than a declared pk, add a second join to the file branch of viewDDL, and
+      // settle what the indexer's write path does with one. Out of scope for v1 — see
+      // docs/architecture.md, "Per-document ACLs".
+      if (c.type === "file")
+        ctx.addIssue({
+          code: "custom",
+          message: `acl: true is not supported on a file collection — an ACL is keyed on the declared primary key, and a file collection declares none`,
+        });
+      // An external collection's rows live in someone else's database. There is no local base
+      // table to join an ACL against, and its view has no org_id column to carry the tenant half
+      // of the join predicate.
+      else if (c.source_ref)
+        ctx.addIssue({
+          code: "custom",
+          message: `acl: true is not supported on a source_ref collection — warehousd does not own those rows`,
+        });
+      else if (!Object.values(c.fields).some((f) => f.pk))
+        ctx.addIssue({
+          code: "custom",
+          message: `acl: true requires a field with pk: true — an ACL is keyed on document identity`,
         });
     }
 

@@ -1,13 +1,14 @@
-import type { RefusalReason, MutationRefusalReason } from "@warehousd/broker";
+import type { RefusalReason, MutationRefusalReason, AclRefusalReason } from "@warehousd/broker";
+
+// Every reason any broker verb can refuse with, in one union, so `restStatus` stays the single
+// table. A reason missing from here is a reason that would fall through to 500.
+type AnyRefusalReason = RefusalReason | MutationRefusalReason | AclRefusalReason;
 
 // Status-code table: maps broker refusal reasons to HTTP status codes.
 // All routes use this single table so no route invents its own.
 // conflict is special-cased: 412 if If-Match was provided (optimistic concurrency
 // mismatch), 409 otherwise (unconditional conflict, e.g., duplicate key).
-export function restStatus(
-  reason: RefusalReason | MutationRefusalReason,
-  ifMatchProvided: boolean = false,
-): number {
+export function restStatus(reason: AnyRefusalReason, ifMatchProvided: boolean = false): number {
   if (reason === "conflict") return ifMatchProvided ? 412 : 409;
 
   // Access denial: no grant, expired grant, field/verb denial, field not writable
@@ -23,6 +24,10 @@ export function restStatus(
   // caller who may not be the one to do this. No retry and no If-Match will change it — only a
   // different person will.
   if (reason === "self_approval_denied") return 403;
+
+  // Managing an ACL is authorised against the caller's standing, not against a grant, so this is
+  // the same family: well-formed request, wrong caller. Nothing they can retry changes it.
+  if (reason === "acl_denied") return 403;
 
   // Extended table gap: field_not_writable is not in the plan's table because the plan
   // considered only query refusals initially. It maps to 403 (same family as field_denied:
@@ -45,10 +50,7 @@ export function restStatus(
   return 500; // fallback
 }
 
-export function refuse(
-  reason: RefusalReason | MutationRefusalReason,
-  ifMatchProvided?: boolean,
-): Response {
+export function refuse(reason: AnyRefusalReason, ifMatchProvided?: boolean): Response {
   const status = restStatus(reason, ifMatchProvided);
   return Response.json({ error: reason }, { status });
 }

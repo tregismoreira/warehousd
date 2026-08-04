@@ -466,6 +466,86 @@ collections:
   rmSync(dir, { recursive: true, force: true });
 });
 
+// Per-document ACLs. `acl: true` is a policy switch, so every way of arriving at one by accident
+// is closed here rather than surfacing as a broken join at apply time.
+describe("acl", () => {
+  const parse = (collection: Record<string, unknown>) =>
+    ConfigSchema.safeParse({ project: "p", collections: { c: collection } });
+
+  const dataset = (over: Record<string, unknown> = {}) => ({
+    description: "d",
+    fields: { id: { type: "uuid", posture: "allow", pk: true } },
+    ...over,
+  });
+
+  it("defaults to false", () => {
+    const cfg = ConfigSchema.parse({ project: "p", collections: { c: dataset() } });
+    expect(cfg.collections.c!.acl).toBe(false);
+  });
+
+  it("accepts acl: true on a dataset with a pk", () => {
+    const cfg = ConfigSchema.parse({ project: "p", collections: { c: dataset({ acl: true }) } });
+    expect(cfg.collections.c!.acl).toBe(true);
+  });
+
+  it("refuses acl: true with no primary key — an ACL is keyed on document identity", () => {
+    const r = parse({
+      description: "d",
+      acl: true,
+      fields: { name: { type: "text", posture: "allow" } },
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error)).toContain("pk: true");
+  });
+
+  it("refuses acl: true on a file collection — v1 has no answer for chunked documents", () => {
+    const r = parse({
+      description: "d",
+      type: "file",
+      source: "docs",
+      acl: true,
+      fields: { title: { posture: "allow" } },
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error)).toContain("file collection");
+  });
+
+  it("refuses acl: true on a source_ref collection — warehousd does not own those rows", () => {
+    const r = ConfigSchema.safeParse({
+      project: "p",
+      sources: { remote: { type: "postgres", url: "postgres://u:p@h:5432/d" } },
+      collections: {
+        c: {
+          description: "d",
+          acl: true,
+          source_ref: { source: "remote", table: "t" },
+          fields: { id: { type: "uuid", posture: "allow", pk: true } },
+        },
+      },
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error)).toContain("source_ref");
+  });
+
+  // `.strict()` is what makes this a typo rather than a silent policy change: `acl_` parsing
+  // cleanly would leave the author believing they had turned ACLs on.
+  it("refuses a misspelt key rather than ignoring it", () => {
+    expect(parse(dataset({ acl_: true })).success).toBe(false);
+  });
+
+  it("refuses a field called _acl — it is the view's ACL column", () => {
+    const r = parse({
+      description: "d",
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        _acl: { type: "text", posture: "allow" },
+      },
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error)).toContain("reserved");
+  });
+});
+
 describe("config schema rejects unrecognised keys", () => {
   // A typo in warehousd.yml used to parse cleanly and change policy. `postur: deny` left the field
   // with no declared posture at all, which is not the same thing as a field that denies — so the

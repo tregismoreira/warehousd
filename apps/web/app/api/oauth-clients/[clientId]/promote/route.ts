@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAppPool } from "../../../../lib/broker";
-import { setAllowedScopes, clientKeyEnvs } from "@warehousd/broker";
+import { setAllowedScopes, setCanManageAcl, clientKeyEnvs } from "@warehousd/broker";
 import { requireRole } from "../../../../../lib/authz";
 import { readJson } from "../../../../../lib/rest";
 import { orgOf } from "../../../../../lib/session";
@@ -17,6 +17,17 @@ export async function POST(
   if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
   const { action } = body.value;
   const app = getAppPool();
+
+  // ACL management is a separate axis from the env scope, and it is admin-only rather than
+  // manager-or-admin: promoting a client to live widens which data it can reach *through the
+  // caller's own grants*, while this lets it change who those grants reach at all. Handled before
+  // the scope branch so the two can never be set by one request.
+  if (action === "grant_acl" || action === "revoke_acl") {
+    if (guard.user.role !== "admin") return Response.json({ error: "forbidden" }, { status: 403 });
+    const ok = await setCanManageAcl(app, clientId, action === "grant_acl", orgOf(sessionUser));
+    if (!ok) return Response.json({ error: "unknown_client" }, { status: 404 });
+    return Response.json({ ok: true });
+  }
 
   // A promotion the client's own keys can never reach is refused rather than recorded.
   //

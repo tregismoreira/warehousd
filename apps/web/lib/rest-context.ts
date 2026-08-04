@@ -19,6 +19,20 @@ import { getAppPool } from "../app/lib/broker";
 // - delegated + client has registered secrets → token_exchange (configured for /v1/token auth)
 // - otherwise → oauth (delegated client with no secrets; only uses interactive OAuth/MCP flow)
 export async function deriveRestContext(req: Request): Promise<BrokerContext | null> {
+  return (await deriveRestCaller(req))?.ctx ?? null;
+}
+
+// The same derivation, plus the client id the token was issued to.
+//
+// A BrokerContext deliberately does not carry a client id: what bounds a caller on the data plane
+// is their grant and the policy's collection ceiling, both already resolved into the context. ACL
+// management is not on the data plane — it is authorised against the CLIENT (can_manage_acl), so
+// that one route needs the id, and only that route asks for it. Kept as one function rather than a
+// second `getMcpSession` call so the two can never disagree about which session they are talking
+// about.
+export async function deriveRestCaller(
+  req: Request,
+): Promise<{ ctx: BrokerContext; clientId: string } | null> {
   const session = await auth.api.getMcpSession({ headers: req.headers });
   if (!session) return null;
   const env = envFromScopes(scopesOf(session.scopes));
@@ -54,10 +68,13 @@ export async function deriveRestContext(req: Request): Promise<BrokerContext | n
   }
 
   return {
-    userId: session.userId,
-    orgId,
-    env,
-    allowedCollections,
-    via,
+    ctx: {
+      userId: session.userId,
+      orgId,
+      env,
+      allowedCollections,
+      via,
+    },
+    clientId: session.clientId || "",
   };
 }

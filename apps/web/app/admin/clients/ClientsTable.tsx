@@ -26,6 +26,8 @@ export type Client = {
   clientId: string;
   displayName: string;
   allowedScopes: string[];
+  /** May this client edit a document's ACL? A separate axis from the env scope. */
+  canManageAcl: boolean;
   promotedAt: string | null;
   promotedBy: string | null;
   createdAt: string;
@@ -42,7 +44,7 @@ export function ClientsTable({
   onRefresh: () => Promise<void>;
 }) {
   const [actionId, setActionId] = useState<string | null>(null);
-  const [actionType, setActionType] = useState<"promote" | "demote" | null>(null);
+  const [actionType, setActionType] = useState<"promote" | "demote" | "acl" | null>(null);
 
   async function promote(clientId: string) {
     setActionId(clientId);
@@ -84,6 +86,28 @@ export function ClientsTable({
     }
   }
 
+  // Granting and withdrawing are one call with two values, because the flag is a boolean and
+  // splitting it would let the console show a state the server never had.
+  async function setAcl(clientId: string, next: boolean) {
+    setActionId(clientId);
+    setActionType("acl");
+    try {
+      const res = await requestJson(`/api/oauth-clients/${clientId}/promote`, {
+        method: "POST",
+        body: JSON.stringify({ action: next ? "grant_acl" : "revoke_acl" }),
+      });
+      if (!res.ok) {
+        toast.error("Failed to change ACL management", { description: res.error });
+        return;
+      }
+      toast.success(next ? "Client may manage document ACLs" : "ACL management withdrawn");
+      await onRefresh();
+    } finally {
+      setActionId(null);
+      setActionType(null);
+    }
+  }
+
   const columns: ColumnDef<Client, unknown>[] = [
     {
       accessorKey: "displayName",
@@ -111,6 +135,35 @@ export function ClientsTable({
           ))}
         </div>
       ),
+    },
+    {
+      id: "acl",
+      header: "ACLs",
+      // Deliberately its own column rather than a badge among the scopes: `can_manage_acl` is not
+      // a scope and does not travel in a token. It says this client may change WHO can read a
+      // document, which is a different question from which environment it reads.
+      cell: ({ row }) => {
+        const on = row.original.canManageAcl;
+        const isLocked = actionId === row.original.clientId && actionType === "acl";
+        return (
+          <div className="flex items-center gap-2">
+            {on && (
+              <Badge variant="outline" className="font-mono text-xs text-allow">
+                can manage
+              </Badge>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isLocked}
+              onClick={() => setAcl(row.original.clientId, !on)}
+            >
+              {isLocked && <Loader2 size={16} className="mr-2 animate-spin" />}
+              {on ? "Withdraw" : "Allow"}
+            </Button>
+          </div>
+        );
+      },
     },
     {
       id: "promotion",

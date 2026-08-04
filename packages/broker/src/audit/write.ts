@@ -29,6 +29,11 @@ export async function writeAudit(
     // Which of fieldsReturned came back RAW rather than transformed. Names only, like
     // fieldsReturned itself — never a value.
     unmaskedFields?: string[];
+    // The principal set the decision was made under — `user:<id>` plus the caller's groups as
+    // `app.user_groups` held them at that instant. Recorded because reproducing "who could read
+    // page 742 on the 4th" needs membership AS IT WAS, and app.user_groups only holds current
+    // state. Same reasoning as unmaskedFields: a property of the DECISION, not of the request.
+    principals?: readonly string[];
     grantId: string | null;
     // `string & {}` rather than a bare `string`: it keeps RefusalReason's members offered by
     // autocomplete while still admitting the operational codes the comment below describes. A plain
@@ -42,8 +47,8 @@ export async function writeAudit(
   // regen) carry their own reason codes.
   const r = await app.query(
     `insert into app.audit_events
-       (user_id, env, collection, org_id, intent, fields_returned, unmasked_fields, grant_id, outcome, reason, via)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
+       (user_id, env, collection, org_id, intent, fields_returned, unmasked_fields, principals, grant_id, outcome, reason, via)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
     [
       e.userId,
       e.env,
@@ -52,6 +57,7 @@ export async function writeAudit(
       e.intent ? JSON.stringify(e.intent) : null,
       e.fieldsReturned,
       e.unmaskedFields ?? [],
+      e.principals ?? [],
       e.grantId,
       e.outcome,
       e.reason,

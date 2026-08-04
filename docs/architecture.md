@@ -16,6 +16,7 @@ with real data, this is the document to read.
 - [The change feed](#the-change-feed)
 - [Client credentials and the collection ceiling](#client-credentials-and-the-collection-ceiling)
 - [Full-document reads](#full-document-reads)
+- [Per-document ACLs](#per-document-acls)
 - [Identity, OAuth, and env-as-scope](#identity-oauth-and-env-as-scope)
 - [File collections and search](#file-collections-and-search)
 - [Taxonomies](#taxonomies)
@@ -844,7 +845,9 @@ existence oracle for collections.
 data to test a predicate against. The consequence is deliberate and bounded: such
 a caller learns that _some_ document in that collection changed, and its id, but
 not which fields moved or what they hold. `getDocument` then refuses the ones
-outside the filter.
+outside the filter. **A per-document ACL is not applied either**, for the same
+reason and with the same consequence — see
+[Per-document ACLs](#per-document-acls).
 
 **Retention is deferred.** Revision history and the change log both grow without
 bound on a writable collection. The eventual answer is a retention policy or
@@ -963,6 +966,102 @@ every chunk in `document_seq` order and rejoins them, undoing the indexer's
 overlap. That reconstructs the _chunked_ text, not the source file byte-for-byte
 — chunking trims and rejoins paragraphs, and nothing stores the original body.
 A caller needing the exact source must keep it.
+
+## Per-document ACLs
+
+A grant can scope to a _set_ of documents — `document_filter` is `eq`/`in`, ANDed
+— but it cannot exempt an individual one: there is no `OR` and no negation in the
+filter algebra, deliberately. A collection that declares `acl: true` gets a
+second, orthogonal rule instead:
+
+> A document with **no ACL** is readable by anyone the grant covers. A document
+> **with an ACL** is readable only by the principals listed on it.
+
+An ACL never widens a grant. It only takes one document out of one.
+
+**Principals are namespaced** — `user:<userId>` and `group:<name>`. Without the
+prefix a group named the same as a user id would grant that user's access, and an
+ACL author would have no way to say which they meant. Validated on write.
+
+**Group membership is warehousd's own fact.** It lives in `app.user_groups` and is
+derived from `ctx.userId` on every call — never read from a token, a claim, or
+anything a caller supplies. Invariant 1 says the broker is the trust boundary, and
+a per-document deny that depends on an assertion minted outside it is not a deny;
+this is the same reasoning `grants/eval.ts` gives for refusing to bake grants into
+tokens. Membership arrives from an SSO login (`source: 'sso'`) or from the console
+(`source: 'manual'`), and each source replaces only its own rows.
+
+**Storage is one table per env data schema**, `data_synth."_acl"` /
+`data_live."_acl"`, shared by every collection and keyed
+`(org_id, collection, document_id)`. No row means public — which is the whole
+design: 1,000 pages with one restricted page is one row, and the other 999 cost
+nothing. It lives in the data schema rather than in `app` because the app pool has
+no data-schema privileges and the read pools have none on `app`, so an
+`app`-schema ACL could not be joined into a collection's view at all.
+
+**The view carries it as a structural column.** `viewDDL` left-joins `_acl` and
+exposes `acl.principals as "_acl"`, exactly the way it already exposes `tsv`,
+`checksum` and `embedding`: it names no configured field, so no grant can carry it
+and `buildSelect` can never project it — the select list is drawn from the YAML
+field set. The name is reserved, so a collection cannot declare a field called
+`_acl`. Org isolation follows the usual two walls: the join carries
+`acl.org_id = base.org_id` explicitly, and `_acl` has the same RLS policy every
+other data table has.
+
+**The read path is one fixed clause**, emitted by the broker and never composed
+from caller input:
+
+```sql
+coalesce(array_length("_acl", 1), 0) = 0 or "_acl" && $n::text[]
+```
+
+`$n` is the caller's principal set — a bound parameter like every other value
+(invariant 2). It is pushed into the same `WHERE` every predicate goes into, which
+is what puts it **inside** the hybrid `scoped` CTE and what makes an aggregate
+honest: a `count` over an ACL'd collection counts what the caller may see, not
+what exists and then a shortfall that reports the difference. The count that
+motivated the feature — 1,000 documents, one restricted — returns 999 through MCP.
+
+**The write path re-evaluates in process**, because it reads base tables for the
+`_rev*` bookkeeping the view does not expose. There were eight `matchesFilters`
+call sites; a separate ACL check beside each would have been eight chances to
+forget one. They all go through a single `admits(row, grant, c)` in
+`grants/filters.ts`, which checks the document filters **and** the ACL —
+`matchesFilters` is module-private, so a caller holding the grant cannot skip
+either half. Each of those queries left-joins the ACL onto the row it was already
+fetching, in the same transaction, so there is no window between reading a
+document and reading the policy that governs it. `admits` fails **closed** when the
+column is absent: a null `_acl` is "no ACL row" and is public, but a missing one
+means the query did not ask, and reading that as public would turn a forgotten
+join into a silent leak. `test/acl-parity.test.ts` asserts the SQL and in-process
+evaluators agree, the same way `filter-parity.test.ts` does one layer up.
+
+**Editing an ACL is not a grant verb.** A grant says which documents and fields a
+caller may read; widening who else may read something is a different act, and
+letting it ride on `update` would mean any grant that can edit a page can also
+unrestrict it. `getDocumentAcl` / `setDocumentAcl` are authorised against the
+caller's standing instead — a console user with role `admin`/`manager`, or a
+client whose policy carries `can_manage_acl` (default false) — and the broker
+reads the role or the flag from the database itself, so an adapter cannot assert
+an authority it does not hold. Both go through `makeAuditWriter` like every other
+decision (invariant 7), and `app.audit_events.principals` records the membership
+each decision ran under, because reproducing "who could read page 742 on the 4th"
+needs membership as it *was*.
+
+**There is no MCP tool for either.** An untrusted proposer must not be able to
+widen access to anything.
+
+Writes go through the write pool, which holds `select, insert, update, delete` on
+`_acl`. That `delete` is a deliberate exception to the no-DELETE-on-data rule: an
+ACL is not content, it has no revision model, and removing the row is the only way
+to make a restricted document public again — a tombstone would force "no
+principals" and "no row" to mean different things, and they do not.
+
+Not in v1: **file collections** (an ACL keyed on `file_id` rather than a pk, a
+second join in the file branch of `viewDDL`, and a decision about the indexer's
+write path — config refuses `acl: true` there), **connect-in-place collections**
+(warehousd does not own those rows), a **default-private** mode, **inheritance**
+down a tree, and **deny entries**. Positive principals only.
 
 ## Semantic search
 
@@ -1085,7 +1184,19 @@ create table app.trusted_issuers (  -- registered IdPs for RFC 8693 token exchan
 
 create table app.audit_events (
   id uuid pk, at timestamptz, user_id text, org_id text, env text, collection text,
-  intent jsonb, fields_returned text[], grant_id uuid, outcome text, reason text
+  intent jsonb, fields_returned text[], unmasked_fields text[],
+  principals text[] not null default '{}',  -- the membership the decision was made under
+  grant_id uuid, outcome text, reason text
+);
+
+create table app.user_groups (         -- warehousd's own record of group membership
+  org_id text references organizations, user_id text, group_name text,
+  source text check (source in ('sso','manual')),
+  updated_at timestamptz, primary key (org_id, user_id, group_name, source)
+);
+
+create table app.sso_provisioned (     -- (user, provider) pairs seen once; see lib/sso.ts
+  user_id text, provider_id text, at timestamptz, primary key (user_id, provider_id)
 );
 
 create table app.change_log (          -- the change feed; carries no field data
@@ -1153,6 +1264,11 @@ One OAuth-protected endpoint at `/mcp`, streamable HTTP.
 Refusals return a reason code plus a request-access hint — never a denied value,
 never SQL. Tool descriptions state the governance model plainly: the model
 reading them is the first consumer of the security posture.
+
+Absent from the table on purpose, alongside `approve`/`reject`: **there is no
+tool for editing a document's ACL.** The model may propose a write and may ask
+for access; it may not decide who else can read something. See
+[Per-document ACLs](#per-document-acls).
 
 Clients find the authorization server through the standard discovery documents
 under `app/.well-known/`: `oauth-authorization-server` (RFC 8414) and

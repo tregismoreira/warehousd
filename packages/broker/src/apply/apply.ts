@@ -8,6 +8,8 @@ import {
   grantImportDDL,
   rlsDDL,
   grantWriteDDL,
+  aclTableDDL,
+  grantAclWriteDDL,
   DEFAULT_EMBEDDING_DIMENSIONS,
 } from "./ddl";
 import { planFromSchema, type SchemaChange } from "./plan";
@@ -76,7 +78,14 @@ async function resolveDestructiveChanges(db: Pool, cfg: WarehousdConfig): Promis
   const gone = new Set(
     changes.filter((c) => c.kind === "drop_collection").map((c) => c.collection),
   );
-  for (const name of gone) await db.query(`delete from app.collections where name = $1`, [name]);
+  for (const name of gone) {
+    await db.query(`delete from app.collections where name = $1`, [name]);
+    // Its ACL rows too. `_acl` is one shared table keyed by (org, collection, document), so
+    // dropping the collection's table does not take them with it — and a collection later
+    // re-created under the same name would inherit restrictions nobody remembers setting.
+    for (const schema of ["data_synth", "data_live"])
+      await db.query(`delete from ${schema}."_acl" where collection = $1`, [name]);
+  }
 }
 
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
@@ -90,6 +99,15 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
   // Postgres forbids it should not fail to boot over a feature it does not use.
   if (Object.keys(cfg.sources ?? {}).length > 0)
     await db.query(`create extension if not exists postgres_fdw`);
+
+  // The shared per-document ACL table, before everything else. Two things need it early: a
+  // collection with `acl: true` joins it, so `create view` fails outright if it is not there yet,
+  // and resolveDestructiveChanges deletes a dropped collection's ACL rows.
+  //
+  // Created unconditionally rather than only when some collection asks for ACLs — like the vector
+  // and pgcrypto extensions above, a later `warehousd apply` that turns one on must not be the
+  // first thing that needs new DDL.
+  for (const env of ["dev", "live"] as const) await db.query(aclTableDDL(env));
 
   // Before any DDL: nothing below this line can alter or drop a column, so a change that needs one
   // has to be settled here or refused here.
@@ -188,6 +206,10 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
     (await db.query(`select 1 from pg_roles where rolname='warehousd_import'`)).rowCount === 1;
   const hasWriteRoles =
     (await db.query(`select 1 from pg_roles where rolname='warehousd_live_write'`)).rowCount === 1;
+
+  // Once per env, not once per collection: `_acl` is one table shared by all of them.
+  if (hasWriteRoles)
+    for (const env of ["dev", "live"] as const) await db.query(grantAclWriteDDL(env));
 
   for (const name of Object.keys(cfg.collections)) {
     for (const env of ["dev", "live"] as const) {

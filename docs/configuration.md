@@ -307,6 +307,57 @@ A collection without `writable: true` is physically untouched — no extra colum
 no extra view predicate, no read cost. `writable: true` with no `write: allow`
 field is a config error.
 
+### Per-document ACLs
+
+```yaml
+collections:
+  content:
+    description: Authored pages
+    acl: true                 # opt in; default false
+    fields:
+      id:    { type: uuid, posture: allow, pk: true }
+      title: { type: text, posture: allow }
+```
+
+A grant scopes to a *set* of documents. `acl: true` adds the orthogonal rule that
+lets you exempt an individual one:
+
+> A document with **no ACL** is readable by anyone the grant covers. A document
+> **with an ACL** is readable only by the principals listed on it.
+
+An ACL never widens a grant — it only takes one document out of one — and it
+applies to every verb and to every aggregate: a `count` over the collection counts
+what the caller may see.
+
+Principals are namespaced, `user:<id>` and `group:<name>`. Groups are warehousd's
+own record (`app.user_groups`), synced from an IdP's group claim on login or
+pinned in the console; they are never read from a token.
+
+ACLs are edited through `PUT /v1/collections/{c}/documents/{id}/acl` or the
+console's **Access** tab, not through MCP — an untrusted proposer must not be able
+to widen access. A REST caller needs `can_manage_acl` on its client policy, which
+an admin grants per client in **Admin → Clients**; a console user needs the
+`manager` or `admin` role. An empty principal list removes the restriction.
+
+Group membership is managed by the IdP — its group claim is persisted on every
+SSO login, see [configure-sso.md](configure-sso.md#5-map-idp-groups-to-warehousd-roles-optional)
+— or by an admin through `PUT /api/admin/users/{id}/groups`, which owns the
+`manual` source. Neither source overwrites the other, so a deployment with no SSO
+at all still gets working groups.
+
+Requirements and current limits, all enforced at config load:
+
+| Rule | Why |
+|---|---|
+| Requires a field with `pk: true` | An ACL is keyed on document identity |
+| Refused on `type: file` | An ACL would key on `file_id`, not a pk — not designed yet |
+| Refused with `source_ref` | warehousd does not own those rows |
+| `_acl` is a reserved field name | It is the ACL column on the collection's view |
+
+A collection without `acl: true` gets no join and no predicate, so it pays
+nothing. A collection with it pays one left join, and a document with no ACL row
+costs nothing beyond that.
+
 ## File collections
 
 ```yaml
@@ -622,4 +673,6 @@ treated as zero, so a typo cannot silently remove the ceiling it meant to raise.
 [`examples/harbor/warehousd.yml`](../examples/harbor/warehousd.yml) is a
 working configuration for the demo company: 20 collections including
 relational data, sensitive compensation records, a time series, three file
-collections with bound taxonomies, and dataset-sourced vocabulary terms.
+collections with bound taxonomies, dataset-sourced vocabulary terms, one
+writable collection behind the proposal path, and one (`announcements`) with
+per-document ACLs turned on.

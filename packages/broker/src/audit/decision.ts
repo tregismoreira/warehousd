@@ -19,6 +19,14 @@ import { redact } from "../log/redact";
 // Binding `(app, ctx)` once per verb call leaves only what actually varies — the collection, the
 // outcome, and the handful of optional details.
 
+// What a decision was made under: the grant's id, and the principal set that decided which
+// individual documents it reached. The two travel together because they are one answer to "on
+// what authority" — recording the grant without the membership leaves the ACL half of the
+// decision unreproducible the moment somebody leaves a group.
+//
+// `ActiveGrant` satisfies this structurally, so verbs pass the grant they already loaded.
+export type AuditGrant = { id: string; principals: readonly string[] };
+
 export type AuditDetail = {
   // A query or search records its intent verbatim; a mutation records op + field names only (see
   // MutationAuditIntent). Absent means the verb has no intent to record.
@@ -26,7 +34,11 @@ export type AuditDetail = {
   fieldsReturned?: string[];
   // Which of fieldsReturned came back raw rather than masked. Only the read verbs set it.
   unmaskedFields?: string[];
-  grantId?: string | null;
+  // The grant this decision ran under, or null where the decision was reached before one was
+  // loaded (unknown_collection, no_grant). Supersedes the old `grantId`: passing the grant rather
+  // than its id is what carries `principals` onto the audit row without a second parameter every
+  // call site could forget.
+  grant?: AuditGrant | null;
 };
 
 // Where an audit write is attempted at all, it is not best-effort. If it fails, the verb it was
@@ -63,10 +75,14 @@ export type AuditWriter = {
   // the op and the field NAMES only. Going through these rather than through `allow`/`refuse` with
   // a hand-built intent is what stops one mutation refusal from auditing differently than the
   // identical one three lines below it.
-  allowMutation(i: MutationIntent, grantId: string | null, fields: string[]): Promise<AuditedAllow>;
+  allowMutation(
+    i: MutationIntent,
+    grant: AuditGrant | null,
+    fields: string[],
+  ): Promise<AuditedAllow>;
   refuseMutation(
     i: MutationIntent,
-    grantId: string | null,
+    grant: AuditGrant | null,
     reason: MutationRefusalReason,
   ): Promise<MutationResult>;
 };
@@ -117,7 +133,8 @@ export function makeAuditWriter(app: Pool, ctx: BrokerContext, enabled: boolean)
         intent: detail.intent ?? null,
         fieldsReturned: detail.fieldsReturned ?? [],
         unmaskedFields: detail.unmaskedFields ?? [],
-        grantId: detail.grantId ?? null,
+        principals: detail.grant?.principals ?? [],
+        grantId: detail.grant?.id ?? null,
         outcome,
         reason,
         via: ctx.via,
@@ -171,18 +188,18 @@ export function makeAuditWriter(app: Pool, ctx: BrokerContext, enabled: boolean)
     async refuse(collection, reason, detail = {}) {
       return { ok: false, reason, auditId: await record(collection, "refused", reason, detail) };
     },
-    async allowMutation(i, grantId, fields) {
+    async allowMutation(i, grant, fields) {
       return sealed(
-        await record(i.collection, "allowed", null, { intent: mutationIntent(i, fields), grantId }),
+        await record(i.collection, "allowed", null, { intent: mutationIntent(i, fields), grant }),
       );
     },
-    async refuseMutation(i, grantId, reason) {
+    async refuseMutation(i, grant, reason) {
       // The field names a refused mutation touched, taken from the intent itself. A delete carries
       // no values, so it names none.
       const fields = i.op === "delete" ? [] : Object.keys(i.values);
       const auditId = await record(i.collection, "refused", reason, {
         intent: mutationIntent(i, fields),
-        grantId,
+        grant,
       });
       return { ok: false, reason, auditId };
     },

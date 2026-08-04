@@ -10,9 +10,10 @@ import type {
   AuditId,
 } from "../types";
 import type { CollectionConfig } from "../config/schema";
+import { ACL_COLUMN } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
 import { loadActiveGrant, loadActiveGrants } from "../grants/eval";
-import { matchesFilters, validateDocumentFilters } from "../grants/filters";
+import { admits, validateDocumentFilters } from "../grants/filters";
 import { withOrg, writePool } from "../db/pools";
 import { insertRevision, demoteRevision } from "../db/revisions";
 import { findCollection, maskedFieldsFor } from "../config/load";
@@ -24,6 +25,7 @@ import {
   type RevisionRow,
 } from "../config/collection";
 import { ident } from "../sql/ident";
+import { aclColumnSql } from "../acl/sql";
 import { coerce } from "../import/validate";
 import { makeAuditWriter, assertRecorded, type AuditWriter } from "../audit/decision";
 import { writeChangeLog } from "./history";
@@ -57,20 +59,20 @@ export async function proposeDataset(
   const schema = dataSchema(ctx.env);
   const table = `${schema}.${ident(intent.collection)}`;
   const pk = pkOf(c);
-  if (!pk) return audit.refuseMutation(intent, grant.id, "invalid_intent");
+  if (!pk) return audit.refuseMutation(intent, grant, "invalid_intent");
 
   const submitted = intent.op === "delete" ? {} : intent.values;
   const coerced: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(submitted)) {
     const r = coerce(value, c.fields[name]!);
-    if (!r.ok) return audit.refuseMutation(intent, grant.id, "invalid_value");
+    if (!r.ok) return audit.refuseMutation(intent, grant, "invalid_value");
     coerced[name] = r.value;
   }
 
   const dataCols = dataColsOf(c);
 
   const pool = writePool(d.pools, ctx);
-  if (!pool) return audit.refuseMutation(intent, grant.id, "not_writable");
+  if (!pool) return audit.refuseMutation(intent, grant, "not_writable");
 
   try {
     return await withOrg(pool, ctx.orgId, async (client) => {
@@ -80,7 +82,7 @@ export async function proposeDataset(
           docId = randomUUID();
           coerced[pk] = docId;
         }
-        if (docId === undefined) return audit.refuseMutation(intent, grant.id, "invalid_intent");
+        if (docId === undefined) return audit.refuseMutation(intent, grant, "invalid_intent");
         // The pk value came out of `coerced`, whose values are `unknown` to the compiler. Anything
         // non-scalar would stringify to "[object Object]"; it is a pk, so it is a scalar — but say
         // that once, here, rather than at each use.
@@ -91,7 +93,7 @@ export async function proposeDataset(
           `select 1 from ${table} where ${ident(pk)} = $1 and (_current or _rev_status = 'pending')`,
           [docId],
         );
-        if ((clash.rowCount ?? 0) > 0) return audit.refuseMutation(intent, grant.id, "conflict");
+        if ((clash.rowCount ?? 0) > 0) return audit.refuseMutation(intent, grant, "conflict");
 
         // Not current: a pending revision is invisible to every read path until it is approved.
         const revId = await insertRevision(
@@ -120,7 +122,7 @@ export async function proposeDataset(
           "create",
           "pending",
         );
-        const rec = await audit.allowMutation(intent, grant.id, Object.keys(coerced));
+        const rec = await audit.allowMutation(intent, grant, Object.keys(coerced));
         assertRecorded(rec);
         return {
           ok: true as const,
@@ -130,16 +132,16 @@ export async function proposeDataset(
         };
       }
 
-      // update and delete: fetch current revision and create pending
+      // update and delete: fetch current revision (with its ACL) and create pending
       const cur = await client.query(
-        `select * from ${table} where ${ident(pk)} = $1 and _current`,
+        `select t.*${aclColumnSql(ctx.env, intent.collection, c, "t")} from ${table} t
+         where t.${ident(pk)} = $1 and t._current`,
         [intent.id],
       );
-      if (cur.rowCount === 0) return audit.refuseMutation(intent, grant.id, "not_found");
+      if (cur.rowCount === 0) return audit.refuseMutation(intent, grant, "not_found");
       const current = cur.rows[0] as RevisionRow;
 
-      if (!matchesFilters(current, grant.documentFilter, c))
-        return audit.refuseMutation(intent, grant.id, "not_found");
+      if (!admits(current, grant, c)) return audit.refuseMutation(intent, grant, "not_found");
 
       const isDelete = intent.op === "delete";
       // For pending revisions, _rev_fields holds the proposed field names and the data columns
@@ -174,7 +176,7 @@ export async function proposeDataset(
         isDelete ? "delete" : "update",
         "pending",
       );
-      const rec = await audit.allowMutation(intent, grant.id, isDelete ? [] : Object.keys(coerced));
+      const rec = await audit.allowMutation(intent, grant, isDelete ? [] : Object.keys(coerced));
       assertRecorded(rec);
       return {
         ok: true as const,
@@ -185,7 +187,7 @@ export async function proposeDataset(
     });
   } catch (err) {
     console.error("[broker] proposeDataset failed", { collection: intent.collection, err });
-    return audit.refuseMutation(intent, grant.id, "internal_error");
+    return audit.refuseMutation(intent, grant, "internal_error");
   }
 }
 
@@ -196,12 +198,18 @@ export function makeProposeVerbs(d: VerbDeps) {
   // scanning the rest throws `column "_rev" does not exist`.
   async function findPending(
     client: PoolClient,
+    env: "dev" | "live",
     schema: string,
     proposalId: string,
   ): Promise<{ collection: string; row: RevisionRow } | null> {
     for (const coll of revisableCollections(cfg)) {
+      const c = findCollection(cfg, coll);
+      if (!c) continue;
+      // Every row this function hands back is later put to `admits()`, so it carries its ACL from
+      // the start — one statement, one transaction, no window between the row and its policy.
       const q = await client.query(
-        `select * from ${schema}.${ident(coll)} where _rev = $1 and _rev_status = 'pending'`,
+        `select t.*${aclColumnSql(env, coll, c, "t")} from ${schema}.${ident(coll)} t
+         where t._rev = $1 and t._rev_status = 'pending'`,
         [proposalId],
       );
       if (q.rowCount && q.rowCount > 0) return { collection: coll, row: q.rows[0] as RevisionRow };
@@ -223,7 +231,7 @@ export function makeProposeVerbs(d: VerbDeps) {
 
     try {
       return await withOrg(pool, ctx.orgId, async (client): Promise<DecisionResult> => {
-        const found = await findPending(client, schema, proposalId);
+        const found = await findPending(client, ctx.env, schema, proposalId);
         if (!found) return audit.refuse("*", "not_found");
         const { collection: collectionName, row: proposal } = found;
 
@@ -246,32 +254,32 @@ export function makeProposeVerbs(d: VerbDeps) {
         // Checked before the verb, so the answer does not depend on the caller's own grant: a
         // proposer who lacks `approve` learns they cannot approve their own work either way.
         if (proposal._rev_by === ctx.userId)
-          return audit.refuse(collectionName, "self_approval_denied", { grantId: grant.id });
+          return audit.refuse(collectionName, "self_approval_denied", { grant });
 
         // Require approve verb
         if (!grant.verbs.includes("approve"))
-          return audit.refuse(collectionName, "verb_denied", { grantId: grant.id });
+          return audit.refuse(collectionName, "verb_denied", { grant });
 
         // Invariant: approve requires read coverage of every field in the proposal. Without this,
         // "approve, then read the diff" is a privilege-escalation path around field postures.
         const proposedFields: string[] = proposal._rev_fields ?? [];
         for (const f of proposedFields) {
           if (!grant.allowedFields.includes(f))
-            return audit.refuse(collectionName, "field_denied", { grantId: grant.id });
+            return audit.refuse(collectionName, "field_denied", { grant });
         }
 
         // Get the pk field for this collection
         const pk = pkOf(c);
-        if (!pk) return audit.refuse(collectionName, "invalid_intent", { grantId: grant.id });
+        if (!pk) return audit.refuse(collectionName, "invalid_intent", { grant });
 
         const table = `${schema}.${ident(collectionName)}`;
 
         // The filters must be evaluable before either branch below leans on them, and refused
         // the same way the read path refuses them — see grants/filters.ts.
         if (validateDocumentFilters(grant.documentFilter, c))
-          return audit.refuse(collectionName, "invalid_intent", { grantId: grant.id });
+          return audit.refuse(collectionName, "invalid_intent", { grant });
 
-        // Check document filter for approver
+        // Check document filter and ACL for approver
         let currentRev: RevisionRow | null = null;
         if (proposal._rev_op === "create") {
           // For create proposals, there's no current revision yet. We need to check if the proposed
@@ -280,21 +288,27 @@ export function makeProposeVerbs(d: VerbDeps) {
           for (const f of Object.keys(c.fields)) {
             tempDoc[f] = proposal[f];
           }
-          if (!matchesFilters(tempDoc, grant.documentFilter, c))
-            return audit.refuse(collectionName, "not_found", { grantId: grant.id });
+          // The ACL comes with it. A document that does not exist yet can still have one — an ACL
+          // is keyed on the pk, and nothing stops it being written before the create is approved —
+          // and dropping the column here would make `admits()` fail closed on every create
+          // proposal against an ACL'd collection.
+          if (Object.hasOwn(proposal, ACL_COLUMN)) tempDoc[ACL_COLUMN] = proposal[ACL_COLUMN];
+          if (!admits(tempDoc, grant, c))
+            return audit.refuse(collectionName, "not_found", { grant });
         } else {
-          // For update/delete, fetch the current revision
+          // For update/delete, fetch the current revision, with its ACL
           const currentQ = await client.query(
-            `select * from ${table} where ${ident(pk)} = $1 and _current`,
+            `select t.*${aclColumnSql(ctx.env, collectionName, c, "t")} from ${table} t
+             where t.${ident(pk)} = $1 and t._current`,
             [proposal[pk]],
           );
           if (currentQ.rows.length === 0)
-            return audit.refuse(collectionName, "not_found", { grantId: grant.id });
+            return audit.refuse(collectionName, "not_found", { grant });
           currentRev = currentQ.rows[0] as RevisionRow;
 
-          // Check document filter
-          if (!matchesFilters(currentRev, grant.documentFilter, c))
-            return audit.refuse(collectionName, "not_found", { grantId: grant.id });
+          // Check document filter and ACL
+          if (!admits(currentRev, grant, c))
+            return audit.refuse(collectionName, "not_found", { grant });
 
           // Conflict check: if any field in proposal._rev_fields was changed after _rev_base,
           // refuse with conflict. Scan revisions with _rev_seq > _rev_base and _rev_status = 'approved'.
@@ -314,7 +328,7 @@ export function makeProposeVerbs(d: VerbDeps) {
 
             // Check for overlap
             const overlap = proposedFields.some((f) => changedSince.has(f));
-            if (overlap) return audit.refuse(collectionName, "conflict", { grantId: grant.id });
+            if (overlap) return audit.refuse(collectionName, "conflict", { grant });
           }
         }
 
@@ -392,7 +406,7 @@ export function makeProposeVerbs(d: VerbDeps) {
           "approved",
         );
 
-        const rec = await audit.allow(collectionName, { grantId: grant.id });
+        const rec = await audit.allow(collectionName, { grant });
         assertRecorded(rec);
         return { ok: true as const, documentId: docId, rev: newRevId, auditId: rec.auditId };
       });
@@ -423,7 +437,7 @@ export function makeProposeVerbs(d: VerbDeps) {
 
     try {
       return await withOrg(pool, ctx.orgId, async (client) => {
-        const found = await findPending(client, schema, proposalId);
+        const found = await findPending(client, ctx.env, schema, proposalId);
         if (!found) return audit.refuse("*", "not_found");
         const { collection: collectionName, row: proposal } = found;
 
@@ -432,7 +446,7 @@ export function makeProposeVerbs(d: VerbDeps) {
 
         const grant = await loadActiveGrant(app, ctx, collectionName);
         if (!grant || !grant.verbs.includes("approve"))
-          return audit.refuse(collectionName, "verb_denied", { grantId: grant?.id ?? null });
+          return audit.refuse(collectionName, "verb_denied", { grant: grant ?? null });
 
         // Rejecting your own proposal is closer to withdrawing it than to deciding on it, and
         // there is no withdraw verb — so it takes the same second person approve does. The rule
@@ -440,14 +454,14 @@ export function makeProposeVerbs(d: VerbDeps) {
         // its opposite not enforcing it is the kind of gap that reads as an oversight and gets
         // used as one. A proposal a proposer wants gone is rejected by a reviewer.
         if (proposal._rev_by === ctx.userId)
-          return audit.refuse(collectionName, "self_approval_denied", { grantId: grant.id });
+          return audit.refuse(collectionName, "self_approval_denied", { grant });
 
         // The same guard approveProposal states above. A collection with no primary key has no
         // document id to log, and `proposal.id ?? proposal.document_id` was guessing at column
         // names revision tables do not have — a miss wrote the string "undefined" into the change
         // log. Approve and reject refuse the same way instead.
         const pk = pkOf(c);
-        if (!pk) return audit.refuse(collectionName, "invalid_intent", { grantId: grant.id });
+        if (!pk) return audit.refuse(collectionName, "invalid_intent", { grant });
 
         const table = `${schema}.${ident(collectionName)}`;
         await client.query(`update ${table} set _rev_status = 'rejected' where _rev = $1`, [
@@ -465,7 +479,7 @@ export function makeProposeVerbs(d: VerbDeps) {
           "rejected",
         );
 
-        const rec = await audit.allow(collectionName, { grantId: grant.id });
+        const rec = await audit.allow(collectionName, { grant });
         assertRecorded(rec);
         return { ok: true as const, auditId: rec.auditId };
       });
@@ -528,13 +542,13 @@ export function makeProposeVerbs(d: VerbDeps) {
           const grant = grants.get(name);
           if (!grant || !grant.verbs.includes("approve")) continue;
           // A grant whose filters cannot be evaluated contributes nothing, for the same reason a
-          // grant without `approve` does. matchesFilters would already drop every row; skipping
-          // here says so outright and spares the query.
+          // grant without `approve` does. `admits` would already drop every row; skipping here
+          // says so outright and spares the query.
           if (validateDocumentFilters(grant.documentFilter, c)) continue;
 
-          // Bookkeeping columns only, plus the document-filter field when one is set. Selecting
-          // `*` would pull ungranted values into memory even if they were never returned, and
-          // "denied means absent" means never fetched, not filtered afterwards.
+          // Bookkeeping columns only, plus the document-filter field when one is set, plus the
+          // ACL. Selecting `*` would pull ungranted values into memory even if they were never
+          // returned, and "denied means absent" means never fetched, not filtered afterwards.
           const pk = pkOf(c);
           const cols = ["_rev", "_rev_op", "_rev_fields", "_rev_by", "_rev_at"];
           if (pk) cols.push(pk);
@@ -542,13 +556,14 @@ export function makeProposeVerbs(d: VerbDeps) {
             if (Object.hasOwn(c.fields, f.field) && !cols.includes(f.field)) cols.push(f.field);
 
           const q = await client.query(
-            `select ${cols.map(ident).join(", ")} from ${schema}.${ident(name)}
-             where _rev_status = $1 order by _rev_at`,
+            `select ${cols.map((col) => `t.${ident(col)}`).join(", ")}${aclColumnSql(ctx.env, name, c, "t")}
+             from ${schema}.${ident(name)} t
+             where t._rev_status = $1 order by t._rev_at`,
             [storedStatus],
           );
 
           for (const row of q.rows) {
-            if (!matchesFilters(row, grant.documentFilter, c)) continue;
+            if (!admits(row, grant, c)) continue;
             out.push({
               proposalId: row._rev,
               collection: name,
@@ -606,7 +621,7 @@ export function makeProposeVerbs(d: VerbDeps) {
 
     try {
       const found = await withOrg(pool, ctx.orgId, (client) =>
-        findPending(client, schema, proposalId),
+        findPending(client, ctx.env, schema, proposalId),
       );
 
       if (!found) return audit.refuse("*", "not_found");
@@ -619,18 +634,19 @@ export function makeProposeVerbs(d: VerbDeps) {
       // Approving is the act this read exists to inform, so it is gated on `approve`, not
       // merely `read` — matching approveProposal's own requirement.
       if (!grant || !grant.verbs.includes("read") || !grant.verbs.includes("approve"))
-        return audit.refuse(coll, "no_grant", { grantId: grant?.id ?? null });
+        return audit.refuse(coll, "no_grant", { grant: grant ?? null });
 
       // As in query and mutate: an unevaluable filter is the grant's problem, reported the same
       // way everywhere rather than as a missing document.
       if (validateDocumentFilters(grant.documentFilter, c))
-        return audit.refuse(coll, "invalid_intent", { grantId: grant.id });
+        return audit.refuse(coll, "invalid_intent", { grant });
 
-      if (!matchesFilters(row, grant.documentFilter, c))
-        return audit.refuse(coll, "not_found", { grantId: grant.id });
+      // `findPending` fetched the row with its ACL, so this is the whole of the question — the
+      // filters and the per-document policy at once.
+      if (!admits(row, grant, c)) return audit.refuse(coll, "not_found", { grant });
 
       const pk = pkOf(c);
-      if (!pk) return audit.refuse(coll, "invalid_intent", { grantId: grant.id });
+      if (!pk) return audit.refuse(coll, "invalid_intent", { grant });
 
       // Same rule as every other read: a field is visible only if the grant carries it.
       const readable = grant.allowedFields.filter((f) => Object.hasOwn(c.fields, f));
@@ -654,7 +670,7 @@ export function makeProposeVerbs(d: VerbDeps) {
       const rec = await audit.allow(coll, {
         fieldsReturned: readable.filter((f) => !masked.has(f)),
         unmaskedFields: readable.filter((f) => grant.unmaskedFields.includes(f)),
-        grantId: grant.id,
+        grant,
       });
       if (!rec.ok) return rec;
 

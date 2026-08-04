@@ -32,8 +32,14 @@ describe("app schema", () => {
       // The migration ledger itself. It is created by the runner rather than by a migration,
       // so it exists before 0001 does anything — see packages/broker/src/db/migrate.ts.
       "schema_migrations",
+      // Which (user, provider) pairs have been provisioned once. It keeps SSO role provisioning a
+      // first-login act while group membership syncs on every login — see apps/web/lib/sso.ts.
+      "sso_provisioned",
       "terms",
       "trusted_issuers",
+      // Warehousd's own record of who is in which group, and therefore what a `group:` principal
+      // on a per-document ACL resolves against. Never read from a token — see acl/principals.ts.
+      "user_groups",
       "vocabularies",
     ]);
   });

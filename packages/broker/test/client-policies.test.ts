@@ -7,6 +7,7 @@ import {
   setAllowedScopes,
   hasApprovedLiveGrant,
   upsertClientPolicy,
+  setCanManageAcl,
 } from "../src/oauth/client-policies";
 
 let p: Provisioned, admin: Pool;
@@ -51,6 +52,43 @@ it("setAllowedScopes updates an existing row and stamps promoted_at/by", async (
   expect(r.rows[0].allowed_scopes.sort()).toEqual(["env:dev", "env:live"]);
   expect(r.rows[0].promoted_by).toBe("ana");
   expect(r.rows[0].promoted_at).not.toBeNull();
+});
+
+// `can_manage_acl` decides who may change WHO can read a document, so the closed default matters
+// as much as the setter does — an unregistered client and a freshly created one must both read
+// false, or the flag would be acquired by omission rather than by decision.
+it("can_manage_acl defaults to false, for a missing row and for a new one alike", async () => {
+  expect((await getClientPolicy(admin, "unknown-client")).canManageAcl).toBe(false);
+  await admin.query(`insert into app."oauthApplication" ("clientId") values ('c1')`);
+  await upsertClientPolicy(admin, "c1", "Test Client", ["env:dev"]);
+  expect((await getClientPolicy(admin, "c1")).canManageAcl).toBe(false);
+});
+
+it("setCanManageAcl grants and withdraws it, and reports an unknown client", async () => {
+  await admin.query(`insert into app."oauthApplication" ("clientId") values ('c1')`);
+  await upsertClientPolicy(admin, "c1", "Test Client", ["env:dev"]);
+
+  expect(await setCanManageAcl(admin, "c1", true)).toBe(true);
+  expect((await getClientPolicy(admin, "c1")).canManageAcl).toBe(true);
+  // Withdrawing is the same call, so the two cannot drift.
+  expect(await setCanManageAcl(admin, "c1", false)).toBe(true);
+  expect((await getClientPolicy(admin, "c1")).canManageAcl).toBe(false);
+
+  // No row updated is reported rather than swallowed: the console turns it into a 404 instead of
+  // telling an admin a client they mistyped was changed.
+  expect(await setCanManageAcl(admin, "never-registered", true)).toBe(false);
+});
+
+// Granting ACL management must not widen the environment a client reaches, and promoting a client
+// to live must not hand it ACL management. They are separate axes and one request sets one.
+it("the ACL flag and the env scope are independent", async () => {
+  await admin.query(`insert into app."oauthApplication" ("clientId") values ('c1')`);
+  await upsertClientPolicy(admin, "c1", "Test Client", ["env:dev"]);
+  await setCanManageAcl(admin, "c1", true);
+  expect((await getClientPolicy(admin, "c1")).allowedScopes).toEqual(["env:dev"]);
+
+  await setAllowedScopes(admin, "c1", ["env:dev", "env:live"], "ana");
+  expect((await getClientPolicy(admin, "c1")).canManageAcl).toBe(true);
 });
 
 it("hasApprovedLiveGrant: true only for approved, env=live, unexpired grants", async () => {

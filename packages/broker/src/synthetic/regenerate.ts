@@ -19,6 +19,12 @@ export async function regenerateSynthetic(
     // collections hold real writes/proposals that a synthetic regen must not truncate.
     if (!c || c.type === "file" || c.writable) continue;
     await db.query(`truncate data_synth.${name} cascade`);
+    // The collection's ACL rows go with its documents. `_acl` is a separate table keyed on
+    // document id, so a truncate leaves rows behind pointing at documents that no longer exist —
+    // and the generator hands out fresh ids, so a stale row would either sit there forever or,
+    // on a collection whose pk is not a uuid, silently restrict a newly generated document that
+    // happened to take the same key.
+    if (c.acl) await db.query(`delete from data_synth."_acl" where collection = $1`, [name]);
     regenerated.push(name);
   }
   await generateSynthetic(db, cfg, seed);

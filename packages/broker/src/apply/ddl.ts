@@ -1,5 +1,6 @@
 import type { WarehousdConfig } from "../config/schema";
-import { fileMetadataFields } from "../config/schema";
+import { fileMetadataFields, ACL_COLUMN, ACL_TABLE } from "../config/schema";
+import { literal } from "../sql/ident";
 
 // The width of the embedding column when no `embedding:` block is configured. Matches the
 // default local model (bge-small-en-v1.5), so turning semantic search on later with the default
@@ -314,6 +315,57 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
   return ddl;
 }
 
+// The per-document ACL table: ONE per env data schema, shared by every collection.
+//
+// One table rather than one per collection because the overwhelming majority of documents have no
+// ACL at all, and a row is what costs something. 1,000 pages with one restricted page is one row,
+// and the other 999 stay free — that is the whole of the design.
+//
+// It lives in the DATA schema and not in `app`. The app pool holds no data-schema privileges and
+// the read pools hold none on `app` (db/pools.ts), so an ACL kept in `app` could not be joined
+// into a collection's view — and the view is the only place the rule can be enforced for a read.
+//
+// Org isolation follows the existing two-wall model (see rlsDDL): the view's join carries
+// `acl.org_id = base.org_id` explicitly, and the table itself gets the same RLS policy every other
+// data table has, for the roles that reach it directly.
+//
+// Read roles are granted NOTHING here, deliberately. A view runs with its owner's privileges
+// (`security_invoker` is off), which is already how a read role reaches base tables at all: it
+// holds SELECT on views and on nothing else.
+export function aclTableDDL(env: "dev" | "live"): string {
+  const schema = env === "dev" ? "data_synth" : "data_live";
+  const t = `${schema}."${ACL_TABLE}"`;
+  return `
+    create table if not exists ${t} (
+      org_id      text not null,
+      collection  text not null,
+      document_id text not null,
+      principals  text[] not null,
+      updated_at  timestamptz not null default now(),
+      updated_by  text not null,
+      primary key (org_id, collection, document_id));
+    alter table ${t} enable row level security;
+    drop policy if exists org_isolation on ${t};
+    create policy org_isolation on ${t}
+      using (org_id = current_setting('warehousd.org_id', true))
+      with check (org_id = current_setting('warehousd.org_id', true));
+  `;
+}
+
+// What the write role may do to an ACL. Emitted once per env, not per collection, because the
+// table is shared.
+//
+// DELETE is a deliberate exception to the no-DELETE-on-data rule that grantWriteDDL and
+// grantImportDDL both state. An ACL is not content: it has no revision model, nothing references
+// it, and removing the row is the only way to make a restricted document public again. Retiring
+// it with a tombstone would mean "no principals" and "no row" had to mean different things, and
+// they do not.
+export function grantAclWriteDDL(env: "dev" | "live"): string {
+  const schema = env === "dev" ? "data_synth" : "data_live";
+  const role = env === "dev" ? "warehousd_dev_write" : "warehousd_live_write";
+  return `grant select, insert, update, delete on ${schema}."${ACL_TABLE}" to ${role};`;
+}
+
 // One flat view per collection/env. Joins resolve view_join columns.
 //
 // Dropped and recreated rather than `create or replace`d: replace may only append columns,
@@ -382,6 +434,26 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
       // Include tsvector columns for searchable fields; they're not in the grantable set
       if (f.searchable) selects.push(`base."${name}_tsv"`);
     }
+  }
+
+  // The per-document ACL, joined in as a structural column exactly as `tsv` and `embedding` are:
+  // it names no configured field, so no grant can carry it and buildSelect can never project it —
+  // its select list comes from the YAML field set. It is here because the read role holds SELECT
+  // on this view and nothing else, and the predicate that enforces the ACL has to have a column
+  // to read.
+  //
+  // LEFT join: no row means public, and that is what makes 999 of 1,000 documents cost nothing.
+  //
+  // `acl.org_id = base.org_id` is carried explicitly. The base table's own RLS policy is the other
+  // wall, and neither is redundant — see rlsDDL.
+  const pkField = declaredPkField(collection, cfg);
+  if (c.acl && pkField) {
+    joins.push(
+      `left join ${schema}."${ACL_TABLE}" acl on acl.org_id = base.org_id` +
+        ` and acl.collection = ${literal(collection)}` +
+        ` and acl.document_id = base."${pkField}"::text`,
+    );
+    selects.push(`acl.principals as "${ACL_COLUMN}"`);
   }
 
   // Every dataset is revisioned, so every dataset view shows the current, non-tombstoned

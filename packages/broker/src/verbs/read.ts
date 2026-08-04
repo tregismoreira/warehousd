@@ -59,13 +59,13 @@ export function makeReadVerbs(d: VerbDeps) {
     // 4. every referenced field ∈ grant.allowedFields
     for (const f of referenced)
       if (!grant.allowedFields.includes(f))
-        return audit.refuse(intent.collection, "field_denied", { intent, grantId: grant.id });
+        return audit.refuse(intent.collection, "field_denied", { intent, grant });
     // document_filter is grant-author-supplied; each predicate's field is validated against
     // the collection's full YAML field set (NOT allowedFields) so denied fields like `path` can
     // gate documents. The same check runs on the write path, so a filter this rejects is rejected
     // everywhere rather than being evaluated by one path and not the other — see grants/filters.ts.
     if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuse(intent.collection, "invalid_intent", { intent, grantId: grant.id });
+      return audit.refuse(intent.collection, "invalid_intent", { intent, grant });
     // 4b. a masked field may be PROJECTED but never computed over — see collectComputed.
     // field_denied, not a new code: the caller does hold the field, just not in a form that
     // answers this question, and inventing a reason would say which fields are masked to
@@ -73,7 +73,7 @@ export function makeReadVerbs(d: VerbDeps) {
     const plan = maskPlan(cfg, intent.collection, c, grant.unmaskedFields);
     for (const f of collectComputed(intent))
       if (plan.masked.has(f))
-        return audit.refuse(intent.collection, "field_denied", { intent, grantId: grant.id });
+        return audit.refuse(intent.collection, "field_denied", { intent, grant });
     // fields to select: explicit, else all granted fields present on the collection
     const selectFields =
       intent.fields && intent.fields.length
@@ -85,6 +85,11 @@ export function makeReadVerbs(d: VerbDeps) {
         documentFilters: grant.documentFilter,
         isMultiValueField,
         maskFor: plan.maskFor,
+        // Only for a collection whose view carries an `_acl` column. Passed here — where the
+        // aggregate branch is built too — so the predicate lands in the same WHERE every
+        // aggregate reads: a count over an ACL'd collection counts what this caller may see, not
+        // what exists and then a shortfall that reports the difference.
+        ...aclOpts(c, grant),
       });
       const documents = await withOrg(
         dataPool(pools, ctx),
@@ -103,7 +108,7 @@ export function makeReadVerbs(d: VerbDeps) {
         // Which of those came back raw. The compliance question a masked field creates is not
         // "who read it" but "who read it unmasked", and this is the only record that answers it.
         unmaskedFields: selectFields.filter((f) => grant.unmaskedFields.includes(f)),
-        grantId: grant.id,
+        grant,
       });
       if (!rec.ok) return rec;
       return { ok: true, documents, fieldsReturned, auditId: rec.auditId };
@@ -111,12 +116,12 @@ export function makeReadVerbs(d: VerbDeps) {
       // A filter the builder can't express is the caller's mistake, not ours. It carries no
       // driver detail, so answering invalid_intent tells them something actionable.
       if (err instanceof UnsupportedFilter)
-        return audit.refuse(intent.collection, "invalid_intent", { intent, grantId: grant.id });
+        return audit.refuse(intent.collection, "invalid_intent", { intent, grant });
       // Never surface a raw driver error: Postgres messages name columns, tables and
       // values, which is exactly what §10 test 4 forbids leaking. The audit row is
       // the non-negotiable part — an unaudited probe leaves no trace.
       console.error("[broker] query failed", { collection: intent.collection, err });
-      return audit.refuse(intent.collection, "internal_error", { intent, grantId: grant.id });
+      return audit.refuse(intent.collection, "internal_error", { intent, grant });
     }
   }
 
@@ -150,7 +155,7 @@ export function makeReadVerbs(d: VerbDeps) {
       }));
     const rec = await audit.allow(name, {
       fieldsReturned: fields.map((f) => f.name),
-      grantId: grant.id,
+      grant,
     });
     if (!rec.ok) return rec;
     return { collection: name, description: c.description, fields };
@@ -220,9 +225,9 @@ export function makeReadVerbs(d: VerbDeps) {
       return audit.refuse(intent.collection, "no_grant", { intent });
     for (const f of intent.fields ?? [])
       if (!grant.allowedFields.includes(f))
-        return audit.refuse(intent.collection, "field_denied", { intent, grantId: grant.id });
+        return audit.refuse(intent.collection, "field_denied", { intent, grant });
     if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuse(intent.collection, "invalid_intent", { intent, grantId: grant.id });
+      return audit.refuse(intent.collection, "invalid_intent", { intent, grant });
     const selectFields =
       intent.fields && intent.fields.length
         ? intent.fields
@@ -254,6 +259,7 @@ export function makeReadVerbs(d: VerbDeps) {
           maskFor: plan.maskFor,
           mode,
           ...(qVector ? { qVector } : {}),
+          ...aclOpts(c, grant),
         },
       );
       const documents = await withOrg(
@@ -266,7 +272,7 @@ export function makeReadVerbs(d: VerbDeps) {
       const rec = await audit.allow(intent.collection, {
         intent,
         fieldsReturned: selectFields,
-        grantId: grant.id,
+        grant,
       });
       if (!rec.ok) return rec;
       return { ok: true, documents, fieldsReturned: selectFields, auditId: rec.auditId };
@@ -275,7 +281,7 @@ export function makeReadVerbs(d: VerbDeps) {
       // values, which is exactly what §10 test 4 forbids leaking. The audit row is
       // the non-negotiable part — an unaudited probe leaves no trace.
       console.error("[broker] searchDocuments failed", { collection: intent.collection, err });
-      return audit.refuse(intent.collection, "internal_error", { intent, grantId: grant.id });
+      return audit.refuse(intent.collection, "internal_error", { intent, grant });
     }
   }
 
@@ -303,7 +309,7 @@ export function makeReadVerbs(d: VerbDeps) {
 
     const all = Object.keys(c.fields);
     if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuse(intent.collection, "invalid_intent", { grantId: grant.id });
+      return audit.refuse(intent.collection, "invalid_intent", { grant });
 
     // How the caller names the document. Like documentFilter this is broker-supplied rather
     // than client-supplied, so it may reference a column outside allowedFields — a file's
@@ -316,7 +322,7 @@ export function makeReadVerbs(d: VerbDeps) {
     } else {
       const pk = pkOf(c);
       // Without a declared pk there is no document identity to address by id.
-      if (!pk) return audit.refuse(intent.collection, "invalid_intent", { grantId: grant.id });
+      if (!pk) return audit.refuse(intent.collection, "invalid_intent", { grant });
       key = { field: pk, op: "eq", value: (intent as { id: string }).id };
     }
 
@@ -340,6 +346,7 @@ export function makeReadVerbs(d: VerbDeps) {
         documentFilters: grant.documentFilter,
         isMultiValueField,
         maskFor: plan.maskFor,
+        ...aclOpts(c, grant),
       });
       const rows = await withOrg(
         dataPool(pools, ctx),
@@ -349,8 +356,7 @@ export function makeReadVerbs(d: VerbDeps) {
 
       // Absent and excluded-by-filter are the same answer. Distinguishing them would make this
       // an existence oracle for documents the grant deliberately hides.
-      if (rows.length === 0)
-        return audit.refuse(intent.collection, "not_found", { grantId: grant.id });
+      if (rows.length === 0) return audit.refuse(intent.collection, "not_found", { grant });
 
       const document: Document = { ...rows[0] };
       if (isFile && selectFields.includes("content"))
@@ -384,7 +390,7 @@ export function makeReadVerbs(d: VerbDeps) {
       const rec = await audit.allow(intent.collection, {
         fieldsReturned: selectFields,
         unmaskedFields: selectFields.filter((f) => grant.unmaskedFields.includes(f)),
-        grantId: grant.id,
+        grant,
       });
       if (!rec.ok) return rec;
       return { ok: true, document, fieldsReturned: selectFields, rev, auditId: rec.auditId };
@@ -392,11 +398,25 @@ export function makeReadVerbs(d: VerbDeps) {
       // Same discipline as query: a driver error names columns and values, so it goes to the
       // log and the caller gets a bare reason code. The audit row is written either way.
       console.error("[broker] getDocument failed", { collection: intent.collection, err });
-      return audit.refuse(intent.collection, "internal_error", { grantId: grant.id });
+      return audit.refuse(intent.collection, "internal_error", { grant });
     }
   }
 
   return { query, describeCollection, listCollections, searchDocuments, getDocument };
+}
+
+// The per-document ACL half of a read, as the option bag buildSelect takes.
+//
+// Spread rather than passed as a nullable key: under `exactOptionalPropertyTypes` an explicit
+// `aclPrincipals: undefined` is not the same as an absent one, and the difference matters — a
+// collection without ACLs has no `_acl` column for the predicate to compare, so the option must
+// be genuinely absent rather than present and empty. One function, three call sites, so the three
+// read verbs cannot answer this differently.
+function aclOpts(
+  c: CollectionConfig,
+  grant: { principals: string[] },
+): { aclPrincipals?: string[] } {
+  return c.acl ? { aclPrincipals: grant.principals } : {};
 }
 
 // Every field named anywhere in the intent (fields, filters, orderBy, aggregate, groupBy).

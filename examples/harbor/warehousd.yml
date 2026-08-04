@@ -128,6 +128,15 @@ collections:
   announcements:
     description: Firm announcements
     taxonomies: [department]
+    # The demo's per-document ACL collection. An announcement with no ACL row is readable by
+    # anyone whose grant covers the collection — which is every announcement, until somebody
+    # restricts one in Admin → Collections → announcements → Access. A restricted one then
+    # disappears from that caller's queries, its aggregates and its getDocument alike.
+    #
+    # Chosen over `matter_tasks` because it has rows: the claim worth demonstrating is that a
+    # count drops by exactly one, and a collection whose documents all arrive by proposal has
+    # nothing to count until somebody proposes something.
+    acl: true
     fields:
       id: { type: uuid, posture: allow, pk: true }
       title: { type: text, posture: allow }

@@ -2,7 +2,13 @@ import { sso } from "@better-auth/sso";
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx, APIError } from "better-auth/api";
 import type { Pool } from "pg";
-import { APP_ROLES, type AppRole, type WarehousdConfig } from "@warehousd/broker";
+import {
+  APP_ROLES,
+  DEFAULT_ORG_ID,
+  setUserGroups,
+  type AppRole,
+  type WarehousdConfig,
+} from "@warehousd/broker";
 
 // Origins allowed as OIDC issuers/discovery hosts. Better Auth's discovery rejects
 // loopback and RFC-1918 hosts outright (validateDiscoveryUrl -> discovery_private_host);
@@ -79,25 +85,91 @@ export function roleForSsoUser(
   return { role: best, warning };
 }
 
+// The groups the IdP asserted on this login, or `null` when it asserted nothing at all.
+//
+// The distinction is the whole of the "IdP stopped sending groups" rule, and it is the same one
+// `roleForSsoUser` makes above:
+//
+//   null   the claim is absent — the provider registration did not map it, or the IdP dropped it.
+//          Nothing is known about this user's groups, so nothing is changed. Wiping membership on
+//          the strength of a claim that never arrived would revoke access from a configuration
+//          mistake.
+//   []     the claim arrived and is empty. The IdP answered: this user is in no group. That is a
+//          fact, and sso-sourced membership is cleared to match it.
+//
+// Console-managed rows (`source: 'manual'`) are untouched either way — setUserGroups replaces only
+// the source it is given.
+export function assertedGroups(
+  cfg: WarehousdConfig,
+  providerId: string,
+  userInfo: Record<string, unknown>,
+): string[] | null {
+  const p = cfg.sso?.providers?.[providerId];
+  if (!p) return null;
+  const raw = userInfo[p.group_claim];
+  if (raw === undefined || raw === null) return null;
+  // A single-group IdP may send a bare string rather than a list of one — same shape rule as
+  // roleForSsoUser, so the role and the membership can never disagree about what was asserted.
+  const list = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+  return list.filter((g): g is string => typeof g === "string" && g.length > 0);
+}
+
+// True exactly once per (user, provider): the first time this pair is seen. Used to keep role
+// provisioning a REGISTRATION act while group membership syncs on every login.
+//
+// Better Auth's sso plugin gives `provisionUser` no "is this a registration?" flag and only a
+// `provisionUserOnEveryLogin` switch, so without a marker the only way to sync groups per login is
+// to re-derive the role per login — which would silently undo an admin's promotion in the console
+// and demote anyone whose IdP groups changed. `insert … on conflict do nothing returning` answers
+// in one statement, so two concurrent logins cannot both read as the first.
+async function firstProvision(app: Pool, userId: string, providerId: string): Promise<boolean> {
+  const r = await app.query(
+    `insert into app.sso_provisioned (user_id, provider_id) values ($1,$2)
+     on conflict (user_id, provider_id) do nothing returning user_id`,
+    [userId, providerId],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
 // `getCfg` rather than a config: it is resolved when a user is actually provisioned, so an
 // operator editing the group map does not have to restart the server, and constructing the auth
 // object never depends on the config (or the data pools behind it) being loadable yet.
 export function ssoPlugin(app: Pool, getCfg: () => WarehousdConfig) {
   return sso({
-    // JIT provisioning: the role comes from the IdP's groups when the provider declares a mapping
-    // in warehousd.yml, and is `member` otherwise; an admin promotes in the UI either way.
+    // Runs on every login (see provisionUserOnEveryLogin below), and does two different things.
     //
-    // Registration only (isRegister), deliberately — `provisionUserOnEveryLogin` is left off. On
-    // every login the map would re-derive the role from the IdP, which means silently undoing an
-    // admin's promotion in the console and demoting anyone whose groups changed. That contradicts
-    // the no-demotion-on-link invariant this hook has always had. Re-applying the map to an
-    // existing account is a deliberate act: change the role in Admin → Users.
+    // ROLE — registration only, as it always was. On every login the map would re-derive the role
+    // from the IdP, which means silently undoing an admin's promotion in the console and demoting
+    // anyone whose groups changed. Re-applying the map to an existing account stays a deliberate
+    // act: change the role in Admin → Users.
+    //
+    // GROUP MEMBERSHIP — every login, because it is not a decision somebody made in the console,
+    // it is a fact about the IdP that per-document ACLs are evaluated against. A membership synced
+    // once at registration would leave `group:` principals frozen at whatever the user's first
+    // login asserted, which is worse than not offering them.
     provisionUser: async ({ user, userInfo, provider }) => {
-      const { role, warning } = roleForSsoUser(getCfg(), provider.providerId, userInfo);
-      // The provider id and the claim name; never the user, the email, or the claim's value.
-      if (warning) console.warn(`[sso] ${warning}`);
-      await app.query(`update app."user" set role = $2 where id = $1`, [user.id, role]);
+      const cfg = getCfg();
+      if (await firstProvision(app, user.id, provider.providerId)) {
+        const { role, warning } = roleForSsoUser(cfg, provider.providerId, userInfo);
+        // The provider id and the claim name; never the user, the email, or the claim's value.
+        if (warning) console.warn(`[sso] ${warning}`);
+        await app.query(`update app."user" set role = $2 where id = $1`, [user.id, role]);
+      }
+
+      const groups = assertedGroups(cfg, provider.providerId, userInfo);
+      if (groups === null) return;
+      const r = await app.query<{ orgId: string | null }>(
+        `select "orgId" from app."user" where id = $1`,
+        [user.id],
+      );
+      await setUserGroups(app, {
+        orgId: r.rows[0]?.orgId ?? DEFAULT_ORG_ID,
+        userId: user.id,
+        groups,
+        source: "sso",
+      });
     },
+    provisionUserOnEveryLogin: true,
   });
 }
 
