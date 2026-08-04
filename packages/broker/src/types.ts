@@ -61,9 +61,12 @@ export type RefusalReason =
   | "internal_error"
   | "not_found";
 
-// `auditId` is null on exactly one path: the audit insert itself failed. It is never null on a
-// successful result — an allow whose decision could not be recorded is downgraded to an
-// `internal_error` refusal before it reaches a caller. See audit/decision.ts.
+// `auditId` is null on exactly two paths, and a caller can tell them apart without inspecting it.
+// On a *refusal* it means the audit insert itself failed; the refusal stands regardless, because
+// there is nothing to withhold. On a *success* it means this deployment runs with
+// `audit.enabled: false` and no row was ever going to be written. An allow whose decision could
+// not be recorded is never one of these: it is downgraded to an `internal_error` refusal before it
+// reaches a caller. See audit/decision.ts.
 export type AuditId = string | null;
 
 export type BrokerResult =
@@ -71,7 +74,7 @@ export type BrokerResult =
       ok: true;
       documents: Document[];
       fieldsReturned: string[];
-      auditId: string;
+      auditId: AuditId;
     }
   | { ok: false; reason: RefusalReason; auditId: AuditId };
 
@@ -81,7 +84,7 @@ export type GetDocumentResult =
       document: Document;
       fieldsReturned: string[];
       rev?: string | undefined;
-      auditId: string;
+      auditId: AuditId;
     }
   | { ok: false; reason: RefusalReason; auditId: AuditId };
 
@@ -115,9 +118,9 @@ export type MutationResult =
       status: "applied";
       documentId: string;
       rev: string;
-      auditId: string;
+      auditId: AuditId;
     }
-  | { ok: true; status: "pending"; proposalId: string; auditId: string }
+  | { ok: true; status: "pending"; proposalId: string; auditId: AuditId }
   | { ok: false; reason: MutationRefusalReason; auditId: AuditId };
 
 export type VisibleField = { name: string; type: string; pk?: boolean | undefined };

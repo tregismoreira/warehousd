@@ -39,10 +39,10 @@ export function makeHistoryVerbs(d: VerbDeps) {
     ctx: BrokerContext,
     opts: { since?: number | undefined; limit?: number | undefined } = {},
   ): Promise<
-    | { ok: true; entries: ChangeEntry[]; auditId: string }
+    | { ok: true; entries: ChangeEntry[]; auditId: AuditId }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const since = opts.since ?? 0;
     const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
 
@@ -114,10 +114,10 @@ export function makeHistoryVerbs(d: VerbDeps) {
     ctx: BrokerContext,
     opts: { collection: string; id: string },
   ): Promise<
-    | { ok: true; revisions: RevisionMetadata[]; auditId: string }
+    | { ok: true; revisions: RevisionMetadata[]; auditId: AuditId }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const name = opts.collection;
     const c = findCollection(cfg, name);
     if (!c) return audit.refuse(name, "unknown_collection");

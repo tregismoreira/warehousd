@@ -1,4 +1,10 @@
-import { loadConfig, envRefs, planFromConfigs, type WarehousdConfig } from "@warehousd/broker";
+import {
+  loadConfig,
+  envRefs,
+  auditEnabled,
+  planFromConfigs,
+  type WarehousdConfig,
+} from "@warehousd/broker";
 import { FlyError, assertFly } from "../fly";
 import { readDeployOutputs } from "../state";
 import { existingMigrations } from "../migrate";
@@ -11,6 +17,7 @@ export type PreflightInput = {
   projectDir: string;
   env: NodeJS.ProcessEnv;
   allowLocalLogin: boolean;
+  allowDisabledAudit?: boolean | undefined;
   ssoLookup?: ((dbUrl: string) => Promise<boolean>) | undefined;
 };
 
@@ -137,6 +144,8 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
   let deployBlockDetail: string;
   let demoOffOk: boolean;
   let demoOffDetail: string;
+  let auditOnOk: boolean;
+  let auditOnDetail: string;
 
   if (missing.length === 0) {
     try {
@@ -156,6 +165,17 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
             : hasEnvDemo
               ? "WAREHOUSD_DEMO=true in environment"
               : "Demo mode is off";
+      // Deploying without a trail is allowed — `audit.enabled: false` exists for lower
+      // environments — but only when the operator says so on the command line. The failure mode
+      // this guards against is the quiet one: a deployment that looks audited, has an audit page,
+      // and is recording nothing.
+      auditOnOk = auditEnabled(cfg) || input.allowDisabledAudit === true;
+      auditOnDetail = auditEnabled(cfg)
+        ? "Audit logging is on"
+        : input.allowDisabledAudit === true
+          ? "--allow-disabled-audit passed; deploying with no audit trail"
+          : "audit.enabled: false in warehousd.yml — this deployment would record no decisions " +
+            "at all. Remove it, or pass --allow-disabled-audit.";
     } catch (err: unknown) {
       // loadConfig threw; mark checks as unevaluable
       const detail = err instanceof Error ? err.message : "Failed to load config";
@@ -163,6 +183,8 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
       deployBlockDetail = `Could not evaluate: ${detail}`;
       demoOffOk = false;
       demoOffDetail = `Could not evaluate: ${detail}`;
+      auditOnOk = false;
+      auditOnDetail = `Could not evaluate: ${detail}`;
     }
   } else {
     // env refs didn't resolve; cannot evaluate demo and deploy checks without resolving env refs.
@@ -171,6 +193,8 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
     deployBlockDetail = "Could not evaluate: resolve environment variables first to load config";
     demoOffOk = false;
     demoOffDetail = "Could not evaluate: resolve environment variables first to load config";
+    auditOnOk = false;
+    auditOnDetail = "Could not evaluate: resolve environment variables first to load config";
   }
 
   // Add deploy-block-present and demo-off checks (only once each)
@@ -183,6 +207,11 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
     id: "demo-off",
     ok: demoOffOk,
     detail: demoOffDetail,
+  });
+  checks.push({
+    id: "audit-on",
+    ok: auditOnOk,
+    detail: auditOnDetail,
   });
 
   checks.push(schemaMigrationsCheck(input.projectDir, cfg));

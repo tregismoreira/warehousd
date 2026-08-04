@@ -49,9 +49,12 @@ Each of these is enforced somewhere. Breaking one is a release blocker, not a cl
 2. **Client input reaches SQL only as a bound parameter.** Values go through `param()`, identifiers
    through `q()`, both in `packages/broker/src/sql/build.ts`. Identifiers come from validated config,
    never from a request.
-3. **Every decision writes exactly one audit row before returning**, via `writeAudit`
-   (`packages/broker/src/audit/write.ts`) — refusals included. An allow whose audit write fails is
-   caught and downgraded to a refusal. Do not "fix" that by fabricating an id.
+3. **Every decision passes through exactly one audit call before returning** — refusals included —
+   via `makeAuditWriter` (`packages/broker/src/audit/decision.ts`), and the configured sink decides
+   whether that call lands in a row. With the trail on (the default) an allow whose audit write
+   fails is caught and downgraded to a refusal. With `audit.enabled: false` nothing is written and
+   `auditId` is null throughout. Do not "fix" either null by fabricating an id, and do not collapse
+   the two: a null with auditing on is a failure, a null with it off is the configured answer.
 4. **Denied means absent.** A denied field must not appear in a response, an error message, or a log
    line. When in doubt add a canary to the fixtures and grep for it.
 5. **Touching enforcement means shipping a test that fails without your change.** Postures, grants,

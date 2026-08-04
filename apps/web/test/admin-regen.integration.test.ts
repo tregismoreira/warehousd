@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setupWebDbWithData, signIn } from "./helpers/web-db";
 import { getAppPool } from "../app/lib/broker";
 
@@ -70,6 +73,37 @@ describe("POST /api/admin/regen-synth", () => {
     expect((await POST(r as any)).status).toBe(200);
     const after = await app.query(`select count(*)::int as n from data_live.people`);
     expect(after.rows[0].n).toBe(before.rows[0].n);
+  });
+
+  // This route holds the only `insert into app.audit_events` that does not go through the broker's
+  // audit writer, so `audit.enabled: false` has to be honoured here on its own. A gate that lives
+  // in one place and a raw insert that lives in another is exactly the pair that drifts.
+  it("writes no audit event when audit.enabled is false", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wh-regen-noaudit-"));
+    const harbor = new URL("../../../examples/harbor", import.meta.url).pathname;
+    cpSync(harbor, dir, { recursive: true });
+    writeFileSync(
+      join(dir, "warehousd.local.yml"),
+      // Also pins that the local-override path reaches the running server, not just loadConfig.
+      `audit: { enabled: false }\n`,
+    );
+
+    const previousDir = process.env.WAREHOUSD_PROJECT_DIR;
+    process.env.WAREHOUSD_PROJECT_DIR = dir;
+    try {
+      const before = await getAppPool().query(
+        `select count(*)::int as n from app.audit_events where intent->>'op' = 'regen_synth'`,
+      );
+      const { POST } = await import("../app/api/admin/regen-synth/route");
+      expect((await POST(req(anaCookie, { seed: 13 }) as any)).status).toBe(200);
+      const after = await getAppPool().query(
+        `select count(*)::int as n from app.audit_events where intent->>'op' = 'regen_synth'`,
+      );
+      expect(after.rows[0].n).toBe(before.rows[0].n);
+    } finally {
+      process.env.WAREHOUSD_PROJECT_DIR = previousDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("rejects a non-numeric seed", async () => {

@@ -22,7 +22,7 @@ export function makeMutateVerb(d: VerbDeps) {
   const { app, cfg, pools } = d;
 
   return async function mutate(ctx: BrokerContext, raw: MutationIntent): Promise<MutationResult> {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     // Parsed before `values` is read: refuseMutation reaches into intent.values to record the
     // field names it touched, so an unparsed intent cannot even be refused safely.
     const parsed = checkIntent(MutationIntentSchema, raw, "mutate");

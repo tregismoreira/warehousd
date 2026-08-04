@@ -68,7 +68,7 @@ function requestFor(
 
 // The BrokerResult union, as the console routes hand it back verbatim.
 type Result =
-  | { ok: true; documents: Row[]; fieldsReturned: string[]; auditId: string }
+  | { ok: true; documents: Row[]; fieldsReturned: string[]; auditId: string | null }
   | { ok: false; reason: string; auditId: string | null };
 
 const LIMITS = [25, 50, 100] as const;
@@ -390,7 +390,9 @@ export function DataBrowser({
               {result?.ok ? (
                 <>
                   Documents {offset + 1}–{offset + result.documents.length} · audit{" "}
-                  <Mono>{result.auditId}</Mono>
+                  {/* Null once the deployment sets `audit.enabled: false`. Saying so beats an
+                      empty space where an id used to be. */}
+                  {result.auditId ? <Mono>{result.auditId}</Mono> : "disabled"}
                 </>
               ) : (
                 " "

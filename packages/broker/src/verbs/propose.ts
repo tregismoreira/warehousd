@@ -40,7 +40,7 @@ export type ProposalSummary = {
 };
 
 export type DecisionResult =
-  | { ok: true; documentId: string; rev: string; auditId: string }
+  | { ok: true; documentId: string; rev: string; auditId: AuditId }
   | { ok: false; reason: MutationRefusalReason; auditId: AuditId };
 
 // The proposal path: a write that parks as a pending revision, and the two verbs that decide on
@@ -218,7 +218,7 @@ export function makeProposeVerbs(d: VerbDeps) {
   // exposes both verbs to any bearer token, so the other half — that the decider is not the
   // proposer — is enforced below against `_rev_by`, where no adapter can omit it.
   async function approveProposal(ctx: BrokerContext, proposalId: string): Promise<DecisionResult> {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const schema = dataSchema(ctx.env);
 
     // Find the proposal by proposalId
@@ -425,9 +425,9 @@ export function makeProposeVerbs(d: VerbDeps) {
     ctx: BrokerContext,
     proposalId: string,
   ): Promise<
-    { ok: true; auditId: string } | { ok: false; reason: MutationRefusalReason; auditId: AuditId }
+    { ok: true; auditId: AuditId } | { ok: false; reason: MutationRefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const schema = dataSchema(ctx.env);
 
     const pool = writePool(pools, ctx);
@@ -493,10 +493,10 @@ export function makeProposeVerbs(d: VerbDeps) {
       status?: "pending" | "approved" | "rejected" | undefined;
     } = {},
   ): Promise<
-    | { ok: true; proposals: ProposalSummary[]; auditId: string }
+    | { ok: true; proposals: ProposalSummary[]; auditId: AuditId }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const auditCollection = opts.collection ?? "*";
 
     const pool = writePool(pools, ctx);
@@ -594,11 +594,11 @@ export function makeProposeVerbs(d: VerbDeps) {
         fields: string[];
         values: Document;
         fieldsReturned: string[];
-        auditId: string;
+        auditId: AuditId;
       }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const pool = writePool(pools, ctx);
     if (!pool) return audit.refuse("*", "internal_error");
 

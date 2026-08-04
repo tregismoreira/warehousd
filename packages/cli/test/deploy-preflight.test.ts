@@ -76,6 +76,81 @@ collections:
     expect(demoCheck?.detail).toContain("WAREHOUSD_DEMO=true");
   });
 
+  // Same shape as --allow-local-login: deploying an unaudited environment is legitimate — that is
+  // the whole point of the key — but never by omission. A deploy that silently drops the trail is
+  // the one mistake nobody notices until they need the trail.
+  it("audit.enabled: false in YAML → refuses with the audit-on check", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+audit: { enabled: false }
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const result = await preflight({ projectDir, env: {}, allowLocalLogin: true });
+
+    expect(result.ok).toBe(false);
+    const check = result.checks.find((c) => c.id === "audit-on");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("--allow-disabled-audit");
+  });
+
+  it("audit.enabled: false with --allow-disabled-audit → the check passes", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+audit: { enabled: false }
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const result = await preflight({
+      projectDir,
+      env: {},
+      allowLocalLogin: true,
+      allowDisabledAudit: true,
+    });
+
+    const check = result.checks.find((c) => c.id === "audit-on");
+    expect(check?.ok).toBe(true);
+  });
+
+  it("no audit key → the check passes without an override", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const result = await preflight({ projectDir, env: {}, allowLocalLogin: true });
+
+    const check = result.checks.find((c) => c.id === "audit-on");
+    expect(check?.ok).toBe(true);
+  });
+
   it("two unresolved env refs → refuses and lists BOTH names in env-refs-resolve check", async () => {
     writeFileSync(
       join(projectDir, "warehousd.yml"),
@@ -560,6 +635,7 @@ collections:
       "env-refs-resolve",
       "deploy-block-present",
       "demo-off",
+      "audit-on",
       "schema-migrations-present",
       "sso-or-local-login",
       "flyctl-ready",
