@@ -339,9 +339,11 @@ to widen access. A REST caller needs `can_manage_acl` on its client policy, whic
 an admin grants per client in **Admin → Clients**; a console user needs the
 `manager` or `admin` role. An empty principal list removes the restriction.
 
-Group membership is managed by the IdP (its group claim is persisted on every SSO
-login) or by an admin through `PUT /api/admin/users/{id}/groups`, which owns the
-`manual` source. Neither source overwrites the other.
+Group membership is managed by the IdP — its group claim is persisted on every
+SSO login, see [configure-sso.md](configure-sso.md#5-map-idp-groups-to-warehousd-roles-optional)
+— or by an admin through `PUT /api/admin/users/{id}/groups`, which owns the
+`manual` source. Neither source overwrites the other, so a deployment with no SSO
+at all still gets working groups.
 
 Requirements and current limits, all enforced at config load:
 
