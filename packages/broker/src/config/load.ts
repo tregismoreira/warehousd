@@ -1,7 +1,14 @@
 import { readFileSync, existsSync, accessSync, constants } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { ConfigSchema, readPosture, writePosture, type WarehousdConfig } from "./schema";
+import {
+  ConfigSchema,
+  readPosture,
+  writePosture,
+  unmaskPosture,
+  isGrantable,
+  type WarehousdConfig,
+} from "./schema";
 
 // Split a line into (code, comment) at the first unquoted "#" preceded by
 // whitespace or start-of-line, per YAML comment syntax — so `${env:...}`
@@ -101,12 +108,42 @@ export function findCollection(
   return Object.hasOwn(cfg.collections, name) ? cfg.collections[name]! : null;
 }
 
-// The two-tier deny (§5.3): fields with read:allow can be granted for reading.
+// The two-tier deny (§5.3): fields that can be granted for reading.
+//
+// `mask` counts. It is a disclosure LEVEL, not a refusal — a manager approving a masked field is
+// approving the transformed value — so excluding it here would make a masked field ungrantable
+// and therefore unreadable, which is what `deny` is for.
 export function grantableFields(cfg: WarehousdConfig, collection: string): string[] {
   const c = findCollection(cfg, collection);
   if (!c) return [];
   return Object.entries(c.fields)
-    .filter(([, f]) => readPosture(f) === "allow")
+    .filter(([, f]) => isGrantable(f))
+    .map(([n]) => n);
+}
+
+// Fields whose RAW value a grant may additionally carry. Always a subset of grantableFields, and
+// only ever a field the config marked `unmask: allow` — a manager cannot widen a mask that the
+// YAML did not offer to widen.
+export function unmaskableFields(cfg: WarehousdConfig, collection: string): string[] {
+  const c = findCollection(cfg, collection);
+  if (!c) return [];
+  return Object.entries(c.fields)
+    .filter(([, f]) => unmaskPosture(f) === "allow")
+    .map(([n]) => n);
+}
+
+// The fields a grant would see transformed: masked, and not carried in the grant's unmask list.
+// One definition, used by every read verb and by describeCollection, so "is this masked for this
+// caller?" cannot be answered two ways.
+export function maskedFieldsFor(
+  cfg: WarehousdConfig,
+  collection: string,
+  unmasked: readonly string[],
+): string[] {
+  const c = findCollection(cfg, collection);
+  if (!c) return [];
+  return Object.entries(c.fields)
+    .filter(([n, f]) => readPosture(f) === "mask" && !unmasked.includes(n))
     .map(([n]) => n);
 }
 

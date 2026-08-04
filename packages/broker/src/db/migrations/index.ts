@@ -2,6 +2,7 @@ import { m0001Init } from "./0001-init";
 import { m0002LoginAttempts } from "./0002-login-attempts";
 import { m0003LoginAttemptsSweep } from "./0003-login-attempts-sweep";
 import { m0004CollectionMigrations } from "./0004-collection-migrations";
+import { m0005GrantUnmaskedFields } from "./0005-grant-unmasked-fields";
 
 export type Migration = { version: string; sql: string };
 
@@ -17,4 +18,5 @@ export const MIGRATIONS: readonly Migration[] = [
   m0002LoginAttempts,
   m0003LoginAttemptsSweep,
   m0004CollectionMigrations,
+  m0005GrantUnmaskedFields,
 ];

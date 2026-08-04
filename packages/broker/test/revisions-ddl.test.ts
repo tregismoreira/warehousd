@@ -116,16 +116,22 @@ describe("dataset revision DDL", () => {
     await db.end();
   });
 
-  it("a non-writable dataset gains no revision machinery at all", () => {
+  it("a non-writable dataset gets the same revision machinery as a writable one", () => {
+    // `writable` used to decide this, which tied "can a client write this?" to "is this table
+    // append-only?" — two different questions. The admin import path needs update and delete on
+    // collections no client may write, and the only way to have those without granting the
+    // import role UPDATE and DELETE on data columns is for both to be new revisions.
     const ddl = tableDDL("live", "people", nonWritableCfg);
-    expect(ddl).not.toContain("_rev");
-    expect(ddl).not.toContain("_current");
-    // Its pk stays a real primary key: without revisions, row identity IS document identity.
-    expect(ddl).toContain("primary key");
+    expect(ddl).toContain("_rev_seq");
+    expect(ddl).toContain("_current");
+    // The declared pk becomes document identity via the partial unique index rather than a
+    // table-level primary key — several rows share it, one per revision.
+    expect(ddl).toContain(`create unique index if not exists "people_current_idx"`);
+    expect(ddl).not.toMatch(/"id" uuid primary key/);
 
     const view = viewDDL("live", "people", nonWritableCfg);
-    expect(view).not.toContain("_current");
-    expect(view).not.toContain("_rev_op");
+    expect(view).toContain("_current");
+    expect(view).toContain("_rev_op <> 'delete'");
   });
 
   it("the view hides non-current and tombstoned revisions", async () => {
@@ -172,29 +178,22 @@ describe("dataset revision DDL", () => {
     await db.end();
   });
 
-  it("turning writable: true on over an existing plain table fails the apply", async () => {
+  it("applying over an existing table that predates revisions fails loudly", async () => {
     p = await provision("revisions-ddl");
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
-    await applyConfig(db, nonWritableCfg);
 
-    // Same collection name, now writable — the table exists without _rev*, and migrating
-    // existing rows into revisions is out of scope, so this must refuse rather than
-    // silently emit a table that cannot hold a revision.
-    const migrated = ConfigSchema.parse({
-      project: "t",
-      collections: {
-        people: {
-          description: "dir",
-          writable: true,
-          fields: {
-            id: { type: "uuid", posture: "allow", pk: true },
-            email: { type: "text", posture: { read: "allow", write: "allow" } },
-          },
-        },
-      },
-    });
-    await expect(applyConfig(db, migrated)).rejects.toThrow(/writable/i);
+    // A table created before every dataset was revisioned. `create table if not exists` is a
+    // no-op on it, so the alters below would add the data columns and leave the NOT NULL
+    // bookkeeping ones missing — and the failure would surface at the first insert, a long way
+    // from its cause. Migrating existing rows into revisions is out of scope, so refuse here.
+    await db.query(`create schema if not exists data_live`);
+    await db.query(
+      `create table data_live.people (org_id text not null default 'default',
+         id uuid primary key, email text)`,
+    );
+
+    await expect(applyConfig(db, nonWritableCfg)).rejects.toThrow(/without revision columns/i);
     await db.end();
   });
 });

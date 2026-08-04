@@ -10,6 +10,13 @@ import type { WarehousdConfig } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
 import { ConfigSchema } from "../src/config/schema";
 
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
 const cfg: WarehousdConfig = ConfigSchema.parse({
   project: "t",
   server: { port: 1 },
@@ -46,8 +53,8 @@ beforeAll(async () => {
   // Two documents that differ only by org. The broker never names org_id, so anything that
   // separates these two rows has to be the database.
   await admin.query(
-    `insert into data_synth.people (org_id, id, full_name) values
-       ($1, gen_random_uuid(), 'Ana of A'), ($2, gen_random_uuid(), 'Bo of B')`,
+    `insert into data_synth.people (${R}, org_id, id, full_name) values
+       (${RV}, $1, gen_random_uuid(), 'Ana of A'), (${RV}, $2, gen_random_uuid(), 'Bo of B')`,
     [ORG_A, ORG_B],
   );
   for (const org of [ORG_A, ORG_B])

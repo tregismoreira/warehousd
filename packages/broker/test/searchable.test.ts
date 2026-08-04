@@ -10,6 +10,13 @@ import { ConfigSchema } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
 import { assertSchema } from "./helpers/results";
 
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
 const cfg: WarehousdConfig = ConfigSchema.parse({
   project: "test",
   collections: {
@@ -49,10 +56,10 @@ beforeAll(async () => {
 
   // Seed articles (use admin pool, not dev pool which has no INSERT)
   await db.query(
-    `insert into data_synth.articles (id, title, summary, body, category) values
-     (gen_random_uuid(), 'GraphQL API Design', 'Best practices', 'GraphQL is powerful', 'tech'),
-     (gen_random_uuid(), 'REST API Best Practices', 'REST design', 'REST is simple', 'tech'),
-     (gen_random_uuid(), 'Company Handbook', 'About us', 'We value teamwork', 'hr')`,
+    `insert into data_synth.articles (${R}, id, title, summary, body, category) values
+     (${RV}, gen_random_uuid(), 'GraphQL API Design', 'Best practices', 'GraphQL is powerful', 'tech'),
+     (${RV}, gen_random_uuid(), 'REST API Best Practices', 'REST design', 'REST is simple', 'tech'),
+     (${RV}, gen_random_uuid(), 'Company Handbook', 'About us', 'We value teamwork', 'hr')`,
   );
 
   // Setup grant

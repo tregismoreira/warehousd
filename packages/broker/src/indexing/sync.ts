@@ -1,19 +1,40 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
-import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, extname } from "node:path";
+import { parse as parseYaml } from "yaml";
 import type { Pool } from "pg";
-import { extractFile, type MetadataField } from "./extract";
-import { chunkText } from "./chunk";
+import type { MetadataField } from "./extract";
+import { ingestFile, filesTable, TEXT_EXT, type IngestDeps } from "./ingest";
 import type { TaxonomyBinding } from "../taxonomy";
+import type { BinaryExtractor, Embedder } from "../providers";
 
-function walk(root: string, dir = root): string[] {
+function walk(root: string, binaryExt: readonly string[], dir = root): string[] {
   const out: string[] = [];
+  // A sidecar is metadata for the file beside it, never a document of its own.
+  const isSidecar = (n: string) =>
+    /\.(ya?ml)$/i.test(n) && binaryExt.some((x) => n.includes(`.${x}.`));
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walk(root, p));
-    else if (/\.(md|txt)$/i.test(e.name)) out.push(relative(root, p));
+    if (e.isDirectory()) out.push(...walk(root, binaryExt, p));
+    else if (isSidecar(e.name)) continue;
+    else if (TEXT_EXT.test(e.name)) out.push(relative(root, p));
+    else if (binaryExt.includes(extname(e.name).slice(1).toLowerCase()))
+      out.push(relative(root, p));
   }
   return out;
+}
+
+// A binary carries no frontmatter, so its owner, terms and metadata come from a sidecar YAML
+// beside it: `contract.pdf` is described by `contract.pdf.yml`. Without this a bound vocabulary
+// would have nowhere to come from, and indexing would either fail or — much worse — silently
+// produce an unscoped document reachable by a grant approved on the assumption it carried a term.
+function readSidecar(absPath: string): Record<string, unknown> {
+  for (const ext of [".yml", ".yaml"]) {
+    const p = `${absPath}${ext}`;
+    if (!existsSync(p)) continue;
+    const parsed: unknown = parseYaml(readFileSync(p, "utf8"));
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  }
+  return {};
 }
 
 // Bindings are resolved by the caller via `loadTaxonomyBindings(db, cfg, collection, env)`,
@@ -24,114 +45,66 @@ export async function indexCollection(
   env: "dev" | "live",
   collection: string,
   sourceDir: string,
-  opts: { taxonomies?: TaxonomyBinding[]; metadata?: MetadataField[] } = {},
+  opts: {
+    taxonomies?: TaxonomyBinding[];
+    metadata?: MetadataField[];
+    // Injected by the caller (CLI or web), never constructed here — the PDF and DOCX parsers
+    // live in @warehousd/providers. Absent means only .md/.txt are picked up, which is exactly
+    // what this function did before binaries were supported.
+    extractor?: BinaryExtractor | undefined;
+    // Absent means chunks are stored with a null embedding, and `warehousd embed` can fill them
+    // in later. Present means they are embedded in the same pass.
+    embedder?: Embedder | undefined;
+  } = {},
 ): Promise<{ indexed: number; skipped: number; deleted: number }> {
   const schema = env === "dev" ? "data_synth" : "data_live";
-  // collection is caller-controlled (server-side config/CLI, not raw user input),
-  // so this identifier interpolation is safe (SQL identifiers can't be parameterized).
-  const filesT = `${schema}."${collection}__files"`;
-  const documentsT = `${schema}."${collection}__documents"`;
-  const existing = new Map<string, { id: string; checksum: string }>(
+  const filesT = filesTable(schema, collection);
+  // Only the rows this indexer put there. An uploaded document has `origin = 'upload'` and is
+  // deliberately absent from the sweep below — see the note on it.
+  const existing = new Map<string, string>(
     (
-      await db.query<{ id: string; path: string; checksum: string }>(
-        `select id, path, checksum from ${filesT}`,
+      await db.query<{ id: string; path: string }>(
+        `select id, path from ${filesT} where origin = 'index'`,
       )
-    ).rows.map((r) => [r.path, { id: r.id, checksum: r.checksum }]),
+    ).rows.map((r) => [r.path, r.id]),
   );
   let indexed = 0,
     skipped = 0,
     deleted = 0;
   const seen = new Set<string>();
 
-  const bindings = opts.taxonomies ?? [];
-  const termFields = bindings.map((b) => ({ field: b.field, multiple: b.multiple }));
-  const metadataFields = opts.metadata ?? [];
+  const deps: IngestDeps = {
+    ...(opts.taxonomies ? { taxonomies: opts.taxonomies } : {}),
+    ...(opts.metadata ? { metadata: opts.metadata } : {}),
+    extractor: opts.extractor,
+    embedder: opts.embedder,
+  };
 
-  for (const rel of walk(sourceDir).sort()) {
+  for (const rel of walk(sourceDir, opts.extractor?.extensions ?? []).sort()) {
     seen.add(rel);
     const abs = join(sourceDir, rel);
-    const file = extractFile(
-      rel,
-      readFileSync(abs, "utf8"),
-      statSync(abs).mtime,
-      termFields.length ? termFields : undefined,
-      metadataFields.length ? metadataFields : undefined,
+    const r = await ingestFile(
+      db,
+      schema,
+      collection,
+      {
+        path: rel,
+        bytes: readFileSync(abs),
+        sidecar: readSidecar(abs),
+        updatedAt: statSync(abs).mtime,
+        origin: "index",
+      },
+      deps,
     );
-
-    // Every bound vocabulary is required frontmatter, and every term must be known.
-    // Failing loudly here is deliberate: a silently unscoped document would be reachable
-    // by a grant that was approved on the assumption it carried a term.
-    const termValues: unknown[] = [];
-    for (const b of bindings) {
-      const raw = file.terms[b.field] ?? null;
-      const values = raw === null ? [] : Array.isArray(raw) ? raw : [raw];
-      if (values.length === 0)
-        throw new Error(
-          `${rel}: missing required ${b.field} frontmatter (valid: ${b.slugs.join(", ")})`,
-        );
-      for (const t of values)
-        if (!b.slugs.includes(t))
-          throw new Error(`${rel}: unknown ${b.field} term "${t}" (valid: ${b.slugs.join(", ")})`);
-      termValues.push(b.multiple ? values : values[0]!);
-    }
-
-    const prev = existing.get(rel);
-    if (prev && prev.checksum === file.checksum) {
-      skipped++;
-      continue;
-    }
-    const id = prev?.id ?? randomUUID();
-    const termCols = bindings.map((b) => `"${b.field}"`);
-    const metadataCols = metadataFields.map((m) => `"${m.field}"`);
-    const metadataValues = metadataFields.map((m) => file.metadata[m.field] ?? null);
-
-    if (prev) {
-      let sets = termCols.map((col, i) => `, ${col}=$${i + 6}`).join("");
-      sets += metadataCols.map((col, i) => `, ${col}=$${i + 6 + termCols.length}`).join("");
-      await db.query(
-        `update ${filesT} set title=$2, owner=$3, checksum=$4, updated_at=$5${sets} where id=$1`,
-        [
-          id,
-          file.title,
-          file.owner,
-          file.checksum,
-          file.updatedAt,
-          ...termValues,
-          ...metadataValues,
-        ],
-      );
-      await db.query(`delete from ${documentsT} where file_id=$1`, [id]);
-    } else {
-      const allCols = [...termCols, ...metadataCols];
-      const cols = allCols.length ? `, ${allCols.join(", ")}` : "";
-      const ph = [...termValues, ...metadataValues].map((_, i) => `,$${i + 7}`).join("");
-      await db.query(
-        `insert into ${filesT} (id, title, path, owner, checksum, updated_at${cols})
-         values ($1,$2,$3,$4,$5,$6${ph})`,
-        [
-          id,
-          file.title,
-          rel,
-          file.owner,
-          file.checksum,
-          file.updatedAt,
-          ...termValues,
-          ...metadataValues,
-        ],
-      );
-    }
-
-    const pieces = chunkText(file.content);
-    for (let i = 0; i < pieces.length; i++)
-      await db.query(
-        `insert into ${documentsT} (id, file_id, document_seq, content) values ($1,$2,$3,$4)`,
-        [randomUUID(), id, i, pieces[i]],
-      );
-    indexed++;
+    if (r.status === "skipped") skipped++;
+    else indexed++;
   }
-  for (const [path, row] of existing)
+  // Directory indexing is a mirror: a file that left the source directory leaves the collection.
+  // Scoped to `origin = 'index'` above, because an uploaded document was never in that directory
+  // and must not be deleted by the first `warehousd index` that runs after it lands.
+  for (const [path, id] of existing)
     if (!seen.has(path)) {
-      await db.query(`delete from ${filesT} where id=$1`, [row.id]);
+      await db.query(`delete from ${filesT} where id=$1`, [id]);
       deleted++;
     }
   return { indexed, skipped, deleted };

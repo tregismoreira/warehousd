@@ -59,10 +59,57 @@ export const ViewJoinSchema = z
   .strict();
 export type ViewJoinConfig = z.infer<typeof ViewJoinSchema>;
 
+// The read axis has three settings, not two. `mask` is a THIRD state between allow and deny:
+// the field is grantable, and what a grant gets back is a transformed value rather than the
+// stored one. It is not "allow with a filter applied afterwards" — the transform is computed in
+// SQL, so the raw value never leaves Postgres (see sql/mask.ts).
+//
+// `unmask` is a separate axis for the same reason `write` is: it answers a different question.
+// `read: mask` says what everyone gets. `unmask: allow` says the raw value is *grantable* — a
+// manager must still tick it per grant, exactly as `read: allow` only makes a field grantable
+// rather than readable. It defaults to `deny`, so declaring a mask and stopping there means
+// nobody sees raw without editing this file.
+export const READ_POSTURES = ["allow", "mask", "deny"] as const;
 const PostureSchema = z.union([
   z.enum(["allow", "deny"]),
-  z.object({ read: z.enum(["allow", "deny"]), write: z.enum(["allow", "deny"]) }),
+  z.object({
+    read: z.enum(READ_POSTURES),
+    write: z.enum(["allow", "deny"]),
+    unmask: z.enum(["allow", "deny"]).default("deny"),
+  }),
 ]);
+
+// The transforms a masked field may take, as a closed set. Each carries its own parameters, so a
+// `bucket` without a width or a `first` without a length is a config error rather than a runtime
+// surprise. sql/mask.ts turns each of these into one SQL expression and nothing else can.
+export const MaskSchema = z.discriminatedUnion("transform", [
+  // Any type. A fixed token, so the value is gone rather than merely obscured.
+  z.object({ transform: z.literal("redact") }).strict(),
+  // text. Keeps the last four characters — the account-number convention.
+  z.object({ transform: z.literal("last4") }).strict(),
+  // text. Keeps a prefix.
+  z.object({ transform: z.literal("first"), chars: z.number().int().min(1).max(64) }).strict(),
+  // Any type. A stable pseudonym: equal values hash equal, so rows can be correlated without
+  // any of them being readable. Keyed per deployment — see WAREHOUSD_MASK_KEY.
+  z.object({ transform: z.literal("hash") }).strict(),
+  // numeric/int. Quantises into bands: 97_300 with width 25_000 reads 75_000.
+  z.object({ transform: z.literal("bucket"), width: z.number().positive() }).strict(),
+  // date/timestamptz. The year alone.
+  z.object({ transform: z.literal("year") }).strict(),
+  // text. The part of an email address after the @.
+  z.object({ transform: z.literal("domain") }).strict(),
+]);
+export type MaskConfig = z.infer<typeof MaskSchema>;
+
+// Which column types each transform can be computed over. `redact` and `hash` are absent because
+// they apply to anything: one replaces the value outright, the other casts to text first.
+const MASK_TYPES: Record<string, readonly string[]> = {
+  last4: ["text"],
+  first: ["text"],
+  domain: ["text"],
+  bucket: ["numeric", "int"],
+  year: ["date", "timestamptz"],
+};
 
 // Every object in this file is strict: an unrecognised key in warehousd.yml is a typo, and the
 // cost of ignoring one is not a validation error but a silent policy change. `postur: deny` parses
@@ -76,6 +123,11 @@ export const FieldSchema = z
       .enum(["uuid", "text", "numeric", "int", "timestamptz", "date", "boolean", "json"])
       .optional(),
     posture: PostureSchema,
+    mask: MaskSchema.optional(), // required by, and only valid with, read: mask
+    // The column's name on the REMOTE table, when it differs from the field name. Only
+    // meaningful on a collection with `source_ref`. Declared explicitly rather than imported so
+    // a column added upstream never silently appears in warehousd.
+    column: z.string().regex(IDENT).optional(),
     pk: z.boolean().optional(),
     fk: z.string().optional(), // "people.id"
     view_join: ViewJoinSchema.optional(), // { table: "people", column: "full_name", on: "responsible_attorney_id" }
@@ -108,27 +160,95 @@ export const FILE_FIELD_TYPES: Record<(typeof FILE_FIELDS)[number], FieldConfig[
   updated_at: "timestamptz",
 };
 
-export function normalizePosture(p: unknown): { read: "allow" | "deny"; write: "allow" | "deny" } {
-  if (typeof p === "string") return { read: p === "allow" ? "allow" : "deny", write: "deny" };
+export type ReadPosture = (typeof READ_POSTURES)[number];
+export type NormalizedPosture = {
+  read: ReadPosture;
+  write: "allow" | "deny";
+  unmask: "allow" | "deny";
+};
+
+// Every unrecognised shape lands on deny/deny/deny. That is the whole point of doing this in one
+// function: a posture arrived at by omission is the closed one, not the open one.
+export function normalizePosture(p: unknown): NormalizedPosture {
+  if (typeof p === "string")
+    return { read: p === "allow" ? "allow" : "deny", write: "deny", unmask: "deny" };
   if (typeof p === "object" && p !== null && "read" in p && "write" in p) {
-    const o = p as { read?: unknown; write?: unknown };
+    const o = p as { read?: unknown; write?: unknown; unmask?: unknown };
+    const read = (READ_POSTURES as readonly unknown[]).includes(o.read)
+      ? (o.read as ReadPosture)
+      : "deny";
     return {
-      read: o.read === "allow" ? "allow" : "deny",
+      read,
       write: o.write === "allow" ? "allow" : "deny",
+      // Only meaningful alongside `read: mask`, and refused by CollectionSchema otherwise — but
+      // pinned closed here too, so a posture that never went through the schema cannot arrive
+      // carrying an unmask nobody validated.
+      unmask: read === "mask" && o.unmask === "allow" ? "allow" : "deny",
     };
   }
-  return { read: "deny", write: "deny" };
+  return { read: "deny", write: "deny", unmask: "deny" };
 }
 
-export function readPosture(f: FieldConfig): "allow" | "deny" {
-  const p = normalizePosture(f.posture);
-  return p.read;
+export function readPosture(f: FieldConfig): ReadPosture {
+  return normalizePosture(f.posture).read;
 }
 
 export function writePosture(f: FieldConfig): "allow" | "deny" {
-  const p = normalizePosture(f.posture);
-  return p.write;
+  return normalizePosture(f.posture).write;
 }
+
+// Whether the RAW value of a masked field may be granted. Never true for an unmasked field:
+// `read: allow` already returns raw, and `read: deny` has nothing to unmask.
+export function unmaskPosture(f: FieldConfig): "allow" | "deny" {
+  return normalizePosture(f.posture).unmask;
+}
+
+// A field is grantable when it can be read at all — masked or not. `mask` is a disclosure level,
+// not a refusal, so a masked field belongs in the set a manager can approve.
+export function isGrantable(f: FieldConfig): boolean {
+  return readPosture(f) !== "deny";
+}
+
+// An external Postgres warehousd reads through rather than copies from.
+//
+// The connection is made by the DATABASE, via postgres_fdw, not by the broker. That is the whole
+// design: a foreign table lives inside data_live, so the collection's view, its grant, its RLS
+// policy, `dataPool` and `buildSelect` all work on it unchanged. A second connection pool in the
+// broker would have needed a variant of every one of those, which is four new ways to get
+// tenant isolation wrong.
+export const SourceSchema = z
+  .object({
+    type: z.literal("postgres"),
+    // Interpolated by ${env:VAR} at load time. It reaches Postgres as a user mapping, which only
+    // the mapping's owner can read back — it is never stored in a warehousd table.
+    //
+    // Resolved BY POSTGRES, not by warehousd: the host and port have to be reachable from the
+    // database server, which is not always the address your client uses. A warehousd running its
+    // own Postgres in a container cannot reach a source published on that container's host port.
+    url: z.string(),
+    schema: z.string().regex(IDENT).default("public"),
+    // Read-only is the default and turning it off is not implemented: writing into someone
+    // else's database through a governed layer is a different feature with different questions
+    // (who owns the transaction, what happens to a failed write's audit row) and pretending
+    // otherwise by flipping a flag would be worse than not offering it.
+    read_only: z.literal(true).default(true),
+  })
+  .strict();
+export type SourceConfig = z.infer<typeof SourceSchema>;
+
+// Where a collection's rows actually live, when they do not live in warehousd.
+export const SourceRefSchema = z
+  .object({
+    source: z.string(),
+    table: z.string().regex(IDENT),
+    // The org every row of the remote table belongs to. A foreign table has no org_id column to
+    // filter on, so the view compares this constant against the request's org instead — see
+    // viewDDL. Declaring it is what keeps an external collection inside the tenant model rather
+    // than beside it.
+    org: z.string().default("default"),
+  })
+  .strict();
+export type SourceRefConfig = z.infer<typeof SourceRefSchema>;
 
 export const CollectionSchema = z
   .object({
@@ -136,6 +256,7 @@ export const CollectionSchema = z
     type: z.enum(["dataset", "file"]).default("dataset"),
     source: z.string().optional(),
     source_live: z.string().optional(),
+    source_ref: SourceRefSchema.optional(),
     taxonomies: z.array(z.string()).default([]), // vocabulary slugs — validated against `taxonomies` at ConfigSchema level
     writable: z.boolean().optional(), // opt-in to write path; verb support is structural
     fields: z.record(z.string(), FieldSchema),
@@ -260,6 +381,110 @@ export const CollectionSchema = z
           });
       }
     }
+
+    // Connect-in-place. A collection either stores its rows in warehousd or reads them from
+    // somewhere else; the two are different enough that mixing them is always a mistake.
+    if (c.source_ref) {
+      if (c.type === "file")
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "`source_ref` is for dataset collections; a file collection is indexed from `source`",
+        });
+      if (c.source || c.source_live)
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "a collection with `source_ref` reads from an external database, so it has no `source` directory",
+        });
+      if (c.writable)
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "`writable: true` is not supported on a `source_ref` collection — warehousd reads external data, it does not write it",
+        });
+      for (const [name, f] of Object.entries(c.fields)) {
+        // A join reaches a sibling table in the SAME schema. Resolving one across a foreign
+        // table would silently pull the whole remote relation over the wire per row.
+        if (f.view_join)
+          ctx.addIssue({
+            code: "custom",
+            message: `field "${name}" has view_join on an external collection; joins are not resolved across a source_ref`,
+          });
+        if (f.searchable)
+          ctx.addIssue({
+            code: "custom",
+            message: `field "${name}" has searchable: true on an external collection; the generated tsv column would have to live on the remote table`,
+          });
+      }
+    } else {
+      for (const [name, f] of Object.entries(c.fields))
+        if (f.column)
+          ctx.addIssue({
+            code: "custom",
+            message: `field "${name}" declares \`column\` but the collection has no \`source_ref\`; there is no remote column to rename`,
+          });
+    }
+
+    // Masking. Every rule here closes a way for a mask to be decorative rather than real.
+    for (const [name, f] of Object.entries(c.fields)) {
+      const p = normalizePosture(f.posture);
+      const masked = p.read === "mask";
+
+      if (masked && !f.mask)
+        ctx.addIssue({
+          code: "custom",
+          message: `field "${name}" has read: mask but no \`mask\` — declare the transform`,
+        });
+      if (!masked && f.mask)
+        ctx.addIssue({
+          code: "custom",
+          message: `field "${name}" declares \`mask\` but its read posture is "${p.read}"; a transform is only applied under read: mask`,
+        });
+      // Read from the RAW posture, not the normalized one. normalizePosture deliberately pins
+      // unmask closed whenever read is not `mask`, so asking it here would make this branch
+      // unreachable and the typo would parse silently as "no unmask" — which is safe, but
+      // leaves the author believing they granted something they did not.
+      const declared = f.posture;
+      const declaredUnmask =
+        typeof declared === "object" && declared !== null && "unmask" in declared
+          ? (declared as { unmask?: unknown }).unmask
+          : undefined;
+      if (declaredUnmask === "allow" && !masked)
+        ctx.addIssue({
+          code: "custom",
+          message: `field "${name}" has unmask: allow but is not masked; there is nothing to unmask`,
+        });
+      if (!masked || !f.mask) continue;
+
+      // A pk addresses a document. getDocument round-trips it and every filter compares against
+      // it, so a masked one would return an id nothing can be looked up by.
+      if (f.pk)
+        ctx.addIssue({
+          code: "custom",
+          message: `field "${name}" is the primary key and cannot be masked — it is how a document is addressed`,
+        });
+      // The generated "<name>_tsv" column is built from the RAW column and is exposed by the
+      // view, so a masked searchable field would be fully recoverable one search at a time.
+      if (f.searchable)
+        ctx.addIssue({
+          code: "custom",
+          message: `field "${name}" cannot be both searchable and masked — the generated ${name}_tsv column indexes the raw value`,
+        });
+      if (c.type === "file" && (name === "content" || name === "path"))
+        ctx.addIssue({
+          code: "custom",
+          message: `file field "${name}" cannot be masked (content is chunked and indexed; path addresses the file)`,
+        });
+
+      const allowed = MASK_TYPES[f.mask.transform];
+      // `redact` and `hash` are absent from MASK_TYPES because they apply to any type.
+      if (allowed && f.type && !allowed.includes(f.type))
+        ctx.addIssue({
+          code: "custom",
+          message: `field "${name}" has mask transform "${f.mask.transform}", which needs type ${allowed.join(" or ")}, but is type ${f.type}`,
+        });
+    }
   })
   .transform((c) => {
     const fields = Object.fromEntries(
@@ -267,7 +492,7 @@ export const CollectionSchema = z
         k,
         {
           ...f,
-          // Normalize posture to canonical {read, write} form
+          // Normalize posture to canonical {read, write, unmask} form
           posture: normalizePosture(f.posture),
         },
       ]),
@@ -281,7 +506,7 @@ export const CollectionSchema = z
             ...tf,
             type: tf.type ?? "text",
           }
-        : { posture: { read: "allow", write: "deny" }, type: "text" };
+        : { posture: { read: "allow", write: "deny", unmask: "deny" }, type: "text" };
     }
     if (c.type !== "file") return { ...c, fields };
     const filled = Object.fromEntries(
@@ -329,6 +554,37 @@ export const DeploySchema = z
       });
   });
 export type DeployConfig = z.infer<typeof DeploySchema>;
+
+// Semantic search, off unless declared. Absent means `search_documents` behaves exactly as it
+// always has and the embedding column stays unpopulated — which is the honest default, because
+// embedding a corpus is a decision with a cost and, for a remote provider, a disclosure.
+//
+// `dimensions` has no default on purpose. It has to match the model, and getting it wrong shows
+// up from Postgres as a cast error on the insert that names neither the model nor this key.
+export const EmbeddingSchema = z
+  .object({
+    provider: z.enum(["local", "openai", "http"]).default("local"),
+    model: z.string(),
+    dimensions: z.number().int().positive().max(4096),
+    base_url: z.string().optional(),
+    api_key: z.string().optional(),
+  })
+  .strict()
+  .superRefine((e, ctx) => {
+    if (e.provider === "http" && !e.base_url)
+      ctx.addIssue({
+        code: "custom",
+        message: "embedding.provider `http` requires `base_url`",
+      });
+    // Local runs in-process and has nothing to authenticate to. Accepting a key here would read
+    // as "this is configured" while the key went nowhere.
+    if (e.provider === "local" && (e.base_url || e.api_key))
+      ctx.addIssue({
+        code: "custom",
+        message: "embedding.provider `local` takes neither `base_url` nor `api_key`",
+      });
+  });
+export type EmbeddingConfig = z.infer<typeof EmbeddingSchema>;
 
 export const ConfigSchema = z
   .object({
@@ -396,14 +652,21 @@ export const ConfigSchema = z
           });
       }
     }),
+    sources: z.record(z.string().regex(IDENT), SourceSchema).default({}),
     synthetic: z
       .object({ documents_per_collection: z.record(z.string(), z.number()).default({}) })
       .default({ documents_per_collection: {} }),
+    embedding: EmbeddingSchema.optional(),
     deploy: DeploySchema.optional(),
   })
   .strict()
   .superRefine((cfg, ctx) => {
     for (const [name, c] of Object.entries(cfg.collections)) {
+      if (c.source_ref && !cfg.sources[c.source_ref.source])
+        ctx.addIssue({
+          code: "custom",
+          message: `collection "${name}" references unknown source "${c.source_ref.source}"`,
+        });
       // Validate that each bound taxonomy exists
       for (const taxSlug of c.taxonomies) {
         if (!cfg.taxonomies[taxSlug])

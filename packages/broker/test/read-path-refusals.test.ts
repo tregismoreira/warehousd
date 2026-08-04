@@ -7,6 +7,13 @@ import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
 
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
 // The narrow refusals on the read verbs: a grant that carries a verb other than `read`, and a
 // grant whose document filter cannot be evaluated at all.
 //
@@ -42,8 +49,8 @@ beforeAll(async () => {
   broker = makeBroker(pools, cfg);
 
   await app.query(
-    `insert into data_synth.people (org_id, id, email, dept)
-     values ('default', gen_random_uuid(), 'seed@ex.com', 'Engineering')`,
+    `insert into data_synth.people (${R}, org_id, id, email, dept)
+     values (${RV}, 'default', gen_random_uuid(), 'seed@ex.com', 'Engineering')`,
   );
 }, 60_000);
 

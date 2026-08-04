@@ -40,10 +40,14 @@ export type QueryIntent = {
   groupBy?: string[] | undefined;
 };
 
+export type SearchMode = "text" | "semantic" | "hybrid";
+
 export type DocSearchIntent = {
   collection: string;
   q: string;
   fields?: string[] | undefined;
+  // Absent means "text", which is what every caller written before semantic search sends.
+  mode?: SearchMode | undefined;
   limit?: number | undefined;
   offset?: number | undefined;
 };
@@ -123,7 +127,15 @@ export type MutationResult =
   | { ok: true; status: "pending"; proposalId: string; auditId: AuditId }
   | { ok: false; reason: MutationRefusalReason; auditId: AuditId };
 
-export type VisibleField = { name: string; type: string; pk?: boolean | undefined };
+// `masked` is present only when true, so an unmasked schema is byte-identical to what it was
+// before masking existed. A masked field is readable but transformed, and cannot be filtered,
+// ordered, grouped or aggregated on — see collectComputed in verbs/read.ts.
+export type VisibleField = {
+  name: string;
+  type: string;
+  pk?: boolean | undefined;
+  masked?: true | undefined;
+};
 export type VisibleSchema = {
   collection: string;
   description: string;

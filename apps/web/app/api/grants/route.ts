@@ -6,6 +6,7 @@ import {
   revokeGrant,
   requestGrant,
   validateGrantRequest,
+  unmaskableFields,
 } from "@warehousd/broker";
 import { requireSession, requireRole, atLeast } from "../../../lib/authz";
 import { readJson } from "../../../lib/rest";
@@ -45,6 +46,10 @@ export async function GET(req: NextRequest) {
       ...g,
       collectionType: cfg.collections[g.collection]?.type || "dataset",
       taxonomyFields: cfg.collections[g.collection]?.taxonomies ?? [],
+      // Which of this collection's fields the config lets a grant carry UNMASKED. The approver
+      // sees a second checkbox only for these — a masked field with `unmask: deny` offers no
+      // choice, and rendering one that always fails would be worse than rendering none.
+      unmaskableFields: unmaskableFields(cfg, g.collection),
     }));
 
   return Response.json({
@@ -68,6 +73,7 @@ export async function POST(req: NextRequest) {
     purposeDetail?: string;
     fields?: string[];
     allowedFields?: string[];
+    unmaskedFields?: string[];
     expiresAt?: string;
     selectedPaths?: string[];
     selectedTerms?: string[];
@@ -128,6 +134,7 @@ export async function POST(req: NextRequest) {
     const built = buildApproval(cfg, row.allowed_fields ?? [], {
       collection: row.collection,
       allowedFields: body.allowedFields,
+      unmaskedFields: body.unmaskedFields,
       expiresAt: body.expiresAt,
       selectedPaths: body.selectedPaths,
       selectedTerms: body.selectedTerms,

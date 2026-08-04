@@ -95,6 +95,35 @@ collections:
       effective_date: { type: date, posture: allow }
       ssn: { type: text, posture: deny }
       bonus: { type: numeric, posture: allow, min: 0, max: 50000, nullable: true }
+      # Masked, and the two halves of what that means.
+      #
+      # `bank_account` is masked with no way to unmask it: everyone who can read this collection
+      # sees the last four digits, and getting the full number takes an edit to this file. That
+      # is the setting for a value nobody needs whole.
+      #
+      # `pay_band` is masked *by default* but declares `unmask: allow`, so the raw figure is
+      # grantable — a manager ticks it per grant and the audit row records who saw it. That is
+      # the setting for a value some people legitimately need and most do not.
+      #
+      # Neither can be filtered, ordered, grouped or aggregated on. A masked field you can still
+      # compare against is not masked: `lt`/`gt` recover a banded number by bisection in about
+      # ten queries. See collectComputed in packages/broker/src/verbs/read.ts.
+      bank_account:
+        {
+          type: text,
+          posture: { read: mask, write: deny },
+          mask: { transform: last4 },
+          nullable: true,
+        }
+      pay_band:
+        {
+          type: numeric,
+          posture: { read: mask, write: deny, unmask: allow },
+          mask: { transform: bucket, width: 25000 },
+          min: 60000,
+          max: 220000,
+          nullable: true,
+        }
       comp_band: { type: text, posture: allow, nullable: true }
   announcements:
     description: Firm announcements

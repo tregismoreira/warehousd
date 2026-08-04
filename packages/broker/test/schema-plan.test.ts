@@ -83,10 +83,20 @@ describe("declaredTables", () => {
       { name: "ok", pgType: "boolean", pk: false },
       { name: "blob", pgType: "jsonb", pk: false },
     ]);
-    // org_id plus a reserved `<field>_tsv` slot per field — see the note in declaredTables on why
-    // the slot is reserved whether or not the field is currently searchable.
+    // org_id, the revision bookkeeping every dataset carries, plus a reserved `<field>_tsv` slot
+    // per field — see the note in declaredTables on why the slot is reserved whether or not the
+    // field is currently searchable.
     expect(t!.structural).toEqual([
       "org_id",
+      "_rev",
+      "_rev_seq",
+      "_rev_at",
+      "_rev_by",
+      "_rev_op",
+      "_rev_status",
+      "_rev_fields",
+      "_rev_base",
+      "_current",
       "id_tsv",
       "amount_tsv",
       "qty_tsv",

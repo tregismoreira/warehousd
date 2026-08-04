@@ -9,6 +9,13 @@ import type { WarehousdConfig } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
 import { ConfigSchema } from "../src/config/schema";
 
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
 const cfg: WarehousdConfig = ConfigSchema.parse({
   project: "t",
   server: { port: 1 },
@@ -32,10 +39,10 @@ beforeAll(async () => {
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   // seed known values via admin (superuser) directly into the synth base table
-  await admin.query(`insert into data_synth.salaries (id, job_title, base_salary, effective_date) values
-    (gen_random_uuid(),'Senior Accountant',100000,'2021-01-01'),
-    (gen_random_uuid(),'Senior Accountant',120000,'2022-01-01'),
-    (gen_random_uuid(),'Analyst',80000,'2021-01-01')`);
+  await admin.query(`insert into data_synth.salaries (${R}, id, job_title, base_salary, effective_date) values
+    (${RV}, gen_random_uuid(),'Senior Accountant',100000,'2021-01-01'),
+    (${RV}, gen_random_uuid(),'Senior Accountant',120000,'2022-01-01'),
+    (${RV}, gen_random_uuid(),'Analyst',80000,'2021-01-01')`);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
 });

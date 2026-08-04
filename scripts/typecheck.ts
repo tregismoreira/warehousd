@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process";
 
 const PROJECTS = [
   "packages/broker/tsconfig.test.json",
+  "packages/providers/tsconfig.test.json",
   "packages/cli/tsconfig.test.json",
   "apps/web/tsconfig.test.json",
   "tsconfig.tools.json",

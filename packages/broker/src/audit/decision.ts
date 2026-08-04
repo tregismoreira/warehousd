@@ -24,6 +24,8 @@ export type AuditDetail = {
   // MutationAuditIntent). Absent means the verb has no intent to record.
   intent?: AuditIntent;
   fieldsReturned?: string[];
+  // Which of fieldsReturned came back raw rather than masked. Only the read verbs set it.
+  unmaskedFields?: string[];
   grantId?: string | null;
 };
 
@@ -114,6 +116,7 @@ export function makeAuditWriter(app: Pool, ctx: BrokerContext, enabled: boolean)
         orgId: ctx.orgId,
         intent: detail.intent ?? null,
         fieldsReturned: detail.fieldsReturned ?? [],
+        unmaskedFields: detail.unmaskedFields ?? [],
         grantId: detail.grantId ?? null,
         outcome,
         reason,

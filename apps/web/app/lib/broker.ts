@@ -5,7 +5,9 @@ import {
   dataRoleUrl,
   type Pools,
   type WarehousdConfig,
+  type Embedder,
 } from "@warehousd/broker";
+import { makeEmbedder } from "@warehousd/providers";
 import { statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -95,14 +97,14 @@ function ensureConfigAndBroker(dir: string): CachedState {
     });
     cached = {
       pools,
-      broker: makeBroker(pools, cfg),
+      broker: makeBroker(pools, cfg, embedderFor(cfg)),
       cfg,
       baselineMtime: mtimes.base,
       localMtime: mtimes.local,
     };
   } else {
     // Config changed: rebuild broker with same pools
-    cached.broker = makeBroker(cached.pools, cfg);
+    cached.broker = makeBroker(cached.pools, cfg, embedderFor(cfg));
     cached.cfg = cfg;
     cached.baselineMtime = mtimes.base;
     cached.localMtime = mtimes.local;
@@ -127,4 +129,15 @@ export function getBroker() {
 
 export function getAppPool() {
   return getBroker().pools.app;
+}
+
+// The embedder, built from config and injected. Constructing it HERE rather than inside the
+// broker is what keeps packages/broker free of an ONNX runtime and of any outbound call — the
+// broker declares the `Embedder` interface and consumes it, exactly as it does with `Pools`.
+//
+// Absent `embedding:` means no embedder, and `search_documents` then refuses `semantic`/`hybrid`
+// rather than silently downgrading to a text search.
+function embedderFor(cfg: WarehousdConfig): { embedder?: Embedder } {
+  if (!cfg.embedding) return {};
+  return { embedder: makeEmbedder(cfg.embedding) };
 }

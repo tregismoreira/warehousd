@@ -10,13 +10,19 @@ import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { setupWebDbWithData, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy } from "@warehousd/broker";
+import { upsertClientPolicy, SEED_REV_COLUMNS, SEED_REV_VALUES } from "@warehousd/broker";
 import {
   DENIED_CANARY,
   SSN_CANARY,
+  MASK_RAW_CANARY,
   LIVE_ONLY_CANARY,
   DOC_RESTRICTED_CANARY,
 } from "../../../packages/broker/test/fixtures/canaries";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
 
 let db: Awaited<ReturnType<typeof setupWebDbWithData>>;
 let admin: Pool;
@@ -31,20 +37,20 @@ beforeAll(async () => {
   // the only thing that should block them is posture, not a missing grant.
   const dep = (
     await admin.query(
-      `insert into data_synth.departments (id,name) values (gen_random_uuid(),'Fin') returning id`,
+      `insert into data_synth.departments (${R}, id,name) values (${RV}, gen_random_uuid(),'Fin') returning id`,
     )
   ).rows[0].id;
   const person = (
     await admin.query(
-      `insert into data_synth.people (id,full_name,email,department_id,home_address,phone)
-     values (gen_random_uuid(),'Canary Person','canary@x', $1, $2, '555') returning id`,
+      `insert into data_synth.people (${R}, id,full_name,email,department_id,home_address,phone)
+     values (${RV}, gen_random_uuid(),'Canary Person','canary@x', $1, $2, '555') returning id`,
       [dep, DENIED_CANARY],
     )
   ).rows[0].id;
   await admin.query(
-    `insert into data_synth.salaries (id,person_id,job_title,base_salary,currency,effective_date,ssn)
-     values (gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`,
-    [person, SSN_CANARY],
+    `insert into data_synth.salaries (${R}, id,person_id,job_title,base_salary,currency,effective_date,ssn,bank_account,pay_band)
+     values (${RV}, gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2,$3,97300)`,
+    [person, SSN_CANARY, `${MASK_RAW_CANARY}-4321`],
   );
 
   // mia: full grantable fields on people/salaries (dev + live), and policies (dev + live).
@@ -55,7 +61,7 @@ beforeAll(async () => {
     await admin.query(
       `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at) values
        ('mia','people', array['id','full_name','email','department_name','department_id'],$1,'approved',$2),
-       ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],$1,'approved',$2),
+       ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date','bank_account','pay_band'],$1,'approved',$2),
        ('mia','policies', array['title','content','owner','updated_at','category'],$1,'approved',$2)`,
       [env, expiresAt],
     );
@@ -150,6 +156,11 @@ describe("hostile-intent probe suite over MCP (§10 test 4)", () => {
       const payload = JSON.stringify(out);
       expect(payload.includes(DENIED_CANARY), `canary in response of "${probe.name}"`).toBe(false);
       expect(payload.includes(SSN_CANARY), `canary in response of "${probe.name}"`).toBe(false);
+      // bank_account IS granted to mia, so only the mask keeps its raw value out of an
+      // otherwise-allowed response — the strictest of the three canaries on this surface.
+      expect(payload.includes(MASK_RAW_CANARY), `canary in response of "${probe.name}"`).toBe(
+        false,
+      );
     }
   });
 

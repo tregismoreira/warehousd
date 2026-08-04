@@ -1,0 +1,27 @@
+{
+  "name": "@warehousd/providers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@warehousd/broker": "workspace:*",
+    "mammoth": "^1.8.0",
+    "unpdf": "^1.3.2"
+  },
+  "peerDependencies": {
+    "@huggingface/transformers": "^3.7.6"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/transformers": {
+      "optional": true
+    }
+  }
+}

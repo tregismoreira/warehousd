@@ -14,6 +14,12 @@ import {
   projectMigrationStatus,
 } from "../src/db/project-migrations";
 import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to be a
+// well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
 
 let p: Provisioned;
 const dirs: string[] = [];
@@ -164,7 +170,9 @@ describe("the migration path unblocks a refused change", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_live.orders (id, amount) values (gen_random_uuid(), '42.5')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '42.5')`,
+    );
 
     const next = orders("numeric");
     await expect(applyConfig(db, next)).rejects.toThrow(/would destroy or strand live data/);
@@ -200,7 +208,9 @@ describe("the migration path unblocks a refused change", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_live.orders (id, amount) values (gen_random_uuid(), '1')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`,
+    );
 
     const dir = project({ "0001-does-nothing.sql": `select 1;` });
     await runProjectMigrations(db, dir);
@@ -221,7 +231,7 @@ describe("the migration path unblocks a refused change", () => {
     const after = orders("text", { note: { type: "int", posture: "allow" } });
     await applyConfig(db, before);
     await db.query(
-      `insert into data_live.orders (id, amount, note) values (gen_random_uuid(), '1', '7')`,
+      `insert into data_live.orders (${R}, id, amount, note) values (${RV}, gen_random_uuid(), '1', '7')`,
     );
     await expect(applyConfig(db, after)).rejects.toThrow(/orders\.note/);
 

@@ -13,6 +13,13 @@ import { makeBroker } from "../src/broker";
 import { createPools, type Pools } from "../src/db/pools";
 import { makeCtx } from "./helpers/ctx";
 
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
 let p: Provisioned;
 let admin: Pool;
 let pools: Pools;
@@ -60,10 +67,10 @@ beforeAll(async () => {
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   // structured rows: 2 hr, 1 finance
-  await admin.query(`insert into data_synth.notes (id, body, category) values
-    (gen_random_uuid(), 'hr note one', 'hr'),
-    (gen_random_uuid(), 'hr note two', 'hr'),
-    (gen_random_uuid(), 'finance note', 'finance')`);
+  await admin.query(`insert into data_synth.notes (${R}, id, body, category) values
+    (${RV}, gen_random_uuid(), 'hr note one', 'hr'),
+    (${RV}, gen_random_uuid(), 'hr note two', 'hr'),
+    (${RV}, gen_random_uuid(), 'finance note', 'finance')`);
   // documents: one per term
   const dir = mkdtempSync(join(tmpdir(), "taxdocs-"));
   writeFileSync(
@@ -242,11 +249,11 @@ describe("Stage 2: multi-predicate document filters", () => {
     await applyConfig(admin2, cfg2);
 
     // Insert test data: 4 combinations
-    await admin2.query(`insert into data_synth.incidents (id, title, priority, severity) values
-      (gen_random_uuid(), 'high-critical', 'high', 'critical'),
-      (gen_random_uuid(), 'high-minor', 'high', 'minor'),
-      (gen_random_uuid(), 'low-critical', 'low', 'critical'),
-      (gen_random_uuid(), 'low-minor', 'low', 'minor')`);
+    await admin2.query(`insert into data_synth.incidents (${R}, id, title, priority, severity) values
+      (${RV}, gen_random_uuid(), 'high-critical', 'high', 'critical'),
+      (${RV}, gen_random_uuid(), 'high-minor', 'high', 'minor'),
+      (${RV}, gen_random_uuid(), 'low-critical', 'low', 'critical'),
+      (${RV}, gen_random_uuid(), 'low-minor', 'low', 'minor')`);
 
     pools2 = createPools({ app: p2.urls.admin, dev: p2.urls.dev, live: p2.urls.live });
     broker2 = makeBroker(pools2, cfg2);
@@ -491,11 +498,11 @@ describe("dataset-sourced vocabulary terms", () => {
     admin4 = new Pool({ connectionString: p4.urls.admin });
     await createAppSchema(admin4);
     await applyConfig(admin4, cfg4);
-    await admin4.query(`insert into data_synth.clients (id, client_number, name) values
-      (gen_random_uuid(), 'C-0001', 'Acme Manufacturing'),
-      (gen_random_uuid(), 'C-0002', 'Globex Corporation')`);
-    await admin4.query(`insert into data_live.clients (id, client_number, name) values
-      (gen_random_uuid(), 'C-9001', 'Beacon Manufacturing')`);
+    await admin4.query(`insert into data_synth.clients (${R}, id, client_number, name) values
+      (${RV}, gen_random_uuid(), 'C-0001', 'Acme Manufacturing'),
+      (${RV}, gen_random_uuid(), 'C-0002', 'Globex Corporation')`);
+    await admin4.query(`insert into data_live.clients (${R}, id, client_number, name) values
+      (${RV}, gen_random_uuid(), 'C-9001', 'Beacon Manufacturing')`);
     await syncDatasetTerms(admin4, cfg4, "dev");
     await syncDatasetTerms(admin4, cfg4, "live");
   });
@@ -534,9 +541,9 @@ describe("dataset-sourced vocabulary terms", () => {
 
   it("refuses two source values that collide on one slug instead of merging them", async () => {
     // Folding these together would silently widen every grant scoped to `acme-inc`.
-    await admin4.query(`insert into data_synth.clients (id, client_number, name) values
-      (gen_random_uuid(), 'Acme, Inc.', 'Acme One'),
-      (gen_random_uuid(), 'Acme Inc',   'Acme Two')`);
+    await admin4.query(`insert into data_synth.clients (${R}, id, client_number, name) values
+      (${RV}, gen_random_uuid(), 'Acme, Inc.', 'Acme One'),
+      (${RV}, gen_random_uuid(), 'Acme Inc',   'Acme Two')`);
     await expect(syncDatasetTerms(admin4, cfg4, "dev")).rejects.toThrow(
       /both slugify to "acme-inc"/,
     );
@@ -546,8 +553,8 @@ describe("dataset-sourced vocabulary terms", () => {
   });
 
   it("refuses a source value with no slug-safe characters", async () => {
-    await admin4.query(`insert into data_synth.clients (id, client_number, name)
-      values (gen_random_uuid(), '!!!', 'Punctuation Only')`);
+    await admin4.query(`insert into data_synth.clients (${R}, id, client_number, name)
+      values (${RV}, gen_random_uuid(), '!!!', 'Punctuation Only')`);
     await expect(syncDatasetTerms(admin4, cfg4, "dev")).rejects.toThrow(/no slug-safe characters/);
     await admin4.query(`delete from data_synth.clients where client_number='!!!'`);
   });

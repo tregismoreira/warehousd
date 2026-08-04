@@ -1,7 +1,33 @@
+import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
 import { loadTaxonomyBindings, syncDatasetTerms } from "../taxonomy";
 import { makeRng, genValue } from "./generators";
+
+// Generated rows are revisions like any other: every dataset table carries REV_COLS, so a plain
+// insert would fail on the NOT NULL bookkeeping columns. A synthetic document is the `create`
+// revision of a document that has never been edited — seq 1, approved, current — and `_rev_by`
+// names the generator rather than a person, so the change feed and the revision history read
+// truthfully for data nobody wrote.
+const SYNTHETIC_AUTHOR = "synthetic";
+const REV_INSERT_COLS = [
+  `"_rev"`,
+  `"_rev_seq"`,
+  `"_rev_by"`,
+  `"_rev_op"`,
+  `"_rev_status"`,
+  `"_rev_fields"`,
+  `"_current"`,
+];
+const revInsertValues = (fields: string[]): unknown[] => [
+  randomUUID(),
+  1,
+  SYNTHETIC_AUTHOR,
+  "create",
+  "approved",
+  fields,
+  true,
+];
 
 // Generates in FK dependency order so parent ids exist before children reference them.
 export async function generateSynthetic(
@@ -20,9 +46,9 @@ export async function generateSynthetic(
     if (!c) throw new Error(`Unknown collection: ${name}`);
     // Skip file collections — they are populated via indexCollection, not synthetic generation
     if (c.type === "file") continue;
-    // Skip writable collections — their base table has NOT NULL revision columns
-    // (_rev_seq, _rev_by, _rev_op, ...) that a plain synthetic insert doesn't populate;
-    // content comes from real writes/proposals, not synthetic filler.
+    // Skip writable collections — their content comes from real writes and proposals, not from
+    // synthetic filler, and truncating one would destroy a pending proposal. (Revision columns
+    // are no longer the reason: every dataset has them, and the insert below fills them.)
     if (c.writable) continue;
     const n = cfg.synthetic.documents_per_collection[name] ?? 20;
     const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
@@ -47,6 +73,30 @@ export async function generateSynthetic(
       }
     }
     if (pkField) pkByCollection[name] = pkField;
+    // Rows are accumulated and inserted in batches rather than one statement each.
+    //
+    // A round trip per row was tolerable when a row was its declared fields; every dataset is
+    // revisioned now, so each one also carries seven bookkeeping columns, and harbor generates
+    // a few thousand rows. One statement per row made `warehousd seed` — and the regenerate
+    // suite — slow enough to cross a 30s test timeout under parallel load.
+    const pending: unknown[][] = [];
+    let pendingCols: string[] = [];
+    const flush = async () => {
+      if (!pending.length) return;
+      const allCols = [...REV_INSERT_COLS, ...pendingCols];
+      const width = allCols.length;
+      const params: unknown[] = [];
+      const tuples = pending.map((row, r) => {
+        const holes = row.map((_, k) => `$${r * width + k + 1}`);
+        params.push(...row);
+        return `(${holes.join(",")})`;
+      });
+      await db.query(
+        `insert into data_synth.${name} (${allCols.join(",")}) values ${tuples.join(",")}`,
+        params,
+      );
+      pending.length = 0;
+    };
     for (let i = 0; i < n; i++) {
       const cols: string[] = [],
         vals: unknown[] = [];
@@ -115,9 +165,18 @@ export async function generateSynthetic(
             }),
           );
       }
-      const ph = vals.map((_, k) => `$${k + 1}`).join(",");
-      await db.query(`insert into data_synth.${name} (${cols.join(",")}) values (${ph})`, vals);
+      // Revision bookkeeping ahead of the data columns, matching the column list built beside it.
+      pendingCols = cols;
+      pending.push([...revInsertValues(cols.map((c2) => c2.replace(/"/g, ""))), ...vals]);
+      // Postgres caps a statement at 65535 bound parameters, so the batch is bounded by row
+      // width rather than by a fixed row count — a wide collection would otherwise blow the
+      // limit at a size that worked for a narrow one.
+      if (
+        pending.length >= Math.max(1, Math.floor(20_000 / (cols.length + REV_INSERT_COLS.length)))
+      )
+        await flush();
     }
+    await flush();
     idsByCollection[name] = ids;
   }
 

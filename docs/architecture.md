@@ -520,7 +520,7 @@ grant rather than finding one.
 
 ## Postures, verbs, and writability
 
-A posture has **two axes**. A bare value sets the read axis and leaves write
+A posture has **three axes**. A bare value sets the read axis and leaves write
 denied, so every configuration written before the write path existed stays valid
 and nothing becomes writable by accident:
 
@@ -528,6 +528,22 @@ and nothing becomes writable by accident:
 email: { type: text, posture: allow } # read allow, write deny
 base_salary: { type: numeric, posture: { read: deny, write: allow } }
 ```
+
+The read axis has three settings, not two: `allow`, `mask`, `deny`. `mask` is a
+disclosure **level** between the other two — the field is grantable, and what a
+grant receives is a transformed value computed in SQL, so the raw one is never
+fetched. `unmask: allow` is the third axis and makes the raw value *grantable*,
+one more application of the same two-tier rule the other axes use: the config
+sets a ceiling, a grant decides who reaches it, and the audit row records which
+fields a decision actually returned unmasked.
+
+Masking is sound only for projection, so the broker refuses a masked field in
+`filters`, `orderBy`, `groupBy` and `aggregate` (`collectComputed` in
+`verbs/read.ts`). A masked field that can still be compared against is not
+masked: ordering comparisons recover a banded number by bisection, `like` walks a
+redacted string, and `min`/`max` return the raw extremes. The one exception is a
+grant's own `document_filter`, which is author-supplied by a manager rather than
+by the model — the same exception that lets a denied `path` gate documents.
 
 `view_join` fields are **always** write-deny, structurally — a joined view is not
 updatable in Postgres and the field belongs to another collection anyway. Asking
@@ -931,6 +947,63 @@ every chunk in `document_seq` order and rejoins them, undoing the indexer's
 overlap. That reconstructs the _chunked_ text, not the source file byte-for-byte
 — chunking trims and rejoins paragraphs, and nothing stores the original body.
 A caller needing the exact source must keep it.
+
+## Semantic search
+
+`{collection}__documents.embedding` is a `vector(N)` column, N from
+`embedding.dimensions`, indexed with HNSW over `vector_cosine_ops`. HNSW rather
+than IVFFlat because IVFFlat has to be built over existing rows to choose its
+lists, and `applyConfig` creates the index on an empty table.
+
+The broker declares `Embedder` (`packages/broker/src/providers.ts`) and consumes
+it through `VerbDeps`; the implementations live in `@warehousd/providers` and are
+injected by the adapter, exactly as `Pools` is. That is what keeps the broker
+free of an ONNX runtime and of any outbound HTTP call — the purity the package
+exists to have.
+
+**The query vector is derived server-side from `q`, after the caller's grant has
+been loaded.** There is no way to supply one: a client-supplied vector is an
+oracle over the embedding space of documents the grant excludes, letting a caller
+read similarity out of a corpus they cannot read.
+
+`hybrid` is Reciprocal Rank Fusion over two CTEs, chosen over a weighted score
+sum because `ts_rank_cd` and cosine similarity share no scale and RRF uses only
+each list's *order*. Both CTEs read one `scoped` CTE, so the grant's predicates
+are applied **before either ranking and before either LIMIT**. Ranking first and
+filtering afterwards would leak: a caller asking for five would receive however
+many of the global top five their grant allowed, and the shortfall itself reports
+how many documents they cannot see.
+
+## Connect-in-place collections
+
+A collection with `source_ref` reads through a `postgres_fdw` foreign table that
+lives inside `data_live`. Everything downstream is unchanged — same view, same
+`grantViewDDL`, same `dataPool`, same `buildSelect` — because the foreign table
+occupies the position a base table would. A second connection pool inside the
+broker was the alternative, and would have needed a variant of `dataPool`,
+`withOrg`, the RLS policy and the org predicate: four new ways to get tenant
+isolation wrong.
+
+Read-only is enforced by the database. The server and the foreign table are both
+`updatable 'false'`, no role holds anything but `SELECT` on the wrapping view, and
+`mutate` refuses `not_writable` structurally in front of that.
+
+The column set is enumerated from the YAML, one `create foreign table` at a time,
+rather than by `import foreign schema`. A column added upstream is therefore
+absent from the local schema entirely — not merely ungranted — so no query,
+broker-built or otherwise, can reach it. `applyConfig` verifies the remote matches
+what was declared and fails at boot, in front of the operator, rather than letting
+drift surface at request time as an `internal_error` nobody can diagnose.
+
+**Tenant isolation is one wall here, not two.** Every other collection has both
+the view's `org_id` predicate and an RLS policy on the base table. A foreign table
+can carry neither: it has no `org_id` column, and RLS does not apply to it. The
+view instead compares the request's org against the constant `org:` the source
+declares. That is a real narrowing and is stated in
+[SECURITY.md](../SECURITY.md) as well as here.
+
+`dev` never touches the external system: an external collection gets an ordinary
+generated table in `data_synth`, which is what keeps invariant 6 true.
 
 ## Taxonomies
 

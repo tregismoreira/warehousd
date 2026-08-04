@@ -28,6 +28,7 @@ export type PendingGrant = {
   requested_at: string;
   collectionType?: string;
   taxonomyFields?: string[];
+  unmaskableFields?: string[];
 };
 
 type Vocabulary = {
@@ -49,6 +50,9 @@ export function ApproveSheet({
   onDone: () => void;
 }) {
   const [fields, setFields] = useState<Set<string>>(new Set());
+  // Raw-value grants, a strict subset of `fields`. Separate state because it is a separate
+  // decision: trimming the field list narrows what is seen, ticking this widens it.
+  const [unmasked, setUnmasked] = useState<Set<string>>(new Set());
   const [expiresAt, setExpiresAt] = useState("");
   const [paths, setPaths] = useState<string[]>([]);
   const [vocabularies, setVocabularies] = useState<Vocabulary[]>([]);
@@ -59,6 +63,9 @@ export function ApproveSheet({
   useEffect(() => {
     if (!grant) return;
     setFields(new Set(grant.allowed_fields ?? []));
+    // Never pre-ticked. The default for a masked field is masked, and an approver has to choose
+    // the wider option deliberately rather than inherit it from a previous grant.
+    setUnmasked(new Set());
     setPickedPaths(new Set());
     setPickedTermsByField({});
     setExpiresAt("");
@@ -103,6 +110,7 @@ export function ApproveSheet({
               action,
               id: grant.id,
               allowedFields: Array.from(fields),
+              unmaskedFields: Array.from(unmasked),
               expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
               selectedPaths: Array.from(pickedPaths),
               selectedTerms,
@@ -154,20 +162,47 @@ export function ApproveSheet({
               Uncheck to trim. You cannot add fields the requester did not ask for.
             </p>
             <div className="space-y-1.5 rounded-md border p-3">
-              {(grant.allowed_fields ?? []).map((f) => (
-                <label key={f} className="flex items-center gap-2 font-mono text-xs">
-                  <Checkbox
-                    checked={fields.has(f)}
-                    onCheckedChange={(v) => {
-                      const next = new Set(fields);
-                      if (v) next.add(f);
-                      else next.delete(f);
-                      setFields(next);
-                    }}
-                  />
-                  {f}
-                </label>
-              ))}
+              {(grant.allowed_fields ?? []).map((f) => {
+                const unmaskable = (grant.unmaskableFields ?? []).includes(f);
+                return (
+                  <div key={f} className="space-y-1">
+                    <label className="flex items-center gap-2 font-mono text-xs">
+                      <Checkbox
+                        checked={fields.has(f)}
+                        onCheckedChange={(v) => {
+                          const next = new Set(fields);
+                          const nextUnmasked = new Set(unmasked);
+                          if (v) next.add(f);
+                          else {
+                            next.delete(f);
+                            // Unmasking a field that is not granted is meaningless, and the
+                            // server refuses it — so untick it here rather than let the form
+                            // submit a combination it will be told off for.
+                            nextUnmasked.delete(f);
+                          }
+                          setFields(next);
+                          setUnmasked(nextUnmasked);
+                        }}
+                      />
+                      {f}
+                    </label>
+                    {unmaskable && fields.has(f) && (
+                      <label className="ml-6 flex items-center gap-2 text-xs text-muted-foreground">
+                        <Checkbox
+                          checked={unmasked.has(f)}
+                          onCheckedChange={(v) => {
+                            const next = new Set(unmasked);
+                            if (v) next.add(f);
+                            else next.delete(f);
+                            setUnmasked(next);
+                          }}
+                        />
+                        Show the real value (this field is masked by default)
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

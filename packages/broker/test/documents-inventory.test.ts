@@ -13,12 +13,18 @@ import {
 } from "../src/index";
 import { loadConfig } from "../src/config/load";
 import { grantViewDDL, viewDDL } from "../src/apply/ddl";
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
 import {
   countDocuments,
   countDocumentsIn,
   countTermUsage,
   listFiles,
 } from "../src/documents/inventory";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to be a
+// well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
 
 let p: Provisioned, admin: Pool, pools: Pools;
 const harborDir = new URL("../../../examples/harbor", import.meta.url).pathname;
@@ -36,8 +42,8 @@ const TENANT_B_DOCUMENTS = 2;
 async function seedVendors(schema: string, n: number) {
   for (let i = 0; i < n; i++) {
     await admin.query(
-      `insert into ${schema}.vendors (org_id, id, name, category, tax_id, active)
-       values ($1, gen_random_uuid(), $2, 'supplies', 'x', true)`,
+      `insert into ${schema}.vendors (${R}, org_id, id, name, category, tax_id, active)
+       values (${RV}, $1, gen_random_uuid(), $2, 'supplies', 'x', true)`,
       [DEFAULT_ORG_ID, `Vendor ${i}`],
     );
   }

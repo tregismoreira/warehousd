@@ -137,15 +137,25 @@ export const TOOLS: ToolDef[] = [
   {
     name: "search_documents",
     description:
-      "Full-text search over a file collection. Access is deny-by-default and purpose-bound: " +
-      "results contain only fields covered by your approved grant, restricted to documents your " +
-      "grant allows. Refusals include a request_access hint.",
+      "Search a file collection. Access is deny-by-default and purpose-bound: results contain " +
+      "only fields covered by your approved grant, restricted to documents your grant allows. " +
+      'Three modes: "text" (default) matches words; "semantic" matches meaning and will find a ' +
+      'document that shares no words with your query; "hybrid" fuses both rankings and is ' +
+      "usually the best default when you are exploring. Semantic and hybrid need the deployment " +
+      "to have embeddings configured, and work on file collections only — asking for one where " +
+      "it is unavailable refuses rather than quietly running a text search. Refusals include a " +
+      "request_access hint.",
     inputSchema: {
       type: "object",
       properties: {
         collection: { type: "string" },
         q: { type: "string" },
         fields: { type: "array", items: { type: "string" } },
+        mode: {
+          type: "string",
+          enum: ["text", "semantic", "hybrid"],
+          description: "Ranking strategy. Defaults to text.",
+        },
         limit: { type: "number" },
       },
       required: ["collection", "q"],

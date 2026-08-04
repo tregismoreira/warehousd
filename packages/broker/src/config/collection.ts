@@ -61,10 +61,20 @@ export type RevisionRow = {
   org_id: string;
 } & Record<string, unknown>;
 
-// Collections that carry revision columns. A proposal only ever lives in one of these, and the
-// _rev/_rev_status columns exist nowhere else — see tableDDL, which emits them only for writable
-// non-file datasets. Approve/reject scan for a proposal by id across collections, so they must
-// scan this set rather than every configured collection.
+// Collections whose table carries revision columns: every dataset. tableDDL emits REV_COLS for
+// all of them, because the admin import path needs update and delete and the only way to have
+// those without giving the import role UPDATE/DELETE on data columns is to make both a new
+// revision. File collections are append-only ingests and have no revisions.
+export function revisionedCollections(cfg: WarehousdConfig): string[] {
+  return Object.entries(cfg.collections)
+    .filter(([, c]) => c.type !== "file")
+    .map(([name]) => name);
+}
+
+// Collections a PROPOSAL can live in — narrower than the above, and deliberately so. Every
+// dataset has the _rev_status column, but only a writable one can be written by a client, so
+// only a writable one can hold a pending revision. Approve/reject scan for a proposal by id
+// across collections; scanning the revisioned set instead would just be slower.
 export function revisableCollections(cfg: WarehousdConfig): string[] {
   return Object.entries(cfg.collections)
     .filter(([, c]) => c.writable && c.type !== "file")

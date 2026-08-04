@@ -229,6 +229,10 @@ export async function planFromSchema(db: Pool, cfg: WarehousdConfig): Promise<Sc
   for (const collection of Object.keys(cfg.collections)) {
     for (const env of ["dev", "live"] as const) {
       const schema = env === "dev" ? "data_synth" : "data_live";
+      // An external collection has no LIVE table of its own to plan against — data_live holds a
+      // foreign table whose shape belongs to the remote system, checked at apply time by
+      // verifyExternalShape. Its dev table is an ordinary local one and is planned normally.
+      if (env === "live" && cfg.collections[collection]?.source_ref) continue;
       for (const decl of declaredTables(collection, cfg)) {
         const existing = byTable.get(`${schema}.${decl.table}`);
         // A table that does not exist yet is not a change: applyConfig creates it.

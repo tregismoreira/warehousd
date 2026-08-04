@@ -14,7 +14,25 @@ export {
   describeIntentError,
 } from "./intents/schema";
 export { createPools, onPoolError, type Pools, withOrg, writePool } from "./db/pools";
-export { loadConfig, grantableFields, findCollection, envRefs, auditEnabled } from "./config/load";
+export {
+  loadConfig,
+  grantableFields,
+  unmaskableFields,
+  maskedFieldsFor,
+  findCollection,
+  envRefs,
+  auditEnabled,
+} from "./config/load";
+export { maskExpr, UnsupportedMask, MASK_KEY_ENV } from "./sql/mask";
+export {
+  ExtractionFailed,
+  type Embedder,
+  type BinaryExtractor,
+  type ExtractedText,
+} from "./providers";
+export { embedCollection, embedChunks, type EmbedProgress } from "./embedding/sync";
+export { DEFAULT_EMBEDDING_DIMENSIONS } from "./apply/ddl";
+export { EmbeddingSchema, type EmbeddingConfig } from "./config/schema";
 export type { WarehousdConfig } from "./config/schema";
 export {
   fileMetadataFields,
@@ -24,7 +42,15 @@ export {
   readPosture,
   writePosture,
 } from "./config/schema";
-export type { CollectionConfig, FileMetadataType, DeployConfig } from "./config/schema";
+export type {
+  CollectionConfig,
+  FileMetadataType,
+  DeployConfig,
+  MaskConfig,
+  ReadPosture,
+  NormalizedPosture,
+} from "./config/schema";
+export { unmaskPosture, isGrantable, READ_POSTURES, MaskSchema } from "./config/schema";
 export { applyConfig } from "./apply/apply";
 export { declaredTables, declaredPkField } from "./apply/ddl";
 export type { DeclaredTable, DeclaredColumn } from "./apply/ddl";
@@ -68,7 +94,21 @@ export {
   type ClientPolicy as EnvScopeClientPolicy,
 } from "./oauth/env-scope";
 export * from "./db/bootstrap";
-export { indexCollection } from "./indexing";
+export {
+  indexCollection,
+  planUpload,
+  uploadFile,
+  deleteUploadedFile,
+  readFileBlob,
+  blobChecksum,
+  UPLOAD_STATUSES,
+  type UploadStatus,
+  type PlanEntry,
+  type PlanResult,
+  type UploadOutcome,
+  type UploadRefusal,
+  type MetadataField,
+} from "./indexing";
 export { syncDatasetTerms, loadTaxonomyBindings, slugify, type TaxonomyBinding } from "./taxonomy";
 export type { DocSearchIntent } from "./types";
 export { listDocumentPaths } from "./documents/paths";
@@ -80,7 +120,24 @@ export {
   type FileSummary,
   type Scope,
 } from "./documents/inventory";
-export { importCollection } from "./import/run";
+export {
+  importCollection,
+  IMPORT_MODES,
+  type ImportMode,
+  type ImportResult,
+  type ImportCounts,
+} from "./import/run";
+export {
+  insertRevision,
+  currentRevision,
+  demoteRevision,
+  reviseDocument,
+  SEED_REV_COLUMNS,
+  SEED_REV_VALUES,
+  type RevisionMeta,
+  type RevisionOp,
+  type RevisionStatus,
+} from "./db/revisions";
 export { validateImportRows, type ImportError } from "./import/validate";
 export { parseImportPayload, parseCsv } from "./import/csv";
 export * from "./credentials/keys";

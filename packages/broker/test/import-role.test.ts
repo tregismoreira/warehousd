@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema, applyConfig, withOrg } from "../src/index";
+import {
+  createAppSchema,
+  applyConfig,
+  withOrg,
+  SEED_REV_COLUMNS,
+  SEED_REV_VALUES,
+} from "../src/index";
 import { loadConfig } from "../src/config/load";
 
 let p: Provisioned, admin: Pool, imp: Pool;
@@ -26,12 +32,22 @@ afterAll(async () => {
 const asOrg = (orgId: string, sql: string, params: unknown[] = []) =>
   withOrg(imp, orgId, (c) => c.query(sql, params));
 
+// Every dataset is revisioned, so a bare insert has to fill the NOT NULL bookkeeping columns.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
+// The import role gained SELECT and a column-scoped UPDATE when import gained upsert and delete.
+// It did NOT gain the ability to change or destroy stored data, and that distinction is the whole
+// of the "immutability by privilege" claim — so it is asserted against Postgres rather than
+// against the code that is supposed to respect it. If these pass while import/run.ts is rewritten
+// to do something reckless, Postgres still refuses.
 describe("warehousd_import privileges", () => {
   it("can INSERT into a data_live base table", async () => {
     await expect(
       asOrg(
         "default",
-        `insert into data_live.departments (org_id, id, name) values ('default', gen_random_uuid(), 'Imported')`,
+        `insert into data_live.departments (${R}, org_id, id, name)
+         values (${RV}, 'default', gen_random_uuid(), 'Imported')`,
       ),
     ).resolves.toBeDefined();
   });
@@ -40,29 +56,61 @@ describe("warehousd_import privileges", () => {
     await expect(
       asOrg(
         "default",
-        `insert into data_live.departments (org_id, id, name) values ('other', gen_random_uuid(), 'Smuggled')`,
+        `insert into data_live.departments (${R}, org_id, id, name)
+         values (${RV}, 'other', gen_random_uuid(), 'Smuggled')`,
       ),
     ).rejects.toThrow(/row-level security/i);
   });
 
-  it("cannot SELECT from data_live — write-only means write-only", async () => {
-    await expect(imp.query(`select * from data_live.departments`)).rejects.toThrow(
-      /permission denied/i,
-    );
+  it("can SELECT a data_live base table — upsert has to find the revision it supersedes", async () => {
+    await expect(
+      asOrg("default", `select 1 from data_live.departments limit 1`),
+    ).resolves.toBeDefined();
   });
 
-  it("cannot SELECT the live view either", async () => {
+  it("still cannot SELECT the live view — it reads base tables or nothing", async () => {
     await expect(imp.query(`select * from data_live.v_people`)).rejects.toThrow(
       /permission denied/i,
     );
   });
 
-  it("cannot UPDATE or DELETE — an import appends, it never rewrites history", async () => {
-    await expect(imp.query(`update data_live.departments set name='x'`)).rejects.toThrow(
+  it("cannot UPDATE a data column — a correction is a new revision, never a rewrite", async () => {
+    // The privilege is `update (_current, _rev_status)`, so naming any other column is refused
+    // by the grant itself. This is the assertion that stops an import silently overwriting real
+    // data: there is no code path to it, because there is no privilege for it.
+    await expect(asOrg("default", `update data_live.departments set name='x'`)).rejects.toThrow(
       /permission denied/i,
     );
-    await expect(imp.query(`delete from data_live.departments`)).rejects.toThrow(
+    await expect(asOrg("default", `update data_live.people set home_address='x'`)).rejects.toThrow(
       /permission denied/i,
+    );
+    // Even alongside a column it IS allowed to set.
+    await expect(
+      asOrg("default", `update data_live.departments set _current=false, name='x'`),
+    ).rejects.toThrow(/permission denied/i);
+  });
+
+  it("can UPDATE only the two promotion columns", async () => {
+    await expect(
+      asOrg("default", `update data_live.departments set _current=_current`),
+    ).resolves.toBeDefined();
+    await expect(
+      asOrg("default", `update data_live.departments set _rev_status=_rev_status`),
+    ).resolves.toBeDefined();
+  });
+
+  it("cannot DELETE, ever — a delete import is a tombstone revision", async () => {
+    await expect(asOrg("default", `delete from data_live.departments`)).rejects.toThrow(
+      /permission denied/i,
+    );
+    await expect(asOrg("default", `delete from data_live.people`)).rejects.toThrow(
+      /permission denied/i,
+    );
+  });
+
+  it("cannot TRUNCATE either — the blunter way to lose everything", async () => {
+    await expect(asOrg("default", `truncate data_live.departments`)).rejects.toThrow(
+      /permission denied|must be owner/i,
     );
   });
 
@@ -71,7 +119,9 @@ describe("warehousd_import privileges", () => {
       /permission denied/i,
     );
     await expect(
-      imp.query(`insert into data_synth.departments (id, name) values (gen_random_uuid(), 'x')`),
+      imp.query(
+        `insert into data_synth.departments (${R}, id, name) values (${RV}, gen_random_uuid(), 'x')`,
+      ),
     ).rejects.toThrow(/permission denied/i);
   });
 
@@ -79,17 +129,30 @@ describe("warehousd_import privileges", () => {
     await expect(imp.query(`select * from app.grants`)).rejects.toThrow(/permission denied/i);
   });
 
+  it("cannot write its own change feed entry", async () => {
+    // The import path writes app.change_log through the APP pool after its transaction commits,
+    // precisely because this fails. The writer of data is not the writer of its own trail.
+    await expect(
+      imp.query(
+        `insert into app.change_log (org_id, env, collection, document_id, rev, op, status, by)
+         values ('default','live','departments','x','y','create','approved','imp')`,
+      ),
+    ).rejects.toThrow(/permission denied/i);
+  });
+
   it("can insert multiple rows into the same table sequentially", async () => {
     await expect(
       asOrg(
         "default",
-        `insert into data_live.departments (org_id, id, name) values ('default', gen_random_uuid(), 'Sales')`,
+        `insert into data_live.departments (${R}, org_id, id, name)
+         values (${RV}, 'default', gen_random_uuid(), 'Sales')`,
       ),
     ).resolves.toBeDefined();
     await expect(
       asOrg(
         "default",
-        `insert into data_live.departments (org_id, id, name) values ('default', gen_random_uuid(), 'Engineering')`,
+        `insert into data_live.departments (${R}, org_id, id, name)
+         values (${RV}, 'default', gen_random_uuid(), 'Engineering')`,
       ),
     ).resolves.toBeDefined();
   });
@@ -99,7 +162,9 @@ describe("the read roles gain nothing", () => {
   it("warehousd_live still cannot write", async () => {
     const live = new Pool({ connectionString: p.urls.live });
     await expect(
-      live.query(`insert into data_live.departments (id, name) values (gen_random_uuid(), 'x')`),
+      live.query(
+        `insert into data_live.departments (${R}, id, name) values (${RV}, gen_random_uuid(), 'x')`,
+      ),
     ).rejects.toThrow(/permission denied/i);
     await live.end();
   });

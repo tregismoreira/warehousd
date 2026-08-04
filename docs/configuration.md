@@ -36,6 +36,15 @@ database:
   managed: true        # default: the CLI runs Postgres in Docker
   url: ${env:DATABASE_URL}   # alternative: bring your own Postgres
   port: 5432           # host port for the managed Postgres (default: server.port + 1)
+sources:                 # optional. External databases to read through — see Connect-in-place
+  crm:
+    type: postgres
+    url: ${env:CRM_DATABASE_URL}
+    schema: public       # default public
+embedding:               # optional. Absent means semantic search is off
+  provider: local        # local (default) | openai | http
+  model: bge-small-en-v1.5
+  dimensions: 384        # required — must match the model
 deploy:
   target: fly          # only supported value
   app_name: harbor-warehousd   # ^[a-z0-9][a-z0-9-]{0,62}$, globally unique on Fly
@@ -112,7 +121,7 @@ storage tables. Anything else is rejected at config load rather than reaching DD
 
 | Key | Meaning |
 |---|---|
-| `posture` | **Required.** `allow` / `deny`, or `{ read: …, write: … }`. |
+| `posture` | **Required.** `allow` / `deny`, or `{ read: allow\|mask\|deny, write: …, unmask: … }`. |
 | `type` | Required on dataset collections: `uuid`, `text`, `numeric`, `int`, `timestamptz`, `date`, `boolean`, `json`. Inferred for file collections. |
 | `pk` | Marks the primary key. On a `writable` dataset this is *document* identity, not row identity. |
 | `fk` | `collection.field` — honored by the synthetic generator so references resolve. |
@@ -121,6 +130,8 @@ storage tables. Anything else is rejected at config load rather than reaching DD
 | `min` / `max` | Range for generated numerics. |
 | `gen` | Names a synthetic generator for this field, overriding the field-name heuristics. See below. |
 | `searchable` | Dataset text fields only. Generates a `<field>_tsv` column and GIN index so `search_documents` reaches this collection. |
+| `mask` | Required with `read: mask`, invalid without it. The transform applied in SQL — see [Masking](#masking). |
+| `column` | Only on a `source_ref` collection: the column's name on the remote table, when it differs. |
 
 Changing `type` on a field, removing a field, or moving `pk` is a **breaking
 change** once a collection holds live content: `apply` refuses it rather than
@@ -175,9 +186,9 @@ The sequence hints are dense and stable for a given row count, which is what let
 committed seed documents reference a generated row by slug. Shrinking a
 collection's row count below a slug a document names breaks indexing loudly.
 
-### Postures are two-tier, on two axes
+### Postures are two-tier, on three axes
 
-A posture governs reading and writing separately:
+A posture governs reading, writing, and unmasking separately:
 
 ```yaml
 email:       { type: text,    posture: allow }                        # read allow, write deny
@@ -189,7 +200,7 @@ base_salary: { type: numeric, posture: { read: deny, write: allow } }
   editing this file.
 - `allow` on an axis — the field is *grantable* for it. It is still denied for
   every user until a manager approves a grant covering it.
-- A field with no posture is denied on both. There is no third state.
+- A field with no posture is denied on every axis.
 - **A bare `allow` or `deny` sets the read axis and leaves write denied.** That
   is what keeps every configuration written before the write path existed valid,
   and stops any field becoming writable by accident.
@@ -198,6 +209,64 @@ base_salary: { type: numeric, posture: { read: deny, write: allow } }
 
 Denied fields are still useful: a denied `path` on a file collection can gate
 which documents a grant reaches without ever being readable.
+
+### Masking
+
+`read: mask` is the third setting on the read axis. The field is grantable, and
+what a grant gets back is a **transformed** value rather than the stored one:
+
+```yaml
+bank_account:
+  type: text
+  posture: { read: mask, write: deny }
+  mask: { transform: last4 }            # ••••4321
+
+pay_band:
+  type: numeric
+  posture: { read: mask, write: deny, unmask: allow }
+  mask: { transform: bucket, width: 25000 }
+```
+
+The transform is computed **in SQL**, so the raw value is never fetched — it
+cannot appear in a response, an error body or a log line, which is the same
+standard `deny` sets. Masking applied after the rows came back would fail all
+four and look identical in a passing test.
+
+`unmask: allow` is the second tier, and it works exactly like `read: allow`: it
+makes the raw value **grantable**, not readable. A manager still has to tick it
+per grant, and the audit row records which fields a decision returned unmasked.
+Omit it and nobody sees the raw value without editing this file.
+
+| transform | types | result |
+| --- | --- | --- |
+| `redact` | any | `[redacted]` |
+| `last4` | text | `••••4321` |
+| `first: { chars: N }` | text | the first N characters, then `…` |
+| `hash` | any | a keyed HMAC — equal values hash equal, so rows still group |
+| `bucket: { width: N }` | numeric, int | quantised down to the band below |
+| `year` | date, timestamptz | the year alone |
+| `domain` | text | whatever follows the `@` |
+
+`hash` needs `WAREHOUSD_MASK_KEY`. There is deliberately no default: a default
+key is a public key, and the point of `hash` is a pseudonym only this deployment
+can correlate.
+
+**A masked field can be projected and nothing else.** It cannot appear in
+`filters`, `orderBy`, `groupBy` or `aggregate` — those refuse with
+`field_denied`. This is not a limitation to work around; it is what makes the
+mask real. A banded salary you can still compare against falls to bisection in
+about ten queries, `like` walks a redacted string one character at a time, and
+`min`/`max` return the raw extremes outright.
+
+A grant's own `document_filter` is the deliberate exception and may still
+reference a masked column — it is written by a human manager rather than by the
+model, the same reason a denied `path` can gate documents.
+
+Refused at config load, because each one is a way for a mask to look applied and
+not be: masking a `pk` (identity has to round-trip), masking a `searchable: true`
+field (the generated `<field>_tsv` column indexes the raw value), masking a file
+collection's `content` or `path`, a transform its column type cannot compute, and
+`unmask: allow` on a field that is not masked.
 
 ### Writable collections
 
@@ -253,6 +322,149 @@ populated from frontmatter (YAML at the top of the file).
 never at real corporate documents. Live content is indexed only by an explicit
 `warehousd index <collection> --env live`, which requires `source_live` or an
 explicit `--source`.
+
+## Semantic search
+
+```yaml
+embedding:
+  provider: local            # runs in-process, nothing leaves the machine
+  model: bge-small-en-v1.5
+  dimensions: 384
+```
+
+Absent, and semantic search is simply off: `search_documents` behaves exactly as
+it always has and the embedding column stays empty. That is the honest default —
+embedding a corpus costs something, and for a remote provider it is a disclosure.
+
+`dimensions` has no default because it has to match the model. Get it wrong and
+Postgres reports a cast error on insert that names neither the model nor this
+key, so warehousd checks it at construction instead.
+
+`provider: local` is the default deliberately. An embedding request is the whole
+document text, and warehousd's argument is that governed content does not leave
+the deployment. Sending it to an API is a legitimate trade — a better model is a
+better search — but it is one someone states in writing:
+
+```yaml
+embedding:
+  provider: openai           # or `http`, which requires base_url
+  model: text-embedding-3-small
+  dimensions: 1536
+  api_key: ${env:OPENAI_API_KEY}
+```
+
+Fill the column with `warehousd embed`, which is resumable — it only ever touches
+chunks that have none, so an interrupted run costs nothing already done.
+`warehousd index` and `warehousd seed` embed new chunks as they go when
+`embedding:` is configured; `--no-embed` skips that.
+
+The `search_documents` tool then takes a `mode`:
+
+| mode | ranking |
+|---|---|
+| `text` (default) | `ts_rank_cd` over the full-text index — matches words |
+| `semantic` | cosine distance over the embedding — matches meaning, and will find a document that shares no words with the query |
+| `hybrid` | Reciprocal Rank Fusion over both |
+
+Semantic and hybrid apply to file collections only, and refuse rather than
+silently falling back to a text search: a caller who asked for one and got the
+other has no way to tell.
+
+## PDF and DOCX
+
+`.pdf` and `.docx` are indexed alongside `.md` and `.txt`, from the same `source`
+directory, with the original bytes stored so the console can hand the document
+back.
+
+A binary has no frontmatter, so its owner, terms and typed metadata come from a
+**sidecar** beside it — `contract.pdf` is described by `contract.pdf.yml`:
+
+```yaml
+owner: legal@acme.example
+client: c-0001
+tags: [urgent, confidential]
+review_date: 2026-06-01
+```
+
+The rule that a bound vocabulary is *required* still holds: a binary with no
+sidecar term fails the index rather than becoming a document no grant can scope.
+A scanned PDF with no extractable text is refused too — OCR is out of scope, and
+storing an empty document is the failure that looks like success.
+
+## Uploading documents from the console
+
+Copying files into `source` and running `warehousd index <collection>` is one way
+in. **Admin → Documents** is the other: pick files or a whole folder, fill in the
+owner, terms and metadata the form derives from the collection's own
+configuration, and upload. Both paths run the same ingestion code, so a document
+is indistinguishable downstream from one indexed off disk — same chunking, same
+checksum, same required-term rule.
+
+Uploads are **resumable, and the resume is answered by the database**. Each file
+is hashed in the browser, the console asks which of those hashes the collection
+already holds, and only the rest are sent — four at a time, each retried on a
+transport failure. So an interrupted upload of three thousand documents is
+resumed by picking the same folder again: everything that landed is skipped,
+from any browser, on any machine, with nothing remembered locally.
+
+Two differences from a directory index are worth knowing:
+
+- **An upload is not a mirror.** `warehousd index` deletes a document whose file
+  has left the source directory; an uploaded document was never in one, so it is
+  left alone. The `origin` column is what tells them apart.
+- **The form fills in what the file does not say.** A `.md` or `.txt` carries its
+  own frontmatter and that always wins; the form's owner, terms and metadata fill
+  gaps, and are the only source for a PDF or DOCX.
+
+`WAREHOUSD_MAX_UPLOAD_BYTES` caps a single file (default 25 MB). Deleting a
+document and downloading its original are both admin-only and both audited.
+
+## Connect-in-place
+
+A collection can read from an external Postgres instead of storing rows in
+warehousd:
+
+```yaml
+sources:
+  crm:
+    type: postgres
+    url: ${env:CRM_DATABASE_URL}
+    schema: public
+
+collections:
+  accounts:
+    description: CRM accounts
+    source_ref: { source: crm, table: accounts, org: default }
+    fields:
+      id:   { type: uuid, posture: allow, pk: true }
+      name: { type: text, posture: allow, column: acct_name }
+      tier: { type: text, posture: allow }
+```
+
+The connection is made by `postgres_fdw` — by **Postgres**, not by warehousd. A
+foreign table lives inside `data_live`, so the collection's view, its grant, its
+field postures and the broker's SQL builder all work on it completely unchanged.
+
+Three consequences worth knowing before you point one at production:
+
+- **`url` is dialled by the database server**, so the host and port have to be
+  reachable *from Postgres*, which is not always the address your client uses. A
+  warehousd running its own Postgres in a container cannot reach a source
+  published on that container's host port.
+- **Columns are declared, never imported.** A column added upstream is invisible
+  to warehousd until someone writes it into the YAML. `warehousd apply` verifies
+  the remote actually matches and fails naming the collection if it does not.
+- **Read-only, and not by convention.** The server and the foreign table are both
+  `updatable 'false'`, and no role is granted anything but `SELECT` on the
+  wrapping view. `writable: true` is a config error on these collections.
+
+`dev` is unaffected: an external collection gets an ordinary synthetic table in
+`data_synth`, so developers never touch the remote system and env parity holds.
+
+The one genuine narrowing is tenant isolation. A foreign table cannot carry an
+RLS policy and has no `org_id` column, so the view compares the request's org
+against the `org:` the source declares — one wall instead of two. See
+[architecture.md](architecture.md).
 
 ## Taxonomies
 

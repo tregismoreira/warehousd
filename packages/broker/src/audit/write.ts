@@ -26,6 +26,9 @@ export async function writeAudit(
     orgId: string;
     intent: AuditIntent;
     fieldsReturned: string[];
+    // Which of fieldsReturned came back RAW rather than transformed. Names only, like
+    // fieldsReturned itself — never a value.
+    unmaskedFields?: string[];
     grantId: string | null;
     // `string & {}` rather than a bare `string`: it keeps RefusalReason's members offered by
     // autocomplete while still admitting the operational codes the comment below describes. A plain
@@ -39,8 +42,8 @@ export async function writeAudit(
   // regen) carry their own reason codes.
   const r = await app.query(
     `insert into app.audit_events
-       (user_id, env, collection, org_id, intent, fields_returned, grant_id, outcome, reason, via)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
+       (user_id, env, collection, org_id, intent, fields_returned, unmasked_fields, grant_id, outcome, reason, via)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
     [
       e.userId,
       e.env,
@@ -48,6 +51,7 @@ export async function writeAudit(
       e.orgId,
       e.intent ? JSON.stringify(e.intent) : null,
       e.fieldsReturned,
+      e.unmaskedFields ?? [],
       e.grantId,
       e.outcome,
       e.reason,

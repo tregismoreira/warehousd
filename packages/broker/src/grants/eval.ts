@@ -4,6 +4,9 @@ import type { BrokerContext, DocumentFilter } from "../types";
 export type ActiveGrant = {
   id: string;
   allowedFields: string[];
+  // Subset of allowedFields whose raw value this grant carries. Every other masked field comes
+  // back transformed. Empty is the default and the safe answer.
+  unmaskedFields: string[];
   documentFilter: DocumentFilter[];
   verbs: string[];
   mode: string;
@@ -29,7 +32,7 @@ export async function loadActiveGrant(
   if (allowedCollections != null && !allowedCollections.includes(collection)) return null;
 
   const r = await db.query(
-    `select id, allowed_fields, document_filter, verbs, mode from app.grants
+    `select id, allowed_fields, unmasked_fields, document_filter, verbs, mode from app.grants
      where user_id=$1 and collection=$2 and env=$3 and org_id=$4
        and status='approved' and (expires_at is null or expires_at > now())
      order by requested_at desc limit 1`,
@@ -62,7 +65,8 @@ export async function loadActiveGrants(
   // `distinct on (collection)` with the same `requested_at desc` tie-break the single loader
   // uses, so a superseded grant loses to its replacement identically either way.
   const r = await db.query(
-    `select distinct on (collection) collection, id, allowed_fields, document_filter, verbs, mode
+    `select distinct on (collection) collection, id, allowed_fields, unmasked_fields,
+       document_filter, verbs, mode
      from app.grants
      where user_id=$1 and collection = any($2) and env=$3 and org_id=$4
        and status='approved' and (expires_at is null or expires_at > now())
@@ -80,6 +84,7 @@ function toActiveGrant(
   row: {
     id: string;
     allowed_fields: string[] | null;
+    unmasked_fields: string[] | null;
     document_filter: unknown;
     verbs: string[] | null;
     mode: string | null;
@@ -106,6 +111,9 @@ function toActiveGrant(
   return {
     id: row.id,
     allowedFields: row.allowed_fields ?? [],
+    // Which of those fields come back RAW rather than transformed. Never widened here: a field
+    // only reaches this column if approveGrant checked its posture declares `unmask: allow`.
+    unmaskedFields: row.unmasked_fields ?? [],
     documentFilter,
     verbs: row.verbs ?? ["read"],
     mode: row.mode ?? "direct",

@@ -159,7 +159,64 @@ export async function runDoctor(dir: string): Promise<DoctorResult> {
     checks.push(imageCheck(dir));
     checks.push(...(await portCheck(dir)));
     checks.push(containersCheck(dir).check);
+    checks.push(...(await sourceChecks(dir)));
   }
 
   return { ok: checks.every((c) => c.ok), checks };
+}
+
+/**
+ * One check per external source, dialled from HERE rather than from Postgres.
+ *
+ * That is a deliberate approximation and the detail says so: `applyConfig` is what proves the
+ * database can reach the source, because the FDW connection is made by the server. This check
+ * catches the ordinary failures — an unset environment variable, a typo, a host that is down —
+ * at a point where the answer is a line of output rather than a failed boot.
+ */
+async function sourceChecks(dir: string): Promise<Check[]> {
+  let cfg;
+  try {
+    cfg = loadConfig(dir);
+  } catch {
+    return [];
+  }
+  const sources = Object.entries(cfg.sources ?? {});
+  if (!sources.length) return [];
+
+  const { Client } = await import("pg");
+  return Promise.all(
+    sources.map(async ([name, src]): Promise<Check> => {
+      const client = new Client({ connectionString: src.url, connectionTimeoutMillis: 5_000 });
+      try {
+        await client.connect();
+        await client.query("select 1");
+        return {
+          id: `source:${name}`,
+          ok: true,
+          // The host, never the URL: a connection string carries a password, and this line is
+          // printed to a terminal and pasted into issues.
+          detail: `reachable from here (${hostOf(src.url)}) — the database dials it separately`,
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          id: `source:${name}`,
+          ok: false,
+          detail: `${hostOf(src.url)}: ${msg.split("\n")[0] ?? msg}`,
+        };
+      } finally {
+        await client.end().catch(() => {});
+      }
+    }),
+  );
+}
+
+// host:port out of a connection string, with the credentials left behind.
+function hostOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.hostname}:${u.port || "5432"}`;
+  } catch {
+    return "(unparseable url)";
+  }
 }

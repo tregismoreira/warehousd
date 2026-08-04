@@ -12,7 +12,7 @@
 
 import { Command } from "commander";
 import { resolve, basename } from "node:path";
-import { resolveDbUrl, tryResolveDbUrl, runApply, runSeed, runIndex } from "./index";
+import { resolveDbUrl, tryResolveDbUrl, runApply, runSeed, runIndex, runEmbed } from "./index";
 import { buildPlan, renderPlan, writeMigration, migrationStatus } from "./migrate";
 import { runInit } from "./init";
 import { runStart } from "./start";
@@ -267,11 +267,28 @@ program
   .option("--db <url>", "database url")
   .option("--env <env>", "dev|live", "dev")
   .option("--source <dir>", "override source directory")
+  .option("--no-embed", "skip embedding the new chunks (see `warehousd embed`)")
   .action(async (collection, o) => {
     ui();
     const db = resolveDbUrl(o.dir, o.db);
-    const r = await runIndex(o.dir, db, collection, { env: o.env, source: o.source });
+    const r = await runIndex(o.dir, db, collection, {
+      env: o.env,
+      source: o.source,
+      embed: o.embed,
+    });
     emit(r, `indexed=${r.indexed} skipped=${r.skipped} deleted=${r.deleted}`);
+  });
+program
+  .command("embed [collection]")
+  .description("fill embeddings for file collections (resumable)")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .option("--env <env>", "dev|live", "dev")
+  .action(async (collection, o) => {
+    ui();
+    const db = resolveDbUrl(o.dir, o.db);
+    const r = await runEmbed(o.dir, db, { collection, env: o.env });
+    emit(r, `embedded=${r.embedded} collections=${r.collections.join(",")}`);
   });
 program
   .command("stop")

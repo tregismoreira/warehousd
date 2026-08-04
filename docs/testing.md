@@ -8,18 +8,18 @@ change enforcement, the pull request must carry a test that fails without it.
 
 ## The suites
 
-| Command | What it runs | Needs |
-|---|---|---|
-| `pnpm lint` | ESLint, including the rule that keeps `packages/broker` free of HTTP/MCP/UI/LLM imports | — |
-| `pnpm typecheck` | `tsc` over four projects: `src`, `test`, `e2e` and `scripts` | — |
-| `pnpm format:check` | Prettier, code only — prose is out of scope (see `.prettierignore`) | — |
-| `pnpm test` | Vitest: broker unit + integration, CLI, and web route/integration tests | Postgres |
-| `pnpm test:coverage` | `pnpm test` with coverage merged across both passes, checked against a floor | Postgres |
-| `pnpm build` | Production build and full typecheck | — |
-| `pnpm e2e` | Playwright against a real browser: every web surface | Postgres |
-| `pnpm test:e2e:cli` | The built CLI driving real Docker containers end to end | Docker |
-| `pnpm test:e2e:sso` | A real OIDC and SAML round trip against Keycloak | Docker |
-| `pnpm test:e2e` | Both of the above, in sequence | Docker |
+| Command              | What it runs                                                                            | Needs    |
+| -------------------- | --------------------------------------------------------------------------------------- | -------- |
+| `pnpm lint`          | ESLint, including the rule that keeps `packages/broker` free of HTTP/MCP/UI/LLM imports | —        |
+| `pnpm typecheck`     | `tsc` over four projects: `src`, `test`, `e2e` and `scripts`                            | —        |
+| `pnpm format:check`  | Prettier, code only — prose is out of scope (see `.prettierignore`)                     | —        |
+| `pnpm test`          | Vitest: broker unit + integration, CLI, and web route/integration tests                 | Postgres |
+| `pnpm test:coverage` | `pnpm test` with coverage merged across both passes, checked against a floor            | Postgres |
+| `pnpm build`         | Production build and full typecheck                                                     | —        |
+| `pnpm e2e`           | Playwright against a real browser: every web surface                                    | Postgres |
+| `pnpm test:e2e:cli`  | The built CLI driving real Docker containers end to end                                 | Docker   |
+| `pnpm test:e2e:sso`  | A real OIDC and SAML round trip against Keycloak                                        | Docker   |
+| `pnpm test:e2e`      | Both of the above, in sequence                                                          | Docker   |
 
 Postgres comes from `pnpm test:up` (pgvector on `127.0.0.1:54330`, plus Keycloak
 for the SSO suite); `pnpm test:down` tears it down with its volume.
@@ -30,7 +30,7 @@ for the SSO suite); `pnpm test:down` tears it down with its volume.
 three personas in through the login form once and saves its cookies under `apps/web/e2e/.auth/`;
 `e2e` declares it as a dependency, so the sessions are there however far down you filter the run.
 Specs then call `as(page, "manager")`, which swaps the stored jar into the browser context rather
-than driving the form. Nearly every test signs in only in order to *be* someone, and the form costs
+than driving the form. Nearly every test signs in only in order to _be_ someone, and the form costs
 a page load, a POST and a password hash every time — that was the bulk of the suite's runtime.
 
 Two things follow, and both matter before you write a spec:
@@ -92,13 +92,13 @@ workspaces share this machine.
 
 Arguments are forwarded, so `pnpm test change-feed` and
 `pnpm test packages/broker/test/types.test.ts --reporter=verbose` both work. That needs
-`scripts/run-tests.ts` rather than a `&&` chain: pnpm hands trailing arguments to the *last*
+`scripts/run-tests.ts` rather than a `&&` chain: pnpm hands trailing arguments to the _last_
 command in a chain, so a filter would have run the parallel pass unfiltered and then failed the
 serial one on a name it could never match. The wrapper sends a filter to whichever pass owns
 the file.
 
 Two suites are in the serial pass, both because they assert on state that is global to the
-Postgres *cluster* rather than to their own database:
+Postgres _cluster_ rather than to their own database:
 
 - `bootstrap.test.ts` rotates the `warehousd_dev` password to prove the escaping round-trips.
   Roles are cluster-global, so a parallel worker's pool hits that window and fails with
@@ -107,7 +107,7 @@ Postgres *cluster* rather than to their own database:
   holds a row back until `pg_snapshot_xmin` passes its `xmin`, which is what stops `seq` from
   being handed out non-monotonically (see `changes` in
   `packages/broker/src/verbs/history.ts`). Transaction ids are cluster-global, so an open
-  transaction in *any other database on the same server* keeps that watermark below the new row
+  transaction in _any other database on the same server_ keeps that watermark below the new row
   and the feed correctly returns nothing yet. Worth knowing beyond
   the tests: change-feed latency depends on the busiest writer in the cluster, not just on this
   application.
@@ -139,7 +139,7 @@ them, so they accumulated across every run anyone had ever done. Measured once:
 autovacuum on them costing the container ~27% CPU — 0.06% after dropping them.
 
 `vitest.global-setup.ts` now sweeps at both ends. `teardown()` handles the
-ordinary case including a suite that threw; `setup()` sweeps *before* the run,
+ordinary case including a suite that threw; `setup()` sweeps _before_ the run,
 because teardown cannot run at all if the run was killed, and that is what makes
 the leak self-healing rather than dependent on remembering a command.
 
@@ -160,7 +160,7 @@ this: a cleanup command nobody remembers to run is how it reached 211.
 
 The Keycloak suite is gated behind `WAREHOUSD_E2E_KEYCLOAK`, so a default
 `pnpm test` run never needs a container beyond Postgres. `pnpm test:e2e:cli`
-runs the *built* CLI against real containers and takes several minutes — run
+runs the _built_ CLI against real containers and takes several minutes — run
 `pnpm --filter ./packages/cli build` first (a path filter, not a name filter:
 `warehousd` also matches the private root package), and point it at a locally
 built image with `WAREHOUSD_IMAGE=warehousd:ci`.
@@ -195,12 +195,12 @@ anything. `resolveTheme` is the only place that reads `isTTY` or `NO_COLOR`.
 > realm is imported at container start, so `pnpm test:up` leaves an already-running
 > container serving the old one. `pnpm test:e2e:sso` then fails inside Keycloak's
 > login form — `expected 200 to be greater than or equal to 300`, or `Could not
-> find SAMLResponse in form` — because the user the test signs in as does not exist
+find SAMLResponse in form` — because the user the test signs in as does not exist
 > in the realm actually loaded. Run
 > `docker compose -f docker-compose.test.yml up -d --force-recreate keycloak`.
 
 CI runs lint in its own job, `pnpm test` and `pnpm build` in another, and Playwright across three
-sharded runners that start *alongside* those rather than after them — it is the longest job in the
+sharded runners that start _alongside_ those rather than after them — it is the longest job in the
 workflow, so gating it on the suite added its minutes to the wait instead of overlapping them. Each
 shard is a whole machine with its own Postgres, dev server and database, so `workers: 1` and the
 isolation it buys still hold inside one; only the spread of files over machines changes. The
@@ -228,14 +228,14 @@ failure it prevents does not look like a collision — it looks like your code i
 broken.
 
 Sibling workspaces share `127.0.0.1:54330`, whichever one ran `pnpm test:up`
-first. Sharing the Postgres *server* is fine and intended. Sharing a *database*
-or an *app port* is not:
+first. Sharing the Postgres _server_ is fine and intended. Sharing a _database_
+or an _app port_ is not:
 
 - A shared database is destructive — each `e2e:setup` drops and recreates it, so
   one suite pulls the schema out from under the other mid-run. It surfaced as
   `relation "session" does not exist`, `column g.org_id does not exist`, and
   hangs well past Playwright's own timeout.
-- A shared port is worse, because it is *silent*. Playwright's usual
+- A shared port is worse, because it is _silent_. Playwright's usual
   `reuseExistingServer: !process.env.CI` cannot tell whose dev server answers on
   a port, so it adopts the other checkout's — and the suite then exercises that
   checkout's code against that checkout's database while reporting the result as
@@ -260,7 +260,7 @@ and adoption of a foreign server is refused outright:
 Two guards keep a residual collision from going quiet. Playwright refuses to
 start when something already answers on the origin, and
 `scripts/assert-port-free.mjs` runs ahead of `next dev` because `next dev -p N`
-does *not* fail on a busy port — it binds N+1 and carries on.
+does _not_ fail on a busy port — it binds N+1 and carries on.
 
 Vitest names its databases `wh_<label>_<pid>_<suffix>` through `runDbName` in
 `packages/broker/test/helpers/templates.ts`, called from
@@ -272,7 +272,7 @@ this checkout's abandoned databases while another checkout's suite is still
 running. The ~90 test files mentioning `http://localhost:8722` only build
 `Request` objects for route handlers; none binds a port.
 
-The servers the suites *do* bind — the fake IdP in `helpers/fake-idp.ts` and the
+The servers the suites _do_ bind — the fake IdP in `helpers/fake-idp.ts` and the
 one-off ones in `sso-admin`, `admin-sso-ui` and `token-exchange` — all listen on
 port 0 and hand their real origin back to the caller. The fake IdP used to be
 fixed on 8791, which collided both across checkouts and, once test files began
@@ -309,7 +309,7 @@ The interesting ones, and where they live:
   adapter: they forge the caller's `env`, `orgId` and `userId` in the tool
   arguments, which a broker-level intent cannot express because the adapter
   derives all three from the token. `assertDevOnly` means the call must succeed
-  and return no live data — a forged `env` has to be *ignored*, not rejected,
+  and return no live data — a forged `env` has to be _ignored_, not rejected,
   since rejecting it would tell the caller the parameter was read at all.
   `expectReason` pins the refusal code where the reason is the point.
 
@@ -320,10 +320,11 @@ The interesting ones, and where they live:
   a string that could not contain a canary, and passed whether or not anything
   leaked. It also captures raw `process.stdout` / `process.stderr`, because
   Next.js and Better Auth write there rather than through `console`.
+
 - **Deny by default and field enforcement** (`broker-query`, `grant-eval`) — a
   user with no grant gets `no_grant` everywhere but still sees names and
   descriptions from `list_collections`; a grant excluding `email` makes the key
-  *absent* from every returned document, not null.
+  _absent_ from every returned document, not null.
 - **The dev/live wall** (`db-roles`, `probe`) — exhaustive dev-token queries
   return zero hits on live-only canaries, and `warehousd_dev` gets a permission
   error on `data_live.v_people`.
@@ -332,7 +333,7 @@ The interesting ones, and where they live:
   `env:dev`; after promotion the next refresh carries `env:live`; after demotion
   it drops again.
 - **Grant lifecycle** (`grant-lifecycle`) — request → approve with trimmed fields
-  → query succeeds → revoke → the *immediately next* query returns `no_grant`,
+  → query succeeds → revoke → the _immediately next_ query returns `no_grant`,
   with no token refresh involved. Expired behaves as revoked.
 - **Aggregation** (`aggregation`) — correct values under a grant that covers the
   field; `field_denied` when it does not, asserted for the field appearing in
@@ -343,7 +344,7 @@ The interesting ones, and where they live:
   denies everything, multi-value vocabularies use array-overlap (`&&`) semantics,
   and a second approved grant is refused by the unique index.
 - **Tenant isolation, data plane** (`org-isolation`) — two orgs' documents in one
-  collection; each org's query returns only its own. The proof that *the database*
+  collection; each org's query returns only its own. The proof that _the database_
   is what refuses: the SQL `buildSelect` produced is asserted to contain no
   `org_id`, then run directly against the view under each org, and it still
   separates the rows. With no org in scope the view returns nothing — the wall
@@ -370,14 +371,14 @@ The interesting ones, and where they live:
   `describe_collection` or in `fieldsReturned`.
 - **Revision storage** (`revisions-ddl`) — a `writable` dataset gets `_rev*` and
   the partial unique index, and its declared pk stops being the primary key; a
-  second *current* revision for one document is rejected by the database while a
+  second _current_ revision for one document is rejected by the database while a
   non-current one is accepted, which is what lets proposals coexist; the view
   hides superseded and tombstoned revisions while the history stays in the table;
   a non-writable dataset gains none of it; turning `writable: true` on over an
   existing plain table fails the apply.
 - **Immutability by privilege** (`write-privileges`, against real Postgres) — the
-  write role *cannot* UPDATE a data column and *cannot* DELETE, asserted as
-  Postgres errors and again against `information_schema`; it *can* insert and
+  write role _cannot_ UPDATE a data column and _cannot_ DELETE, asserted as
+  Postgres errors and again against `information_schema`; it _can_ insert and
   update `_current`/`_rev_status`; RLS confines its base-table SELECT to one org.
 - **Full-document reads** (`get-document`) — only granted fields come back; a
   document the filter excludes is `not_found`, the same answer as one that does
@@ -469,6 +470,24 @@ The interesting ones, and where they live:
   as absent rather than aborting the transaction that was counting its
   neighbours.
 
+- **Uploads and directory indexing produce the same document**
+  (`upload.integration`, `apps/web/test/admin-documents.integration.test.ts`) —
+  the same file arriving by either path yields identical title, owner, checksum
+  and chunks, because both go through one `ingestFile`. If they could drift, a
+  document's reachability would depend on how it was uploaded. The same suite
+  asserts the required-term rule holds on the upload surface, that a plan is
+  answered from the database rather than from anything the client remembers, that
+  a claimed checksum is verified rather than believed, and that a later
+  `warehousd index` does not sweep away a document that was uploaded rather than
+  indexed.
+
+- **The upload queue hashes before it sends, and skips what is already stored**
+  (`apps/web/e2e/admin-documents.spec.ts`) — a real browser, because the claim is
+  about the client: the plan request carries a WebCrypto digest per file and
+  happens before any upload; re-selecting the same files issues **zero** upload
+  requests; a folder keeps each file's relative path, so two same-named files in
+  different directories stay two documents.
+
 ## What is still manual
 
 The Playwright suite covers every web surface. Four things are still
@@ -485,12 +504,17 @@ checked by hand, because they need credentials or a product UI no test can drive
    `/api/sso/status` — SSO-first rendering with local login collapsed, the "No
    login method is configured" state, and `returnTo` parameters surviving
    sign-in through to the authorize endpoint. Two gaps remain: no test sends
-   `providerType: "saml"`, and no test asserts what the page *looks* like. Check
+   `providerType: "saml"`, and no test asserts what the page _looks_ like. Check
    those by eye against a registered SAML provider.
 4. **Deploying to Fly.io.** [deploy-fly.md](deploy-fly.md) — end-to-end
    provisioning: configuring the `deploy:` block, ensuring demo is off and SSO
    is configured, running the deploy, verifying the stack reaches health checks,
    and connecting Claude to the deployed server.
+   One narrower gap sits inside a covered surface: `admin-documents.spec.ts` drives
+   the upload queue but not its **pause and resume buttons**, because the fixture
+   files finish uploading faster than a test can press pause, and a test that
+   contrived a slow upload would be asserting about the contrivance. Check those by
+   hand against a corpus large enough to take a few seconds.
 
 Re-run all four whenever the OAuth flow, the login page, the env-scope rules,
 or the deploy machinery change materially — they are the only checks that
