@@ -11,11 +11,16 @@ export type ClientPolicy = {
   mode: "delegated" | "headless";
   robotUserId: string | null;
   trustedIssuerId: string | null;
+  // May this client edit a document's ACL? Not a grant verb and not a scope: a grant says what a
+  // caller may read, and widening who else may read something is a different act. Default false,
+  // and an unregistered client gets false too — the flag is only ever granted on purpose.
+  canManageAcl: boolean;
 };
 
 export async function getClientPolicy(app: Pool, clientId: string): Promise<ClientPolicy> {
   const r = await app.query(
-    `select allowed_scopes, allowed_collections, mode, robot_user_id, trusted_issuer_id
+    `select allowed_scopes, allowed_collections, mode, robot_user_id, trusted_issuer_id,
+            can_manage_acl
      from app.client_policies where client_id=$1`,
     [clientId],
   );
@@ -27,6 +32,7 @@ export async function getClientPolicy(app: Pool, clientId: string): Promise<Clie
       mode: "delegated",
       robotUserId: null,
       trustedIssuerId: null,
+      canManageAcl: false,
     };
   }
   const row = r.rows[0];
@@ -37,7 +43,25 @@ export async function getClientPolicy(app: Pool, clientId: string): Promise<Clie
     mode: row.mode || "delegated",
     robotUserId: row.robot_user_id,
     trustedIssuerId: row.trusted_issuer_id,
+    canManageAcl: row.can_manage_acl === true,
   };
+}
+
+// Grant or withdraw a client's ability to edit document ACLs.
+//
+// Scoped to the org like every other client-policy write, and audited by the caller rather than
+// here — the console route that owns this is the one holding the acting admin's identity.
+export async function setCanManageAcl(
+  app: Pool,
+  clientId: string,
+  canManageAcl: boolean,
+  orgId = DEFAULT_ORG_ID,
+): Promise<boolean> {
+  const r = await app.query(
+    `update app.client_policies set can_manage_acl=$2 where client_id=$1 and org_id=$3`,
+    [clientId, canManageAcl, orgId],
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function upsertClientPolicy(

@@ -124,7 +124,11 @@ deployment that follows the expectations above, but each is worth knowing:
   alternative — joining the base tables to test the filter — would put field data on
   the control plane, which is the larger hole. Where document ids are themselves
   sensitive, do not issue a document-filtered grant expecting the feed to honour it.
-  See [The change feed](docs/architecture.md#the-change-feed).
+  A per-document ACL is not applied to the feed either, and for the same reason:
+  the feed carries no field data and no ACL join, so a restricted document's id,
+  op and timestamp appear to anyone with a `read` grant on the collection.
+  `getDocument` still refuses it. See
+  [The change feed](docs/architecture.md#the-change-feed).
 - **OAuth client secrets are stored in cleartext, and the library currently
   requires it.** `app."oauthApplication"."clientSecret"` holds the secret verbatim
   for the dev client and for every dynamically registered MCP client, so a database
@@ -149,6 +153,26 @@ deployment that follows the expectations above, but each is worth knowing:
   caps what any client can reach. Revisit when the mcp plugin routes client
   authentication through the provider.
 
+- **A per-document ACL depends on group membership warehousd stores, not on what
+  the IdP asserts at request time.** `group:` principals resolve against
+  `app.user_groups`, which is written by an SSO login (`source: 'sso'`) and by the
+  console (`source: 'manual'`). That is the point — a deny that depended on a claim
+  minted outside the broker would not be a deny — but it means membership is as
+  fresh as the last login, not as fresh as the directory. An IdP removing someone
+  from a group does not revoke their `group:` principals until they sign in again.
+  Where that window matters, remove the principal from the ACL or the row from
+  `app.user_groups` directly. An assertion that carries *no* group claim at all
+  deliberately changes nothing, so a provider registration that forgets to map the
+  claim cannot silently revoke everyone's membership.
+- **An ACL restricts, it never grants.** A principal listed on a document still
+  needs a grant covering the collection and the fields. Adding somebody to an ACL
+  gives them nothing they did not already have; removing everybody makes the
+  document public *within the grant*, not public.
+- **ACL rows are the one thing a write role may DELETE.** Every other data table is
+  append-only by privilege. An ACL has no revision model and nothing references it,
+  so removing the row is the only way to un-restrict a document — which also means
+  an ACL's history is not recoverable from the data schema. The audit trail records
+  each change (`set_acl`, with the principals) and is where that history lives.
 - **Write tools are exposed over MCP.** `create_document`, `update_document` and
   `delete_document` are MCP tools, so the untrusted model can propose writes. It
   cannot decide on them: `approve`/`reject` are not MCP tools, and the broker

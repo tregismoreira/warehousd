@@ -128,8 +128,14 @@ describe("org isolation", () => {
     const r = await admin.query(
       `select schemaname, tablename from pg_policies where policyname='org_isolation' order by schemaname`,
     );
+    // `_acl` is in the list for the same reason `people` is: it is a data table holding per-org
+    // rows, and the read roles never touch it directly — but the write roles do, and RLS is their
+    // wall. The view's own join carries `acl.org_id = base.org_id` explicitly; neither is
+    // redundant. See rlsDDL/aclTableDDL in apply/ddl.ts.
     expect(r.rows.map((x) => `${x.schemaname}.${x.tablename}`)).toEqual([
+      "data_live._acl",
       "data_live.people",
+      "data_synth._acl",
       "data_synth.people",
     ]);
     const rls = await admin.query(

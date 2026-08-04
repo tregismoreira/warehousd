@@ -70,6 +70,50 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Added
 
+- **Per-document ACLs.** A grant can scope to a *set* of documents but could never exempt an
+  individual one — document filters are `eq`/`in`, ANDed, with no `OR` and no negation. A
+  collection that declares `acl: true` gets the orthogonal rule instead: a document with no ACL is
+  readable by anyone the grant covers, and a document with an ACL is readable only by the
+  principals listed on it. An ACL never widens a grant; it takes one document out of one.
+  Principals are namespaced `user:<id>` / `group:<name>`, and group membership is warehousd's own
+  record in `app.user_groups` — derived from the caller's id on every request, never read from a
+  token, because a deny that depends on a claim minted outside the broker is not a deny.
+- The rule is one fixed clause ANDed into the same `WHERE` every read already builds, so it lands
+  inside the hybrid `scoped` CTE and inside every aggregate: a `count` over an ACL'd collection
+  returns what the caller may see rather than a total whose shortfall reports the difference. The
+  write path cannot reuse that SQL — it reads base tables for revision bookkeeping — so the eight
+  places that evaluated a grant's filters in process now go through a single `admits()` that
+  checks the filters *and* the ACL, with `matchesFilters` made module-private so neither half can
+  be skipped. Each of those queries carries the ACL onto the row in the same statement and the
+  same transaction, and `admits()` fails closed when the column was not fetched.
+  `test/acl-parity.test.ts` asserts the SQL and in-process evaluators agree against a live
+  Postgres.
+- ACLs are edited through `GET`/`PUT`/`DELETE /v1/collections/{c}/documents/{id}/acl` or the
+  console's new **Access** tab, and deliberately not over MCP — an untrusted proposer must not be
+  able to widen access. Managing one is not a grant verb: it takes the `manager`/`admin` console
+  role or a client policy carrying the new `can_manage_acl` flag, and the broker reads the role or
+  the flag itself so an adapter cannot assert an authority it does not hold. Both verbs are
+  audited, and `app.audit_events.principals` records the membership each decision ran under, since
+  reproducing who could read what on a given day needs membership as it was.
+- `can_manage_acl` is granted and withdrawn per client in **Admin → Clients**, admin-only and on
+  its own axis: it is not a scope, does not travel in a token, and promoting a client to `env:live`
+  neither grants nor implies it. Promotion widens which data a client reaches through the caller's
+  own grants; this changes who those grants reach at all.
+- Dataset collections only in v1. `acl: true` is refused at config load on a file collection (an
+  ACL would key on `file_id` rather than a pk) and on a connect-in-place collection (warehousd
+  does not own those rows), and requires a declared primary key. `_acl` is reserved as a field
+  name.
+- An SSO login now persists the asserted group list to `app.user_groups`, which is what a `group:`
+  principal resolves against. Console-pinned memberships (`source: 'manual'`) survive an IdP
+  re-sync untouched, and an assertion carrying no group claim at all changes nothing — the same
+  rule role mapping already followed. Role provisioning stays a first-login act: a new
+  `app.sso_provisioned` marker is what lets membership sync every login without re-deriving the
+  role and silently undoing a console promotion. `GET`/`PUT /api/admin/users/{id}/groups` manages
+  the manual source.
+- `examples/harbor` turns ACLs on for `announcements`, so the demo project ships a collection the
+  Access tab actually applies to — and so the Playwright suite can prove the claim across two
+  surfaces at once: an admin restricts one announcement in the console and a headless key's count
+  over the collection drops by exactly one.
 - **Documents can be uploaded from the console.** `/admin/documents` takes a multi-file selection
   or a whole folder, and is resumable: each file is hashed in the browser, `POST
   /api/admin/documents/plan` answers which of those hashes the collection already holds, and only

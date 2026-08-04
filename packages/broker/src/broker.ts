@@ -6,6 +6,7 @@ import { makeReadVerbs } from "./verbs/read";
 import { makeMutateVerb } from "./verbs/mutate";
 import { makeProposeVerbs } from "./verbs/propose";
 import { makeHistoryVerbs } from "./verbs/history";
+import { makeAclVerbs } from "./acl/manage";
 
 // The composition root, and nothing else.
 //
@@ -30,6 +31,10 @@ export function makeBroker(
   const mutate = makeMutateVerb(deps);
   const { approveProposal, rejectProposal, listProposals, getProposal } = makeProposeVerbs(deps);
   const { changes, listRevisions } = makeHistoryVerbs(deps);
+  // Not grant verbs, and not MCP tools: managing an ACL is authorised against the caller's
+  // standing (console role, or the client's can_manage_acl flag), never against a grant. See
+  // acl/manage.ts.
+  const { getDocumentAcl, setDocumentAcl } = makeAclVerbs(deps);
 
   return {
     query,
@@ -44,5 +49,7 @@ export function makeBroker(
     changes,
     listRevisions,
     getProposal,
+    getDocumentAcl,
+    setDocumentAcl,
   };
 }

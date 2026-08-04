@@ -456,6 +456,29 @@ The interesting ones, and where they live:
   the verb rules so it names the real problem. `dev` is exempt, and that is
   asserted too, because the exemption is what the console's one-click
   request-and-approve depends on.
+- **Per-document ACLs scope every read, including aggregates** (`acl-read`) — 1,000
+  documents with one restricted returns 999 to a caller who is not on that
+  document's ACL, and 1,000 to a `user:` or `group:` principal who is; `sum` and
+  `avg` are scoped identically. `getDocument` answers `not_found`,
+  `searchDocuments` never returns it, and its canary reaches no response body, no
+  error and no captured log line. The suite also pins where the predicate lands in
+  the statement — inside the hybrid `scoped` CTE, before either ranking and either
+  LIMIT — and that a collection without `acl: true` emits none of it.
+- **The write path enforces the same ACL** (`acl-write`) — `update`, `delete`,
+  proposing either, approving a proposal, `getProposal`, `listProposals` and
+  `listRevisions` all refuse a document the caller is not on the ACL of, and all
+  refuse with `not_found` rather than a distinguishable code. Includes a create
+  proposal against an ACL written before the document exists, which is the one
+  branch with no current revision to read. The same file covers management authz:
+  a client without `can_manage_acl` and a console `member` are both refused, an
+  unknown client is refused outright, a principal with no namespace is rejected,
+  an empty list removes the row, and every call is audited.
+- **The two ACL evaluators agree** (`acl-parity`) — the SQL predicate and
+  `admits()` return the same boolean for every (stored ACL, principal set) pair,
+  against a live Postgres; and one ACL scopes `query` and `mutate` identically.
+  `admits()` fails closed when the row never carried the column, which is what
+  stops a forgotten join reading as "public". The same shape as `filter-parity`,
+  one rule down.
 - **Console reads are governed, not privileged**
   (`apps/web/test/console-browse.integration.test.ts`) — the admin console's own
   query route refuses an admin with no grant exactly as it refuses a member,
@@ -480,6 +503,20 @@ The interesting ones, and where they live:
   a claimed checksum is verified rather than believed, and that a later
   `warehousd index` does not sweep away a document that was uploaded rather than
   indexed.
+
+- **Restricting a document in the console changes what a token can read**
+  (`apps/web/e2e/acl-access.spec.ts`) — two surfaces at once, which is the only
+  place the claim is observable: an admin restricts one announcement through the
+  session-cookie console, and a headless key's `count` over the collection drops
+  by exactly one while `getDocument` starts answering 404 and a filtered query
+  returns nothing. Making it public again restores all three. `announcements`
+  carries `acl: true` in `examples/harbor/warehousd.yml` for this. The same file
+  pins that a `group:` principal admits a caller through membership and stops
+  admitting them the moment membership is removed — with no new token, because
+  principals are derived per call — that a REST client without `can_manage_acl`
+  is refused `acl_denied` while still being able to *read* the document, that the
+  console route takes the manager role rather than a grant, and that the Access
+  tab is absent on a collection with no `acl: true`.
 
 - **The upload queue hashes before it sends, and skips what is already stored**
   (`apps/web/e2e/admin-documents.spec.ts`) — a real browser, because the claim is

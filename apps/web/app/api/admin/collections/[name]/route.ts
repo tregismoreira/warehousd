@@ -103,6 +103,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
     description: c.description,
     type: c.type ?? "dataset",
     writable: c.writable ?? false,
+    // Whether this collection carries per-document ACLs at all. The detail page shows the ACL
+    // editor only when it does — an editor on a collection with no `_acl` column would write rows
+    // the read path never reads.
+    acl: c.acl ?? false,
     status,
     appliedAt: appliedRow?.updated_at ?? null,
     env,

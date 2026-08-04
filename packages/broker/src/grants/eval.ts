@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import type { BrokerContext, DocumentFilter } from "../types";
 import { SELF } from "./filters";
+import { loadPrincipals } from "../acl/principals";
 
 export type ActiveGrant = {
   id: string;
@@ -11,6 +12,14 @@ export type ActiveGrant = {
   documentFilter: DocumentFilter[];
   verbs: string[];
   mode: string;
+  // Who the caller is, for per-document ACLs: `user:<id>` plus one `group:<name>` per membership
+  // in `app.user_groups`. It rides on the grant rather than being fetched where it is used because
+  // every verb already loads a grant — so no verb can forget principals, and there is no second
+  // call site to drop. Exactly the argument this file makes above for putting the collection
+  // ceiling on `ctx`.
+  //
+  // Never from a token or a claim: see acl/principals.ts.
+  principals: string[];
 };
 
 // Loaded fresh on every broker call — grants are never baked into a token/cache.
@@ -40,7 +49,10 @@ export async function loadActiveGrant(
     [userId, collection, env, orgId],
   );
   if (r.rowCount === 0) return null;
-  return toActiveGrant(r.rows[0], userId);
+  // Loaded here, in the same call, for the same reason the grant itself is: it is fresh on every
+  // broker call and never cached. Only once a grant exists — there is nothing to scope otherwise.
+  const principals = await loadPrincipals(db, ctx);
+  return toActiveGrant(r.rows[0], userId, principals);
 }
 
 // Same question as loadActiveGrant, asked about many collections at once. Two verbs
@@ -75,7 +87,11 @@ export async function loadActiveGrants(
     [userId, asked, env, orgId],
   );
 
-  for (const row of r.rows) out.set(row.collection, toActiveGrant(row, userId));
+  if (r.rowCount === 0) return out;
+  // One membership lookup for the whole batch: principals are a property of the caller, not of a
+  // collection, so asking per grant would be the same answer N times.
+  const principals = await loadPrincipals(db, ctx);
+  for (const row of r.rows) out.set(row.collection, toActiveGrant(row, userId, principals));
   return out;
 }
 
@@ -91,6 +107,7 @@ function toActiveGrant(
     mode: string | null;
   },
   userId: string,
+  principals: string[],
 ): ActiveGrant {
   const df = row.document_filter;
   // document_filter is a DocumentFilter[]. A row holding the pre-Stage-2 object form is a
@@ -118,5 +135,6 @@ function toActiveGrant(
     documentFilter,
     verbs: row.verbs ?? ["read"],
     mode: row.mode ?? "direct",
+    principals,
   };
 }

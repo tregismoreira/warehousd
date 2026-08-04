@@ -177,6 +177,14 @@ full-text search). Both flow through the same postures, grants, and audit.
 narrowed to specific documents or taxonomy terms. Evaluated fresh on every
 request, so revocation is immediate — never baked into a token.
 
+**Per-document ACLs** — A grant scopes to a *set* of documents; `acl: true` lets
+you exempt an individual one. A document with no ACL is readable by anyone the
+grant covers; a document with one is readable only by the `user:` and `group:`
+principals listed on it. Enforced in the same `WHERE` every read goes through, so
+a `count` returns what the caller may see — not a total with a shortfall that
+reports the difference. Group membership is warehousd's own record, never a token
+claim, and editing an ACL is not a grant verb and is not an MCP tool.
+
 **Expressive-but-safe queries** — Filters, ordering, pagination, and
 aggregation (`avg`/`sum`/`count`/`min`/`max` with `groupBy`) — enough for the
 assistant to answer real analytical questions, with aggregation permitted only
@@ -353,7 +361,8 @@ yet built:
 | PDF/DOCX extraction | **real** | `.pdf` and `.docx` indexed beside `.md`/`.txt`, originals stored, sidecar `.yml` supplies owner and terms. A scanned PDF with no extractable text is refused rather than indexed empty. |
 | Document upload UI | **real** | Admin-only multi-file and folder upload, resumable: each file is hashed in the browser and only what the collection does not already hold is sent. Same ingestion path as `warehousd index`. |
 | Multi-tenancy (`org_id`) | *partial* | Every grant, audit event and document carries an org, isolated by a view predicate and RLS. A single implicit org is created at bootstrap; there is no UI for creating or switching orgs yet. |
-| IdP group→role mapping | **real** | Per provider in `warehousd.yml`: a group claim and a group→role map, applied at JIT provisioning. Highest matching role wins; unmapped groups are ignored. Registration-time only, so a console promotion is never undone by the next login. A deployment that declares no map still provisions `member`. |
+| Per-document ACLs | **real** | `acl: true` per collection. No ACL row means public within the grant; an ACL row means only its `user:`/`group:` principals. One fixed predicate ANDed into the same `WHERE` every read uses, so aggregates count what the caller may see; the write path re-evaluates the same rule in process through one entry point, asserted against the SQL by a parity suite. Editing an ACL is authorised by console role or a client's `can_manage_acl` flag — not by a grant verb, and never over MCP. Dataset collections only in v1; file and connect-in-place collections are refused at config load. |
+| IdP group→role mapping | **real** | Per provider in `warehousd.yml`: a group claim and a group→role map, applied at JIT provisioning. Highest matching role wins; unmapped groups are ignored. Registration-time only, so a console promotion is never undone by the next login. A deployment that declares no map still provisions `member`. The asserted group list is also persisted to `app.user_groups` on every login, which is what `group:` ACL principals resolve against; console-pinned memberships survive a re-sync, and an assertion carrying no group claim changes nothing. |
 | SCIM, compliance exports | *not built* | |
 
 ## Contributing

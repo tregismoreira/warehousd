@@ -3,6 +3,7 @@ import { m0002LoginAttempts } from "./0002-login-attempts";
 import { m0003LoginAttemptsSweep } from "./0003-login-attempts-sweep";
 import { m0004CollectionMigrations } from "./0004-collection-migrations";
 import { m0005GrantUnmaskedFields } from "./0005-grant-unmasked-fields";
+import { m0006DocumentAcl } from "./0006-document-acl";
 
 export type Migration = { version: string; sql: string };
 
@@ -19,4 +20,5 @@ export const MIGRATIONS: readonly Migration[] = [
   m0003LoginAttemptsSweep,
   m0004CollectionMigrations,
   m0005GrantUnmaskedFields,
+  m0006DocumentAcl,
 ];

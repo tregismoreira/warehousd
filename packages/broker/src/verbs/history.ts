@@ -3,11 +3,12 @@ import type { BrokerContext, RefusalReason, AuditId } from "../types";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../types";
 import type { ActiveGrant } from "../grants/eval";
 import { loadActiveGrant, loadActiveGrants } from "../grants/eval";
-import { matchesFilters, validateDocumentFilters } from "../grants/filters";
+import { admits, validateDocumentFilters } from "../grants/filters";
 import { dataPool, withOrg, writePool } from "../db/pools";
 import { findCollection } from "../config/load";
 import { pkOf, dataSchema } from "../config/collection";
 import { ident } from "../sql/ident";
+import { aclColumnSql } from "../acl/sql";
 import { makeAuditWriter } from "../audit/decision";
 import type { VerbDeps } from "./deps";
 
@@ -130,11 +131,11 @@ export function makeHistoryVerbs(d: VerbDeps) {
     if (!grant.verbs.includes("read")) return audit.refuse(name, "no_grant");
 
     if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuse(name, "invalid_intent", { grantId: grant.id });
+      return audit.refuse(name, "invalid_intent", { grant });
 
     const schema = dataSchema(ctx.env);
     const pk = pkOf(c);
-    if (!pk) return audit.refuse(name, "invalid_intent", { grantId: grant.id });
+    if (!pk) return audit.refuse(name, "invalid_intent", { grant });
 
     const cols = [
       "_rev",
@@ -150,10 +151,11 @@ export function makeHistoryVerbs(d: VerbDeps) {
 
     try {
       const revisions = await withOrg(pool, ctx.orgId, async (client) => {
-        // Fetch current row to apply document filter against
+        // Fetch current row, with its ACL, to apply the document filter and the ACL against
         const currentQ = await client.query(
-          `select ${cols.map(ident).join(", ")} from ${schema}.${ident(name)}
-           where org_id=$1 and ${ident(pk)}=$2 and _current`,
+          `select ${cols.map((col) => `t.${ident(col)}`).join(", ")}${aclColumnSql(ctx.env, name, c, "t")}
+           from ${schema}.${ident(name)} t
+           where t.org_id=$1 and t.${ident(pk)}=$2 and t._current`,
           [ctx.orgId, opts.id],
         );
 
@@ -161,8 +163,8 @@ export function makeHistoryVerbs(d: VerbDeps) {
           return null; // Document not found or filtered out
         }
         const currentRow = currentQ.rows[0];
-        if (!matchesFilters(currentRow, grant.documentFilter, c)) {
-          return null; // Document filtered out
+        if (!admits(currentRow, grant, c)) {
+          return null; // Excluded by the grant's document filter or by the document's ACL
         }
 
         // Every revision of this document, in the order the document held them.
@@ -189,14 +191,14 @@ export function makeHistoryVerbs(d: VerbDeps) {
         }));
       });
 
-      if (!revisions) return audit.refuse(name, "not_found", { grantId: grant.id });
+      if (!revisions) return audit.refuse(name, "not_found", { grant });
 
-      const rec = await audit.allow(name, { grantId: grant.id });
+      const rec = await audit.allow(name, { grant });
       if (!rec.ok) return rec;
       return { ok: true, revisions, auditId: rec.auditId };
     } catch (err) {
       console.error("[broker] listRevisions failed", { collection: name, id: opts.id, err });
-      return audit.refuse(name, "internal_error", { grantId: grant.id });
+      return audit.refuse(name, "internal_error", { grant });
     }
   }
 

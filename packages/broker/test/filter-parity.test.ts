@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import {
   canonicalize,
-  matchesFilters,
+  admits,
   validateDocumentFilters,
   validateGrantFilters,
 } from "../src/grants/filters";
@@ -205,9 +205,15 @@ describe("document filter: in-process evaluation matches SQL", () => {
       );
       const sqlMatch: boolean = sql.rows[0]!.m;
 
-      // What the write path says, against the row as the driver hands it over.
+      // What the write path says, against the row as the driver hands it over. Through `admits`,
+      // which is the door the verbs use: the collection has no ACL, so it reduces to the filter
+      // half — the same call every verb makes on a collection without `acl: true`.
       const row = (await admin.query(`select * from public.parity`)).rows[0]!;
-      const jsMatch = matchesFilters(row, [{ field, op: "eq", value: k.filter }], c);
+      const jsMatch = admits(
+        row,
+        { documentFilter: [{ field, op: "eq", value: k.filter }], principals: [] },
+        c,
+      );
 
       expect(jsMatch, `SQL said ${sqlMatch}, in-process said ${jsMatch}`).toBe(sqlMatch);
     });
@@ -249,7 +255,9 @@ describe("document filter: `in` lists agree with SQL", () => {
       );
       const row = (await admin.query(`select * from public.parity`)).rows[0]!;
 
-      expect(matchesFilters(row, [{ field, op: "in", value: k.list }], c)).toBe(sql.rows[0]!.m);
+      expect(
+        admits(row, { documentFilter: [{ field, op: "in", value: k.list }], principals: [] }, c),
+      ).toBe(sql.rows[0]!.m);
     });
   }
 });
@@ -306,12 +314,20 @@ describe("document filter validation refuses what the two paths could not agree 
     // Legal SQL, so not a validation error — but it must not match, including against a null
     // column. The parity cases above pin the matching half.
     expect(validateDocumentFilters([{ field: "c_text", op: "eq", value: null }], c)).toBeNull();
-    expect(matchesFilters({ c_text: null }, [{ field: "c_text", op: "eq", value: null }], c)).toBe(
-      false,
-    );
-    expect(matchesFilters({ c_text: "x" }, [{ field: "c_text", op: "eq", value: null }], c)).toBe(
-      false,
-    );
+    expect(
+      admits(
+        { c_text: null },
+        { documentFilter: [{ field: "c_text", op: "eq", value: null }], principals: [] },
+        c,
+      ),
+    ).toBe(false);
+    expect(
+      admits(
+        { c_text: "x" },
+        { documentFilter: [{ field: "c_text", op: "eq", value: null }], principals: [] },
+        c,
+      ),
+    ).toBe(false);
   });
 
   it("refuses a view_join field, which the write path cannot see at all", () => {

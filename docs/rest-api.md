@@ -14,6 +14,9 @@ A thin HTTP adapter for programmatic access to collections, governed by the same
 | PUT | `/v1/collections/{c}/documents/{id}` | `mutate` (update) | Update a document; `If-Match: "{rev}"` for optimistic concurrency | 200 (direct), 202 (pending), 409/412 (conflict) |
 | DELETE | `/v1/collections/{c}/documents/{id}` | `mutate` (delete) | Delete a document | 204 (direct), 202 (pending) |
 | GET | `/v1/collections/{c}/documents/{id}/revisions` | `listRevisions` | Revision history of one document | 200 |
+| GET | `/v1/collections/{c}/documents/{id}/acl` | `getDocumentAcl` | The document's ACL; empty principals means public within the grant | 200 |
+| PUT | `/v1/collections/{c}/documents/{id}/acl` | `setDocumentAcl` | Replace the ACL (`{"principals":["user:…","group:…"]}`); an empty list removes it | 200 |
+| DELETE | `/v1/collections/{c}/documents/{id}/acl` | `setDocumentAcl` | Remove the ACL — the document is public within the grant again | 200 |
 | POST | `/v1/collections/{c}/query` | `query` | Structured query: filters, ordering, aggregation, grouping | 200 |
 | GET | `/v1/collections/{c}/search` | `searchDocuments` | Full-text search over a file collection (query params: `q`, `limit`, `offset`, `fields`) | 200 |
 | GET | `/v1/proposals` | `listProposals` | List pending/approved/rejected proposals (query params: `status`, `collection`) | 200 |
@@ -47,7 +50,7 @@ broker refusal reasons below — the two tables do not share a mapping function.
 | 204 | (success) | Document deleted (direct mode) with no body per RFC 7231. |
 | 400 | `invalid_intent`, `invalid_value` | Malformed query or mutation. |
 | 401 | `unauthenticated` | Missing or invalid access token. |
-| 403 | `no_grant`, `expired_grant`, `field_denied`, `verb_denied`, `field_not_writable` | Access denied: no grant, expired grant, field/verb not granted, or field is not writable. |
+| 403 | `no_grant`, `expired_grant`, `field_denied`, `verb_denied`, `field_not_writable`, `acl_denied` | Access denied: no grant, expired grant, field/verb not granted, field is not writable, or the client's policy does not carry `can_manage_acl`. |
 | 404 | `unknown_collection`, `unknown_field`, `not_found` | Collection, field, or document does not exist, or is excluded by a document filter. |
 | 405 | `verb_not_supported`, `not_writable` | Operation not supported on this collection type (e.g., update on a file collection). |
 | 409 | `conflict` | Mutation conflicts with an existing value (no `If-Match` header provided). |

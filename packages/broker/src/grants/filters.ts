@@ -1,5 +1,7 @@
 import type { CollectionConfig, FieldConfig } from "../config/schema";
+import { ACL_COLUMN } from "../config/schema";
 import type { DocumentFilter } from "../types";
+import { aclAdmits } from "../acl/principals";
 
 // A grant's document filters decide which rows the grant reaches. The read path evaluates them
 // in SQL (sql/build.ts appends them to the WHERE clause); the write path evaluates them here, in
@@ -219,13 +221,52 @@ export function validateGrantFilters(
   return validateDocumentFilters(unbound, c);
 }
 
+// The whole of "may this grant reach this row", and the ONLY entry point the write path uses.
+//
+// It exists because there were eight `matchesFilters` call sites and adding a separate ACL check
+// beside each of them would have been eight chances to forget one. A caller that holds the grant
+// cannot skip either half: the document filters and the per-document ACL are one question here.
+//
+// The row must come from a query that carried the ACL — `aclColumnSql` in acl/sql.ts emits the
+// fragment for it. Three states, and only two of them are the same:
+//
+//   null       there is no ACL row for this document → public → admitted
+//   []         an ACL row with no principals, which setDocumentAcl never writes → admitted, so
+//              that a row edited directly in the database cannot deny everyone silently
+//   absent     the query did not fetch the column → REFUSED
+//
+// The last is the important one. Reading an absent column as "public" would turn a forgotten join
+// into a silent leak, which is the exact failure mode this function was introduced to make
+// impossible. It fails closed instead, and the test suite pins it.
+export function admits(
+  row: Record<string, unknown>,
+  // Structural, not `ActiveGrant`: grants/eval.ts imports SELF from this module, and naming its
+  // type here would close the cycle.
+  grant: { documentFilter: DocumentFilter[]; principals: readonly string[] },
+  c: CollectionConfig,
+): boolean {
+  if (!matchesFilters(row, grant.documentFilter, c)) return false;
+  if (!c.acl) return true;
+  if (!Object.hasOwn(row, ACL_COLUMN)) return false;
+  const acl = row[ACL_COLUMN];
+  if (acl === null || acl === undefined) return aclAdmits(null, grant.principals);
+  // A text[] column arrives from the driver as an array of strings. Anything else is a row this
+  // module cannot interpret, and an uninterpretable ACL denies rather than admits.
+  if (!Array.isArray(acl) || acl.some((p) => typeof p !== "string")) return false;
+  return aclAdmits(acl as string[], grant.principals);
+}
+
 // The grant's document filters, ANDed, evaluated against a row the write path already holds.
 // `$self` is bound by loadActiveGrant, so by here every value is a plain literal. An empty list
 // scopes nothing, which is what buildSelect does with it too.
 //
 // Callers must have run validateDocumentFilters first; an uninterpretable value reaching here
 // matches nothing, so a skipped validation fails closed rather than open.
-export function matchesFilters(
+//
+// Module-private on purpose. It answers half a question, and every verb needs the whole of it —
+// `admits` above is the door. The parity suite reaches the filter half through `admits` with an
+// empty ACL, which is the same call the verbs make on a collection without ACLs.
+function matchesFilters(
   row: Record<string, unknown>,
   filters: DocumentFilter[],
   c: CollectionConfig,

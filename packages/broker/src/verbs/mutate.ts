@@ -5,12 +5,13 @@ import type { CollectionConfig } from "../config/schema";
 import { writePosture } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
 import { loadActiveGrant } from "../grants/eval";
-import { matchesFilters, validateDocumentFilters } from "../grants/filters";
+import { admits, validateDocumentFilters } from "../grants/filters";
 import { withOrg, writePool } from "../db/pools";
 import { insertRevision, currentRevision, reviseDocument } from "../db/revisions";
 import { findCollection, supportedVerbs } from "../config/load";
 import { pkOf, dataColsOf, dataSchema } from "../config/collection";
 import { ident } from "../sql/ident";
+import { aclColumnSql } from "../acl/sql";
 import { chunkText } from "../indexing/chunk";
 import { coerce } from "../import/validate";
 import { makeAuditWriter, assertRecorded, type AuditWriter } from "../audit/decision";
@@ -70,7 +71,7 @@ export function makeMutateVerb(d: VerbDeps) {
 
     // 6. verb ∈ grant.verbs
     if (!grant.verbs.includes(intent.op))
-      return audit.refuse(intent.collection, "verb_denied", { grantId: grant.id });
+      return audit.refuse(intent.collection, "verb_denied", { grant });
 
     // 6b. the grant's document filters must be evaluable. matchesFilters below fails closed on a
     // filter it cannot interpret, so this is not what makes the write path safe — it is what makes
@@ -78,19 +79,18 @@ export function makeMutateVerb(d: VerbDeps) {
     // filter reads as `invalid_intent` and writes as `not_found`, and the grant looks broken in
     // two different ways depending on which verb you try.
     if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuseMutation(intent, grant.id, "invalid_intent");
+      return audit.refuseMutation(intent, grant, "invalid_intent");
 
     // Phase 5: proposal_only mode creates pending revisions for dataset collections.
     // File collections are append-only; they don't support this mode.
     if (grant.mode === "proposal_only") {
-      if (c.type === "file")
-        return audit.refuse(intent.collection, "verb_denied", { grantId: grant.id });
+      if (c.type === "file") return audit.refuse(intent.collection, "verb_denied", { grant });
       return proposeDataset(d, ctx, audit, intent, c, grant);
     }
 
     // Write pool: env determines which pool; no pool configured → not_writable
     const pool = writePool(pools, ctx);
-    if (!pool) return audit.refuse(intent.collection, "not_writable", { grantId: grant.id });
+    if (!pool) return audit.refuse(intent.collection, "not_writable", { grant });
 
     // The field that ADDRESSES a document rather than describing it: the declared pk for a
     // dataset, `path` for a file. It is exempt from the write posture on create, because a
@@ -101,18 +101,17 @@ export function makeMutateVerb(d: VerbDeps) {
 
     const all = Object.keys(c.fields);
     for (const f of fieldNames) {
-      if (!all.includes(f)) return audit.refuseMutation(intent, grant.id, "unknown_field");
-      if (c.fields[f]!.view_join)
-        return audit.refuseMutation(intent, grant.id, "field_not_writable");
+      if (!all.includes(f)) return audit.refuseMutation(intent, grant, "unknown_field");
+      if (c.fields[f]!.view_join) return audit.refuseMutation(intent, grant, "field_not_writable");
       if (f === identityField) {
         if (intent.op !== "create")
-          return audit.refuseMutation(intent, grant.id, "field_not_writable");
+          return audit.refuseMutation(intent, grant, "field_not_writable");
         continue; // identity on create: addressed above, and never posture-gated
       }
       if (writePosture(c.fields[f]!) !== "allow")
-        return audit.refuseMutation(intent, grant.id, "field_not_writable");
+        return audit.refuseMutation(intent, grant, "field_not_writable");
       if (!grant.allowedFields.includes(f))
-        return audit.refuseMutation(intent, grant.id, "field_denied");
+        return audit.refuseMutation(intent, grant, "field_denied");
     }
 
     // File collection handling
@@ -139,17 +138,17 @@ async function mutateFile(
   pool: Pool,
 ): Promise<MutationResult> {
   // Structural, and checked before anything else: no grant can make a file revisable.
-  if (intent.op !== "create") return audit.refuseMutation(intent, grant.id, "verb_not_supported");
+  if (intent.op !== "create") return audit.refuseMutation(intent, grant, "verb_not_supported");
 
   const values = intent.values;
   const path = typeof values.path === "string" ? values.path.trim() : "";
   const content = typeof values.content === "string" ? values.content : "";
-  if (!path || !content) return audit.refuseMutation(intent, grant.id, "invalid_intent");
+  if (!path || !content) return audit.refuseMutation(intent, grant, "invalid_intent");
 
   const coerced: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(values)) {
     const r = coerce(value, c.fields[name]!);
-    if (!r.ok) return audit.refuseMutation(intent, grant.id, "invalid_value");
+    if (!r.ok) return audit.refuseMutation(intent, grant, "invalid_value");
     coerced[name] = r.value;
   }
 
@@ -160,7 +159,7 @@ async function mutateFile(
   for (const vocabSlug of c.taxonomies ?? []) {
     if (!(vocabSlug in values)) continue;
     const vocab = d.cfg.taxonomies[vocabSlug];
-    if (!vocab?.terms) return audit.refuseMutation(intent, grant.id, "invalid_value");
+    if (!vocab?.terms) return audit.refuseMutation(intent, grant, "invalid_value");
     // A `multiple: true` vocabulary carries a list; every part is validated independently.
     const submitted = Array.isArray(values[vocabSlug])
       ? (values[vocabSlug] as unknown[])
@@ -171,12 +170,12 @@ async function mutateFile(
       // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const term = String(t ?? "");
       if (!Object.hasOwn(vocab.terms, term))
-        return audit.refuseMutation(intent, grant.id, "invalid_value");
+        return audit.refuseMutation(intent, grant, "invalid_value");
     }
   }
 
   const chunks = chunkText(content);
-  if (chunks.length === 0) return audit.refuseMutation(intent, grant.id, "invalid_intent");
+  if (chunks.length === 0) return audit.refuseMutation(intent, grant, "invalid_intent");
 
   const schema = dataSchema(ctx.env);
   const files = `${schema}.${ident(`${intent.collection}__files`)}`;
@@ -221,7 +220,7 @@ async function mutateFile(
       // For files, store the file_id as the rev identifier in change_log; the checksum is
       // returned to the caller as the If-Match value but is not a UUID for storage.
       await writeChangeLog(client, ctx, intent.collection, fileId, fileId, "create", "approved");
-      const rec = await audit.allowMutation(intent, grant.id, Object.keys(values));
+      const rec = await audit.allowMutation(intent, grant, Object.keys(values));
       assertRecorded(rec);
       // A file has no revisions, so its checksum is the closest thing to one: it identifies
       // the content that was stored, and it is what a later If-Match would compare.
@@ -237,9 +236,9 @@ async function mutateFile(
     // 23505 on this table can only be the unique `path`: the caller is re-creating a
     // document that already exists, which is a conflict rather than a server fault.
     if ((err as { code?: string }).code === "23505")
-      return audit.refuseMutation(intent, grant.id, "conflict");
+      return audit.refuseMutation(intent, grant, "conflict");
     console.error("[broker] mutateFile failed", { collection: intent.collection, err });
-    return audit.refuseMutation(intent, grant.id, "internal_error");
+    return audit.refuseMutation(intent, grant, "internal_error");
   }
 }
 
@@ -255,14 +254,14 @@ async function mutateDataset(
   const table = `${schema}.${ident(intent.collection)}`;
   const pk = pkOf(c);
   // Without a declared pk a dataset has no document identity, so nothing can address it.
-  if (!pk) return audit.refuseMutation(intent, grant.id, "invalid_intent");
+  if (!pk) return audit.refuseMutation(intent, grant, "invalid_intent");
 
   const submitted = intent.op === "delete" ? {} : intent.values;
   const coerced: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(submitted)) {
     const r = coerce(value, c.fields[name]!);
     // coerce's reasons name a type; the broker's name nothing. Collapse them.
-    if (!r.ok) return audit.refuseMutation(intent, grant.id, "invalid_value");
+    if (!r.ok) return audit.refuseMutation(intent, grant, "invalid_value");
     coerced[name] = r.value;
   }
 
@@ -278,7 +277,7 @@ async function mutateDataset(
           docId = randomUUID();
           coerced[pk] = docId;
         }
-        if (docId === undefined) return audit.refuseMutation(intent, grant.id, "invalid_intent");
+        if (docId === undefined) return audit.refuseMutation(intent, grant, "invalid_intent");
         // The pk value came out of `coerced`, whose values are `unknown` to the compiler. Anything
         // non-scalar would stringify to "[object Object]"; it is a pk, so it is a scalar — but say
         // that once, here, rather than at each use.
@@ -291,7 +290,7 @@ async function mutateDataset(
           `select 1 from ${table} where ${ident(pk)} = $1 and _current`,
           [docId],
         );
-        if ((clash.rowCount ?? 0) > 0) return audit.refuseMutation(intent, grant.id, "conflict");
+        if ((clash.rowCount ?? 0) > 0) return audit.refuseMutation(intent, grant, "conflict");
 
         const revId = await insertRevision(
           client,
@@ -317,7 +316,7 @@ async function mutateDataset(
           "create",
           "approved",
         );
-        const rec = await audit.allowMutation(intent, grant.id, Object.keys(coerced));
+        const rec = await audit.allowMutation(intent, grant, Object.keys(coerced));
         assertRecorded(rec);
         return {
           ok: true as const,
@@ -330,17 +329,24 @@ async function mutateDataset(
 
       // update and delete both revise an existing document, and differ only in the op they
       // record and whether they carry values.
-      const current = await currentRevision(client, table, pk, intent.id);
-      if (!current) return audit.refuseMutation(intent, grant.id, "not_found");
+      // The row carries its ACL: same statement, same transaction, so there is no window
+      // between reading the document and reading the policy that governs it.
+      const current = await currentRevision(
+        client,
+        table,
+        pk,
+        intent.id,
+        aclColumnSql(ctx.env, intent.collection, c, "t"),
+      );
+      if (!current) return audit.refuseMutation(intent, grant, "not_found");
 
-      // A document the grant's filter excludes is not_found, never a distinct refusal —
+      // A document the grant's filter OR its ACL excludes is not_found, never a distinct refusal —
       // the same rule as getDocument. $self is already bound by loadActiveGrant.
-      if (!matchesFilters(current, grant.documentFilter, c))
-        return audit.refuseMutation(intent, grant.id, "not_found");
+      if (!admits(current, grant, c)) return audit.refuseMutation(intent, grant, "not_found");
 
       // Optimistic concurrency: `expect` is the _rev the caller last saw.
       if (intent.expect && intent.expect !== current._rev)
-        return audit.refuseMutation(intent, grant.id, "conflict");
+        return audit.refuseMutation(intent, grant, "conflict");
 
       const isDelete = intent.op === "delete";
       // Demote-then-promote, untouched columns carried forward: reviseDocument owns both, and is
@@ -360,7 +366,7 @@ async function mutateDataset(
         isDelete ? "delete" : "update",
         "approved",
       );
-      const rec = await audit.allowMutation(intent, grant.id, isDelete ? [] : Object.keys(coerced));
+      const rec = await audit.allowMutation(intent, grant, isDelete ? [] : Object.keys(coerced));
       assertRecorded(rec);
       return {
         ok: true as const,
@@ -374,6 +380,6 @@ async function mutateDataset(
     // Same discipline as query: a driver error names columns and values, so it goes to the
     // log and the caller gets a bare reason code.
     console.error("[broker] mutateDataset failed", { collection: intent.collection, err });
-    return audit.refuseMutation(intent, grant.id, "internal_error");
+    return audit.refuseMutation(intent, grant, "internal_error");
   }
 }

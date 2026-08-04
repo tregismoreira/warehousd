@@ -61,6 +61,8 @@ export type CollectionDetail = {
   description: string;
   type: "dataset" | "file";
   writable: boolean;
+  /** `acl: true` in warehousd.yml — the collection carries per-document ACLs. */
+  acl: boolean;
   status: ApplyStatus;
   appliedAt: string | null;
   env: "dev" | "live";

@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
     select a."clientId"                      as "clientId",
            coalesce(p.display_name, a.name)  as "displayName",
            coalesce(p.allowed_scopes, '{env:dev}') as "allowedScopes",
+           -- Absent policy row means false, mirroring getClientPolicy. Never allow-all.
+           coalesce(p.can_manage_acl, false) as "canManageAcl",
            p.promoted_at                     as "promotedAt",
            p.promoted_by                     as "promotedBy",
            a."createdAt"                     as "createdAt",

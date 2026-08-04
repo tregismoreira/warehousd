@@ -86,14 +86,27 @@ export async function demoteRevision(
   await client.query(`update ${table} set _current = false where _rev = $1`, [rev]);
 }
 
-/** The revision a document currently holds, or null if it has none (or was deleted). */
+/**
+ * The revision a document currently holds, or null if it has none (or was deleted).
+ *
+ * `aclSql` is the `, (...) as "_acl"` fragment from acl/sql.ts, or "" for a caller with no ACL to
+ * evaluate. It is a REQUIRED parameter and not an optional one on purpose: `admits()` fails closed
+ * when the column is absent, so a caller that forgets it would find every write to an ACL'd
+ * collection refused rather than allowed — but the compiler naming the site is better than either.
+ * The import path passes "": it runs as the operator, not as a principal, and there is no ACL for
+ * it to be inside or outside of.
+ */
 export async function currentRevision(
   client: PoolClient,
   table: string,
   pk: string,
   id: unknown,
+  aclSql: string,
 ): Promise<RevisionRow | null> {
-  const r = await client.query(`select * from ${table} where ${ident(pk)} = $1 and _current`, [id]);
+  const r = await client.query(
+    `select t.*${aclSql} from ${table} t where t.${ident(pk)} = $1 and t._current`,
+    [id],
+  );
   return r.rowCount ? (r.rows[0] as RevisionRow) : null;
 }
 

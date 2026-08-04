@@ -19,6 +19,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { PostureBadge } from "@/components/common/PostureBadge";
 import type { BoundVocabulary, CollectionDetail as Detail, FileRow } from "../types";
 import { DataBrowser } from "./DataBrowser";
+import { AclEditor } from "./AclEditor";
 
 // Master/detail: one route per collection, so a collection is a thing you can link somebody to.
 // Everything on this page is scoped to the console's current environment — counts, terms, files
@@ -68,6 +69,11 @@ export function CollectionDetail({ name }: { name: string }) {
                 writable
               </Badge>
             )}
+            {detail.acl && (
+              <Badge variant="secondary" className="font-mono text-xs">
+                acl
+              </Badge>
+            )}
             <Badge variant="outline" className="font-mono text-xs">
               {detail.env}
             </Badge>
@@ -97,6 +103,9 @@ export function CollectionDetail({ name }: { name: string }) {
           <TabsTrigger value="taxonomies">Taxonomies</TabsTrigger>
           {detail.type === "file" && <TabsTrigger value="files">Files</TabsTrigger>}
           <TabsTrigger value="data">Data</TabsTrigger>
+          {/* Only for a collection that declares `acl: true`. On any other collection the rows
+              would be inert — the view has no `_acl` column to read them through. */}
+          {detail.acl && <TabsTrigger value="acl">Access</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="fields" className="pt-4">
@@ -113,6 +122,11 @@ export function CollectionDetail({ name }: { name: string }) {
         <TabsContent value="data" className="pt-4">
           <DataBrowser detail={detail} onGrantChanged={load} />
         </TabsContent>
+        {detail.acl && (
+          <TabsContent value="acl" className="pt-4">
+            <AclEditor collection={detail.name} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

@@ -4,6 +4,7 @@ import { ident } from "./ident";
 import { maskExpr } from "./mask";
 import type { MaskConfig } from "../config/schema";
 import { dataSchema } from "../config/collection";
+import { aclPredicate } from "../acl/sql";
 
 // A filter the builder can express no SQL for. Distinct from the generic Error below so the
 // broker can answer `invalid_intent` — a caller's mistake — rather than `internal_error`.
@@ -66,6 +67,12 @@ export function buildSelect(
     // `semantic` and `hybrid`. There is no path from a client-supplied vector to here.
     qVector?: number[];
     mode?: "text" | "semantic" | "hybrid";
+    // The caller's principal set, supplied ONLY for a collection whose view carries an `_acl`
+    // column (`acl: true`). Present means the per-document predicate is ANDed in; absent means the
+    // collection has no ACLs and the column does not exist to be compared. Never a value from a
+    // request — the read verbs take it from the loaded grant, which derives it from
+    // `app.user_groups` (acl/principals.ts).
+    aclPrincipals?: string[];
   } = {},
 ): { text: string; values: unknown[] } {
   const schema = dataSchema(env);
@@ -198,6 +205,18 @@ export function buildSelect(
       where.push(`${q(rf.field)} = ${param(rf.value)}`);
     }
   }
+
+  // The per-document ACL, ANDed in with everything else.
+  //
+  // It goes in `where` rather than anywhere later on purpose: `whereClause` below is what both
+  // hybrid CTEs interpolate, so putting it here is what lands it inside `scoped` — the ACL is
+  // applied BEFORE either ranking and before either LIMIT. Ranked-then-filtered would leak the
+  // same way a grant filter would: a caller asking for 5 would get however many of the global
+  // top-5 they may see, and the shortfall itself reports how many they may not.
+  //
+  // A fixed clause, never composed from caller input. The principal set is the only thing that
+  // varies and it is a bound parameter, like every other value (invariant 2).
+  if (opts.aclPrincipals) where.push(aclPredicate(param(opts.aclPrincipals)));
 
   // The lexical match. NOT applied in semantic mode: the whole point of a vector search is to
   // find documents that do not contain the query's words.

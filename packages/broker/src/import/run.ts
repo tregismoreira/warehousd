@@ -210,7 +210,7 @@ export async function importCollection(
         const missing: ImportError[] = [];
         for (const [idx, row] of v.values.entries()) {
           const doc = docOf(row);
-          if (!(await currentRevision(client, table, pk!, doc[pk!])))
+          if (!(await currentRevision(client, table, pk!, doc[pk!], "")))
             missing.push({ row: idx, column: pk, reason: "not_found" });
         }
         if (missing.length) throw new RowErrors(missing);
@@ -228,7 +228,7 @@ export async function importCollection(
           continue;
         }
 
-        const current = await currentRevision(client, table, pk!, doc[pk!]);
+        const current = await currentRevision(client, table, pk!, doc[pk!], "");
 
         if (mode === "delete") {
           // currentRevision was non-null in the sweep above and this is the same transaction.

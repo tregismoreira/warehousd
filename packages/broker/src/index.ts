@@ -60,6 +60,30 @@ export type {
 } from "./config/schema";
 export { unmaskPosture, isGrantable, READ_POSTURES, MaskSchema } from "./config/schema";
 export { applyConfig } from "./apply/apply";
+// Per-document ACLs. The read/write verbs hang off the broker object (broker.ts); what is exported
+// here is what an adapter needs around them — the manager identity type, group membership, and the
+// principal spelling that both sides have to agree on.
+export {
+  listUserGroups,
+  setUserGroups,
+  listGroups,
+  listGroupMembers,
+  type AclManager,
+  type DocumentAcl,
+  type GroupSource,
+  type GetAclResult,
+  type SetAclResult,
+  type AclRefusalReason,
+} from "./acl/manage";
+export {
+  userPrincipal,
+  groupPrincipal,
+  isPrincipal,
+  loadPrincipals,
+  USER_PREFIX,
+  GROUP_PREFIX,
+} from "./acl/principals";
+export { ACL_COLUMN, ACL_TABLE } from "./config/schema";
 export { declaredTables, declaredPkField } from "./apply/ddl";
 export type { DeclaredTable, DeclaredColumn } from "./apply/ddl";
 export {
@@ -89,6 +113,7 @@ export {
   hasApprovedLiveGrant,
   upsertClientPolicy,
   setAllowedScopes,
+  setCanManageAcl,
   getDevClient,
   ensureDevClient,
   DEV_CLIENT_NAME,
