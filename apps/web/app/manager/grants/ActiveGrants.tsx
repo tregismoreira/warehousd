@@ -17,6 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { requestJson } from "@/lib/client-api";
 
 type ActiveGrant = {
   id: string;
@@ -39,13 +40,9 @@ export function ActiveGrants() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      const res = await fetch("/api/grants");
-      const data = await res.json();
-      setGrants(data.active ?? []);
-    } finally {
-      setLoading(false);
-    }
+    const res = await requestJson<{ active?: ActiveGrant[] }>("/api/grants");
+    if (res.ok) setGrants(res.data.active ?? []);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -55,14 +52,12 @@ export function ActiveGrants() {
   async function revoke(id: string) {
     setRevoking(id);
     try {
-      const res = await fetch("/api/grants", {
+      const res = await requestJson("/api/grants", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "revoke", id }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to revoke", { description: err.error });
+        toast.error("Failed to revoke", { description: res.error });
         return;
       }
       toast.success("Grant revoked");

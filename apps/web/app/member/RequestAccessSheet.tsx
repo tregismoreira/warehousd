@@ -23,6 +23,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { requestJson } from "@/lib/client-api";
 
 type Coll = {
   name: string;
@@ -43,9 +44,9 @@ export function RequestAccessSheet({ onDone }: { onDone: () => void }) {
 
   useEffect(() => {
     if (!open) return;
-    void fetch("/api/me/collections")
-      .then((r) => r.json())
-      .then((d) => setColls(d.collections ?? []));
+    void requestJson<{ collections?: Coll[] }>("/api/me/collections").then((r) => {
+      if (r.ok) setColls(r.data.collections ?? []);
+    });
   }, [open]);
 
   const selected = colls.find((c) => c.name === collection);
@@ -56,9 +57,8 @@ export function RequestAccessSheet({ onDone }: { onDone: () => void }) {
 
   async function submit() {
     setSubmitting(true);
-    const res = await fetch("/api/grants", {
+    const res = await requestJson("/api/grants", {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         action: "request",
         collection,
@@ -69,7 +69,7 @@ export function RequestAccessSheet({ onDone }: { onDone: () => void }) {
     });
     setSubmitting(false);
     if (!res.ok) {
-      toast.error("Request failed", { description: (await res.json()).error });
+      toast.error("Request failed", { description: res.error });
       return;
     }
     toast.success("Access requested", { description: "A manager will review it." });

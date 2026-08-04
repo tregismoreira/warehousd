@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { QueryIntentSchema } from "@warehousd/broker";
 import { deriveContext } from "../../../../../lib/session";
 import { getBroker } from "../../../../lib/broker";
-import { unauthenticated, restStatus } from "../../../../../lib/rest";
+import { unauthenticated, restStatus, readJson } from "../../../../../lib/rest";
 
 // The console's read path. Session-authenticated where `/v1/collections/[c]/query` is
 // token-authenticated, and identical in every other respect: same broker verb, same context
@@ -37,19 +37,4 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ c: 
 
 function refusal(reason: "invalid_intent"): Response {
   return Response.json({ ok: false, reason, auditId: null }, { status: restStatus(reason) });
-}
-
-// req.json() throws on an absent or non-JSON body, and a JSON array or scalar is not an intent
-// either. Reporting that as invalid_intent keeps it inside the reason-code table instead of
-// surfacing a parser error as a 500.
-async function readJson(
-  req: NextRequest,
-): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
-  try {
-    const body: unknown = await req.json();
-    if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false };
-    return { ok: true, value: body as Record<string, unknown> };
-  } catch {
-    return { ok: false };
-  }
 }

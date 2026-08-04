@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mono } from "@/components/common/Mono";
+import { requestJson } from "@/lib/client-api";
 
 interface ViewJoin {
   table: string;
@@ -85,17 +86,10 @@ export function ImportForm() {
 
   useEffect(() => {
     const loadCollections = async () => {
-      try {
-        const res = await fetch("/api/admin/collections");
-        const data = await res.json();
-        const datasets = (data.collections as Collection[]).filter((c) => c.type !== "file");
-        setCollections(datasets);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        toast.error(`Failed to load collections: ${msg}`);
-      } finally {
-        setLoading(false);
-      }
+      const res = await requestJson<{ collections: Collection[] }>("/api/admin/collections");
+      if (!res.ok) toast.error(`Failed to load collections: ${res.error}`);
+      else setCollections(res.data.collections.filter((c) => c.type !== "file"));
+      setLoading(false);
     };
     void loadCollections();
   }, []);

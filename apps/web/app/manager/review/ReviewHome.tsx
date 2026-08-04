@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
+import { requestJson } from "@/lib/client-api";
 import { ProposalsTable, type Proposal } from "./ProposalsTable";
 
 export function ReviewHome() {
@@ -10,17 +11,10 @@ export function ReviewHome() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      const res = await fetch("/api/proposals?status=pending");
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data = await res.json();
-      setProposals(data.proposals);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to load proposals: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
+    const res = await requestJson<{ proposals: Proposal[] }>("/api/proposals?status=pending");
+    if (res.ok) setProposals(res.data.proposals);
+    else toast.error(`Failed to load proposals: ${res.error}`);
+    setLoading(false);
   };
 
   useEffect(() => {

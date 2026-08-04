@@ -6,6 +6,7 @@ import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Mono } from "@/components/common/Mono";
+import { requestJson } from "@/lib/client-api";
 import { ApproveSheet, type PendingGrant } from "./ApproveSheet";
 
 type GrantRow = PendingGrant;
@@ -18,18 +19,15 @@ export function Inbox() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      const res = await fetch("/api/grants");
-      const data = await res.json();
+    const res = await requestJson<{ pending?: GrantRow[] }>("/api/grants");
+    if (res.ok)
       setGrants(
-        (data.pending ?? []).map((g: GrantRow) => ({
+        (res.data.pending ?? []).map((g) => ({
           ...g,
           collectionType: g.collectionType || "dataset",
         })),
       );
-    } finally {
-      setLoading(false);
-    }
+    setLoading(false);
   };
 
   useEffect(() => {

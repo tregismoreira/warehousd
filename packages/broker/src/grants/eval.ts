@@ -36,14 +36,62 @@ export async function loadActiveGrant(
     [userId, collection, env, orgId],
   );
   if (r.rowCount === 0) return null;
-  const df = r.rows[0].document_filter;
+  return toActiveGrant(r.rows[0], userId);
+}
+
+// Same question as loadActiveGrant, asked about many collections at once. Two verbs
+// (`changes`, `listProposals`) ask it for every configured collection, which was one round trip
+// each. A collection with no active grant is absent from the map — exactly the null the
+// single-collection loader returns, so neither caller has to learn a second convention.
+export async function loadActiveGrants(
+  db: Pool,
+  ctx: Pick<BrokerContext, "userId" | "orgId" | "env" | "allowedCollections">,
+  collections: string[],
+): Promise<Map<string, ActiveGrant>> {
+  const { userId, orgId, env, allowedCollections } = ctx;
+
+  // The ceiling is applied to the input list rather than inside the query, so it stays the same
+  // narrowing rule the single loader states above rather than a second copy of it in SQL.
+  const asked =
+    allowedCollections != null
+      ? collections.filter((c) => allowedCollections.includes(c))
+      : collections;
+  const out = new Map<string, ActiveGrant>();
+  if (asked.length === 0) return out;
+
+  // `distinct on (collection)` with the same `requested_at desc` tie-break the single loader
+  // uses, so a superseded grant loses to its replacement identically either way.
+  const r = await db.query(
+    `select distinct on (collection) collection, id, allowed_fields, document_filter, verbs, mode
+     from app.grants
+     where user_id=$1 and collection = any($2) and env=$3 and org_id=$4
+       and status='approved' and (expires_at is null or expires_at > now())
+     order by collection, requested_at desc`,
+    [userId, asked, env, orgId],
+  );
+
+  for (const row of r.rows) out.set(row.collection, toActiveGrant(row, userId));
+  return out;
+}
+
+// The one place a grant row becomes an ActiveGrant. Both loaders go through it so the legacy
+// document_filter check and the $self binding — the security-relevant parts — cannot drift apart.
+function toActiveGrant(
+  row: {
+    id: string;
+    allowed_fields: string[] | null;
+    document_filter: unknown;
+    verbs: string[] | null;
+    mode: string | null;
+  },
+  userId: string,
+): ActiveGrant {
+  const df = row.document_filter;
   // document_filter is a DocumentFilter[]. A row holding the pre-Stage-2 object form is a
   // database that predates this schema and must be rebuilt — coercing it to [] would silently
   // widen a scoped grant to the whole collection, which is the one failure mode worth crashing on.
   if (df !== null && df !== undefined && !Array.isArray(df))
-    throw new Error(
-      `grant ${r.rows[0].id}: document_filter is not an array (rebuild the database)`,
-    );
+    throw new Error(`grant ${row.id}: document_filter is not an array (rebuild the database)`);
 
   // Resolve $self, per predicate and per element inside an `in` list. Binding happens here so
   // no caller can forget it and the SQL builder still sees a plain literal. Only the exact
@@ -56,10 +104,10 @@ export async function loadActiveGrant(
   });
 
   return {
-    id: r.rows[0].id,
-    allowedFields: r.rows[0].allowed_fields ?? [],
+    id: row.id,
+    allowedFields: row.allowed_fields ?? [],
     documentFilter,
-    verbs: r.rows[0].verbs ?? ["read"],
-    mode: r.rows[0].mode ?? "direct",
+    verbs: row.verbs ?? ["read"],
+    mode: row.mode ?? "direct",
   };
 }

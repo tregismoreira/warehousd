@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { requestJson } from "@/lib/client-api";
 import type { ApiKey } from "./ApiKeysTable";
 import { AuditBrowser } from "../audit/AuditBrowser";
 
@@ -53,25 +54,22 @@ export function ApiKeyDetail({
     if (!activeSecret) return;
     setRotating(true);
     try {
-      const res = await fetch(`/api/api-keys/${keyData.clientId}/rotate`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          oldSecretId: activeSecret.id,
-          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-        }),
-      });
+      const res = await requestJson<{ secret: string; id: string }>(
+        `/api/api-keys/${keyData.clientId}/rotate`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            oldSecretId: activeSecret.id,
+            expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          }),
+        },
+      );
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to rotate", { description: err.error });
+        toast.error("Failed to rotate", { description: res.error });
         return;
       }
-      const result = await res.json();
-      setRotatedSecret(result);
+      setRotatedSecret(res.data);
       await onRefresh();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to rotate: ${msg}`);
     } finally {
       setRotating(false);
     }
@@ -80,66 +78,47 @@ export function ApiKeyDetail({
   async function promote() {
     setPromoting(true);
     try {
-      const res = await fetch(`/api/oauth-clients/${keyData.clientId}/promote`, {
+      const res = await requestJson(`/api/oauth-clients/${keyData.clientId}/promote`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "promote" }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to promote", { description: err.error });
+        toast.error("Failed to promote", { description: res.error });
         return;
       }
       toast.success("Key promoted to env:live");
       await onRefresh();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to promote: ${msg}`);
     } finally {
       setPromoting(false);
     }
   }
 
   async function updateCeiling() {
-    try {
-      const collections = newCeiling.trim() ? newCeiling.split(",").map((c) => c.trim()) : null;
-      const res = await fetch(`/api/api-keys/${keyData.clientId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ allowedCollections: collections }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to update ceiling", { description: err.error });
-        return;
-      }
-      toast.success("Collection ceiling updated");
-      await onRefresh();
-      setEditingCeiling(false);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to update ceiling: ${msg}`);
+    const collections = newCeiling.trim() ? newCeiling.split(",").map((c) => c.trim()) : null;
+    const res = await requestJson(`/api/api-keys/${keyData.clientId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ allowedCollections: collections }),
+    });
+    if (!res.ok) {
+      toast.error("Failed to update ceiling", { description: res.error });
+      return;
     }
+    toast.success("Collection ceiling updated");
+    await onRefresh();
+    setEditingCeiling(false);
   }
 
   async function revokeSecret(secretId: string, prefix: string) {
-    try {
-      const res = await fetch(`/api/api-keys/${keyData.clientId}/revoke`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ secretId }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to revoke", { description: err.error });
-        return;
-      }
-      toast.success(`Revoked ${prefix}`);
-      await onRefresh();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to revoke: ${msg}`);
+    const res = await requestJson(`/api/api-keys/${keyData.clientId}/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ secretId }),
+    });
+    if (!res.ok) {
+      toast.error("Failed to revoke", { description: res.error });
+      return;
     }
+    toast.success(`Revoked ${prefix}`);
+    await onRefresh();
   }
 
   if (showAudit) {

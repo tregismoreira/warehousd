@@ -14,6 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { requestJson } from "@/lib/client-api";
 
 export function AddIssuerDialog({ onCreated }: { onCreated: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
@@ -33,9 +34,8 @@ export function AddIssuerDialog({ onCreated }: { onCreated: () => Promise<void> 
   async function submit() {
     setSaving(true);
     try {
-      const res = await fetch("/api/trusted-issuers", {
+      const res = await requestJson("/api/trusted-issuers", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           issuer: issuer.trim(),
           jwksUri: jwksUri.trim(),
@@ -45,17 +45,13 @@ export function AddIssuerDialog({ onCreated }: { onCreated: () => Promise<void> 
         }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to add issuer", { description: err.error });
+        toast.error("Failed to add issuer", { description: res.error });
         return;
       }
       toast.success("Trusted issuer added");
       setOpen(false);
       reset();
       await onCreated();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to add issuer: ${msg}`);
     } finally {
       setSaving(false);
     }

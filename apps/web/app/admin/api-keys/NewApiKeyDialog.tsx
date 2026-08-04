@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Mono } from "@/components/common/Mono";
+import { requestJson } from "@/lib/client-api";
 
 type TrustedIssuer = {
   id: string;
@@ -44,45 +45,36 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
   useEffect(() => {
     if (open && mode === "delegated" && !issuersLoaded) {
       setLoadingIssuers(true);
-      fetch("/api/trusted-issuers")
-        .then((r) => r.json())
-        .then((data) => {
-          setIssuers(data.issuers);
+      void requestJson<{ issuers: TrustedIssuer[] }>("/api/trusted-issuers").then((r) => {
+        if (r.ok) {
+          setIssuers(r.data.issuers);
           setIssuersLoaded(true);
-        })
-        .catch((e) => toast.error(`Failed to load issuers: ${e.message}`))
-        .finally(() => setLoadingIssuers(false));
+        } else toast.error(`Failed to load issuers: ${r.error}`);
+        setLoadingIssuers(false);
+      });
     }
   }, [open, mode, issuersLoaded]);
 
   async function submit() {
-    try {
-      const res = await fetch("/api/api-keys", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          mode,
-          trustedIssuerId: mode === "delegated" ? trustedIssuerId : undefined,
-          robotUserId: mode === "headless" ? robotUserId.trim() : undefined,
-          allowedCollections: allowedCollections.trim()
-            ? allowedCollections.split(",").map((c) => c.trim())
-            : null,
-          expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to create API key", { description: err.error });
-        return;
-      }
-      const result = await res.json();
-      setCreated(result);
-      onCreated();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to create API key: ${msg}`);
+    const res = await requestJson<{ clientId: string; secret: string }>("/api/api-keys", {
+      method: "POST",
+      body: JSON.stringify({
+        name: name.trim(),
+        mode,
+        trustedIssuerId: mode === "delegated" ? trustedIssuerId : undefined,
+        robotUserId: mode === "headless" ? robotUserId.trim() : undefined,
+        allowedCollections: allowedCollections.trim()
+          ? allowedCollections.split(",").map((c) => c.trim())
+          : null,
+        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+      }),
+    });
+    if (!res.ok) {
+      toast.error("Failed to create API key", { description: res.error });
+      return;
     }
+    setCreated(res.data);
+    onCreated();
   }
 
   const isValid =
