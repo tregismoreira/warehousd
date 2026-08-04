@@ -12,7 +12,8 @@
 
 import { Command } from "commander";
 import { resolve, basename } from "node:path";
-import { resolveDbUrl, runApply, runSeed, runIndex, runEmbed } from "./index";
+import { resolveDbUrl, tryResolveDbUrl, runApply, runSeed, runIndex, runEmbed } from "./index";
+import { buildPlan, renderPlan, writeMigration, migrationStatus } from "./migrate";
 import { runInit } from "./init";
 import { runStart } from "./start";
 import { runStop } from "./stop";
@@ -179,8 +180,69 @@ program
   .action(async (o) => {
     ui();
     const db = resolveDbUrl(o.dir, o.db);
-    await runApply(o.dir, db);
-    emit({ applied: true }, "applied");
+    const r = await runApply(o.dir, db);
+    // A rebuilt synth table is empty until the generator runs again. Saying so is the difference
+    // between "apply worked" and an operator wondering where their dev data went.
+    const notes = [
+      ...(r.migrated.length ? [`migrations: ${r.migrated.join(", ")}`] : []),
+      ...(r.rebuilt.length ? [`rebuilt ${r.rebuilt.join(", ")} — run \`warehousd seed\``] : []),
+    ];
+    emit({ applied: true, ...r }, notes.length ? `applied (${notes.join("; ")})` : "applied");
+  });
+const migrate = program
+  .command("migrate")
+  .description("plan and write migrations for changes that would destroy live data");
+migrate
+  .command("plan")
+  .description("what a config change would do to existing data")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .action(async (o) => {
+    ui();
+    // No `resolveDbUrl` throw here: a plan from the last deploy snapshot is still worth printing
+    // when there is no database to reach, which is the normal case before a deploy.
+    const db = tryResolveDbUrl(o.dir, o.db);
+    const plan = await buildPlan(o.dir, db);
+    emit(plan, renderPlan(plan));
+  });
+migrate
+  .command("generate")
+  .description("write the pending changes as a reviewable SQL migration")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .option("-n, --name <slug>", "name for the migration file", "schema-change")
+  .action(async (o) => {
+    ui();
+    const db = tryResolveDbUrl(o.dir, o.db);
+    const plan = await buildPlan(o.dir, db);
+    const blocking = plan.changes.filter((c) => c.destructive);
+    if (blocking.length === 0) {
+      emit({ written: null, changes: [] }, "nothing to migrate");
+      return;
+    }
+    const path = writeMigration(o.dir, plan.changes, o.name);
+    const review = blocking.filter((c) => c.reviewRequired).length;
+    emit(
+      { written: path, changes: blocking, reviewRequired: review },
+      review > 0
+        ? `wrote ${path} — ${review} statement(s) are commented out pending your review`
+        : `wrote ${path} — every statement is lossless and ready to run`,
+    );
+  });
+migrate
+  .command("status")
+  .description("which project migrations have been applied")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .action(async (o) => {
+    ui();
+    const rows = await migrationStatus(o.dir, resolveDbUrl(o.dir, o.db));
+    emit(
+      rows,
+      rows.length === 0
+        ? "no migrations in this project"
+        : rows.map((r) => `${r.state.padEnd(8)} ${r.version}`).join("\n"),
+    );
   });
 program
   .command("seed")
@@ -387,6 +449,7 @@ program
   .description("deploy this project to Fly.io, or tear it down with --destroy")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--allow-local-login", "permit deploying without SSO configured", false)
+  .option("--allow-disabled-audit", "permit deploying with audit.enabled: false", false)
   .option("-y, --yes", "skip the config-diff confirmation", false)
   .option(
     "--local-build",
@@ -399,6 +462,7 @@ program
     const { theme, json, quiet } = ui();
     await runDeploy(o.dir, {
       allowLocalLogin: o.allowLocalLogin,
+      allowDisabledAudit: o.allowDisabledAudit,
       yes: o.yes,
       localBuild: o.localBuild,
       destroy: o.destroy,

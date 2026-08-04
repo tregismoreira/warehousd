@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { Pools } from "../db/pools";
 import type { WarehousdConfig } from "../config/schema";
 import type { Embedder } from "../providers";
+import { auditEnabled } from "../config/load";
 
 // What every verb family needs, handed over explicitly rather than closed over.
 //
@@ -24,6 +25,9 @@ export type VerbDeps = {
   // configured, and `search_documents` refuses `semantic`/`hybrid` rather than silently
   // downgrading to text: a caller that asked for one and got the other has no way to tell.
   embedder?: Embedder | undefined;
+  // Resolved once here rather than read from `cfg` at each verb's audit writer, so that "is this
+  // deployment audited" has one answer for the life of the broker rather than one per verb.
+  auditEnabled: boolean;
 };
 
 export function makeVerbDeps(
@@ -39,5 +43,6 @@ export function makeVerbDeps(
     // `taxonomies` is optional-chained, not indexed: callers that hand-build a config object and
     // cast it never get zod's default, so the key is genuinely absent for most of the test suite.
     isMultiValueField: (field: string) => cfg.taxonomies?.[field]?.multiple ?? false,
+    auditEnabled: auditEnabled(cfg),
   };
 }

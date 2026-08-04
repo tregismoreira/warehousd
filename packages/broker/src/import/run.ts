@@ -8,7 +8,7 @@ import { ident } from "../sql/ident";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
 import { writeAudit } from "../audit/write";
 import { writeChangeLog } from "../verbs/history";
-import { findCollection } from "../config/load";
+import { auditEnabled, findCollection } from "../config/load";
 import { parseImportPayload } from "./csv";
 import { validateImportRows, type ImportError } from "./validate";
 import { loadTaxonomyBindings, syncDatasetTerms, type TaxonomyBinding } from "../taxonomy";
@@ -24,12 +24,15 @@ export type ImportMode = (typeof IMPORT_MODES)[number];
 export type ImportCounts = { inserted: number; updated: number; deleted: number };
 
 export type ImportResult =
+  // `auditId` is nullable on the success arm too: a deployment with `audit.enabled: false`
+  // writes no row, and fabricating an id for one that does not exist would be worse than saying
+  // there isn't one.
   | ({
       ok: true;
       mode: ImportMode;
       dryRun: boolean;
       columns: string[];
-      auditId: string;
+      auditId: string | null;
     } & ImportCounts)
   | { ok: false; reason: string; errors?: ImportError[]; auditId: string | null };
 
@@ -56,8 +59,9 @@ class RowErrors extends Error {
 //
 //   1. Atomic — a partially applied file is worse than a rejected one.
 //   2. Append-only — every mode writes revisions; none rewrites or removes a stored row.
-//   3. Audited on every outcome, through the app pool. The import role cannot reach `app`,
-//      which is deliberate: the writer of data is not the writer of its own audit trail.
+//   3. Audited on every outcome, through the app pool — unless the deployment has turned the
+//      trail off (`audit.enabled: false`). The import role cannot reach `app`, which is
+//      deliberate: the writer of data is not the writer of its own audit trail.
 //   4. Previewable — `dryRun` runs the whole thing and rolls back.
 export async function importCollection(
   pools: Pools,
@@ -71,25 +75,30 @@ export async function importCollection(
   const dryRun = opts.dryRun ?? false;
   const orgId = opts.orgId ?? DEFAULT_ORG_ID;
 
+  // Import writes its own row rather than going through audit/decision.ts, so it has to honour
+  // `audit.enabled` itself — an environment configured as unaudited must not still collect a row
+  // per import.
   const audit = (
     outcome: "allowed" | "refused",
     reason: string | null,
     extra: Record<string, unknown>,
-  ) =>
-    writeAudit(pools.app, {
-      userId: actor,
-      env: "live",
-      collection,
-      orgId,
-      // Column names and counts only — never a cell value. An import file may carry real
-      // personal data and the audit log is queryable by every admin.
-      intent: { op: `import:${mode}`, format: payload.format, dryRun, ...extra },
-      fieldsReturned: [],
-      grantId: null,
-      outcome,
-      reason,
-      via: "session",
-    });
+  ): Promise<string | null> =>
+    !auditEnabled(cfg)
+      ? Promise.resolve(null)
+      : writeAudit(pools.app, {
+          userId: actor,
+          env: "live",
+          collection,
+          orgId,
+          // Column names and counts only — never a cell value. An import file may carry real
+          // personal data and the audit log is queryable by every admin.
+          intent: { op: `import:${mode}`, format: payload.format, dryRun, ...extra },
+          fieldsReturned: [],
+          grantId: null,
+          outcome,
+          reason,
+          via: "session",
+        });
 
   if (!IMPORT_MODES.includes(mode)) {
     return { ok: false, reason: "unknown_mode", auditId: null };

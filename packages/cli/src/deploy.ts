@@ -9,6 +9,7 @@ import { resolveBaseImage, renderDeployDockerfile, renderFlyToml } from "./deplo
 import { renderConfigDiff } from "./deploy/diff";
 import { confirmDestroy } from "./deploy/destroy";
 import { buildDeployOutputs, formatDeployOutputs } from "./deploy/outputs";
+import { existingMigrations } from "./migrate";
 import { run, tryRun, appExists } from "./fly";
 import { renderChecks } from "./ui/render";
 import { plainTheme, type Theme } from "./ui/theme";
@@ -65,6 +66,7 @@ export async function runDeploy(
   dir: string,
   opts: {
     allowLocalLogin?: boolean;
+    allowDisabledAudit?: boolean;
     yes?: boolean;
     destroy?: boolean;
     localBuild?: boolean;
@@ -132,6 +134,7 @@ export async function runDeploy(
     projectDir: dir,
     env: process.env,
     allowLocalLogin: !!opts.allowLocalLogin,
+    allowDisabledAudit: !!opts.allowDisabledAudit,
     ssoLookup: ssoConfiguredInDatabase,
   });
 
@@ -306,6 +309,9 @@ export async function runDeploy(
     cfg,
     databaseUrl: deploy.database.managed ? null : databaseUrl,
     now: new Date(),
+    // Recorded so the next deploy's pre-flight can tell a migration written for this change from
+    // one that was already there.
+    migrationVersions: existingMigrations(dir),
   });
 
   writeDeployOutputs(dir, outputs);

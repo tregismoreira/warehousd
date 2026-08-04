@@ -1,4 +1,4 @@
-// Migration 0004 — which of a grant's fields are carried RAW rather than masked.
+// Migration 0005 — which of a grant's fields are carried RAW rather than masked.
 //
 // `allowed_fields` says what the grant can read. It cannot also say how much of each: a field
 // with `posture: { read: mask }` is readable by anyone the grant covers, but only as its
@@ -17,8 +17,8 @@
 // read ssn unmasked" are different questions, and only the second one is the interesting one.
 // It goes in its own column rather than inside the intent JSON because it is a property of the
 // DECISION, not of what the caller asked for.
-export const m0004GrantUnmaskedFields = {
-  version: "0004_grant_unmasked_fields",
+export const m0005GrantUnmaskedFields = {
+  version: "0005_grant_unmasked_fields",
   sql: `
 alter table app.grants
   add column if not exists unmasked_fields text[] not null default '{}';

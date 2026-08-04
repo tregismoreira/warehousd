@@ -1,5 +1,13 @@
-import { loadConfig, envRefs, type WarehousdConfig } from "@warehousd/broker";
+import {
+  loadConfig,
+  envRefs,
+  auditEnabled,
+  planFromConfigs,
+  type WarehousdConfig,
+} from "@warehousd/broker";
 import { FlyError, assertFly } from "../fly";
+import { readDeployOutputs } from "../state";
+import { existingMigrations } from "../migrate";
 
 export type PreflightCheck = { id: string; ok: boolean; detail: string };
 export type PreflightResult =
@@ -9,6 +17,7 @@ export type PreflightInput = {
   projectDir: string;
   env: NodeJS.ProcessEnv;
   allowLocalLogin: boolean;
+  allowDisabledAudit?: boolean | undefined;
   ssoLookup?: ((dbUrl: string) => Promise<boolean>) | undefined;
 };
 
@@ -68,6 +77,49 @@ async function ssoOrLocalLoginCheck(
   };
 }
 
+/**
+ * Catch a change that would destroy live data before the image is pushed, not after.
+ *
+ * This runs on the operator's machine, where the target database is usually unreachable — with
+ * `database.managed: true` there is no URL at all, because Fly generates those credentials during
+ * `postgres attach` and never hands them back. So the comparison is against the config snapshot
+ * from the last deploy, and the question it can answer is narrow: did a destructive change appear,
+ * and has the operator written a migration since?
+ *
+ * It cannot confirm the migration is correct — only the release command, which has the real
+ * database, can do that, and it refuses the boot if the drift is still there. This check exists so
+ * that failure happens here instead, before a broken release is on its way to Fly.
+ */
+function schemaMigrationsCheck(projectDir: string, cfg: WarehousdConfig | null): PreflightCheck {
+  const id = "schema-migrations-present";
+  if (!cfg) return { id, ok: true, detail: "not evaluated: the config did not load" };
+
+  const previous = readDeployOutputs(projectDir);
+  if (!previous)
+    return { id, ok: true, detail: "no previous deploy on this machine — nothing to compare" };
+
+  const blocking = planFromConfigs(previous.configSnapshot, cfg).filter((c) => c.destructive);
+  if (blocking.length === 0) return { id, ok: true, detail: "no change needs a migration" };
+
+  const before = new Set(previous.migrationVersions ?? []);
+  const added = existingMigrations(projectDir).filter((m) => !before.has(m));
+  if (added.length > 0)
+    return {
+      id,
+      ok: true,
+      detail: `${added.length} new migration(s) since the last deploy: ${added.join(", ")}. The release command verifies they resolved the change.`,
+    };
+
+  return {
+    id,
+    ok: false,
+    detail:
+      `${blocking.length} change(s) would destroy or strand live data and no migration has been ` +
+      `added since the last deploy: ${blocking.map((c) => c.detail).join("; ")}. ` +
+      `Run \`warehousd migrate generate\`, review the SQL, and deploy again.`,
+  };
+}
+
 export async function preflight(input: PreflightInput): Promise<PreflightResult> {
   const checks: PreflightCheck[] = [];
 
@@ -92,6 +144,8 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
   let deployBlockDetail: string;
   let demoOffOk: boolean;
   let demoOffDetail: string;
+  let auditOnOk: boolean;
+  let auditOnDetail: string;
 
   if (missing.length === 0) {
     try {
@@ -111,6 +165,17 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
             : hasEnvDemo
               ? "WAREHOUSD_DEMO=true in environment"
               : "Demo mode is off";
+      // Deploying without a trail is allowed — `audit.enabled: false` exists for lower
+      // environments — but only when the operator says so on the command line. The failure mode
+      // this guards against is the quiet one: a deployment that looks audited, has an audit page,
+      // and is recording nothing.
+      auditOnOk = auditEnabled(cfg) || input.allowDisabledAudit === true;
+      auditOnDetail = auditEnabled(cfg)
+        ? "Audit logging is on"
+        : input.allowDisabledAudit === true
+          ? "--allow-disabled-audit passed; deploying with no audit trail"
+          : "audit.enabled: false in warehousd.yml — this deployment would record no decisions " +
+            "at all. Remove it, or pass --allow-disabled-audit.";
     } catch (err: unknown) {
       // loadConfig threw; mark checks as unevaluable
       const detail = err instanceof Error ? err.message : "Failed to load config";
@@ -118,6 +183,8 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
       deployBlockDetail = `Could not evaluate: ${detail}`;
       demoOffOk = false;
       demoOffDetail = `Could not evaluate: ${detail}`;
+      auditOnOk = false;
+      auditOnDetail = `Could not evaluate: ${detail}`;
     }
   } else {
     // env refs didn't resolve; cannot evaluate demo and deploy checks without resolving env refs.
@@ -126,6 +193,8 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
     deployBlockDetail = "Could not evaluate: resolve environment variables first to load config";
     demoOffOk = false;
     demoOffDetail = "Could not evaluate: resolve environment variables first to load config";
+    auditOnOk = false;
+    auditOnDetail = "Could not evaluate: resolve environment variables first to load config";
   }
 
   // Add deploy-block-present and demo-off checks (only once each)
@@ -139,6 +208,13 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
     ok: demoOffOk,
     detail: demoOffDetail,
   });
+  checks.push({
+    id: "audit-on",
+    ok: auditOnOk,
+    detail: auditOnDetail,
+  });
+
+  checks.push(schemaMigrationsCheck(input.projectDir, cfg));
 
   checks.push(await ssoOrLocalLoginCheck(input, cfg));
 

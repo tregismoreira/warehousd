@@ -86,6 +86,15 @@ export function loadConfig(dir: string): WarehousdConfig {
   return ConfigSchema.parse(cfg);
 }
 
+// Whether decisions are recorded at all. The `??` is not belt-and-braces: most of the test suite
+// hand-builds a config object and casts it rather than going through zod, so the key is genuinely
+// absent for those callers and there is no default to read — the same reason `isMultiValueField`
+// optional-chains `taxonomies` (verbs/deps.ts). Defaulting to true here means the only way to lose
+// the trail is to ask for it in writing.
+export function auditEnabled(cfg: WarehousdConfig): boolean {
+  return cfg.audit?.enabled ?? true;
+}
+
 // Collection names arrive from request bodies and MCP tool calls, and `cfg.collections[name]`
 // is a property read, not a membership test: every object literal already answers to
 // `constructor`, `toString`, `__proto__` and friends. Those names returned a truthy

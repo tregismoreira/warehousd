@@ -8,6 +8,7 @@
 </p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/warehousd"><img src="https://img.shields.io/npm/v/warehousd.svg" alt="npm version"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-1D9E75" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A522-1A1A1A" alt="Node 22+">
   <img src="https://img.shields.io/badge/postgres-16-1A1A1A" alt="Postgres 16">

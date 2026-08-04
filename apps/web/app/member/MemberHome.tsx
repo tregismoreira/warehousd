@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/common/PageHeader";
+import { requestJson } from "@/lib/client-api";
 import { MyGrants, type MeGrant } from "./MyGrants";
 import { RequestAccessSheet } from "./RequestAccessSheet";
 
@@ -10,13 +11,9 @@ export function MemberHome() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      const res = await fetch("/api/me/grants");
-      const data = await res.json();
-      setGrants(data.grants ?? []);
-    } finally {
-      setLoading(false);
-    }
+    const res = await requestJson<{ grants?: MeGrant[] }>("/api/me/grants");
+    if (res.ok) setGrants(res.data.grants ?? []);
+    setLoading(false);
   };
 
   useEffect(() => {

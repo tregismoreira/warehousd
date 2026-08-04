@@ -1,5 +1,6 @@
 import {
   normalizePosture,
+  planFromConfigs,
   type WarehousdConfig,
   type CollectionConfig,
   type DeployConfig,
@@ -17,6 +18,7 @@ export function renderConfigDiff(prev: WarehousdConfig | null, next: WarehousdCo
 
   const items: DiffItem[] = [];
 
+  compareSchema(prev, next, items);
   compareDeploy(prev.deploy, next.deploy, items);
   compareCollections(prev.collections, next.collections, items);
   compareTaxonomies(prev.collections, next.collections, items);
@@ -27,6 +29,27 @@ export function renderConfigDiff(prev: WarehousdConfig | null, next: WarehousdCo
 
   items.sort((a, b) => b.priority - a.priority);
   return items.map((item) => item.text).join("\n");
+}
+
+// Above the posture changes at 100, because this is the only category that can end the deploy: a
+// posture change is a policy decision the operator meant to make, while an unmigrated type change
+// is refused outright by the release command and takes the deploy with it.
+const SCHEMA_PRIORITY = 110;
+
+function compareSchema(prev: WarehousdConfig, next: WarehousdConfig, items: DiffItem[]): void {
+  const blocking = planFromConfigs(prev, next).filter((c) => c.destructive);
+  if (blocking.length === 0) return;
+
+  const lines = blocking.map(
+    (c) => `  ! ${c.detail}${c.reviewRequired ? "" : " (lossless, but still needs a migration)"}`,
+  );
+  items.push({
+    priority: SCHEMA_PRIORITY,
+    text:
+      `REQUIRES MIGRATION — these changes would destroy or strand live data:\n${lines.join("\n")}\n` +
+      `  Run \`warehousd migrate generate\` before deploying; the release command refuses ` +
+      `without it.`,
+  });
 }
 
 function compareDeploy(

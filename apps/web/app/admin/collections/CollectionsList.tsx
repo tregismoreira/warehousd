@@ -15,6 +15,7 @@ import {
 import { ApplyBadge } from "@/components/common/ApplyBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Mono } from "@/components/common/Mono";
+import { requestJson } from "@/lib/client-api";
 import type { CollectionSummary } from "./types";
 
 // Twenty collections in one scrolling stack of field tables was unreadable and unsearchable, and
@@ -30,19 +31,16 @@ export function CollectionsList() {
 
   useEffect(() => {
     async function load() {
-      try {
-        // counts=1: this is the one surface that renders a document count, and counting is a
-        // scan per collection. See the route.
-        const res = await fetch("/api/admin/collections?counts=1");
-        if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-        const data = await res.json();
-        setCollections(data.collections);
-        setEnv(data.env);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Unknown error");
-      } finally {
-        setLoading(false);
-      }
+      // counts=1: this is the one surface that renders a document count, and counting is a
+      // scan per collection. See the route.
+      const res = await requestJson<{ collections: CollectionSummary[]; env: "dev" | "live" }>(
+        "/api/admin/collections?counts=1",
+      );
+      if (res.ok) {
+        setCollections(res.data.collections);
+        setEnv(res.data.env);
+      } else setError(res.error);
+      setLoading(false);
     }
     void load();
   }, []);

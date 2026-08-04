@@ -193,9 +193,50 @@ The generated credentials, masked unless asked otherwise.
 Re-applies `warehousd.yml` — schemas, tables, and `v_<collection>` views —
 without a restart. Runs against the host, not inside the container.
 
+Applies the project's pending migrations first, then the config. `apply` is
+additive: it creates tables and adds columns, and it will not rewrite a column
+underneath live rows. A change that would — a field's type, a removed field, a
+moved primary key — is refused, and `warehousd migrate` is how you get past it.
+See [migrations.md](migrations.md).
+
 | Flag         |                                                                             |
 | ------------ | --------------------------------------------------------------------------- |
 | `--db <url>` | Database URL. Falls back to `DATABASE_URL`, then `.warehousd/outputs.json`. |
+
+### `migrate plan`
+
+What a config change would do to data that already exists. Reads the live schema
+when a database is reachable — that is the only source that can see drift no
+config change explains — and falls back to the config recorded by the last
+deploy when it is not.
+
+Each pending change is either `ready` (the cast cannot lose anything) or
+`needs review` (it can).
+
+| Flag         |               |
+| ------------ | ------------- |
+| `--db <url>` | Database URL. |
+
+### `migrate generate`
+
+Writes the pending changes to `migrations/NNNN-<name>.sql` as SQL you can read
+and edit. Lossless statements are written ready to run; lossy ones are commented
+out under a `-- REVIEW:` header that says what would be lost and lists the
+alternatives.
+
+| Flag              |                                                 |
+| ----------------- | ----------------------------------------------- |
+| `--db <url>`      | Database URL.                                   |
+| `-n, --name <s>`  | Name for the file (default `schema-change`).    |
+
+### `migrate status`
+
+Which of the project's migrations have been applied to a database, and which
+files have been edited since they were.
+
+| Flag         |               |
+| ------------ | ------------- |
+| `--db <url>` | Database URL. |
 
 ### `seed`
 
@@ -232,9 +273,10 @@ CLI will not index one directory into both environments.
 
 Provisions a warehousd stack to Fly.io from the same `warehousd.yml`. A
 pre-flight checklist must pass before anything is created: the `deploy:` block
-exists, all `${env:VAR}` references resolve, demo mode is off, SSO or
-`--allow-local-login` is configured, and `flyctl` is installed and authenticated.
-Every check is printed if any fail — nothing is created until all pass.
+exists, all `${env:VAR}` references resolve, demo mode is off, the audit trail is
+on or `--allow-disabled-audit` is passed, SSO or `--allow-local-login` is
+configured, and `flyctl` is installed and authenticated. Every check is printed
+if any fail — nothing is created until all pass.
 
 The server image is not yet published (the repo is private and no release tag
 exists). Until it is, build the base locally and pass `--local-build`:
@@ -253,6 +295,7 @@ while the default `--remote-only` path does not.
 | --------------------- | -------------------------------------------------------------------------------------------------- |
 | `-d, --dir <dir>`     | Project directory (default: current).                                                              |
 | `--allow-local-login` | Enable `admin@warehousd.local` with a generated password, in addition to any configured SSO.       |
+| `--allow-disabled-audit` | Deploy a project configured with `audit.enabled: false`. Nothing it does will be recorded.      |
 | `-y, --yes`           | Skip the re-deploy diff prompt (one-time deploys always prompt).                                   |
 | `--local-build`       | Build the image locally; otherwise use the published one.                                          |
 | `--destroy`           | Tear down the Fly app and database. Requires typing the app name exactly; `--yes` does not bypass. |

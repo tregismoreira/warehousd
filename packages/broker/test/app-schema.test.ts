@@ -22,6 +22,9 @@ describe("app schema", () => {
       "change_log",
       "client_policies",
       "client_secrets",
+      // The ledger for the project's own migrations — the SQL files that unblock a destructive
+      // collection change. Separate from schema_migrations, which tracks this repository's.
+      "collection_migrations",
       "collections",
       "grants",
       "login_attempts",

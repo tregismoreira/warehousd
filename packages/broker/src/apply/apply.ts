@@ -9,6 +9,74 @@ import {
   grantWriteDDL,
   DEFAULT_EMBEDDING_DIMENSIONS,
 } from "./ddl";
+import { planFromSchema, type SchemaChange } from "./plan";
+
+// A file collection's documents hang off its files table by FK, and are rebuilt by the indexer
+// from the same source directory, so the two are always dropped as a pair.
+function tablesToDrop(table: string): string[] {
+  return table.endsWith("__files") ? [table, table.replace(/__files$/, "__documents")] : [table];
+}
+
+/**
+ * Refuse the changes that would strand or destroy live content, and rebuild the ones that cannot.
+ *
+ * The asymmetry between the two schemas is the whole design. `data_synth` is a pure function of
+ * (config, seed): the entrypoint truncates and regenerates it on every boot, and file collections
+ * are re-indexed from their source directory. Dropping a synth table therefore costs nothing, and
+ * paying migration ceremony for it would put friction on the one loop — edit the YAML, re-apply —
+ * that has to stay fast. `data_live` is real content that exists nowhere else.
+ *
+ * An empty `data_live` table is treated like a synth one, because there is nothing there to lose.
+ *
+ * Throws one error listing every blocked change rather than one per change: an operator editing
+ * their config should see the whole bill, not discover it a field at a time across six deploys.
+ */
+async function resolveDestructiveChanges(db: Pool, cfg: WarehousdConfig): Promise<void> {
+  const changes = (await planFromSchema(db, cfg)).filter((c) => c.destructive);
+  if (changes.length === 0) return;
+
+  const blocked: SchemaChange[] = [];
+  const drop = new Set<string>();
+
+  for (const change of changes) {
+    const schema = change.env === "dev" ? "data_synth" : "data_live";
+    if (change.env === "live") {
+      const populated = await db.query(`select 1 from ${schema}."${change.table}" limit 1`);
+      if (populated.rowCount === 1) {
+        blocked.push(change);
+        continue;
+      }
+    }
+    for (const t of tablesToDrop(change.table)) drop.add(`${schema}."${t}"`);
+  }
+
+  if (blocked.length > 0) {
+    const lines = blocked.map((c) => `  - ${c.detail}`);
+    // Every name in this message comes from the config or from information_schema, never from a
+    // request, and it is written to the operator's boot log — no broker caller sees it. Invariant 4
+    // is about what a denied *client* can observe, and nothing here is reachable by one.
+    throw new Error(
+      `Refusing to apply: ${blocked.length} change(s) would destroy or strand live data.\n` +
+        `${lines.join("\n")}\n\n` +
+        `data_live holds rows for these collections, and applyConfig will not rewrite a column ` +
+        `underneath them. Run \`warehousd migrate generate\` to write a migration you can review, ` +
+        `edit it, and re-apply. \`warehousd migrate plan\` explains each change and its options.`,
+    );
+  }
+
+  // Dropped rather than altered: these tables are empty or disposable, so a rebuild is both
+  // simpler and more complete than a column-by-column ALTER — it also fixes a pk that moved and a
+  // column that changed in a way no cast covers. The views are recreated further down, and the
+  // entrypoint regenerates synthetic rows and re-indexes file collections straight afterwards.
+  for (const t of drop) await db.query(`drop table if exists ${t} cascade`);
+
+  // A collection that left the YAML also leaves the registry, or the admin console goes on
+  // listing something that no longer exists in either the config or the database.
+  const gone = new Set(
+    changes.filter((c) => c.kind === "drop_collection").map((c) => c.collection),
+  );
+  for (const name of gone) await db.query(`delete from app.collections where name = $1`, [name]);
+}
 
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
   await db.query(`create extension if not exists vector`);
@@ -16,6 +84,10 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
   // collection declares that transform: a later `warehousd apply` adding one must not be the
   // first thing that needs a superuser, long after the deployment stopped having one.
   await db.query(`create extension if not exists pgcrypto`);
+
+  // Before any DDL: nothing below this line can alter or drop a column, so a change that needs one
+  // has to be settled here or refused here.
+  await resolveDestructiveChanges(db, cfg);
 
   // Vocabularies: upsert by slug (labels renameable in place). apply never deletes
   // vocabularies/terms — data rows store term slugs, so removal is a manual operation.

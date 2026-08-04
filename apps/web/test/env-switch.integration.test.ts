@@ -64,7 +64,7 @@ describe("POST /api/env", () => {
     const { POST } = await import("../app/api/env/route");
     const res = await POST(req({ env: "data_live; drop" }, miaCookie));
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("invalid env");
+    expect((await res.json()).error).toBe("invalid_env");
     expect(setCookie(res)).not.toContain("wh_env");
   });
 

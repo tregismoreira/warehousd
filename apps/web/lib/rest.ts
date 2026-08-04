@@ -62,3 +62,18 @@ export function unauthenticated(): Response {
 export function ok<T>(data: T, status: number = 200): Response {
   return Response.json(data, { status });
 }
+
+// req.json() throws on an absent or non-JSON body, and a JSON array or scalar is not an intent
+// either. Reporting that as invalid_intent keeps it inside the reason-code table instead of
+// surfacing a parser error as a 500.
+export async function readJson(
+  req: Request,
+): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false }> {
+  try {
+    const body: unknown = await req.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false };
+    return { ok: true, value: body as Record<string, unknown> };
+  } catch {
+    return { ok: false };
+  }
+}

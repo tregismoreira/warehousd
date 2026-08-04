@@ -1,12 +1,15 @@
 import { NextRequest } from "next/server";
-import { getSessionUser } from "../../../lib/session";
+import { requireSession } from "../../../lib/authz";
+import { readJson } from "../../../lib/rest";
 
 export async function POST(req: NextRequest) {
-  const user = await getSessionUser(req);
-  if (!user) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  const { env } = await req.json();
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const body = await readJson(req);
+  if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
+  const { env } = body.value;
   if (env !== "dev" && env !== "live")
-    return Response.json({ error: "invalid env" }, { status: 400 });
+    return Response.json({ error: "invalid_env" }, { status: 400 });
   const res = Response.json({ ok: true, env });
 
   // Determine if the request is over HTTPS (check req.url protocol and x-forwarded-proto header)

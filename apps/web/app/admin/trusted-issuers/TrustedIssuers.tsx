@@ -6,6 +6,7 @@ import { ShieldCheck } from "lucide-react";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Mono } from "@/components/common/Mono";
+import { requestJson } from "@/lib/client-api";
 import { AddIssuerDialog } from "./AddIssuerDialog";
 
 export type TrustedIssuer = {
@@ -22,17 +23,10 @@ export function TrustedIssuers() {
   const [loading, setLoading] = useState(true);
 
   async function load() {
-    try {
-      const res = await fetch("/api/trusted-issuers");
-      if (!res.ok) throw new Error(`Failed to load issuers: ${res.status}`);
-      const data = await res.json();
-      setIssuers(data.issuers ?? []);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to load issuers: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
+    const res = await requestJson<{ issuers?: TrustedIssuer[] }>("/api/trusted-issuers");
+    if (res.ok) setIssuers(res.data.issuers ?? []);
+    else toast.error(`Failed to load issuers: ${res.error}`);
+    setLoading(false);
   }
 
   useEffect(() => {

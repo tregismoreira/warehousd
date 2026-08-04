@@ -34,7 +34,7 @@ export function makeReadVerbs(d: VerbDeps) {
   const { app, cfg, pools, isMultiValueField } = d;
 
   async function query(ctx: BrokerContext, raw: QueryIntent): Promise<BrokerResult> {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     // 0. intent shape at runtime, before anything reads it
     const parsed = checkIntent(QueryIntentSchema, raw, "query");
     if (!parsed.ok) return audit.refuse(parsed.collection, "invalid_intent");
@@ -124,7 +124,7 @@ export function makeReadVerbs(d: VerbDeps) {
     ctx: BrokerContext,
     name: string,
   ): Promise<VisibleSchema | Refusal> {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const c = findCollection(cfg, name);
     if (!c) return audit.refuse(name, "unknown_collection");
     const grant = await loadActiveGrant(app, ctx, name);
@@ -162,7 +162,7 @@ export function makeReadVerbs(d: VerbDeps) {
   async function listCollections(
     ctx: BrokerContext,
   ): Promise<{ name: string; description: string }[] | Refusal> {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     // The client's collection ceiling applies to discovery too. loadActiveGrant enforces it on
     // every other verb, so without this a restricted client could enumerate names and
     // descriptions for collections no grant it holds can ever reach — a catalogue of what it is
@@ -179,7 +179,7 @@ export function makeReadVerbs(d: VerbDeps) {
   }
 
   async function searchDocuments(ctx: BrokerContext, raw: DocSearchIntent): Promise<BrokerResult> {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const parsed = checkIntent(DocSearchIntentSchema, raw, "searchDocuments");
     if (!parsed.ok) return audit.refuse(parsed.collection, "invalid_intent");
     const intent = parsed.intent;
@@ -286,7 +286,7 @@ export function makeReadVerbs(d: VerbDeps) {
     ctx: BrokerContext,
     raw: GetDocumentIntent,
   ): Promise<GetDocumentResult> {
-    const audit = makeAuditWriter(app, ctx);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
     const parsed = checkIntent(GetDocumentIntentSchema, raw, "getDocument");
     if (!parsed.ok) return audit.refuse(parsed.collection, "invalid_intent");
     const intent = parsed.intent;

@@ -15,6 +15,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { requestJson } from "@/lib/client-api";
 
 export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = useState(false);
@@ -52,9 +53,8 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/sso/providers", {
+      const res = await requestJson("/api/sso/providers", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           providerId: oidcProviderId,
           issuer: oidcIssuer,
@@ -68,17 +68,14 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to register provider");
+        toast.error(`Error: ${res.error}`);
+        return;
       }
 
       toast.success("Provider added successfully");
       setOpen(false);
       resetOidcForm();
       onAdded();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Error: ${msg}`);
     } finally {
       setSubmitting(false);
     }
@@ -98,9 +95,8 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/sso/providers", {
+      const res = await requestJson("/api/sso/providers", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           providerId: samlProviderId,
           issuer: samlIssuer,
@@ -123,17 +119,14 @@ export function AddProviderSheet({ onAdded }: { onAdded: () => void }) {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to register provider");
+        toast.error(`Error: ${res.error}`);
+        return;
       }
 
       toast.success("SAML provider added successfully");
       setOpen(false);
       resetSamlForm();
       onAdded();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Error: ${msg}`);
     } finally {
       setSubmitting(false);
     }

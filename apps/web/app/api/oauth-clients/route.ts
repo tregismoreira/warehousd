@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { upsertClientPolicy } from "@warehousd/broker";
 import { getAppPool } from "../../lib/broker";
 import { requireRole } from "../../../lib/authz";
+import { readJson } from "../../../lib/rest";
 
 // §6.1: clients are an IT concern. Creation is admin-only; promotion stays manager-or-admin
 // (a manager signs off on an app reaching live, an admin owns the credential inventory).
@@ -31,7 +32,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
-  const { name } = await req.json();
+  const body = await readJson(req);
+  if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
+  const { name } = body.value as { name?: string };
 
   const id = randomBytes(16).toString("hex");
   const clientId = randomBytes(16).toString("hex");

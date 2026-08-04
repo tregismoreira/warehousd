@@ -501,6 +501,11 @@ export const ConfigSchema = z
     project: z.string(),
     // Seed the §9 demo personas on first boot. Off by default: a consuming project must opt in.
     demo: z.boolean().default(false),
+    // The audit trail. On unless a project turns it off, and turning it off is for lower
+    // environments: nothing is recorded — allows, refusals and imports alike — and every result's
+    // auditId comes back null. Read it through `auditEnabled()` in config/load.ts rather than
+    // directly; see the note there.
+    audit: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
     database: z
       .object({
         managed: z.boolean().optional(),

@@ -29,16 +29,22 @@ export type AuditDetail = {
   grantId?: string | null;
 };
 
-// The audit write is not best-effort. If it fails, the verb it was recording did not happen as far
-// as the system of record is concerned, so the caller must not be told it succeeded.
+// Where an audit write is attempted at all, it is not best-effort. If it fails, the verb it was
+// recording did not happen as far as the system of record is concerned, so the caller must not be
+// told it succeeded.
 //
 // Before this, ~25 `await writeAudit(…)` calls were unguarded. A failing insert threw out of the
 // verb — including out of `query`'s own catch block, whose refusal path is itself an audit write —
 // and the caller got an unhandled 500 with no audit row: exactly the outcome the comments call
 // "the non-negotiable part". Nothing here fabricates an id to paper over that; the failure becomes
 // a refusal the caller can read, and a loud log line for the operator.
+//
+// A deployment can also switch the trail off entirely (`audit.enabled: false`, for lower
+// environments). That is the reason `auditId` is nullable on an *allow* and not only on a refusal:
+// with auditing off there was never a row to name. The two nulls are told apart by `enabled`, not
+// by inspecting the id — see `sealed` below, and audit-disabled.test.ts.
 export type AuditedAllow =
-  { ok: true; auditId: string } | { ok: false; reason: "internal_error"; auditId: null };
+  { ok: true; auditId: string | null } | { ok: false; reason: "internal_error"; auditId: null };
 
 export type AuditedRefusal<R extends string> = { ok: false; reason: R; auditId: string | null };
 
@@ -78,7 +84,9 @@ export class AuditWriteFailed extends Error {
   }
 }
 
-export function assertRecorded(rec: AuditedAllow): asserts rec is { ok: true; auditId: string } {
+export function assertRecorded(
+  rec: AuditedAllow,
+): asserts rec is { ok: true; auditId: string | null } {
   if (!rec.ok) throw new AuditWriteFailed();
 }
 
@@ -89,13 +97,17 @@ function mutationIntent(i: MutationIntent, fields: string[]) {
   return { op: i.op, collection: i.collection, id: "id" in i ? i.id : undefined, fields };
 }
 
-export function makeAuditWriter(app: Pool, ctx: BrokerContext): AuditWriter {
+// `enabled` has no default on purpose. A default of `true` would be the safe value, but it would
+// also let a new call site forget the flag and keep auditing in a deployment that asked not to be
+// audited — silently, and only on that one verb. Required means the compiler names every site.
+export function makeAuditWriter(app: Pool, ctx: BrokerContext, enabled: boolean): AuditWriter {
   async function record(
     collection: string,
     outcome: "allowed" | "refused",
     reason: string | null,
     detail: AuditDetail,
   ): Promise<string | null> {
+    if (!enabled) return null;
     try {
       return await writeAudit(app, {
         userId: ctx.userId,
@@ -140,9 +152,15 @@ export function makeAuditWriter(app: Pool, ctx: BrokerContext): AuditWriter {
     }
   }
 
-  // An allow is only an allow once the row exists. This is the whole of the downgrade rule.
+  // An allow is only an allow once the row exists — where a row was expected. This is the whole of
+  // the downgrade rule, and the whole of what `audit.enabled: false` changes about it.
+  //
+  // Two ways to reach a null id, and only one of them is a failure. With auditing ON it means the
+  // insert threw: the decision went unrecorded, so the allow does not stand. With auditing OFF it
+  // is the configured answer — no row was ever coming — and downgrading there would turn every
+  // read in a lower environment into an internal_error.
   const sealed = (auditId: string | null): AuditedAllow =>
-    auditId === null
+    auditId === null && enabled
       ? { ok: false, reason: "internal_error", auditId: null }
       : { ok: true, auditId };
 

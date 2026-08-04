@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getAppPool } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
+import { readJson } from "../../../../lib/rest";
 import { auth } from "../../../../lib/auth";
 
 export async function GET(req: NextRequest) {
@@ -31,6 +32,18 @@ export async function POST(req: NextRequest) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
 
+  // Checked on a clone, ahead of the try. An unparseable body used to land in the catch below
+  // and come back as a 500 — the caller sent something the parser could not read and was told
+  // the server had broken.
+  //
+  // Only the parse is checked here, never the shape: registerSSOProvider validates that against
+  // its own zod schema and throws an APIError carrying the status and message it wants returned,
+  // which the catch passes through. Restating that schema would be a second, drifting answer to
+  // "which fields are required" — so the request itself, not a re-serialised copy, is what gets
+  // handed on.
+  if (!(await readJson(req.clone())).ok)
+    return Response.json({ error: "invalid_body" }, { status: 400 });
+
   try {
     const body = await req.json();
     const response = await auth.api.registerSSOProvider({
@@ -44,6 +57,7 @@ export async function POST(req: NextRequest) {
     if (e?.statusCode) {
       return Response.json({ error: e.message || "registration failed" }, { status: e.statusCode });
     }
-    return Response.json({ error: "internal server error" }, { status: 500 });
+    console.error("[web] sso provider registration failed", { error });
+    return Response.json({ error: "internal_error" }, { status: 500 });
   }
 }

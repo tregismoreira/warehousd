@@ -19,6 +19,7 @@ import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Mono } from "@/components/common/Mono";
 import { cn } from "@/lib/utils";
+import { requestJson } from "@/lib/client-api";
 import type { CollectionDetail, Field } from "../types";
 
 type Row = Record<string, unknown>;
@@ -68,7 +69,7 @@ function requestFor(
 
 // The BrokerResult union, as the console routes hand it back verbatim.
 type Result =
-  | { ok: true; documents: Row[]; fieldsReturned: string[]; auditId: string }
+  | { ok: true; documents: Row[]; fieldsReturned: string[]; auditId: string | null }
   | { ok: false; reason: string; auditId: string | null };
 
 const LIMITS = [25, 50, 100] as const;
@@ -180,9 +181,8 @@ export function DataBrowser({
   async function requestAndApprove() {
     setRequesting(true);
     try {
-      const asked = await fetch("/api/grants", {
+      const asked = await requestJson<{ requestId: string }>("/api/grants", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "request",
           collection: detail.name,
@@ -191,18 +191,16 @@ export function DataBrowser({
           fields: grantable,
         }),
       });
-      const askedBody = await asked.json();
       if (!asked.ok) {
-        toast.error("Request failed", { description: askedBody.error });
+        toast.error("Request failed", { description: asked.error });
         return;
       }
 
-      const approved = await fetch("/api/grants", {
+      const approved = await requestJson("/api/grants", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "approve",
-          id: askedBody.requestId,
+          id: asked.data.requestId,
           allowedFields: grantable,
         }),
       });
@@ -212,14 +210,13 @@ export function DataBrowser({
         return;
       }
 
-      const error = (await approved.json()).error;
-      if (error === "self_approval_denied") {
+      if (approved.error === "self_approval_denied") {
         toast.info("Requested — awaiting another approver", {
           description: `A live grant cannot be approved by the person who asked for it. It is in the manager inbox.`,
         });
         return;
       }
-      toast.error("Approval failed", { description: error });
+      toast.error("Approval failed", { description: approved.error });
     } finally {
       setRequesting(false);
     }
@@ -390,7 +387,9 @@ export function DataBrowser({
               {result?.ok ? (
                 <>
                   Documents {offset + 1}–{offset + result.documents.length} · audit{" "}
-                  <Mono>{result.auditId}</Mono>
+                  {/* Null once the deployment sets `audit.enabled: false`. Saying so beats an
+                      empty space where an id used to be. */}
+                  {result.auditId ? <Mono>{result.auditId}</Mono> : "disabled"}
                 </>
               ) : (
                 " "
