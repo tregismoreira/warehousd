@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
+import { requestJson } from "@/lib/client-api";
 import { ApiKeysTable, type ApiKey } from "./ApiKeysTable";
 import { NewApiKeyDialog } from "./NewApiKeyDialog";
 
@@ -11,17 +12,10 @@ export function AdminApiKeysHome() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      const res = await fetch("/api/api-keys");
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data = await res.json();
-      setKeys(data.keys);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Failed to load API keys: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
+    const res = await requestJson<{ keys: ApiKey[] }>("/api/api-keys");
+    if (res.ok) setKeys(res.data.keys);
+    else toast.error(`Failed to load API keys: ${res.error}`);
+    setLoading(false);
   };
 
   useEffect(() => {

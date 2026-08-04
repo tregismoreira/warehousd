@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { listClientSecrets, createClientSecret } from "@warehousd/broker";
 import { getAppPool } from "../../lib/broker";
 import { requireRole } from "../../../lib/authz";
+import { readJson } from "../../../lib/rest";
 import { orgOf } from "../../../lib/session";
 
 export async function GET(req: NextRequest) {
@@ -49,8 +50,17 @@ export async function POST(req: NextRequest) {
   if (!guard.ok) return guard.response;
 
   const org = orgOf(guard.user);
+  const body = await readJson(req);
+  if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
   const { name, mode, trustedIssuerId, robotUserId, allowedCollections, expiresAt } =
-    await req.json();
+    body.value as {
+      name?: string;
+      mode?: string;
+      trustedIssuerId?: string;
+      robotUserId?: string;
+      allowedCollections?: string[];
+      expiresAt?: string;
+    };
 
   if (!name || !mode) {
     return Response.json({ error: "missing_name_or_mode" }, { status: 400 });

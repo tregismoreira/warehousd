@@ -20,6 +20,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { requestJson } from "@/lib/client-api";
 
 export type Client = {
   clientId: string;
@@ -47,14 +48,12 @@ export function ClientsTable({
     setActionId(clientId);
     setActionType("promote");
     try {
-      const res = await fetch(`/api/oauth-clients/${clientId}/promote`, {
+      const res = await requestJson(`/api/oauth-clients/${clientId}/promote`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "promote" }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to promote", { description: err.error });
+        toast.error("Failed to promote", { description: res.error });
         return;
       }
       toast.success("Client promoted to env:live");
@@ -69,14 +68,12 @@ export function ClientsTable({
     setActionId(clientId);
     setActionType("demote");
     try {
-      const res = await fetch(`/api/oauth-clients/${clientId}/promote`, {
+      const res = await requestJson(`/api/oauth-clients/${clientId}/promote`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "demote" }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to demote", { description: err.error });
+        toast.error("Failed to demote", { description: res.error });
         return;
       }
       toast.success("Client demoted to env:dev");

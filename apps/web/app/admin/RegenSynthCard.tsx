@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { requestJson } from "@/lib/client-api";
 
 export function RegenSynthCard() {
   const [seed, setSeed] = useState("42");
@@ -29,19 +30,16 @@ export function RegenSynthCard() {
         toast.error("Invalid seed", { description: "Seed must be a valid number" });
         return;
       }
-      const res = await fetch("/api/admin/regen-synth", {
+      const res = await requestJson<{ collections: string[] }>("/api/admin/regen-synth", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ seed: seedNum }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to regenerate", { description: err.error });
+        toast.error("Failed to regenerate", { description: res.error });
         return;
       }
-      const body = await res.json();
-      toast.success(`Regenerated ${body.collections.length} collections`, {
-        description: body.collections.join(", "),
+      toast.success(`Regenerated ${res.data.collections.length} collections`, {
+        description: res.data.collections.join(", "),
       });
     } finally {
       setLoading(false);

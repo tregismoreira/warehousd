@@ -11,7 +11,7 @@ import type {
 } from "../types";
 import type { CollectionConfig } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
-import { loadActiveGrant } from "../grants/eval";
+import { loadActiveGrant, loadActiveGrants } from "../grants/eval";
 import { matchesFilters, validateDocumentFilters } from "../grants/filters";
 import { withOrg, writePool } from "../db/pools";
 import { findCollection } from "../config/load";
@@ -439,6 +439,9 @@ export function makeProposeVerbs(d: VerbDeps) {
         if (!found) return audit.refuse("*", "not_found");
         const { collection: collectionName, row: proposal } = found;
 
+        const c = findCollection(cfg, collectionName);
+        if (!c) return audit.refuse(collectionName, "unknown_collection");
+
         const grant = await loadActiveGrant(app, ctx, collectionName);
         if (!grant || !grant.verbs.includes("approve"))
           return audit.refuse(collectionName, "verb_denied", { grantId: grant?.id ?? null });
@@ -451,14 +454,19 @@ export function makeProposeVerbs(d: VerbDeps) {
         if (proposal._rev_by === ctx.userId)
           return audit.refuse(collectionName, "self_approval_denied", { grantId: grant.id });
 
+        // The same guard approveProposal states above. A collection with no primary key has no
+        // document id to log, and `proposal.id ?? proposal.document_id` was guessing at column
+        // names revision tables do not have — a miss wrote the string "undefined" into the change
+        // log. Approve and reject refuse the same way instead.
+        const pk = pkOf(c);
+        if (!pk) return audit.refuse(collectionName, "invalid_intent", { grantId: grant.id });
+
         const table = `${schema}.${ident(collectionName)}`;
         await client.query(`update ${table} set _rev_status = 'rejected' where _rev = $1`, [
           proposalId,
         ]);
 
-        const c = findCollection(cfg, collectionName);
-        const pk = c ? pkOf(c) : null;
-        const docId = pk ? String(proposal[pk]) : String(proposal.id ?? proposal.document_id);
+        const docId = String(proposal[pk]);
         await writeChangeLog(
           client,
           ctx,
@@ -516,6 +524,12 @@ export function makeProposeVerbs(d: VerbDeps) {
     const names = opts.collection ? [opts.collection] : Object.keys(cfg.collections);
 
     try {
+      // Fresh on every call, like every other grant check — one round trip for the whole list
+      // rather than one per collection. No approve verb → that collection is simply absent from
+      // the feed, not a refusal: a reviewer learning which collections they cannot approve for is
+      // itself a disclosure.
+      const grants = await loadActiveGrants(app, ctx, names);
+
       const proposals = await withOrg(pool, ctx.orgId, async (client) => {
         const out: ProposalSummary[] = [];
         for (const name of names) {
@@ -523,10 +537,7 @@ export function makeProposeVerbs(d: VerbDeps) {
           // Only revisable collections have proposals at all.
           if (!c || !c.writable || c.type === "file") continue;
 
-          // Fresh per collection, like every other grant check. No approve verb → this
-          // collection is simply absent from the feed, not a refusal: a reviewer learning
-          // which collections they cannot approve for is itself a disclosure.
-          const grant = await loadActiveGrant(app, ctx, name);
+          const grant = grants.get(name);
           if (!grant || !grant.verbs.includes("approve")) continue;
           // A grant whose filters cannot be evaluated contributes nothing, for the same reason a
           // grant without `approve` does. matchesFilters would already drop every row; skipping

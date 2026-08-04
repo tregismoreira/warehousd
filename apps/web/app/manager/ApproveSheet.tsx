@@ -15,6 +15,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Mono } from "@/components/common/Mono";
+import { requestJson } from "@/lib/client-api";
 
 export type PendingGrant = {
   id: string;
@@ -65,21 +66,23 @@ export function ApproveSheet({
     setVocabularies([]);
 
     if (grant.collectionType === "file") {
-      void fetch(`/api/grants/doc-paths?collection=${grant.collection}&env=${grant.env}`)
-        .then((r) => r.json())
-        .then((d) => setPaths(d.paths ?? []));
+      void requestJson<{ paths?: string[] }>(
+        `/api/grants/doc-paths?collection=${grant.collection}&env=${grant.env}`,
+      ).then((r) => {
+        if (r.ok) setPaths(r.data.paths ?? []);
+      });
     }
     if (grant.taxonomyFields && grant.taxonomyFields.length > 0) {
-      void fetch(`/api/grants/terms?collection=${grant.collection}`)
-        .then((r) => r.json())
-        .then((d) => {
-          setVocabularies(d.vocabularies ?? []);
-          const picked: Record<string, Set<string>> = {};
-          for (const vocab of d.vocabularies ?? []) {
-            picked[vocab.field] = new Set();
-          }
-          setPickedTermsByField(picked);
-        });
+      void requestJson<{ vocabularies?: Vocabulary[] }>(
+        `/api/grants/terms?collection=${grant.collection}`,
+      ).then((r) => {
+        if (!r.ok) return;
+        const vocabs = r.data.vocabularies ?? [];
+        setVocabularies(vocabs);
+        const picked: Record<string, Set<string>> = {};
+        for (const vocab of vocabs) picked[vocab.field] = new Set();
+        setPickedTermsByField(picked);
+      });
     }
   }, [grant]);
 
@@ -91,9 +94,8 @@ export function ApproveSheet({
     for (const [field, terms] of Object.entries(pickedTermsByField)) {
       if (terms.size > 0) selectedTerms[field] = Array.from(terms);
     }
-    const res = await fetch("/api/grants", {
+    const res = await requestJson("/api/grants", {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify(
         action === "deny"
           ? { action, id: grant.id }
@@ -109,7 +111,7 @@ export function ApproveSheet({
     });
     setBusy(false);
     if (!res.ok) {
-      toast.error("Failed", { description: (await res.json()).error });
+      toast.error("Failed", { description: res.error });
       return;
     }
     toast.success(action === "approve" ? "Grant approved" : "Request denied");

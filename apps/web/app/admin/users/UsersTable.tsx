@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
+import { requestJson } from "@/lib/client-api";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import {
@@ -33,20 +34,16 @@ function RoleSelect({ user, isSelf }: { user: User; isSelf: boolean }) {
     if (newRole === user.role) return;
     setUpdating(true);
     try {
-      const res = await fetch(`/api/admin/users/${user.id}`, {
+      const res = await requestJson(`/api/admin/users/${user.id}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ role: newRole }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to update role");
+        toast.error(`Error: ${res.error}`);
+        return;
       }
       toast.success(`Updated ${user.email} to ${roleLabels[newRole as keyof typeof roleLabels]}`);
       window.location.reload();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Error: ${msg}`);
     } finally {
       setUpdating(false);
     }

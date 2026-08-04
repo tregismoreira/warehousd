@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 import type { BrokerContext, RefusalReason, AuditId } from "../types";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../types";
 import type { ActiveGrant } from "../grants/eval";
-import { loadActiveGrant } from "../grants/eval";
+import { loadActiveGrant, loadActiveGrants } from "../grants/eval";
 import { matchesFilters, validateDocumentFilters } from "../grants/filters";
 import { dataPool, withOrg, writePool } from "../db/pools";
 import { findCollection } from "../config/load";
@@ -50,10 +50,9 @@ export function makeHistoryVerbs(d: VerbDeps) {
       // Load all grants to filter collections; caller sees only collections they can read
       const collections = Object.keys(cfg.collections);
       const grantsByCollection = new Map<string, ActiveGrant | null>();
-      for (const c of collections) {
-        const grant = await loadActiveGrant(app, ctx, c);
+      for (const [c, grant] of await loadActiveGrants(app, ctx, collections)) {
         // No grant or no read verb → no entries for this collection
-        if (grant && grant.verbs.includes("read")) grantsByCollection.set(c, grant);
+        if (grant.verbs.includes("read")) grantsByCollection.set(c, grant);
       }
 
       // `seq` order is not commit order. bigserial hands out numbers when a statement runs,

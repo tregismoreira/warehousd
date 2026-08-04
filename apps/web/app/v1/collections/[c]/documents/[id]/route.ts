@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import type { GetDocumentIntent } from "@warehousd/broker";
 import { deriveRestContext } from "../../../../../../lib/rest-context";
 import { getBroker } from "../../../../../lib/broker";
-import { unauthenticated, refuse, ok } from "../../../../../../lib/rest";
+import { unauthenticated, refuse, ok, readJson } from "../../../../../../lib/rest";
 
 export async function GET(
   req: NextRequest,
@@ -32,7 +32,8 @@ export async function PUT(
   if (!ctx) return unauthenticated();
 
   const { c, id } = await params;
-  const body = await req.json();
+  const body = await readJson(req);
+  if (!body.ok) return refuse("invalid_intent");
   const ifMatch = req.headers.get("If-Match");
 
   // Strip quotes from If-Match (RFC 7232 format: "value")
@@ -43,7 +44,7 @@ export async function PUT(
     op: "update" as const,
     id,
     expect,
-    values: body,
+    values: body.value,
   };
 
   const result = await getBroker().broker.mutate(ctx, intent);

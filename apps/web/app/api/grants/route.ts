@@ -8,6 +8,7 @@ import {
   validateGrantRequest,
 } from "@warehousd/broker";
 import { requireSession, requireRole, atLeast } from "../../../lib/authz";
+import { readJson } from "../../../lib/rest";
 import { readEnvCookie, orgOf } from "../../../lib/session";
 import { buildApproval } from "../../../lib/approve";
 
@@ -57,7 +58,21 @@ export async function POST(req: NextRequest) {
   const guard = await requireSession(req);
   if (!guard.ok) return guard.response;
   const user = guard.user;
-  const body = await req.json();
+  const parsed = await readJson(req);
+  if (!parsed.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
+  const body = parsed.value as {
+    action?: string;
+    id?: string;
+    collection?: string;
+    purposeLabel?: string;
+    purposeDetail?: string;
+    fields?: string[];
+    allowedFields?: string[];
+    expiresAt?: string;
+    selectedPaths?: string[];
+    selectedTerms?: string[];
+    verbs?: string[];
+  };
   const { action } = body;
   const app = getAppPool();
   const cfg = getConfig();
@@ -66,6 +81,10 @@ export async function POST(req: NextRequest) {
     // Any authenticated user may ask. Requester and env come from the session and the signed
     // cookie — a userId or env in the body is never read.
     const { collection, purposeLabel, purposeDetail, fields } = body;
+    // Same answer validateGrantRequest gives a collection name that isn't one — it just cannot be
+    // asked the question unless the name is a string.
+    if (typeof collection !== "string")
+      return Response.json({ error: "unknown_collection" }, { status: 400 });
 
     const validation = validateGrantRequest(cfg, collection, purposeLabel, fields);
     if (!validation.ok) return Response.json({ error: validation.error }, { status: 400 });
@@ -89,10 +108,18 @@ export async function POST(req: NextRequest) {
 
   const org = orgOf(user);
 
+  if (action !== "approve" && action !== "deny" && action !== "revoke")
+    return Response.json({ error: "unknown_action" }, { status: 400 });
+
+  // A grant id that is absent or not a string matches no row, which is what the lookups below
+  // would have concluded anyway.
+  const { id } = body;
+  if (typeof id !== "string") return Response.json({ error: "unknown_grant" }, { status: 404 });
+
   if (action === "approve") {
     const cur = await app.query(
       `select collection, allowed_fields, status from app.grants where id=$1 and org_id=$2`,
-      [body.id, org],
+      [id, org],
     );
     const row = cur.rows[0];
     if (!row) return Response.json({ error: "unknown_grant" }, { status: 404 });
@@ -107,9 +134,9 @@ export async function POST(req: NextRequest) {
     });
     if (!built.ok) return Response.json({ error: built.error }, { status: 400 });
 
-    const approved = await approveGrant(app, cfg, body.id, by, {
+    const approved = await approveGrant(app, cfg, id, by, {
       ...built.opts,
-      verbs: body.verbs,
+      ...(body.verbs !== undefined ? { verbs: body.verbs } : {}),
       orgId: org,
     });
     if (!approved.ok) {
@@ -127,14 +154,12 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true });
   }
   if (action === "deny") {
-    const denied = await denyGrant(app, body.id, by, org);
+    const denied = await denyGrant(app, id, by, org);
     if (!denied) return Response.json({ error: "unknown_grant" }, { status: 404 });
     return Response.json({ ok: true });
   }
-  if (action === "revoke") {
-    const revoked = await revokeGrant(app, body.id, by, org);
-    if (!revoked) return Response.json({ error: "unknown_grant" }, { status: 404 });
-    return Response.json({ ok: true });
-  }
-  return Response.json({ error: "unknown_action" }, { status: 400 });
+  // revoke: the only action left, checked off above rather than tested again here.
+  const revoked = await revokeGrant(app, id, by, org);
+  if (!revoked) return Response.json({ error: "unknown_grant" }, { status: 404 });
+  return Response.json({ ok: true });
 }

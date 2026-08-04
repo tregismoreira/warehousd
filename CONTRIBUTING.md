@@ -41,7 +41,8 @@ Or run your own Postgres 16 with the `pgvector` extension available.
 
 ## 3. Configure the web app
 
-Create `apps/web/.env.local`:
+Copy `apps/web/.env.example` to `apps/web/.env.local` — it already contains the
+block below:
 
 ```bash
 # The app schema: users, sessions, grants, collections, audit

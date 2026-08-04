@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { requestGrant, validateGrantRequest } from "@warehousd/broker";
 import { deriveRestContext } from "../../../lib/rest-context";
 import { getBroker, getAppPool } from "../../lib/broker";
-import { unauthenticated, ok } from "../../../lib/rest";
+import { unauthenticated, refuse, ok, readJson } from "../../../lib/rest";
 
 export async function GET(req: NextRequest) {
   const ctx = await deriveRestContext(req);
@@ -36,8 +36,13 @@ export async function POST(req: NextRequest) {
   const ctx = await deriveRestContext(req);
   if (!ctx) return unauthenticated();
 
-  const body = await req.json();
-  const { collection, purposeLabel, purposeDetail, fields } = body;
+  const body = await readJson(req);
+  if (!body.ok) return refuse("invalid_intent");
+  const { collection, purposeLabel, purposeDetail, fields } = body.value;
+  // Same answer validateGrantRequest gives a collection name that isn't one — it just cannot be
+  // asked the question unless the name is a string.
+  if (typeof collection !== "string")
+    return Response.json({ error: "unknown_collection" }, { status: 404 });
   const cfg = getBroker().cfg;
 
   const validation = validateGrantRequest(cfg, collection, purposeLabel, fields);

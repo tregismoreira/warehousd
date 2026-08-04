@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { requestJson } from "@/lib/client-api";
 import type { Proposal } from "./ProposalsTable";
 
 interface Document {
@@ -74,12 +75,11 @@ export function ProposalDetail({
   async function handleApprove() {
     setActionInProgress(true);
     try {
-      const res = await fetch(`/api/proposals/${proposal.proposalId}/approve`, {
+      const res = await requestJson(`/api/proposals/${proposal.proposalId}/approve`, {
         method: "POST",
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to approve", { description: err.error });
+        toast.error("Failed to approve", { description: res.error });
         return;
       }
       toast.success("Proposal approved");
@@ -93,12 +93,11 @@ export function ProposalDetail({
   async function handleReject() {
     setActionInProgress(true);
     try {
-      const res = await fetch(`/api/proposals/${proposal.proposalId}/reject`, {
+      const res = await requestJson(`/api/proposals/${proposal.proposalId}/reject`, {
         method: "POST",
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to reject", { description: err.error });
+        toast.error("Failed to reject", { description: res.error });
         return;
       }
       toast.success("Proposal rejected");

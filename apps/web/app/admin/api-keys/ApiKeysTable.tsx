@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { requestJson } from "@/lib/client-api";
 import { ApiKeyDetail } from "./ApiKeyDetail";
 
 export type ClientSecretInfo = {
@@ -57,14 +58,12 @@ export function ApiKeysTable({
   async function revokeSecret(clientId: string, secretId: string, secretPrefix: string) {
     setActionId(secretId);
     try {
-      const res = await fetch(`/api/api-keys/${clientId}/revoke`, {
+      const res = await requestJson(`/api/api-keys/${clientId}/revoke`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ secretId }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        toast.error("Failed to revoke", { description: err.error });
+        toast.error("Failed to revoke", { description: res.error });
         return;
       }
       toast.success(`Revoked ${secretPrefix}`);

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { rotateClientSecret } from "@warehousd/broker";
 import { getAppPool } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
+import { readJson } from "../../../../../lib/rest";
 import { orgOf } from "../../../../../lib/session";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -10,7 +11,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const clientId = (await params).id;
   const org = orgOf(guard.user);
-  const { oldSecretId, expiresAt } = await req.json();
+  const body = await readJson(req);
+  if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
+  const { oldSecretId, expiresAt } = body.value as { oldSecretId?: string; expiresAt?: string };
 
   if (!oldSecretId) {
     return Response.json({ error: "missing_old_secret_id" }, { status: 400 });

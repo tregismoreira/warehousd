@@ -1,3 +1,5 @@
+# Development and demo only. Every credential below is hardcoded and public —
+# never run this file in production.
 services:
   db:
     image: pgvector/pgvector:pg16
