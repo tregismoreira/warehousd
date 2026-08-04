@@ -170,7 +170,9 @@ describe("the migration path unblocks a refused change", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '42.5')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '42.5')`,
+    );
 
     const next = orders("numeric");
     await expect(applyConfig(db, next)).rejects.toThrow(/would destroy or strand live data/);
@@ -206,7 +208,9 @@ describe("the migration path unblocks a refused change", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`,
+    );
 
     const dir = project({ "0001-does-nothing.sql": `select 1;` });
     await runProjectMigrations(db, dir);

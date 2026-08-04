@@ -140,7 +140,9 @@ describe("a destructive change to populated live data", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`,
+    );
 
     await expect(applyConfig(db, orders("numeric"))).rejects.toThrow(/warehousd migrate generate/);
     await db.end();
@@ -167,7 +169,9 @@ describe("a destructive change to populated live data", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text", { note: { type: "text", posture: "allow" } }));
-    await db.query(`insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`,
+    );
 
     const err = await applyConfig(db, orders("numeric")).catch((e: Error) => e);
     expect(err).toBeInstanceOf(Error);
@@ -203,7 +207,9 @@ describe("a destructive change with nothing to lose", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_synth.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), 'x')`);
+    await db.query(
+      `insert into data_synth.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), 'x')`,
+    );
 
     await applyConfig(db, orders("numeric"));
     expect(await columnType(db, "data_synth", "orders", "amount")).toBe("numeric");
@@ -278,7 +284,9 @@ describe("a destructive change with nothing to lose", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`,
+    );
 
     const empty = ConfigSchema.parse({ project: "t", collections: {} });
     await expect(applyConfig(db, empty)).rejects.toThrow(/orders/);
@@ -296,7 +304,9 @@ describe("changes that are not destructive", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`,
+    );
 
     await applyConfig(db, orders("text", { note: { type: "text", posture: "allow" } }));
     expect(await columnType(db, "data_live", "orders", "note")).toBe("text");
@@ -309,7 +319,9 @@ describe("changes that are not destructive", () => {
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
-    await db.query(`insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`);
+    await db.query(
+      `insert into data_live.orders (${R}, id, amount) values (${RV}, gen_random_uuid(), '1')`,
+    );
     await expect(applyConfig(db, orders("text"))).resolves.not.toThrow();
     expect((await db.query(`select count(*)::int as n from data_live.orders`)).rows[0].n).toBe(1);
     await db.end();
