@@ -4,6 +4,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { RegenSynthCard } from "./RegenSynthCard";
+import { EmbedCard } from "./EmbedCard";
 
 // Only the fields this page counts. The two endpoints return more; naming what is read keeps a
 // renamed field a compile error rather than a tile that quietly reports zero.
@@ -126,6 +127,7 @@ export default function AdminOverview() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <RegenSynthCard />
+        <EmbedCard />
       </div>
     </div>
   );

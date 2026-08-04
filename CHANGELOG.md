@@ -70,6 +70,20 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Added
 
+- **Documents can be uploaded from the console.** `/admin/documents` takes a multi-file selection
+  or a whole folder, and is resumable: each file is hashed in the browser, `POST
+  /api/admin/documents/plan` answers which of those hashes the collection already holds, and only
+  the rest are uploaded — four at a time, retried on a transport failure. The resume is answered
+  by the database rather than by anything the browser remembers, so an interrupted upload of a
+  large corpus is resumed by picking the same folder again, from any machine. Deleting a document
+  and downloading its original are admin-only and audited, as the upload is.
+- Upload and `warehousd index` share one ingestion path (`indexing/ingest.ts`), so a document is
+  indistinguishable downstream from one indexed off disk — same chunking, same checksum, same
+  required-term rule. A new `origin` column keeps them apart for exactly one purpose: the index
+  sweep mirrors a source directory, and must not delete a document that was never in one.
+- `POST /api/admin/embed` and a console action beside it, for filling embeddings on a corpus that
+  predates the `embedding:` block or a run a rate limit cut short.
+
 - The admin console can look at data. `/admin/collections/{name}` gains a Data tab that browses a
   collection through `broker.query` / `broker.searchDocuments` with the session's own context, so
   an admin sees what their grants allow and every read is audited. A field legend distinguishes

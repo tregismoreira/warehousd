@@ -94,7 +94,21 @@ export {
   type ClientPolicy as EnvScopeClientPolicy,
 } from "./oauth/env-scope";
 export * from "./db/bootstrap";
-export { indexCollection } from "./indexing";
+export {
+  indexCollection,
+  planUpload,
+  uploadFile,
+  deleteUploadedFile,
+  readFileBlob,
+  blobChecksum,
+  UPLOAD_STATUSES,
+  type UploadStatus,
+  type PlanEntry,
+  type PlanResult,
+  type UploadOutcome,
+  type UploadRefusal,
+  type MetadataField,
+} from "./indexing";
 export { syncDatasetTerms, loadTaxonomyBindings, slugify, type TaxonomyBinding } from "./taxonomy";
 export type { DocSearchIntent } from "./types";
 export { listDocumentPaths } from "./documents/paths";

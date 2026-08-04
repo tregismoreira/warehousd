@@ -1,6 +1,7 @@
 import {
   BadgeCheck,
   Boxes,
+  FilePlus,
   FileUp,
   Key,
   KeyRound,
@@ -32,6 +33,7 @@ export const NAV: Record<Role, NavItem[]> = {
     { href: "/admin/sso", label: "SSO", icon: ShieldCheck },
     { href: "/admin/audit", label: "Audit", icon: ScrollText },
     { href: "/admin/import", label: "Import", icon: FileUp },
+    { href: "/admin/documents", label: "Documents", icon: FilePlus },
   ],
   manager: [
     { href: "/manager", label: "Grant inbox", icon: Inbox },

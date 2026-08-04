@@ -28,8 +28,6 @@ it is in the repository today, it is MIT tomorrow.
 
 ## Planned
 
-- **Document upload UI.** PDF and DOCX are extracted and indexed, but only from a
-  local directory — there is no browser upload path yet.
 - **Aggregate-only postures** with inference-leak protection — computing
   `avg(base_salary)` without row access. This needs minimum-group-size or
   differential-privacy machinery to be safe, which is why it is not built:

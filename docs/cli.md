@@ -271,6 +271,12 @@ owner, terms and typed metadata come from a sidecar `<file>.yml` beside it.
 `--env live` requires `source_live` in the config or an explicit `--source`. The
 CLI will not index one directory into both environments.
 
+Indexing **mirrors** the directory: a file that is no longer there is removed
+from the collection. Documents uploaded through **Admin → Documents** were never
+in that directory and are left alone — see
+[docs/configuration.md](configuration.md), "Uploading documents from the
+console".
+
 ### `embed [collection]`
 
 Fill the embedding column for file collections, so `search_documents` can answer

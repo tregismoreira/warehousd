@@ -391,6 +391,34 @@ sidecar term fails the index rather than becoming a document no grant can scope.
 A scanned PDF with no extractable text is refused too — OCR is out of scope, and
 storing an empty document is the failure that looks like success.
 
+## Uploading documents from the console
+
+Copying files into `source` and running `warehousd index <collection>` is one way
+in. **Admin → Documents** is the other: pick files or a whole folder, fill in the
+owner, terms and metadata the form derives from the collection's own
+configuration, and upload. Both paths run the same ingestion code, so a document
+is indistinguishable downstream from one indexed off disk — same chunking, same
+checksum, same required-term rule.
+
+Uploads are **resumable, and the resume is answered by the database**. Each file
+is hashed in the browser, the console asks which of those hashes the collection
+already holds, and only the rest are sent — four at a time, each retried on a
+transport failure. So an interrupted upload of three thousand documents is
+resumed by picking the same folder again: everything that landed is skipped,
+from any browser, on any machine, with nothing remembered locally.
+
+Two differences from a directory index are worth knowing:
+
+- **An upload is not a mirror.** `warehousd index` deletes a document whose file
+  has left the source directory; an uploaded document was never in one, so it is
+  left alone. The `origin` column is what tells them apart.
+- **The form fills in what the file does not say.** A `.md` or `.txt` carries its
+  own frontmatter and that always wins; the form's owner, terms and metadata fill
+  gaps, and are the only source for a PDF or DOCX.
+
+`WAREHOUSD_MAX_UPLOAD_BYTES` caps a single file (default 25 MB). Deleting a
+document and downloading its original are both admin-only and both audited.
+
 ## Connect-in-place
 
 A collection can read from an external Postgres instead of storing rows in

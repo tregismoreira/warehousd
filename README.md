@@ -351,7 +351,7 @@ yet built:
 | Masking / transform postures | **real** | `read: mask` with seven transforms, computed in SQL so the raw value is never fetched. Masked fields are projection-only — filtering, ordering, grouping and aggregating over one are refused, which is what stops a mask being decorative. `unmask: allow` makes the raw value separately grantable. |
 | Connect-in-place to external databases | **real** | `postgres_fdw` foreign tables inside `data_live`, so views, grants, postures and the SQL builder are unchanged. Read-only enforced by the database; columns declared rather than imported; `apply` verifies the remote matches. Tenant isolation is the view predicate alone — one wall rather than two, see SECURITY.md. |
 | PDF/DOCX extraction | **real** | `.pdf` and `.docx` indexed beside `.md`/`.txt`, originals stored, sidecar `.yml` supplies owner and terms. A scanned PDF with no extractable text is refused rather than indexed empty. |
-| Document upload UI | *not built* | Indexing reads local directories; there is no browser upload path yet. |
+| Document upload UI | **real** | Admin-only multi-file and folder upload, resumable: each file is hashed in the browser and only what the collection does not already hold is sent. Same ingestion path as `warehousd index`. |
 | Multi-tenancy (`org_id`) | *partial* | Every grant, audit event and document carries an org, isolated by a view predicate and RLS. A single implicit org is created at bootstrap; there is no UI for creating or switching orgs yet. |
 | SCIM, compliance exports, IdP group→role mapping | *not built* | JIT provisioning creates a `member`. |
 
@@ -436,8 +436,8 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 
 ## Roadmap
 
-Document upload UI · aggregate-only postures with inference-leak protection ·
-more deploy targets · IdP group→role mapping.
+Aggregate-only postures with inference-leak protection · more deploy targets ·
+IdP group→role mapping.
 
 [docs/roadmap.md](docs/roadmap.md) has the detail, and states where the
 open-source line sits: everything shipped is MIT and stays MIT.
