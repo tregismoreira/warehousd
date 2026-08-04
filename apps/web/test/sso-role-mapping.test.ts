@@ -29,10 +29,12 @@ const plain: WarehousdConfig = ConfigSchema.parse(base);
 
 describe("roleForSsoUser", () => {
   it("maps an asserted group to its configured role", () => {
-    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: ["warehousd-managers"] })).toBe(
+    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: ["warehousd-managers"] }).role).toBe(
       "manager",
     );
-    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: ["warehousd-admins"] })).toBe("admin");
+    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: ["warehousd-admins"] }).role).toBe(
+      "admin",
+    );
   });
 
   // Taking the lowest would make joining a second group a demotion, which is not what an operator
@@ -41,25 +43,25 @@ describe("roleForSsoUser", () => {
     expect(
       roleForSsoUser(cfg, "keycloak-oidc", {
         groups: ["everyone", "warehousd-admins", "warehousd-managers"],
-      }),
+      }).role,
     ).toBe("admin");
   });
 
   it("ignores groups the map does not name", () => {
     expect(
-      roleForSsoUser(cfg, "keycloak-oidc", { groups: ["hr", "printer-access", "everyone"] }),
+      roleForSsoUser(cfg, "keycloak-oidc", { groups: ["hr", "printer-access", "everyone"] }).role,
     ).toBe("member");
   });
 
   it("accepts a bare string for an IdP that sends one group unwrapped", () => {
-    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: "warehousd-admins" })).toBe("admin");
+    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: "warehousd-admins" }).role).toBe("admin");
   });
 
   // An IdP that stops sending the claim must not promote anyone — and must not lock the login out
   // either, which is why the answer is a role rather than a refusal.
   it("falls back to default_role when the claim is missing, empty or the wrong shape", () => {
     for (const userInfo of [{}, { groups: [] }, { groups: 42 }, { groups: null }, { groups: {} }])
-      expect(roleForSsoUser(cfg, "keycloak-oidc", userInfo)).toBe("member");
+      expect(roleForSsoUser(cfg, "keycloak-oidc", userInfo).role).toBe("member");
   });
 
   it("honours a default_role other than member", () => {
@@ -68,32 +70,77 @@ describe("roleForSsoUser", () => {
       groups: { "warehousd-admins": "admin" },
       default_role: "manager",
     });
-    expect(roleForSsoUser(c, "keycloak-oidc", { groups: ["hr"] })).toBe("manager");
-    expect(roleForSsoUser(c, "keycloak-oidc", { groups: ["warehousd-admins"] })).toBe("admin");
+    expect(roleForSsoUser(c, "keycloak-oidc", { groups: ["hr"] }).role).toBe("manager");
+    expect(roleForSsoUser(c, "keycloak-oidc", { groups: ["warehousd-admins"] }).role).toBe("admin");
   });
 
   it("reads the claim the provider names, not a fixed one", () => {
     const c = withMapping({ group_claim: "roles", groups: { "wh-admin": "admin" } });
-    expect(roleForSsoUser(c, "keycloak-oidc", { roles: ["wh-admin"] })).toBe("admin");
+    expect(roleForSsoUser(c, "keycloak-oidc", { roles: ["wh-admin"] }).role).toBe("admin");
     // The same value under the wrong key buys nothing.
-    expect(roleForSsoUser(c, "keycloak-oidc", { groups: ["wh-admin"] })).toBe("member");
+    expect(roleForSsoUser(c, "keycloak-oidc", { groups: ["wh-admin"] }).role).toBe("member");
   });
 
   // The mapping is per provider, so a second IdP registered later cannot inherit the first's.
   it("applies nothing to a provider with no mapping configured", () => {
-    expect(roleForSsoUser(cfg, "okta-oidc", { groups: ["warehousd-admins"] })).toBe("member");
+    expect(roleForSsoUser(cfg, "okta-oidc", { groups: ["warehousd-admins"] }).role).toBe("member");
   });
 
   it("leaves a deployment with no sso config exactly where it was: member", () => {
-    expect(roleForSsoUser(plain, "keycloak-oidc", { groups: ["warehousd-admins"] })).toBe("member");
+    expect(roleForSsoUser(plain, "keycloak-oidc", { groups: ["warehousd-admins"] }).role).toBe(
+      "member",
+    );
   });
 
   // A group named after an Object.prototype key must not resolve through the prototype chain —
   // the same class of bug findCollection closed for collection names.
   it("does not resolve a group through the prototype chain", () => {
-    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: ["constructor", "toString"] })).toBe(
+    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: ["constructor", "toString"] }).role).toBe(
       "member",
     );
+  });
+});
+
+// Both ways this feature silently does nothing look identical from the outside — everyone keeps
+// landing on `member`, nothing errors. Neither is catchable when the config is parsed: providers
+// are registered at runtime, and the claim only exists once someone signs in.
+describe("roleForSsoUser — the warnings for a map that cannot apply", () => {
+  it("warns when the claim never arrived, naming it and the provider", () => {
+    const { warning } = roleForSsoUser(cfg, "keycloak-oidc", { email: "x@y.z" });
+    expect(warning).toContain("groups");
+    expect(warning).toContain("keycloak-oidc");
+    expect(warning).toContain("mapping.extraFields");
+  });
+
+  // An IdP that answered with an empty list is not misconfigured — the user is in no group.
+  it("says nothing when the claim arrived empty", () => {
+    expect(roleForSsoUser(cfg, "keycloak-oidc", { groups: [] }).warning).toBeNull();
+  });
+
+  it("says nothing on the ordinary path", () => {
+    expect(
+      roleForSsoUser(cfg, "keycloak-oidc", { groups: ["warehousd-admins"] }).warning,
+    ).toBeNull();
+  });
+
+  // The typo case: a map is configured, but under a providerId nobody signs in with.
+  it("warns when a configured deployment has no entry for the provider in use", () => {
+    const { role, warning } = roleForSsoUser(cfg, "okat-oidc", { groups: ["warehousd-admins"] });
+    expect(role).toBe("member");
+    expect(warning).toContain("okat-oidc");
+    expect(warning).toContain("keycloak-oidc");
+  });
+
+  // A deployment that never configured a map is the ordinary case, not a misconfiguration.
+  it("says nothing when no map is configured at all", () => {
+    expect(roleForSsoUser(plain, "keycloak-oidc", { groups: ["x"] }).warning).toBeNull();
+  });
+
+  // The warning is an operator diagnostic, and it goes to a server log: it names the provider and
+  // the claim, never the user or the claim's value.
+  it("carries no identity in the message", () => {
+    const { warning } = roleForSsoUser(cfg, "keycloak-oidc", { email: "mia@harbor.demo" });
+    expect(warning).not.toContain("mia@harbor.demo");
   });
 });
 

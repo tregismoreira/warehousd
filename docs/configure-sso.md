@@ -181,6 +181,12 @@ Behaviour worth knowing before you rely on it:
   login. To re-apply it, delete the account and let it be provisioned again.
 - **A provider with no entry here provisions `member`**, exactly as before.
 
+Both ways this can silently do nothing — the claim never mapped at registration,
+or an entry keyed by a `providerId` nobody signs in with — look identical from
+outside: everyone lands on `member` and nothing errors. Neither is catchable when
+the config is parsed, so warehousd logs a `[sso]` warning at provisioning naming
+the provider and the claim. Check the server log if a map appears to be ignored.
+
 ## 6. Promote a member by hand
 
 As `admin`, promote the newly-provisioned member in **Admin → Users**, the same

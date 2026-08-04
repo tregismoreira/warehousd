@@ -890,6 +890,13 @@ system — a parallel system is precisely how the two sets of rules drift apart.
   still needs a policy allowing `env:live` **and** a user holding an approved,
   unexpired live grant. Rotation carries the environment forward; changing it
   means minting a new key.
+- **Promoting a client whose keys cannot reach live is refused**, rather than
+  recorded as a promotion that does nothing. `POST /api/oauth-clients/:id/promote`
+  answers `409 no_live_capable_key` when the client holds usable keys and none
+  is live-prefixed — otherwise `promoted_at` would be stamped and the console
+  would show the client as live-capable while every key it has is capped at dev.
+  A client with no API keys at all is unaffected: its environment comes from the
+  authorize flow, not from a prefix. Demotion is never refused.
 - **Shown once at creation**, never retrievable. Only a salted scrypt hash is
   stored, compared in constant time.
 - **Rotation without downtime** — a client may hold two live secrets at once, and

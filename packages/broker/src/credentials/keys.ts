@@ -240,6 +240,35 @@ export async function revokeClientSecret(
   return (r.rowCount ?? 0) > 0;
 }
 
+// What the client's usable keys can reach, read from their prefixes.
+//
+// Exists because promoting a client's policy to `env:live` is meaningless — and now silently so —
+// when every key it holds is `whd_dev_`: the prefix is a ceiling, so the widened policy would
+// never be reached. The promote route asks this first and refuses rather than recording a
+// promotion that does nothing.
+//
+// `hasSecrets` is separate from `liveCapable` on purpose. A client with NO keys at all is an
+// OAuth/DCR client whose env comes from the authorize flow, not from a prefix — promoting one is
+// perfectly meaningful, and conflating "no keys" with "no live key" would break it.
+//
+// Scoped the same way verifyClientSecret is: revoked and expired keys cannot be presented, so
+// they cannot make a promotion useful and must not make one look useful either.
+export async function clientKeyEnvs(
+  db: Pool,
+  clientId: string,
+  orgId: string,
+): Promise<{ hasSecrets: boolean; liveCapable: boolean }> {
+  const r = await db.query(
+    `select prefix from app.client_secrets
+     where client_id=$1 and org_id=$2 and revoked_at is null and expires_at > now()`,
+    [clientId, orgId],
+  );
+  return {
+    hasSecrets: (r.rowCount ?? 0) > 0,
+    liveCapable: r.rows.some((row) => envFromSecret(row.prefix) === "live"),
+  };
+}
+
 export async function listClientSecrets(
   db: Pool,
   clientId: string,

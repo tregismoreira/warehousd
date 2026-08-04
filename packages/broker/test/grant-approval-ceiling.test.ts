@@ -214,28 +214,21 @@ describe("approveGrant — filter evaluability", () => {
   });
 });
 
-describe("validateGrantRequest — filters", () => {
-  it("refuses an unevaluable filter on the request side too", () => {
-    expect(
-      validateGrantRequest(
-        cfg,
-        "people",
-        "why",
-        ["id"],
-        [{ field: "hired_on", op: "eq", value: "last tuesday" }],
-      ),
-    ).toEqual({ ok: false, error: "invalid_filter" });
+// The request side keeps only the rules a request can actually break. A grant request carries no
+// predicates — the approver picks the values and the server picks the column — so approveGrant
+// above is the only writer of a document filter, and the only place the filter rule needs to live.
+describe("validateGrantRequest — the field ceiling on the request side", () => {
+  it("refuses a denied field", () => {
+    expect(validateGrantRequest(cfg, "people", "why", ["id", "ssn"])).toEqual({
+      ok: false,
+      error: "field_not_grantable",
+    });
   });
 
-  it("accepts an evaluable one", () => {
-    expect(
-      validateGrantRequest(
-        cfg,
-        "people",
-        "why",
-        ["id"],
-        [{ field: "hired_on", op: "eq", value: "2026-01-01" }],
-      ),
-    ).toEqual({ ok: true, fields: ["id"] });
+  it("accepts a grantable one", () => {
+    expect(validateGrantRequest(cfg, "people", "why", ["id"])).toEqual({
+      ok: true,
+      fields: ["id"],
+    });
   });
 });

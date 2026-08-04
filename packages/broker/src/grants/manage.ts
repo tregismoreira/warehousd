@@ -11,8 +11,7 @@ import {
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
 import { validateGrantFilters } from "./filters";
 
-export type GrantRequestError =
-  "unknown_collection" | "purpose_required" | "field_not_grantable" | "invalid_filter";
+export type GrantRequestError = "unknown_collection" | "purpose_required" | "field_not_grantable";
 
 export const GRANT_VERBS = ["read", "create", "update", "delete", "approve"] as const;
 export type GrantVerb = (typeof GRANT_VERBS)[number];
@@ -68,11 +67,6 @@ export function validateGrantRequest(
   collection: string,
   purposeLabel: unknown,
   fields: unknown,
-  // Filters a requester asked to be scoped by. No request surface offers them today — the
-  // approver picks the values and the server picks the column (apps/web/lib/approve.ts) — but the
-  // rule that a stored predicate must be evaluable belongs to this function rather than to
-  // whichever surface grows the field first.
-  documentFilters?: DocumentFilter[],
 ): { ok: true; fields: string[] } | { ok: false; error: GrantRequestError } {
   // Check collection exists
   const c = findCollection(cfg, collection);
@@ -92,10 +86,10 @@ export function validateGrantRequest(
   for (const f of requested)
     if (!grantable.includes(f)) return { ok: false, error: "field_not_grantable" };
 
-  // A predicate the two evaluators cannot agree on is refused now, not on the grant's first call.
-  if (documentFilters?.length && validateGrantFilters(documentFilters, c))
-    return { ok: false, error: "invalid_filter" };
-
+  // No filter check here, on purpose. A grant request carries no predicates — the approver picks
+  // the values and the server picks the column (apps/web/lib/approve.ts) — so approveGrant is the
+  // only path that ever writes a document filter, and that is where the rule lives. A parameter
+  // here would be an unexercised second copy of it, which is how the two drift.
   return { ok: true, fields: requested };
 }
 

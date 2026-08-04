@@ -83,7 +83,14 @@ export function ApiKeyDetail({
         body: JSON.stringify({ action: "promote" }),
       });
       if (!res.ok) {
-        toast.error("Failed to promote", { description: res.error });
+        // The one refusal an operator can act on, so it gets a sentence rather than a code:
+        // the environment is fixed in a key's prefix at mint time and rotation keeps it.
+        toast.error("Failed to promote", {
+          description:
+            res.error === "no_live_capable_key"
+              ? "Every usable key on this client is whd_dev_, which can never reach live. Create a live key instead — rotating a dev key keeps it on dev."
+              : res.error,
+        });
         return;
       }
       toast.success("Key promoted to env:live");

@@ -29,13 +29,31 @@ export function trustedOrigins(): string[] {
 //     admins group is an admin; taking the lowest would make adding a group a demotion, which no
 //     operator writing this map expects. Unmapped groups are ignored, not an error — an IdP's
 //     group list is its own business and will contain plenty warehousd knows nothing about.
+//
+// `warning` names the two ways this silently does nothing, because both of them look identical
+// from the outside: everyone keeps landing on `member` and no error is raised anywhere. Neither
+// can be caught when the config is parsed — providers are registered at runtime, and the claim
+// only exists once a user signs in — so the check has to happen here and be reported by the
+// caller. Returned rather than logged so the function stays pure and the message is testable.
 export function roleForSsoUser(
   cfg: WarehousdConfig,
   providerId: string,
   userInfo: Record<string, unknown>,
-): AppRole {
-  const p = cfg.sso?.providers?.[providerId];
-  if (!p) return "member";
+): { role: AppRole; warning: string | null } {
+  const providers = cfg.sso?.providers;
+  const p = providers?.[providerId];
+  if (!p) {
+    // A deployment with no map at all is the ordinary case and says nothing. A deployment that
+    // configured one and named a provider that never signs anyone in has a typo, and the two are
+    // only distinguishable here.
+    const configured = Object.keys(providers ?? {});
+    return {
+      role: "member",
+      warning: configured.length
+        ? `no group map for provider "${providerId}" (configured: ${configured.join(", ")}) — every user from it is provisioned member`
+        : null,
+    };
+  }
 
   const raw = userInfo[p.group_claim];
   // A single-group IdP may send a bare string rather than a list of one.
@@ -49,7 +67,16 @@ export function roleForSsoUser(
     const mapped = Object.hasOwn(p.groups, g) ? p.groups[g] : undefined;
     if (mapped && rank(mapped) > rank(best)) best = mapped;
   }
-  return best;
+
+  // The claim missing entirely is the misconfiguration worth naming: better-auth hands this hook a
+  // MAPPED user-info object, so a claim the provider registration did not list under
+  // `mapping.extraFields` never arrives however faithfully the IdP sends it. An empty list is a
+  // different thing — the IdP answered, the user is in no group — and is not worth a line.
+  const warning =
+    raw === undefined
+      ? `group claim "${p.group_claim}" absent from provider "${providerId}" user info — map it under the provider's mapping.extraFields, or the group map cannot apply`
+      : null;
+  return { role: best, warning };
 }
 
 // `getCfg` rather than a config: it is resolved when a user is actually provisioned, so an
@@ -59,10 +86,16 @@ export function ssoPlugin(app: Pool, getCfg: () => WarehousdConfig) {
   return sso({
     // JIT provisioning: the role comes from the IdP's groups when the provider declares a mapping
     // in warehousd.yml, and is `member` otherwise; an admin promotes in the UI either way.
-    // Runs on registration only (isRegister), so an existing admin who later links an SSO account
-    // is never demoted — and so a group mapping cannot demote anyone on a later login either.
+    //
+    // Registration only (isRegister), deliberately — `provisionUserOnEveryLogin` is left off. On
+    // every login the map would re-derive the role from the IdP, which means silently undoing an
+    // admin's promotion in the console and demoting anyone whose groups changed. That contradicts
+    // the no-demotion-on-link invariant this hook has always had. Re-applying the map to an
+    // existing account is a deliberate act: change the role in Admin → Users.
     provisionUser: async ({ user, userInfo, provider }) => {
-      const role = roleForSsoUser(getCfg(), provider.providerId, userInfo);
+      const { role, warning } = roleForSsoUser(getCfg(), provider.providerId, userInfo);
+      // The provider id and the claim name; never the user, the email, or the claim's value.
+      if (warning) console.warn(`[sso] ${warning}`);
       await app.query(`update app."user" set role = $2 where id = $1`, [user.id, role]);
     },
   });
