@@ -34,8 +34,6 @@ it is in the repository today, it is MIT tomorrow.
   aggregation is currently permitted only over fields the caller could already
   read row by row, so an aggregate can never reveal anything new.
 - **More deploy targets** beyond Fly.io.
-- **IdP group→role mapping.** JIT provisioning creates a `member` and roles are
-  changed by hand.
 
 ## Not planned
 

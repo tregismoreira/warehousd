@@ -92,6 +92,68 @@ describe("Control-plane API routes", () => {
       expect(data.secret).toBeDefined();
     });
 
+    // The env is chosen once, at mint time, and encoded in the prefix. Before this there was no
+    // way to ask for a live key at all, which is why the prefix could not be a ceiling: enforcing
+    // it would have capped every client at dev with no opt-out.
+    it("mints a live-prefixed key when asked, with a policy that allows env:live", async () => {
+      const app = getAppPool();
+      const { POST } = await import("../app/api/api-keys/route");
+      const res = await POST(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: { name: "Live Key", mode: "headless", robotUserId: "robot-live", env: "live" },
+        }),
+      );
+      expect(res.status).toBe(201);
+      const data = await res.json();
+      expect(data.env).toBe("live");
+      expect(data.secret).toMatch(/^whd_live_/);
+
+      const policy = await app.query(
+        `select allowed_scopes from app.client_policies where client_id=$1`,
+        [data.clientId],
+      );
+      // Both, not live alone: live is the ceiling, not an exclusive mode.
+      expect(policy.rows[0].allowed_scopes).toEqual(["env:dev", "env:live"]);
+    });
+
+    it("defaults to dev, with a policy that allows no live at all", async () => {
+      const app = getAppPool();
+      const { POST } = await import("../app/api/api-keys/route");
+      const res = await POST(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: { name: "Default Env Key", mode: "headless", robotUserId: "robot-default-env" },
+        }),
+      );
+      const data = await res.json();
+      expect(data.env).toBe("dev");
+      expect(data.secret).toMatch(/^whd_dev_/);
+
+      const policy = await app.query(
+        `select allowed_scopes from app.client_policies where client_id=$1`,
+        [data.clientId],
+      );
+      expect(policy.rows[0].allowed_scopes).toEqual(["env:dev"]);
+    });
+
+    // Refused rather than coerced to dev: a typo that silently produced a dev key would surface
+    // later as an unexplained invalid_scope, a long way from the request that caused it.
+    it("refuses an env that is neither dev nor live", async () => {
+      const { POST } = await import("../app/api/api-keys/route");
+      const res = await POST(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: { name: "Bad Env Key", mode: "headless", robotUserId: "robot-bad", env: "staging" },
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_env");
+    });
+
     it("rejects headless mode without robotUserId", async () => {
       const { POST } = await import("../app/api/api-keys/route");
       const req = apiRequest("/api/api-keys", {
@@ -218,6 +280,42 @@ describe("Control-plane API routes", () => {
       expect(rotatedSecrets.length).toBe(2);
       expect(rotatedSecrets.some((s) => s.id === oldSecretId)).toBe(true);
       expect(rotatedSecrets.every((s) => !s.revokedAt)).toBe(true);
+    });
+
+    // Rotation replaces a credential; it does not re-scope one. A live key coming back capped at
+    // dev would break the deployment mid-rotation, and the reverse would be an escalation.
+    it("keeps the rotated key's environment", async () => {
+      const app = getAppPool();
+      const { POST: create } = await import("../app/api/api-keys/route");
+      const createRes = await create(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: {
+            name: "Live Key to Rotate",
+            mode: "headless",
+            robotUserId: "robot-rotate-live",
+            env: "live",
+          },
+        }),
+      );
+      const { clientId } = await createRes.json();
+      const oldSecretId = must(
+        (await listClientSecrets(app, clientId, "default"))[0],
+        "a client secret for the new live key",
+      ).id;
+
+      const { POST } = await import("../app/api/api-keys/[id]/rotate/route");
+      const res = await POST(
+        apiRequest(`/api/api-keys/${clientId}/rotate`, {
+          method: "POST",
+          cookie: adminCookie,
+          body: { oldSecretId },
+        }),
+        { params: Promise.resolve({ id: clientId }) },
+      );
+      expect(res.status).toBe(201);
+      expect((await res.json()).secret).toMatch(/^whd_live_/);
     });
 
     it("plaintext secret appears only once", async () => {

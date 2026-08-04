@@ -8,6 +8,10 @@ interface OIDCUser {
   email: string;
   email_verified: boolean;
   name: string;
+  // Anything else the IdP asserts. Group claims live here — the SSO role-mapping suite needs an
+  // IdP that sends one, and naming the claim in the fixture rather than in this type keeps the
+  // helper indifferent to which claim a deployment happens to use.
+  [claim: string]: unknown;
 }
 
 export async function startFakeIdp(_opts: { users: OIDCUser[] }) {
@@ -91,6 +95,7 @@ export async function startFakeIdp(_opts: { users: OIDCUser[] }) {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
+          ...currentUser,
           sub: currentUser.sub || currentUser.email,
           email: currentUser.email,
           email_verified: currentUser.email_verified ?? true,

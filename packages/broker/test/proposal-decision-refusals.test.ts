@@ -3,7 +3,8 @@ import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
-import type { BrokerContext } from "../src/types";
+import { validateGrantFilters } from "../src/grants/filters";
+import type { BrokerContext, DocumentFilter } from "../src/types";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
@@ -57,6 +58,11 @@ afterAll(async () => {
   await p.end();
 });
 
+// The same question approveGrant asks, so the helper below routes each filter the way the real
+// approval path would rather than by a hand-maintained list of which fixtures are broken.
+const isEvaluable = (filters: { field: string; op: string; value: unknown }[]): boolean =>
+  validateGrantFilters(filters as DocumentFilter[], cfg.collections.people!) === null;
+
 // A proposer who may only propose, and an approver whose grant the caller shapes. Every test here
 // needs the pair, and spelling both out each time buried the one line that was the point.
 async function grantPair(
@@ -91,8 +97,18 @@ async function grantPair(
   });
   await approveGrant(app, cfg, approverId, "admin", {
     verbs: approver.verbs ?? ["read", "approve"],
-    documentFilters: approver.documentFilters as never,
+    ...(approver.documentFilters && isEvaluable(approver.documentFilters)
+      ? { documentFilters: approver.documentFilters as never }
+      : {}),
   });
+  // An unevaluable filter is written past approveGrant, which now refuses one (`invalid_filter`).
+  // An approved grant can still carry one — the config may have changed since the decision — and
+  // that is precisely the state the first describe block below exercises.
+  if (approver.documentFilters && !isEvaluable(approver.documentFilters))
+    await app.query(`update app.grants set document_filter=$2 where id=$1`, [
+      approverId,
+      JSON.stringify(approver.documentFilters),
+    ]);
 
   return {
     proposer: makeCtx({ userId: `proposer_${suffix}` }),

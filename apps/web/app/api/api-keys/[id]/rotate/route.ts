@@ -25,6 +25,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
 
   try {
+    // No env argument: rotateClientSecret carries the old key's own prefix forward, so a rotation
+    // cannot quietly move a client between environments.
     const { secret, id } = await rotateClientSecret(
       app,
       clientId,
@@ -32,7 +34,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       oldSecretId,
       expiryDate,
       guard.user.id,
-      "dev",
     );
     return Response.json({ secret, id }, { status: 201 });
   } catch {

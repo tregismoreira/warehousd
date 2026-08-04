@@ -586,6 +586,41 @@ export const EmbeddingSchema = z
   });
 export type EmbeddingConfig = z.infer<typeof EmbeddingSchema>;
 
+// admin ⊃ manager ⊃ member, the same order apps/web/lib/authz.ts ranks them in.
+export const APP_ROLES = ["member", "manager", "admin"] as const;
+export type AppRole = (typeof APP_ROLES)[number];
+
+// Which IdP groups map to which warehousd role, per provider.
+//
+// This lives in warehousd.yml rather than alongside the provider registration on purpose. A
+// provider is registered at runtime through the admin API; the YAML is operator-controlled trusted
+// input (see SECURITY.md, "Deployment expectations"). A mapping that decides who becomes an admin
+// belongs in the trusted file, not in a row an API call writes.
+//
+// `groups` is keyed by the IdP's group name and never the other way round: two groups mapping to
+// the same role is ordinary, and a role appearing twice as a key would silently drop one.
+export const SsoProviderSchema = z
+  .object({
+    // The claim (OIDC) or attribute (SAML) carrying the caller's groups. It must also be mapped
+    // into `userInfo` by the provider registration's `mapping.extraFields` — better-auth passes
+    // the provisioning hook a mapped object, not the raw claim set, so an unmapped claim is not
+    // merely unread here, it never arrives.
+    group_claim: z.string().min(1),
+    groups: z.record(z.string(), z.enum(APP_ROLES)),
+    // What a user in none of the mapped groups gets. `member` — the role JIT provisioning has
+    // always produced — so adding a mapping cannot accidentally lock an existing population out.
+    default_role: z.enum(APP_ROLES).default("member"),
+  })
+  .strict();
+export type SsoProviderConfig = z.infer<typeof SsoProviderSchema>;
+
+export const SsoSchema = z
+  .object({
+    // Keyed by `providerId` — the same string the admin API registers the provider under.
+    providers: z.record(z.string(), SsoProviderSchema).default({}),
+  })
+  .strict();
+
 export const ConfigSchema = z
   .object({
     project: z.string(),
@@ -657,6 +692,7 @@ export const ConfigSchema = z
       .object({ documents_per_collection: z.record(z.string(), z.number()).default({}) })
       .default({ documents_per_collection: {} }),
     embedding: EmbeddingSchema.optional(),
+    sso: SsoSchema.optional(),
     deploy: DeploySchema.optional(),
   })
   .strict()

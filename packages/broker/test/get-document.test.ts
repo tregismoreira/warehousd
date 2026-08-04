@@ -214,7 +214,9 @@ describe("broker.getDocument", () => {
       env: "live",
       orgId: "default",
       purposeLabel: "test",
-      allowedFields: ["path", "content"],
+      // Not `path`: this fixture declares it `posture: deny`, and the path form is a lookup key
+      // rather than a field the grant has to carry.
+      allowedFields: ["title", "content"],
     });
     await approveGrant(app, cfg, fileGrantId, "admin", { verbs: ["read"] });
 

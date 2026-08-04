@@ -52,10 +52,11 @@ export async function POST(req: NextRequest) {
   const org = orgOf(guard.user);
   const body = await readJson(req);
   if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
-  const { name, mode, trustedIssuerId, robotUserId, allowedCollections, expiresAt } =
+  const { name, mode, env, trustedIssuerId, robotUserId, allowedCollections, expiresAt } =
     body.value as {
       name?: string;
       mode?: string;
+      env?: string;
       trustedIssuerId?: string;
       robotUserId?: string;
       allowedCollections?: string[];
@@ -65,6 +66,15 @@ export async function POST(req: NextRequest) {
   if (!name || !mode) {
     return Response.json({ error: "missing_name_or_mode" }, { status: 400 });
   }
+
+  // The environment a key is minted for, chosen once and encoded in its prefix. `dev` is the
+  // default because a key that reaches real data should be asked for rather than arrived at.
+  // Refused rather than coerced: a typo that silently produced a dev key would be discovered as a
+  // mysterious `invalid_scope` at token time.
+  if (env !== undefined && env !== "dev" && env !== "live") {
+    return Response.json({ error: "invalid_env" }, { status: 400 });
+  }
+  const keyEnv: "dev" | "live" = env === "live" ? "live" : "dev";
 
   if (mode === "delegated" && !trustedIssuerId) {
     return Response.json({ error: "delegated_mode_requires_trusted_issuer" }, { status: 400 });
@@ -85,11 +95,15 @@ export async function POST(req: NextRequest) {
     [id, clientId, randomBytes(32).toString("hex"), name, guard.user.id],
   );
 
-  // Upsert the policy
+  // Upsert the policy. A live key's policy carries `env:dev` too — live is the ceiling, not an
+  // exclusive mode, and a key that could reach real data but not generated data would be a strange
+  // thing to hand anyone. The policy is only half the gate: /v1/token still narrows it by the
+  // key's own prefix and still requires the user to hold an approved live grant.
+  const allowedScopes = keyEnv === "live" ? "{env:dev,env:live}" : "{env:dev}";
   await app.query(
     `insert into app.client_policies (client_id, org_id, display_name, allowed_scopes, mode, allowed_collections, trusted_issuer_id, robot_user_id)
-     values ($1, $2, $3, '{env:dev}', $4, $5, $6, $7)
-     on conflict (client_id) do update set display_name=$3, mode=$4, allowed_collections=$5, trusted_issuer_id=$6, robot_user_id=$7`,
+     values ($1, $2, $3, $8, $4, $5, $6, $7)
+     on conflict (client_id) do update set display_name=$3, mode=$4, allowed_collections=$5, trusted_issuer_id=$6, robot_user_id=$7, allowed_scopes=$8`,
     [
       clientId,
       org,
@@ -98,6 +112,7 @@ export async function POST(req: NextRequest) {
       allowedCollections || null,
       trustedIssuerId || null,
       robotUserId || null,
+      allowedScopes,
     ],
   );
 
@@ -105,7 +120,14 @@ export async function POST(req: NextRequest) {
   const expiryDate = expiresAt
     ? new Date(expiresAt)
     : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-  const { secret } = await createClientSecret(app, clientId, org, expiryDate, guard.user.id, "dev");
+  const { secret } = await createClientSecret(
+    app,
+    clientId,
+    org,
+    expiryDate,
+    guard.user.id,
+    keyEnv,
+  );
 
-  return Response.json({ clientId, secret }, { status: 201 });
+  return Response.json({ clientId, secret, env: keyEnv }, { status: 201 });
 }

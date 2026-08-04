@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { onPoolError } from "@warehousd/broker";
 import { mcpPlugin, envScopePlugin } from "./oauth";
 import { ssoPlugin, ssoAdminPlugin, trustedOrigins } from "./sso";
+import { getConfig } from "../app/lib/broker";
 import { lockoutPlugin } from "./lockout";
 
 export const LOCAL_LOGIN_DISABLED = process.env.WAREHOUSD_DISABLE_LOCAL_LOGIN === "true";
@@ -77,7 +78,7 @@ export const auth = betterAuth({
   plugins: [
     mcpPlugin,
     envScopePlugin(appPool),
-    ssoPlugin(appPool),
+    ssoPlugin(appPool, getConfig),
     ssoAdminPlugin(),
     lockoutPlugin(appPool),
   ],

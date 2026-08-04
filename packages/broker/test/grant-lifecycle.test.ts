@@ -111,10 +111,10 @@ it("approveGrant persists documentFilters array", async () => {
     orgId: "default",
     env: "dev",
     purposeLabel: "p",
-    allowedFields: ["title", "content"],
+    allowedFields: ["id", "full_name"],
   });
   await approveGrant(admin, cfg, id, "marcus", {
-    documentFilters: [{ field: "path", op: "in", value: ["hr/pto.md"] }],
+    documentFilters: [{ field: "full_name", op: "in", value: ["Ana Silva"] }],
   });
   const g = await loadActiveGrant(admin, makeCtx({ userId: "u2" }), "people");
   expect(g?.documentFilter?.[0]?.op).toBe("in");

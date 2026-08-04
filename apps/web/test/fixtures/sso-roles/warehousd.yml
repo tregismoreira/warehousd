@@ -1,0 +1,21 @@
+project: sso-roles-test
+demo: false
+server: { port: 8722 }
+collections:
+  feedback:
+    description: User feedback entries
+    fields:
+      id:      { type: uuid, posture: allow, pk: true }
+      title:   { type: text, posture: allow }
+synthetic:
+  documents_per_collection: {}
+# The group→role map is per provider, keyed by the `providerId` the admin API registered it
+# under. `group_claim` names the claim; the provider registration must also map it into the
+# user info it hands the provisioning hook (oidcConfig.mapping.extraFields below, in the test).
+sso:
+  providers:
+    test-oidc:
+      group_claim: groups
+      groups:
+        wh-admins: admin
+        wh-managers: manager

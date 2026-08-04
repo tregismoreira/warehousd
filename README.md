@@ -353,7 +353,8 @@ yet built:
 | PDF/DOCX extraction | **real** | `.pdf` and `.docx` indexed beside `.md`/`.txt`, originals stored, sidecar `.yml` supplies owner and terms. A scanned PDF with no extractable text is refused rather than indexed empty. |
 | Document upload UI | **real** | Admin-only multi-file and folder upload, resumable: each file is hashed in the browser and only what the collection does not already hold is sent. Same ingestion path as `warehousd index`. |
 | Multi-tenancy (`org_id`) | *partial* | Every grant, audit event and document carries an org, isolated by a view predicate and RLS. A single implicit org is created at bootstrap; there is no UI for creating or switching orgs yet. |
-| SCIM, compliance exports, IdP group→role mapping | *not built* | JIT provisioning creates a `member`. |
+| IdP group→role mapping | **real** | Per provider in `warehousd.yml`: a group claim and a group→role map, applied at JIT provisioning. Highest matching role wins; unmapped groups are ignored. Registration-time only, so a console promotion is never undone by the next login. A deployment that declares no map still provisions `member`. |
+| SCIM, compliance exports | *not built* | |
 
 ## Contributing
 

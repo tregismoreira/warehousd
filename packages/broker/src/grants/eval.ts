@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { BrokerContext, DocumentFilter } from "../types";
+import { SELF } from "./filters";
 
 export type ActiveGrant = {
   id: string;
@@ -102,9 +103,9 @@ function toActiveGrant(
   // no caller can forget it and the SQL builder still sees a plain literal. Only the exact
   // string is a sentinel — "$self-service" is a literal, and there is no substring interpolation.
   const documentFilter: DocumentFilter[] = ((df ?? []) as DocumentFilter[]).map((f) => {
-    if (f.value === "$self") return { ...f, value: userId };
+    if (f.value === SELF) return { ...f, value: userId };
     if (f.op === "in" && Array.isArray(f.value))
-      return { ...f, value: f.value.map((v: unknown) => (v === "$self" ? userId : v)) };
+      return { ...f, value: f.value.map((v: unknown) => (v === SELF ? userId : v)) };
     return f;
   });
 

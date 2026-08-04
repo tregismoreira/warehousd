@@ -191,6 +191,34 @@ export function validateDocumentFilters(
   return null;
 }
 
+// The sentinel a grant author writes to mean "the caller". grants/eval.ts binds it to the user id
+// when the grant is loaded; one definition, so the two places that care cannot spell it apart.
+export const SELF = "$self";
+
+// The same rule set, run when a grant is *stored* rather than used.
+//
+// Approval is the only moment an approver is present to be told a predicate is unusable, so a
+// filter that cannot be compared is refused there instead of surfacing as `invalid_intent` on the
+// grant's first call. `$self` is the one value that has nothing to canonicalise yet — it is not a
+// literal until loadActiveGrant binds it — so it is skipped here and checked at use time, against
+// the bound id. Nothing else is relaxed: the field must still exist, must still be stored on the
+// base table, and every real value must still be a valid instance of its column's type.
+//
+// The use-time check stays where it is. Config can change between approval and use, and a filter
+// that was evaluable when it was approved is not necessarily evaluable when it runs.
+export function validateGrantFilters(
+  filters: DocumentFilter[],
+  c: CollectionConfig,
+): FilterValidationError | null {
+  const unbound = filters.map((f) => {
+    if (f.value === SELF) return { ...f, value: null };
+    if (Array.isArray(f.value))
+      return { ...f, value: f.value.map((v: unknown) => (v === SELF ? null : v)) };
+    return f;
+  });
+  return validateDocumentFilters(unbound, c);
+}
+
 // The grant's document filters, ANDed, evaluated against a row the write path already holds.
 // `$self` is bound by loadActiveGrant, so by here every value is a plain literal. An empty list
 // scopes nothing, which is what buildSelect does with it too.

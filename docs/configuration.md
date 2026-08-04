@@ -45,6 +45,14 @@ embedding:               # optional. Absent means semantic search is off
   provider: local        # local (default) | openai | http
   model: bge-small-en-v1.5
   dimensions: 384        # required — must match the model
+sso:                     # optional. Absent means every SSO user is provisioned `member`
+  providers:
+    okta-oidc:           # the providerId the IdP was registered under
+      group_claim: groups
+      groups:
+        wh-admins: admin
+        wh-managers: manager
+      default_role: member   # default member
 deploy:
   target: fly          # only supported value
   app_name: harbor-warehousd   # ^[a-z0-9][a-z0-9-]{0,62}$, globally unique on Fly
@@ -89,6 +97,13 @@ parsed and so yields a real boolean:
 ```yaml
 audit: { enabled: ${env:WAREHOUSD_AUDIT} }   # WAREHOUSD_AUDIT=false
 ```
+
+The `sso:` block maps an identity provider's groups to warehousd roles at
+JIT provisioning. It lives here rather than alongside the provider registration
+because a provider is registered at runtime through the admin API, while this
+file is operator-controlled trusted input — and a rule that decides who becomes
+an admin belongs in the trusted file. See
+[configure-sso.md](configure-sso.md#4-map-idp-groups-to-warehousd-roles).
 
 The `deploy:` block is optional and required only by `warehousd deploy`. It
 names the target (`fly` is the only value), the globally unique app name, the

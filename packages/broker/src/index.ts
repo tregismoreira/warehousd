@@ -33,6 +33,14 @@ export {
 export { embedCollection, embedChunks, type EmbedProgress } from "./embedding/sync";
 export { DEFAULT_EMBEDDING_DIMENSIONS } from "./apply/ddl";
 export { EmbeddingSchema, type EmbeddingConfig } from "./config/schema";
+export {
+  ConfigSchema,
+  SsoSchema,
+  SsoProviderSchema,
+  APP_ROLES,
+  type AppRole,
+  type SsoProviderConfig,
+} from "./config/schema";
 export type { WarehousdConfig } from "./config/schema";
 export {
   fileMetadataFields,
@@ -90,6 +98,7 @@ export {
   resolveEnvScopes,
   resolveIssuedEnvScope,
   recomputeEnvScope,
+  narrowPolicyToKeyEnv,
   pickEnvScope,
   type ClientPolicy as EnvScopeClientPolicy,
 } from "./oauth/env-scope";

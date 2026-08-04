@@ -46,14 +46,14 @@ export function validateSecretFormat(secret: string): boolean {
 
 // The env a key was minted for, read from its own prefix.
 //
-// Informational, NOT a boundary — verifyClientSecret reports it so a leaked key can be triaged on
-// sight, and nothing narrows access to it. Two reasons it cannot be a ceiling today: both admin
-// routes hardcode "dev" when minting, so a live-prefixed key is unreachable, and enforcing the
-// prefix would therefore cap every delegated client at dev with no way to opt out.
+// A ceiling as well as a label. verifyClientSecret reports it so a leaked key can be triaged on
+// sight, and /v1/token narrows the client policy by it (narrowPolicyToKeyEnv) before resolving an
+// env scope — so a `whd_dev_` key can never yield `env:live`, however the policy is widened later.
+// It only ever narrows: it cannot grant an env the policy withholds, and `env:live` still requires
+// the user's live-grant eligibility on top (see resolveIssuedEnvScope).
 //
-// What actually bounds the environment is `client_policies.allowed_scopes` intersected with the
-// user's live-grant eligibility (see resolveIssuedEnvScope). Making the prefix a real ceiling
-// needs a way to mint a live key first; until then this is a label, and SECURITY.md says so.
+// The opt-out that used to be missing is the admin route's `env` field: a live key is minted
+// explicitly, so capping a dev-prefixed key at dev no longer caps every client at dev.
 export function envFromSecret(secret: string): "dev" | "live" | null {
   const match = secret.match(/^whd_(dev|live)_/i);
   if (match && match[1]) return match[1].toLowerCase() as "dev" | "live";
@@ -110,8 +110,8 @@ export async function createClientSecret(
     throw new Error("Maximum 2 unrevoked secrets per client");
   }
 
-  // The env goes INTO the secret so a leaked key can be triaged on sight. It is a label, not a
-  // ceiling — see envFromSecret for why, and for what does bound the environment.
+  // The env goes INTO the secret: it is both how a leaked key is triaged on sight and the ceiling
+  // /v1/token narrows the client policy by. See envFromSecret.
   const secretId = randomBytes(6).toString("hex");
   const secret = generateSecret(env, secretId);
 
@@ -133,7 +133,8 @@ export async function createClientSecret(
 
 // `env` is the ceiling encoded in the key's own prefix — see envFromSecret. Callers that issue
 // tokens must intersect it with whatever the client policy and the user's grants allow, so a
-// `whd_dev_*` key cannot reach live however the policy is later widened.
+// `whd_dev_*` key cannot reach live however the policy is later widened. `/v1/token` does this
+// through narrowPolicyToKeyEnv; a new token-issuing path that skips it reopens the hole.
 export async function verifyClientSecret(
   db: Pool,
   secret: string,
@@ -185,6 +186,11 @@ export async function verifyClientSecret(
 // Rotation issues a SECOND live secret and leaves the first working. That overlap is the
 // feature: a caller redeploys with the new key at its own pace, then revokes the old one
 // explicitly. Revoking here would make every rotation an outage.
+//
+// The env is read off the secret being rotated rather than taken as an argument. Rotation replaces
+// a credential, it does not re-scope one: a caller-supplied env would make a rotation either a
+// silent downgrade (a live key coming back capped at dev, breaking the deployment mid-rotation) or
+// a silent escalation. Choosing an env is what minting a new key is for.
 export async function rotateClientSecret(
   db: Pool,
   clientId: string,
@@ -192,10 +198,9 @@ export async function rotateClientSecret(
   oldSecretId: string,
   expiresAt: Date,
   createdBy: string,
-  env: "dev" | "live" = "dev",
 ): Promise<{ secret: string; id: string }> {
   const old = await db.query(
-    `select id from app.client_secrets
+    `select prefix from app.client_secrets
      where id=$1 and client_id=$2 and org_id=$3 and revoked_at is null`,
     [oldSecretId, clientId, orgId],
   );
@@ -203,7 +208,14 @@ export async function rotateClientSecret(
 
   // createClientSecret enforces the ceiling of two unrevoked secrets, so a client cannot
   // accumulate keys by rotating repeatedly without ever revoking.
-  return createClientSecret(db, clientId, orgId, expiresAt, createdBy, env);
+  return createClientSecret(
+    db,
+    clientId,
+    orgId,
+    expiresAt,
+    createdBy,
+    envFromSecret(old.rows[0].prefix) ?? "dev",
+  );
 }
 
 // Scoped by client and org, not by secret id alone.
