@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
-import { onPoolError } from "@warehousd/broker";
+import { onPoolError, loadConfig } from "@warehousd/broker";
 import { mcpPlugin, envScopePlugin } from "./oauth";
 import { ssoPlugin, ssoAdminPlugin, trustedOrigins } from "./sso";
 import { lockoutPlugin } from "./lockout";
@@ -77,7 +77,18 @@ export const auth = betterAuth({
   plugins: [
     mcpPlugin,
     envScopePlugin(appPool),
-    ssoPlugin(appPool),
+    // The config is read straight from disk here rather than through `getConfig` in
+    // app/lib/broker. That module imports @warehousd/providers for the embedder, and this file is
+    // imported by apps/web/scripts/entrypoint.ts, which the image runs under `tsx` — unbundled —
+    // BEFORE `next start`. The runtime image carries packages/broker and apps/web but not
+    // packages/providers (see apps/web/Dockerfile): the app routes never notice, because
+    // `next build` bundles the embedder for them, but an unbundled import resolves a dangling
+    // workspace symlink and kills the entrypoint before the server ever starts. Nothing in this
+    // file may reach app/lib/broker for that reason. The CLI lifecycle e2e is what catches it.
+    //
+    // Re-reading per provisioning is not a cost worth caching: it happens once per new SSO
+    // account, and picking up an edited group map without a restart is a feature.
+    ssoPlugin(appPool, () => loadConfig(process.env.WAREHOUSD_PROJECT_DIR ?? process.cwd())),
     ssoAdminPlugin(),
     lockoutPlugin(appPool),
   ],

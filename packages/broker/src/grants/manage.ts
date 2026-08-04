@@ -9,6 +9,7 @@ import {
   supportedVerbs,
 } from "../config/load";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
+import { validateGrantFilters } from "./filters";
 
 export type GrantRequestError = "unknown_collection" | "purpose_required" | "field_not_grantable";
 
@@ -85,6 +86,10 @@ export function validateGrantRequest(
   for (const f of requested)
     if (!grantable.includes(f)) return { ok: false, error: "field_not_grantable" };
 
+  // No filter check here, on purpose. A grant request carries no predicates — the approver picks
+  // the values and the server picks the column (apps/web/lib/approve.ts) — so approveGrant is the
+  // only path that ever writes a document filter, and that is where the rule lives. A parameter
+  // here would be an unexercised second copy of it, which is how the two drift.
   return { ok: true, fields: requested };
 }
 
@@ -120,7 +125,12 @@ export async function requestGrant(
 }
 
 export type ApproveGrantError =
-  "unknown_grant" | "invalid_verbs" | "invalid_unmask" | "self_approval_denied";
+  | "unknown_grant"
+  | "invalid_verbs"
+  | "invalid_unmask"
+  | "invalid_filter"
+  | "field_not_grantable"
+  | "self_approval_denied";
 
 // Every decision is scoped to the grant's org as well as its id. A grant id is a uuid, so
 // this is a backstop rather than the primary gate — but it is the difference between a
@@ -176,6 +186,28 @@ export async function approveGrant(
 
   const v = validateVerbs(verbs, cfg, collection, allowedFields);
   if (!v.ok) return { ok: false, error: "invalid_verbs", detail: v.error };
+
+  // The two-tier deny, re-checked on the decision side. validateGrantRequest enforces it when a
+  // grant is asked for, and the console's buildApproval derives the approver's field set from the
+  // YAML — but both are caller-side guarantees, and the broker is the trust boundary. Without
+  // this, an adapter calling approveGrant directly can store a field the config never made
+  // grantable; since the unmask rules below take allowedFields as their base set, such a field
+  // would also become an admissible unmask target.
+  const grantable = grantableFields(cfg, collection);
+  const notGrantable = allowedFields.filter((f: string) => !grantable.includes(f));
+  if (notGrantable.length)
+    return { ok: false, error: "field_not_grantable", detail: notGrantable.join(", ") };
+
+  // A malformed predicate is refused while an approver is still present to be told about it,
+  // rather than surfacing as `invalid_intent` on the grant's first call. The use-time check stays:
+  // config can change between approval and use.
+  const documentFilters = opts.documentFilters ?? [];
+  if (documentFilters.length) {
+    const c = findCollection(cfg, collection);
+    // validateVerbs already refused an unknown collection, so c is non-null here.
+    const bad = c ? validateGrantFilters(documentFilters, c) : null;
+    if (bad) return { ok: false, error: "invalid_filter", detail: `${bad.field}: ${bad.detail}` };
+  }
 
   const unmaskedFields = opts.unmaskedFields ?? [];
   if (unmaskedFields.length) {

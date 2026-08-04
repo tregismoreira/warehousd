@@ -317,7 +317,9 @@ describe("SSO: Rules 1-3 hold on the SSO path", () => {
       collection: "policies",
       env: "live",
       purposeLabel: "test",
-      allowedFields: ["id"],
+      // `policies` is a file collection and declares no `id`; approveGrant refuses a field the
+      // config never made grantable, and this grant only has to exist to make the user live-eligible.
+      allowedFields: ["title"],
     });
     await approveGrant(appPool, harborCfg, grantId, "ana", {
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { getAppPool } from "../app/lib/broker";
-import { listClientSecrets } from "@warehousd/broker";
+import { listClientSecrets, createClientSecret } from "@warehousd/broker";
 import { must } from "./helpers/must";
 
 describe("Control-plane API routes", () => {
@@ -90,6 +90,68 @@ describe("Control-plane API routes", () => {
       const data = await res.json();
       expect(data.clientId).toBeDefined();
       expect(data.secret).toBeDefined();
+    });
+
+    // The env is chosen once, at mint time, and encoded in the prefix. Before this there was no
+    // way to ask for a live key at all, which is why the prefix could not be a ceiling: enforcing
+    // it would have capped every client at dev with no opt-out.
+    it("mints a live-prefixed key when asked, with a policy that allows env:live", async () => {
+      const app = getAppPool();
+      const { POST } = await import("../app/api/api-keys/route");
+      const res = await POST(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: { name: "Live Key", mode: "headless", robotUserId: "robot-live", env: "live" },
+        }),
+      );
+      expect(res.status).toBe(201);
+      const data = await res.json();
+      expect(data.env).toBe("live");
+      expect(data.secret).toMatch(/^whd_live_/);
+
+      const policy = await app.query(
+        `select allowed_scopes from app.client_policies where client_id=$1`,
+        [data.clientId],
+      );
+      // Both, not live alone: live is the ceiling, not an exclusive mode.
+      expect(policy.rows[0].allowed_scopes).toEqual(["env:dev", "env:live"]);
+    });
+
+    it("defaults to dev, with a policy that allows no live at all", async () => {
+      const app = getAppPool();
+      const { POST } = await import("../app/api/api-keys/route");
+      const res = await POST(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: { name: "Default Env Key", mode: "headless", robotUserId: "robot-default-env" },
+        }),
+      );
+      const data = await res.json();
+      expect(data.env).toBe("dev");
+      expect(data.secret).toMatch(/^whd_dev_/);
+
+      const policy = await app.query(
+        `select allowed_scopes from app.client_policies where client_id=$1`,
+        [data.clientId],
+      );
+      expect(policy.rows[0].allowed_scopes).toEqual(["env:dev"]);
+    });
+
+    // Refused rather than coerced to dev: a typo that silently produced a dev key would surface
+    // later as an unexplained invalid_scope, a long way from the request that caused it.
+    it("refuses an env that is neither dev nor live", async () => {
+      const { POST } = await import("../app/api/api-keys/route");
+      const res = await POST(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: { name: "Bad Env Key", mode: "headless", robotUserId: "robot-bad", env: "staging" },
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_env");
     });
 
     it("rejects headless mode without robotUserId", async () => {
@@ -220,6 +282,42 @@ describe("Control-plane API routes", () => {
       expect(rotatedSecrets.every((s) => !s.revokedAt)).toBe(true);
     });
 
+    // Rotation replaces a credential; it does not re-scope one. A live key coming back capped at
+    // dev would break the deployment mid-rotation, and the reverse would be an escalation.
+    it("keeps the rotated key's environment", async () => {
+      const app = getAppPool();
+      const { POST: create } = await import("../app/api/api-keys/route");
+      const createRes = await create(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: {
+            name: "Live Key to Rotate",
+            mode: "headless",
+            robotUserId: "robot-rotate-live",
+            env: "live",
+          },
+        }),
+      );
+      const { clientId } = await createRes.json();
+      const oldSecretId = must(
+        (await listClientSecrets(app, clientId, "default"))[0],
+        "a client secret for the new live key",
+      ).id;
+
+      const { POST } = await import("../app/api/api-keys/[id]/rotate/route");
+      const res = await POST(
+        apiRequest(`/api/api-keys/${clientId}/rotate`, {
+          method: "POST",
+          cookie: adminCookie,
+          body: { oldSecretId },
+        }),
+        { params: Promise.resolve({ id: clientId }) },
+      );
+      expect(res.status).toBe(201);
+      expect((await res.json()).secret).toMatch(/^whd_live_/);
+    });
+
     it("plaintext secret appears only once", async () => {
       const { POST: create } = await import("../app/api/api-keys/route");
       const createReq = apiRequest("/api/api-keys", {
@@ -343,6 +441,137 @@ describe("Control-plane API routes", () => {
 
       const stillLive = await listClientSecrets(app, clientB, "default");
       expect(stillLive.find((s) => s.id === secretIdB)?.revokedAt).toBeNull();
+    });
+  });
+
+  // Promotion widens a client policy to `env:live`. Since the key's own prefix is now a ceiling,
+  // doing that for a client whose every usable key is `whd_dev_` changes nothing — but it writes
+  // `promoted_at` and the console then shows the client as live-capable, which reads as an
+  // escalation that happened rather than the no-op it is.
+  describe("POST /api/oauth-clients/[clientId]/promote", () => {
+    async function mint(name: string, env?: "dev" | "live") {
+      const { POST } = await import("../app/api/api-keys/route");
+      const res = await POST(
+        apiRequest("/api/api-keys", {
+          method: "POST",
+          cookie: adminCookie,
+          body: {
+            name,
+            mode: "headless",
+            robotUserId: `robot-${name}`,
+            ...(env ? { env } : {}),
+          },
+        }),
+      );
+      return (await res.json()) as { clientId: string };
+    }
+
+    async function promote(clientId: string, action = "promote") {
+      const { POST } = await import("../app/api/oauth-clients/[clientId]/promote/route");
+      return POST(
+        apiRequest(`/api/oauth-clients/${clientId}/promote`, {
+          method: "POST",
+          cookie: adminCookie,
+          body: { action },
+        }),
+        { params: Promise.resolve({ clientId }) },
+      );
+    }
+
+    const scopesOf = async (clientId: string) =>
+      (
+        await getAppPool().query(
+          `select allowed_scopes from app.client_policies where client_id=$1`,
+          [clientId],
+        )
+      ).rows[0].allowed_scopes;
+
+    it("refuses to promote a client whose only key is dev-prefixed", async () => {
+      const { clientId } = await mint("Promote Dev Only");
+      const res = await promote(clientId);
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("no_live_capable_key");
+      // Neither the scopes nor promoted_at moved.
+      expect(await scopesOf(clientId)).toEqual(["env:dev"]);
+      const promoted = await getAppPool().query(
+        `select promoted_at from app.client_policies where client_id=$1`,
+        [clientId],
+      );
+      expect(promoted.rows[0].promoted_at).toBeNull();
+    });
+
+    it("promotes a client that holds a live-prefixed key", async () => {
+      const { clientId } = await mint("Promote Live", "live");
+      const res = await promote(clientId);
+      expect(res.status).toBe(200);
+      expect(await scopesOf(clientId)).toEqual(["env:dev", "env:live"]);
+    });
+
+    // A client with no API keys at all is an OAuth/DCR client — its env comes from the authorize
+    // flow, not from a prefix, so there is nothing to contradict and promotion is meaningful.
+    it("promotes a client that holds no API keys at all", async () => {
+      const app = getAppPool();
+      const { POST: createClient } = await import("../app/api/oauth-clients/route");
+      const created = await createClient(
+        apiRequest("/api/oauth-clients", {
+          method: "POST",
+          cookie: adminCookie,
+          body: { name: "Keyless OAuth Client" },
+        }),
+      );
+      const { clientId } = await created.json();
+      expect((await listClientSecrets(app, clientId, "default")).length).toBe(0);
+
+      const res = await promote(clientId);
+      expect(res.status).toBe(200);
+      expect(await scopesOf(clientId)).toEqual(["env:dev", "env:live"]);
+    });
+
+    // Narrowing is always meaningful and always safe, so it is never refused.
+    it("never refuses a demotion", async () => {
+      const { clientId } = await mint("Demote Dev Only");
+      const res = await promote(clientId, "demote");
+      expect(res.status).toBe(200);
+      expect(await scopesOf(clientId)).toEqual(["env:dev"]);
+    });
+
+    // A revoked or expired key cannot be presented, so it cannot make a promotion useful — and
+    // must not make one look useful either. The client here keeps a working dev key throughout,
+    // so it never falls into the keyless case above.
+    it("ignores a revoked live key, leaving only the dev one that decides", async () => {
+      const app = getAppPool();
+      const { clientId } = await mint("Promote Dev Plus Revoked Live");
+      const { id: liveId } = await createClientSecret(
+        app,
+        clientId,
+        "default",
+        new Date(Date.now() + 86_400_000),
+        "test",
+        "live",
+      );
+      // While the live key is usable the promotion is meaningful.
+      expect((await promote(clientId)).status).toBe(200);
+
+      await app.query(`update app.client_secrets set revoked_at=now() where id=$1`, [liveId]);
+      expect((await promote(clientId)).status).toBe(409);
+    });
+
+    it("ignores an expired live key the same way", async () => {
+      const app = getAppPool();
+      const { clientId } = await mint("Promote Dev Plus Expired Live");
+      const { id: liveId } = await createClientSecret(
+        app,
+        clientId,
+        "default",
+        new Date(Date.now() + 86_400_000),
+        "test",
+        "live",
+      );
+      await app.query(
+        `update app.client_secrets set expires_at=now() - interval '1 day' where id=$1`,
+        [liveId],
+      );
+      expect((await promote(clientId)).status).toBe(409);
     });
   });
 

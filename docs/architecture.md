@@ -881,6 +881,22 @@ system — a parallel system is precisely how the two sets of rules drift apart.
 - **Prefixed and self-identifying** — `whd_live_…` / `whd_dev_…` with a checksum
   suffix. A leaked key is greppable, its environment is visible on sight, and an
   obviously-malformed key is rejected before any database work.
+- **The prefix is a ceiling, not only a label.** The environment is chosen once,
+  when the key is minted, and `/v1/token` strikes `env:live` from the client
+  policy for a `whd_dev_` key before resolving any scope
+  (`narrowPolicyToKeyEnv`). So a dev key cannot reach real data however the
+  policy is widened afterwards — which is what makes "its environment is visible
+  on sight" worth anything during a leak. It only ever narrows: a `whd_live_` key
+  still needs a policy allowing `env:live` **and** a user holding an approved,
+  unexpired live grant. Rotation carries the environment forward; changing it
+  means minting a new key.
+- **Promoting a client whose keys cannot reach live is refused**, rather than
+  recorded as a promotion that does nothing. `POST /api/oauth-clients/:id/promote`
+  answers `409 no_live_capable_key` when the client holds usable keys and none
+  is live-prefixed — otherwise `promoted_at` would be stamped and the console
+  would show the client as live-capable while every key it has is capped at dev.
+  A client with no API keys at all is unaffected: its environment comes from the
+  authorize flow, not from a prefix. Demotion is never refused.
 - **Shown once at creation**, never retrievable. Only a salted scrypt hash is
   stored, compared in constant time.
 - **Rotation without downtime** — a client may hold two live secrets at once, and

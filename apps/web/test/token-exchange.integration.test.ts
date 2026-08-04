@@ -641,12 +641,15 @@ describe("token exchange (delegated flow)", () => {
         `update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`,
         [trustedIssuer.id, clientId],
       );
+      // Minted `live`: the key's own prefix is a ceiling, so a dev-prefixed key would be capped at
+      // env:dev here however eligible the user is — which is the next test.
       const { secret } = await createClientSecret(
         app,
         clientId,
         "default",
         new Date(Date.now() + 86_400_000),
         "test",
+        "live",
       );
       const jwt = await signSubjectJwt("mia@harbor.demo");
 
@@ -660,6 +663,43 @@ describe("token exchange (delegated flow)", () => {
       });
       expect(res.status).toBe(200);
       expect((await res.json()).scope).toContain("env:live");
+    });
+
+    // The ceiling, end to end and against the most permissive everything else: policy allows both
+    // envs, the user holds the approved live grant seeded by the test above, and the request asks
+    // for live. The only thing standing in the way is the four characters in the key's prefix.
+    it("a whd_dev_ key is capped at env:dev even when policy and user both allow live", async () => {
+      const app = getAppPool();
+      const clientId = await registerClient("TE KeyPrefix");
+      await upsertClientPolicy(app, clientId, "TE KeyPrefix", ["env:dev", "env:live"]);
+      await app.query(
+        `update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`,
+        [trustedIssuer.id, clientId],
+      );
+      const { secret } = await createClientSecret(
+        app,
+        clientId,
+        "default",
+        new Date(Date.now() + 86_400_000),
+        "test",
+        "dev",
+      );
+      expect(secret).toMatch(/^whd_dev_/);
+      const jwt = await signSubjectJwt("mia@harbor.demo");
+
+      for (const scope of ["env:live", "env:dev env:live", "env:live env:dev", ""]) {
+        const res = await exchange({
+          grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+          subject_token: jwt,
+          subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+          client_id: clientId,
+          client_secret: secret,
+          scope,
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.scope).toBe("env:dev");
+      }
     });
 
     it("an env:dev-only key cannot obtain env:live by any request shape", async () => {

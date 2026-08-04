@@ -89,6 +89,19 @@ export function recomputeEnvScope(options: {
   return [];
 }
 
+// The env encoded in an API key's own prefix, applied to the client policy as a ceiling.
+//
+// It only ever narrows. A `whd_dev_` key drops `env:live` from the effective policy, so a key
+// minted for dev cannot reach real data however the policy is widened afterwards — the property
+// the prefix claims by being visible on the key. A `whd_live_` key removes nothing: live is the
+// top of the axis, and stripping `env:dev` would stop a live key being used against generated
+// data for no gain. Nothing here ADDS a scope: a live-prefixed key whose policy allows only
+// `env:dev` still gets dev, and the user's live-grant eligibility is still checked separately.
+export function narrowPolicyToKeyEnv<P extends ClientPolicy>(policy: P, keyEnv: "dev" | "live"): P {
+  if (keyEnv === "live") return policy;
+  return { ...policy, allowedScopes: policy.allowedScopes.filter((s) => s !== "env:live") };
+}
+
 // Policy intersection for dual-mode (both dev and live eligible).
 // Used by the env-picker UI to enforce exactly-one-env selection.
 export function pickEnvScope(survivors: string[], picked: string | null | undefined): string[] {

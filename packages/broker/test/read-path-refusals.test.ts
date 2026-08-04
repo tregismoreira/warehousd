@@ -74,10 +74,16 @@ async function grantFor(
     purposeLabel: "test",
     allowedFields: ["id", "email", "dept"],
   });
-  await approveGrant(app, cfg, id, "admin", {
-    verbs: opts.verbs ?? ["read"],
-    documentFilters: opts.documentFilters as never,
-  });
+  await approveGrant(app, cfg, id, "admin", { verbs: opts.verbs ?? ["read"] });
+  // The filter is written past approveGrant deliberately. Approval now refuses a predicate it
+  // cannot evaluate (`invalid_filter`), so the only way an approved grant carries one is that the
+  // config changed after the decision — a field renamed, a type narrowed. That is the state these
+  // tests exercise, and the reason the use-time check stays where it is.
+  if (opts.documentFilters)
+    await app.query(`update app.grants set document_filter=$2 where id=$1`, [
+      id,
+      JSON.stringify(opts.documentFilters),
+    ]);
   return makeCtx({ userId });
 }
 

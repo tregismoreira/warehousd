@@ -122,12 +122,78 @@ just-in-time-provisioned with the IdP's email. Existing accounts that later
 link an SSO identity (e.g. an `admin` who signs in via SSO for the first time)
 are **not** demoted — provisioning only sets the role on brand-new accounts.
 
-## 5. Promote the new member
+## 5. Map IdP groups to warehousd roles (optional)
+
+Instead of promoting each new member by hand, declare a group→role map in
+`warehousd.yml`, keyed by the `providerId` you registered above:
+
+```yaml
+sso:
+  providers:
+    keycloak-oidc:
+      group_claim: groups        # the claim (OIDC) or attribute (SAML) carrying the groups
+      groups:
+        wh-admins: admin
+        wh-managers: manager
+      default_role: member       # what a user in none of these gets. Default: member
+```
+
+**The map lives in `warehousd.yml`, not in the provider registration.** A
+provider is registered at runtime through the admin API; this file is
+operator-controlled trusted input, and a rule that decides who becomes an admin
+belongs in the trusted file.
+
+**The claim must also be mapped at registration.** Better Auth hands the
+provisioning hook a *mapped* user-info object, not the raw claim set, so a claim
+it was not told about never arrives. Add it under `mapping.extraFields` —
+and note that `mapping.id`, `mapping.email` and `mapping.name` become required
+once `mapping` is present at all, so restate the defaults:
+
+```jsonc
+"oidcConfig": {
+  "clientId": "warehousd-oidc",
+  "clientSecret": "oidc-secret",
+  "discoveryEndpoint": "…/.well-known/openid-configuration",
+  "mapping": {
+    "id": "sub",
+    "email": "email",
+    "emailVerified": "email_verified",
+    "name": "name",
+    "extraFields": { "groups": "groups" }
+  }
+}
+```
+
+For SAML the same key sits under `samlConfig.mapping.extraFields`, naming the
+assertion attribute.
+
+Behaviour worth knowing before you rely on it:
+
+- **Highest role wins.** A user in both `wh-managers` and `wh-admins` is an
+  admin. Joining a second group is never a demotion.
+- **Unmapped groups are ignored.** An IdP's group list will contain plenty
+  warehousd knows nothing about; that is not an error.
+- **A missing or empty claim yields `default_role`**, not a refused login. An
+  IdP that stops sending groups must not promote anyone, and must not lock
+  everyone out either.
+- **Registration-time only.** The map is applied when the account is created, so
+  a promotion or demotion made in **Admin → Users** is never undone by the next
+  login. To re-apply it, delete the account and let it be provisioned again.
+- **A provider with no entry here provisions `member`**, exactly as before.
+
+Both ways this can silently do nothing — the claim never mapped at registration,
+or an entry keyed by a `providerId` nobody signs in with — look identical from
+outside: everyone lands on `member` and nothing errors. Neither is catchable when
+the config is parsed, so warehousd logs a `[sso]` warning at provisioning naming
+the provider and the claim. Check the server log if a map appears to be ignored.
+
+## 6. Promote a member by hand
 
 As `admin`, promote the newly-provisioned member in **Admin → Users**, the same
-way you would any other account.
+way you would any other account. This is the whole story when no group map is
+configured, and the override when one is.
 
-## 6. Local login kill switch (optional)
+## 7. Local login kill switch (optional)
 
 To force every sign-in through SSO, set:
 

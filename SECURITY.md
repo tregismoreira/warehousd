@@ -60,16 +60,6 @@ not vulnerabilities in warehousd:
 Deliberate gaps in the current implementation. None is a live exploit path in a
 deployment that follows the expectations above, but each is worth knowing:
 
-- **`approveGrant` does not re-check the two-tier deny.** The request side is
-  enforced in the broker: `validateGrantRequest`
-  (`packages/broker/src/grants/manage.ts`) rejects any field outside
-  `grantableFields()`, and both callers that reach `app.grants` — the web route
-  and the MCP `request_access` tool — go through it. `approveGrant` still trusts
-  the `allowedFields` it is handed. The web approve path is safe because
-  `buildApproval` derives the field set from the YAML rather than the request
-  body, but that is a caller-side guarantee rather than one the broker enforces,
-  so a future adapter calling `approveGrant` directly could widen a grant beyond
-  what the config allows.
 - **A connect-in-place collection has one isolation wall, not two.** Every other
   collection is confined to its org by the view's `org_id` predicate *and* by an
   RLS policy on the base table. A `postgres_fdw` foreign table can carry neither:
@@ -97,14 +87,6 @@ deployment that follows the expectations above, but each is worth knowing:
   direction: `env:dev` is generated data, and `env:live` is never implied — real
   data requires the scope to be explicitly present, which requires both a policy
   allowing it and a user with an approved, unexpired live grant.
-- **An API key's `whd_dev_` / `whd_live_` prefix is a label, not a ceiling.** It
-  exists so a leaked key can be triaged on sight, and `verifyClientSecret` reports
-  it — but nothing narrows access to it. What bounds the environment is
-  `client_policies.allowed_scopes` intersected with the user's live-grant
-  eligibility. Both admin routes currently mint with `dev`, so a live-prefixed key
-  cannot be created; enforcing the prefix would cap every delegated client at dev
-  with no way to opt out. Making it a real ceiling needs a way to mint a live key
-  first.
 - **A trusted issuer's `subject_claim` is trusted as an identity.** In the
   delegated (RFC 8693) flow the claim named by `subject_claim` is matched against
   a local user's email address. warehousd requires that the value be a
@@ -124,9 +106,13 @@ deployment that follows the expectations above, but each is worth knowing:
   that is not a valid instance of its column's declared type. This narrows what a
   grant author may write, and it is the deliberate trade: a filter that silently
   means something different to the reader and the writer is worse than one that is
-  rejected outright. Filter values are still validated only when a grant is
-  _used_, not when it is approved, so a malformed filter surfaces as
-  `invalid_intent` on the next call rather than as an error at approval time.
+  rejected outright. The check runs at approval time as well as at use time, so an
+  unevaluable predicate is refused (`invalid_filter`) while an approver is still
+  present to be told which one — with one exception on each side. `$self` has no
+  value to canonicalise until the grant is loaded, so it is checked only at use
+  time; and because the config can change after a decision, an already-approved
+  grant can still carry a filter that has since become unevaluable, which surfaces
+  as `invalid_intent` on the next call.
 - **The change feed discloses document ids past a grant's document filter.**
   `broker.changes` is filtered to collections the caller holds a `read` grant on,
   but a grant's _document_ filter is not applied to it — the feed carries no field
@@ -176,10 +162,6 @@ Absence here is a decision, not an oversight. These are things warehousd does no
 attempt, so that a report of "X is missing" can be answered quickly and a report
 of something genuinely broken is not buried among them.
 
-- **Masking and transform postures.** A field is allow or deny; there is nothing
-  in between, and no partial-value redaction on the read path.
-- **Connect-in-place over an external database.** Collections live in
-  warehousd's own Postgres.
 - **Multi-tenancy beyond the org column.** Every grant, audit event and document
   carries an org, isolated by a view predicate and RLS, but one deployment is
   intended to serve one organization. It is not a hostile-tenant boundary.
@@ -192,11 +174,9 @@ of something genuinely broken is not buried among them.
 - **Distributed rate limiting.** The `/v1/token` limiter is in-memory and
   per-process *by design* — it is a CPU cost cap, not a quota. Behind several
   machines each holds its own window. A real quota belongs at the ingress.
-- **Semantic/vector search, PDF and DOCX extraction, an upload UI.** The
-  `vector(1536)` column is reserved and unpopulated; indexing reads local
-  directories of `.md` and `.txt`.
-- **SCIM, compliance exports, IdP group→role mapping.** JIT provisioning creates
-  a `member`; role changes are manual.
+- **SCIM and compliance exports.** Users arrive by SSO or by an admin creating
+  them; there is no directory sync and no packaged evidence export. IdP
+  group→role mapping *is* built — see the component status table.
 
 ## Dependency advisories
 

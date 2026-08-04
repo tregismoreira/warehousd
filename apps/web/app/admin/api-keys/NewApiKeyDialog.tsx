@@ -33,13 +33,18 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"delegated" | "headless" | "">("");
+  const [env, setEnv] = useState<"dev" | "live">("dev");
   const [trustedIssuerId, setTrustedIssuerId] = useState("");
   const [robotUserId, setRobotUserId] = useState("");
   const [allowedCollections, setAllowedCollections] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [issuers, setIssuers] = useState<TrustedIssuer[]>([]);
   const [issuersLoaded, setIssuersLoaded] = useState(false);
-  const [created, setCreated] = useState<{ clientId: string; secret: string } | null>(null);
+  const [created, setCreated] = useState<{
+    clientId: string;
+    secret: string;
+    env: "dev" | "live";
+  } | null>(null);
   const [loadingIssuers, setLoadingIssuers] = useState(false);
 
   useEffect(() => {
@@ -56,19 +61,23 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
   }, [open, mode, issuersLoaded]);
 
   async function submit() {
-    const res = await requestJson<{ clientId: string; secret: string }>("/api/api-keys", {
-      method: "POST",
-      body: JSON.stringify({
-        name: name.trim(),
-        mode,
-        trustedIssuerId: mode === "delegated" ? trustedIssuerId : undefined,
-        robotUserId: mode === "headless" ? robotUserId.trim() : undefined,
-        allowedCollections: allowedCollections.trim()
-          ? allowedCollections.split(",").map((c) => c.trim())
-          : null,
-        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
-      }),
-    });
+    const res = await requestJson<{ clientId: string; secret: string; env: "dev" | "live" }>(
+      "/api/api-keys",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: name.trim(),
+          mode,
+          env,
+          trustedIssuerId: mode === "delegated" ? trustedIssuerId : undefined,
+          robotUserId: mode === "headless" ? robotUserId.trim() : undefined,
+          allowedCollections: allowedCollections.trim()
+            ? allowedCollections.split(",").map((c) => c.trim())
+            : null,
+          expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+        }),
+      },
+    );
     if (!res.ok) {
       toast.error("Failed to create API key", { description: res.error });
       return;
@@ -91,6 +100,7 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
           setCreated(null);
           setName("");
           setMode("");
+          setEnv("dev");
           setTrustedIssuerId("");
           setRobotUserId("");
           setAllowedCollections("");
@@ -128,9 +138,20 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
               </div>
               <p className="flex items-start gap-2 rounded-md border border-pending/40 p-3 text-xs text-muted-foreground">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0 text-pending" />
-                This secret is <b className="mx-1 font-mono">whd_dev_*</b> by default and can only
-                ever access synthetic data. Rotate to issue a live secret, then ask a manager to
-                promote it if access to live data is needed.
+                {created.env === "live" ? (
+                  <>
+                    This secret is <b className="mx-1 font-mono">whd_live_*</b>. It can reach live
+                    data, but only for a user who already holds an approved live grant — the prefix
+                    raises no ceiling on its own. Rotating it keeps that environment.
+                  </>
+                ) : (
+                  <>
+                    This secret is <b className="mx-1 font-mono">whd_dev_*</b> and can only ever
+                    access synthetic data — the prefix is enforced at token issue, so widening the
+                    policy later will not change that. Create a live key if real data is needed;
+                    rotation keeps a key in the environment it was minted for.
+                  </>
+                )}
               </p>
             </div>
             <DialogFooter>
@@ -218,6 +239,27 @@ export function NewApiKeyDialog({ onCreated }: { onCreated: () => void }) {
                   />
                 </div>
               )}
+
+              <div>
+                <Label htmlFor="env">
+                  Environment <span className="text-destructive">*</span>
+                </Label>
+                <Select value={env} onValueChange={(v) => setEnv(v as "dev" | "live")}>
+                  <SelectTrigger id="env">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="dev">Development — synthetic data only</SelectItem>
+                    <SelectItem value="live">
+                      Live — real data, with an approved live grant
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Fixed for the life of the key: it is encoded in the secret&apos;s prefix and
+                  enforced when a token is issued. Rotation keeps it.
+                </p>
+              </div>
 
               <div>
                 <Label htmlFor="collections">Collection ceiling (comma-separated, optional)</Label>

@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { canonicalize, matchesFilters, validateDocumentFilters } from "../src/grants/filters";
+import {
+  canonicalize,
+  matchesFilters,
+  validateDocumentFilters,
+  validateGrantFilters,
+} from "../src/grants/filters";
 import {
   ConfigSchema,
   type CollectionConfig,
@@ -494,10 +499,19 @@ describe("a grant scopes read and write identically", () => {
       purposeLabel: "parity",
       allowedFields: FIELDS,
     });
+    // approveGrant refuses a filter it cannot evaluate, so an unevaluable one is written straight
+    // onto the row instead — the state an approved grant reaches when the config changes under it,
+    // and the only way to ask both verbs what they make of one.
+    const evaluable = validateGrantFilters([filter], wcfg.collections.things!) === null;
     await approveGrant(wapp, wcfg, grantId, "admin", {
       verbs: ["read", "update"],
-      documentFilters: [filter],
+      ...(evaluable ? { documentFilters: [filter] } : {}),
     });
+    if (!evaluable)
+      await wapp.query(`update app.grants set document_filter=$2 where id=$1`, [
+        grantId,
+        JSON.stringify([filter]),
+      ]);
     const ctx: BrokerContext = makeCtx({ userId });
 
     const read = await broker.query(ctx, { collection: "things", fields: ["id"] });
