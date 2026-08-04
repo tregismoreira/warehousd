@@ -200,7 +200,11 @@ of something genuinely broken is not buried among them.
   machines each holds its own window. A real quota belongs at the ingress.
 - **SCIM and compliance exports.** Users arrive by SSO or by an admin creating
   them; there is no directory sync and no packaged evidence export. IdP
-  group→role mapping *is* built — see the component status table.
+  group→role mapping *is* built, and an SSO login also persists the asserted
+  group list — but that is a pull at login, not a directory sync: nothing is
+  pushed, nothing is reconciled, and a user who never signs in again keeps the
+  membership their last login asserted. See the component status table, and the
+  known limitation above on how fresh a `group:` principal is.
 
 ## Dependency advisories
 
