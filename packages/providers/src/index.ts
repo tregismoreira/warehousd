@@ -5,6 +5,7 @@
 // outbound HTTP call actually live. Adapters (apps/web, packages/cli) construct from here and
 // inject downwards — the same direction `Pools` already flows.
 export { makeBinaryExtractor } from "./extract-binary";
+export { importRuntime } from "./runtime-import";
 export {
   makeEmbedder,
   localEmbedder,

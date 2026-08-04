@@ -1,4 +1,5 @@
 import type { Embedder } from "@warehousd/broker";
+import { importRuntime } from "./runtime-import";
 
 // The two embedders, and the reason they live here rather than in the broker.
 //
@@ -32,9 +33,11 @@ export type EmbeddingConfig = {
 export function localEmbedder(cfg: EmbeddingConfig): Embedder {
   let pipe: Promise<unknown> | null = null;
   const load = async () => {
-    let transformers;
+    let transformers: typeof import("@huggingface/transformers");
     try {
-      transformers = await import("@huggingface/transformers");
+      transformers = await importRuntime<typeof import("@huggingface/transformers")>(
+        "@huggingface/transformers",
+      );
     } catch {
       throw new EmbeddingFailed(
         "local embedding needs @huggingface/transformers — install it, or set embedding.provider to openai/http",

@@ -3,6 +3,7 @@
 // build entry point — see the note at the top of that file for why the two are separate.
 
 import { Pool } from "pg";
+import { makeBinaryExtractor, makeEmbedder } from "@warehousd/providers";
 import { resolve } from "node:path";
 import {
   loadConfig,
@@ -10,6 +11,7 @@ import {
   regenerateSynthetic,
   migrateApp,
   indexCollection,
+  embedCollection,
   syncDatasetTerms,
   loadTaxonomyBindings,
   fileMetadataFields,
@@ -81,7 +83,7 @@ export async function runIndex(
   projectDir: string,
   dbUrl: string,
   collection: string,
-  opts: { env?: "dev" | "live"; source?: string } = {},
+  opts: { env?: "dev" | "live"; source?: string; embed?: boolean } = {},
 ): Promise<{ indexed: number; skipped: number; deleted: number }> {
   const cfg = loadConfig(projectDir);
   const c = cfg.collections[collection];
@@ -98,10 +100,61 @@ export async function runIndex(
     await syncDatasetTerms(db, cfg, env);
     const taxonomies = await loadTaxonomyBindings(db, cfg, collection, env);
     const metadata = fileMetadataFields(c);
+    // PDF/DOCX support and embedding are both injected rather than reached for by the broker:
+    // the parsers and the model live in @warehousd/providers. Passing the extractor is what
+    // makes the walk pick up binaries at all.
+    const extractor = makeBinaryExtractor();
+    const embedder =
+      cfg.embedding && opts.embed !== false ? makeEmbedder(cfg.embedding) : undefined;
     return await indexCollection(db, env, collection, resolve(projectDir, dir), {
+      extractor,
+      ...(embedder ? { embedder } : {}),
       taxonomies,
       metadata,
     });
+  } finally {
+    await db.end();
+  }
+}
+
+/**
+ * Fill the embedding column for every file collection, or one of them.
+ *
+ * Separate from `index` because they fail for different reasons and recover differently: indexing
+ * is local and fast, embedding may call a provider and is the part worth resuming. embedCollection
+ * only ever touches chunks with a null embedding, so re-running this after an interruption costs
+ * nothing already done.
+ */
+export async function runEmbed(
+  projectDir: string,
+  dbUrl: string,
+  opts: { collection?: string; env?: "dev" | "live" } = {},
+): Promise<{ embedded: number; collections: string[] }> {
+  const cfg = loadConfig(projectDir);
+  if (!cfg.embedding)
+    throw new Error(
+      "No `embedding:` block in warehousd.yml — semantic search is not configured for this project",
+    );
+  const env = opts.env ?? "dev";
+  const names = opts.collection
+    ? [opts.collection]
+    : Object.entries(cfg.collections)
+        .filter(([, c]) => c.type === "file")
+        .map(([n]) => n);
+  for (const n of names) {
+    const c = cfg.collections[n];
+    if (!c) throw new Error(`Unknown collection: ${n}`);
+    if (c.type !== "file") throw new Error(`Collection ${n} is not a file collection`);
+  }
+  const embedder = makeEmbedder(cfg.embedding);
+  const db = new Pool({ connectionString: dbUrl });
+  try {
+    let embedded = 0;
+    for (const n of names) {
+      const r = await embedCollection(db, env, n, embedder);
+      embedded += r.embedded;
+    }
+    return { embedded, collections: names };
   } finally {
     await db.end();
   }

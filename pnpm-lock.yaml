@@ -189,9 +189,15 @@ importers:
       '@warehousd/providers':
         specifier: workspace:*
         version: link:../providers
+      mammoth:
+        specifier: ^1.12.0
+        version: 1.12.0
       pg:
         specifier: ^8.13.0
         version: 8.22.0
+      unpdf:
+        specifier: ^1.8.0
+        version: 1.8.0
     devDependencies:
       '@clack/prompts':
         specifier: ^0.11.0

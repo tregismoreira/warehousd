@@ -1,11 +1,11 @@
 import { ExtractionFailed, type BinaryExtractor, type ExtractedText } from "@warehousd/broker";
+// Imported statically. Both resolve under CommonJS — unpdf ships a `require` condition and
+// mammoth is CommonJS outright — so bundling them into the CLI works, unlike the ESM-only
+// embedding runtime next door which has to stay opaque to the bundler (see runtime-import.ts).
+import { getDocumentProxy, extractText as extractTextFrom, getMeta } from "unpdf";
+import mammoth from "mammoth";
 
 // PDF and DOCX text extraction.
-//
-// Both parsers are loaded through a dynamic `import()` so that nothing pulls them in until a
-// binary document is actually indexed. That matters twice over: `warehousd start` and every
-// markdown-only project pay nothing for them, and `packages/cli`'s CommonJS bundle can mark them
-// external rather than inlining an ESM-only package it cannot inline.
 //
 // Every failure becomes an ExtractionFailed naming the file. A parser's own error is not something
 // a caller should see — pdf.js in particular puts document structure in its messages — and the
@@ -23,16 +23,10 @@ function startsWith(bytes: Uint8Array, magic: number[]): boolean {
 async function extractPdf(filename: string, bytes: Uint8Array): Promise<ExtractedText> {
   if (!new TextDecoder().decode(bytes.subarray(0, 5)).startsWith(PDF_MAGIC))
     throw new ExtractionFailed(filename, "not a PDF (missing %PDF- header)");
-  let mod;
   try {
-    mod = await import("unpdf");
-  } catch {
-    throw new ExtractionFailed(filename, "PDF support is not installed (unpdf)");
-  }
-  try {
-    const doc = await mod.getDocumentProxy(bytes);
-    const { text, totalPages } = await mod.extractText(doc, { mergePages: true });
-    const meta = await mod.getMeta(doc).catch(() => null);
+    const doc = await getDocumentProxy(bytes);
+    const { text, totalPages } = await extractTextFrom(doc, { mergePages: true });
+    const meta = await getMeta(doc).catch(() => null);
     // `info.Title` is frequently the authoring tool's placeholder rather than the document's
     // title, so an empty or whitespace-only one is treated as absent and the indexer falls back
     // to the filename — the same rule extract.ts already applies to markdown without a heading.
@@ -54,14 +48,8 @@ async function extractDocx(filename: string, bytes: Uint8Array): Promise<Extract
       filename,
       "not a DOCX (a .doc saved by an old Word is a different format — re-save as .docx)",
     );
-  let mod;
   try {
-    mod = await import("mammoth");
-  } catch {
-    throw new ExtractionFailed(filename, "DOCX support is not installed (mammoth)");
-  }
-  try {
-    const { value } = await mod.extractRawText({ buffer: Buffer.from(bytes) });
+    const { value } = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
     return { text: value };
   } catch {
     throw new ExtractionFailed(filename, "could not be parsed as a DOCX");
