@@ -4,6 +4,10 @@ import { tableDDL, viewDDL, grantViewDDL, grantImportDDL, rlsDDL, grantWriteDDL 
 
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
   await db.query(`create extension if not exists vector`);
+  // hmac(), for `mask: { transform: hash }`. Created unconditionally rather than only when some
+  // collection declares that transform: a later `warehousd apply` adding one must not be the
+  // first thing that needs a superuser, long after the deployment stopped having one.
+  await db.query(`create extension if not exists pgcrypto`);
 
   // Vocabularies: upsert by slug (labels renameable in place). apply never deletes
   // vocabularies/terms — data rows store term slugs, so removal is a manual operation.

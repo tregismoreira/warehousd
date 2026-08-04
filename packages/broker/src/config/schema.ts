@@ -351,9 +351,16 @@ export const CollectionSchema = z
           code: "custom",
           message: `field "${name}" declares \`mask\` but its read posture is "${p.read}"; a transform is only applied under read: mask`,
         });
-      // normalizePosture already pins this closed, so the check exists to say so out loud
-      // rather than let a typo look like it worked.
-      if (p.unmask === "allow" && !masked)
+      // Read from the RAW posture, not the normalized one. normalizePosture deliberately pins
+      // unmask closed whenever read is not `mask`, so asking it here would make this branch
+      // unreachable and the typo would parse silently as "no unmask" — which is safe, but
+      // leaves the author believing they granted something they did not.
+      const declared = f.posture;
+      const declaredUnmask =
+        typeof declared === "object" && declared !== null && "unmask" in declared
+          ? (declared as { unmask?: unknown }).unmask
+          : undefined;
+      if (declaredUnmask === "allow" && !masked)
         ctx.addIssue({
           code: "custom",
           message: `field "${name}" has unmask: allow but is not masked; there is nothing to unmask`,

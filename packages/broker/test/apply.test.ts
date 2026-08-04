@@ -192,14 +192,12 @@ describe("apply: additive field on an existing dataset collection", () => {
         [schema],
       );
       // `org_id` is on every base table for tenant isolation; it is not a declared field, so
-      // it appears here and deliberately not on the view below.
-      expect(cols.rows.map((r) => r.column_name)).toEqual([
-        "email",
-        "hire_date",
-        "id",
-        "org_id",
-        "role",
-      ]);
+      // it appears here and deliberately not on the view below. The `_rev*` bookkeeping is
+      // filtered out for the same reason — every dataset carries it, and this test is about
+      // whether a field added to the YAML reached an already-created table.
+      expect(cols.rows.map((r) => r.column_name).filter((c: string) => !c.startsWith("_"))).toEqual(
+        ["email", "hire_date", "id", "org_id", "role"],
+      );
       // The view has to carry them too, or the broker can never read them.
       const view = await db.query(
         `select column_name from information_schema.columns

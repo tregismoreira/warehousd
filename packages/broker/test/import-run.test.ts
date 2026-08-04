@@ -27,6 +27,17 @@ afterAll(async () => {
 const liveCount = async (t: string) =>
   Number((await admin.query(`select count(*)::int as n from data_live.${t}`)).rows[0].n);
 
+// Narrow to the success arm, naming the refusal when there is one. `expect(r.ok).toBe(true)`
+// reports "expected false to be true", which is the one thing about the failure you already knew.
+type Imported = Extract<Awaited<ReturnType<typeof importCollection>>, { ok: true }>;
+function assertImported(r: Awaited<ReturnType<typeof importCollection>>): asserts r is Imported {
+  if (!r.ok)
+    throw new Error(
+      `expected the import to succeed, got ${r.reason}` +
+        (r.errors?.length ? `: ${JSON.stringify(r.errors.slice(0, 5))}` : ""),
+    );
+}
+
 describe("importCollection", () => {
   it("imports a CSV into data_live and reports the row count", async () => {
     const before = await liveCount("departments");
@@ -189,7 +200,7 @@ describe("importCollection", () => {
 // the view deliberately hides exactly what these tests are checking is still there.
 describe("importCollection: upsert and delete write revisions", () => {
   // Each test owns its ids so the file's tests stay order-independent.
-  const D = (n: number) => `0000${n}00-0000-4000-8000-00000000d000`.slice(-36);
+  const D = (n: number) => `0000d00${n}-0000-4000-8000-000000000000`.slice(-36);
 
   const revs = async (id: string) =>
     (
@@ -217,8 +228,7 @@ describe("importCollection: upsert and delete write revisions", () => {
       { format: "csv", text: `id,name\n${D(1)},Fresh` },
       { mode: "upsert" },
     );
-    expect(r.ok).toBe(true);
-    if (!r.ok) throw new Error("unreachable");
+    assertImported(r);
     expect(r).toMatchObject({ mode: "upsert", inserted: 1, updated: 0, deleted: 0 });
     expect(await revs(D(1))).toMatchObject([
       { _rev_seq: "1", _rev_op: "create", _current: true, name: "Fresh" },
@@ -242,8 +252,7 @@ describe("importCollection: upsert and delete write revisions", () => {
       { format: "csv", text: `id,name\n${D(2)},After` },
       { mode: "upsert" },
     );
-    expect(r.ok).toBe(true);
-    if (!r.ok) throw new Error("unreachable");
+    assertImported(r);
     expect(r).toMatchObject({ inserted: 0, updated: 1 });
 
     // Two rows, not one: the first is history, and it still holds the value it held.
@@ -276,7 +285,7 @@ describe("importCollection: upsert and delete write revisions", () => {
       { format: "csv", text: `id,email\n${D(3)},ada@new.com` },
       { mode: "upsert" },
     );
-    expect(r.ok).toBe(true);
+    assertImported(r);
     const row = await admin.query(
       `select full_name, email, home_address, phone from data_live.people where id=$1 and _current`,
       [D(3)],
@@ -306,8 +315,7 @@ describe("importCollection: upsert and delete write revisions", () => {
       { format: "csv", text: `id\n${D(4)}` },
       { mode: "delete" },
     );
-    expect(r.ok).toBe(true);
-    if (!r.ok) throw new Error("unreachable");
+    assertImported(r);
     expect(r).toMatchObject({ mode: "delete", deleted: 1 });
 
     expect(await visible(D(4))).toHaveLength(0);
@@ -340,7 +348,7 @@ describe("importCollection: upsert and delete write revisions", () => {
       { format: "csv", text: `id\n${D(5)}` },
       { mode: "delete" },
     );
-    expect(r.ok).toBe(true);
+    assertImported(r);
   });
 
   it("refuses a whole delete file when any row names a document that is not there", async () => {
@@ -471,7 +479,7 @@ describe("importCollection: upsert and delete write revisions", () => {
 });
 
 describe("importCollection: dry run", () => {
-  const P = (n: number) => `0000${n}00-0000-4000-8000-0000000000dd`.slice(-36);
+  const P = (n: number) => `0000e00${n}-0000-4000-8000-000000000000`.slice(-36);
 
   it("reports what would happen and writes nothing at all", async () => {
     await importCollection(
@@ -496,8 +504,7 @@ describe("importCollection: dry run", () => {
       { format: "csv", text: `id,name\n${P(1)},Revised\n${P(2)},Brand New` },
       { mode: "upsert", dryRun: true },
     );
-    expect(r.ok).toBe(true);
-    if (!r.ok) throw new Error("unreachable");
+    assertImported(r);
     expect(r).toMatchObject({ dryRun: true, inserted: 1, updated: 1 });
 
     // Rolled back: no new rows, and the existing document still holds its original value.

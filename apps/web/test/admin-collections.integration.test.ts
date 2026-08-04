@@ -69,10 +69,11 @@ describe("GET /api/admin/collections", () => {
     // Admins configure postures, so they see the denied fields BY NAME. No values are
     // returned by this route — it reads app.collections, never a data schema.
     // Postures are normalized to {read, write} form in Phase 2.
-    expect(home.posture).toEqual({ read: "deny", write: "deny" });
+    expect(home.posture).toEqual({ read: "deny", write: "deny", unmask: "deny" });
     expect(people.fields.find((f: any) => f.name === "full_name").posture).toEqual({
       read: "allow",
       write: "deny",
+      unmask: "deny",
     });
   });
 
@@ -163,7 +164,7 @@ describe("GET /api/admin/collections/[name]", () => {
     expect(body.documentCount).toBeGreaterThan(0);
 
     const home = body.fields.find((f: any) => f.name === "home_address");
-    expect(home.posture).toEqual({ read: "deny", write: "deny" });
+    expect(home.posture).toEqual({ read: "deny", write: "deny", unmask: "deny" });
     const joined = body.fields.find((f: any) => f.name === "department_name");
     expect(joined.view_join).toEqual({ table: "departments", column: "name", on: "department_id" });
   });

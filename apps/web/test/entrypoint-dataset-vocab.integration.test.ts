@@ -6,6 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setupWebDb } from "./helpers/web-db";
 
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "@warehousd/broker";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
 // Lives in its own file rather than alongside entrypoint.integration.test.ts: `auth` is a module
 // singleton bound to the APP_DATABASE_URL present when it is first imported, so a second suite in
 // the same file would still be talking to the first suite's dropped database.
@@ -101,8 +108,8 @@ synthetic:
     const { bootstrap } = await import("../scripts/entrypoint");
     const db = new Pool({ connectionString: setup.appUrl });
     // Stand in for an admin import of the client the live document references.
-    await db.query(`insert into data_live.clients (id, client_number, name)
-      values (gen_random_uuid(), 'C-9001', 'Beacon Manufacturing')`);
+    await db.query(`insert into data_live.clients (${R}, id, client_number, name)
+      values (${RV}, gen_random_uuid(), 'C-9001', 'Beacon Manufacturing')`);
     await db.end();
 
     await bootstrap();

@@ -174,10 +174,8 @@ export async function importCollection(
     });
     return doc;
   };
-  const idOf = (doc: Record<string, unknown>): string =>
-    // A pk is a scalar; `unknown` only to the compiler, exactly as in validate.ts.
-    // eslint-disable-next-line @typescript-eslint/no-base-to-string
-    String(doc[pk!]);
+  // A pk is a scalar; `unknown` only to the compiler, exactly as in validate.ts.
+  const idOf = (doc: Record<string, unknown>): string => String(doc[pk!]);
   // The `create` revision every insert below writes, so the shape is stated once.
   const create = (fields: string[]) =>
     ({
@@ -246,7 +244,17 @@ export async function importCollection(
         if (current) {
           // Only the columns the file carries are changed; reviseDocument carries the rest
           // forward, so an upsert that sets one column does not blank the other twenty.
-          const rev = await reviseDocument(client, table, dataCols, current, doc, {
+          //
+          // The pk is dropped first. In an upsert file it is the ADDRESS — it is how this row
+          // was found — not something the import is changing, and its value is by definition
+          // the one already stored. Leaving it in put the pk in `_rev_fields`, which says the
+          // import edited the document's identity: wrong in the change feed, wrong in the
+          // history, and a source of phantom conflicts in approveProposal, which intersects
+          // `_rev_fields` to decide whether a proposal still applies. The direct write path
+          // refuses a pk on an update outright for the same reason ("changing identity is not
+          // an edit"), and test/revision-parity.test.ts is what holds the two together.
+          const { [pk!]: _addressed, ...changed } = doc;
+          const rev = await reviseDocument(client, table, dataCols, current, changed, {
             op: "update",
             status: "approved",
             by: actor,

@@ -8,3 +8,10 @@ export const DOC_RESTRICTED_CANARY = "DOC-RESTRICTED-CANARY-9e4b"; // planted in
 // rows are the only real-shaped data in the system, so the probe suite must cover them.
 export const IMPORT_CANARY = "CANARY_IMPORTED_LIVE_5d7e";          // people.full_name (live, imported)
 export const IMPORT_DENIED_CANARY = "CANARY_IMPORTED_DENIED_8b2f"; // people.home_address (posture: deny)
+
+// The raw value behind a `posture: { read: mask }` field. Distinct from DENIED_CANARY because it
+// tests a different rule: a denied field is never selected at all, while a masked one IS selected
+// — as an expression over the raw column — so the raw value exists in the query plan and must
+// still never reach a response, an error or a log line. A grant carrying `unmask` is the one
+// case where seeing it is correct.
+export const MASK_RAW_CANARY = "CANARY_MASK_RAW_4c8d";

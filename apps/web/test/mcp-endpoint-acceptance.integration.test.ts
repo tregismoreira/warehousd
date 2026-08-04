@@ -10,13 +10,18 @@ import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { setupWebDbWithData, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy } from "@warehousd/broker";
+import { upsertClientPolicy, SEED_REV_COLUMNS, SEED_REV_VALUES } from "@warehousd/broker";
 import {
   DENIED_CANARY,
   SSN_CANARY,
   LIVE_ONLY_CANARY,
   DOC_RESTRICTED_CANARY,
 } from "../../../packages/broker/test/fixtures/canaries";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
 
 let db: Awaited<ReturnType<typeof setupWebDbWithData>>;
 let admin: Pool;
@@ -31,19 +36,19 @@ beforeAll(async () => {
   // the only thing that should block them is posture, not a missing grant.
   const dep = (
     await admin.query(
-      `insert into data_synth.departments (id,name) values (gen_random_uuid(),'Fin') returning id`,
+      `insert into data_synth.departments (${R}, id,name) values (${RV}, gen_random_uuid(),'Fin') returning id`,
     )
   ).rows[0].id;
   const person = (
     await admin.query(
-      `insert into data_synth.people (id,full_name,email,department_id,home_address,phone)
-     values (gen_random_uuid(),'Canary Person','canary@x', $1, $2, '555') returning id`,
+      `insert into data_synth.people (${R}, id,full_name,email,department_id,home_address,phone)
+     values (${RV}, gen_random_uuid(),'Canary Person','canary@x', $1, $2, '555') returning id`,
       [dep, DENIED_CANARY],
     )
   ).rows[0].id;
   await admin.query(
-    `insert into data_synth.salaries (id,person_id,job_title,base_salary,currency,effective_date,ssn)
-     values (gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`,
+    `insert into data_synth.salaries (${R}, id,person_id,job_title,base_salary,currency,effective_date,ssn)
+     values (${RV}, gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`,
     [person, SSN_CANARY],
   );
 

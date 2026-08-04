@@ -8,6 +8,13 @@ import type { WarehousdConfig } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
 import { ConfigSchema } from "../src/config/schema";
 
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
 let p: Provisioned, app: Pool, pools: any;
 
 const cfg: WarehousdConfig = ConfigSchema.parse({
@@ -83,7 +90,7 @@ describe("broker.getDocument", () => {
     // Insert test data
     const id = (
       await app.query(
-        `insert into data_live.people (org_id, id, email, status) values ('default', gen_random_uuid(), 'test@ex.com', 'active') returning id`,
+        `insert into data_live.people (${R}, org_id, id, email, status) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com', 'active') returning id`,
       )
     ).rows[0].id;
 
@@ -119,7 +126,7 @@ describe("broker.getDocument", () => {
     // Insert inactive document
     const id = (
       await app.query(
-        `insert into data_live.people (org_id, id, email, status) values ('default', gen_random_uuid(), 'test@ex.com', 'inactive') returning id`,
+        `insert into data_live.people (${R}, org_id, id, email, status) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com', 'inactive') returning id`,
       )
     ).rows[0].id;
 
@@ -151,7 +158,7 @@ describe("broker.getDocument", () => {
     // Insert document owned by self_user
     const ownedId = (
       await app.query(
-        `insert into data_live.people (org_id, id, email, owner) values ('default', gen_random_uuid(), 'self@ex.com', $1) returning id`,
+        `insert into data_live.people (${R}, org_id, id, email, owner) values (${RV}, 'default', gen_random_uuid(), 'self@ex.com', $1) returning id`,
         [userId],
       )
     ).rows[0].id;
@@ -159,7 +166,7 @@ describe("broker.getDocument", () => {
     // Insert document owned by someone else
     const otherId = (
       await app.query(
-        `insert into data_live.people (org_id, id, email, owner) values ('default', gen_random_uuid(), 'other@ex.com', 'other_user') returning id`,
+        `insert into data_live.people (${R}, org_id, id, email, owner) values (${RV}, 'default', gen_random_uuid(), 'other@ex.com', 'other_user') returning id`,
       )
     ).rows[0].id;
 
@@ -186,7 +193,7 @@ describe("broker.getDocument", () => {
     const ctxNoRead: BrokerContext = makeCtx({ userId: "noread_user", env: "live" });
     const id = (
       await app.query(
-        `insert into data_live.people (org_id, id, email) values ('default', gen_random_uuid(), 'test@ex.com') returning id`,
+        `insert into data_live.people (${R}, org_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
       )
     ).rows[0].id;
 
@@ -305,7 +312,7 @@ describe("broker.getDocument", () => {
 
     const id = (
       await app.query(
-        `insert into data_live.people (org_id, id, email) values ('default', gen_random_uuid(), 'test@ex.com') returning id`,
+        `insert into data_live.people (${R}, org_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
       )
     ).rows[0].id;
 
@@ -336,7 +343,7 @@ describe("broker.getDocument", () => {
 
     const id = (
       await app.query(
-        `insert into data_live.people (org_id, id, email) values ('default', gen_random_uuid(), 'test@ex.com') returning id`,
+        `insert into data_live.people (${R}, org_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
       )
     ).rows[0].id;
 

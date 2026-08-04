@@ -15,6 +15,13 @@ import { makeCtx } from "./helpers/ctx";
 import { captureLogs } from "./helpers/log-capture";
 import { ConfigSchema } from "../src/config/schema";
 
+import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
+
+// Every dataset table carries NOT NULL revision bookkeeping, so a fixture insert has to
+// be a well-formed `create` revision. These are literals; every value stays bound.
+const R = SEED_REV_COLUMNS;
+const RV = SEED_REV_VALUES;
+
 const cfg = loadConfig(join(__dirname, "../../../examples/harbor"));
 const allProbes = JSON.parse(readFileSync(join(__dirname, "fixtures/probes.json"), "utf8")) as {
   name: string;
@@ -34,19 +41,19 @@ beforeAll(async () => {
   // plant canaries directly into denied columns
   const dep = (
     await admin.query(
-      `insert into data_synth.departments (id,name) values (gen_random_uuid(),'Fin') returning id`,
+      `insert into data_synth.departments (${R}, id,name) values (${RV}, gen_random_uuid(),'Fin') returning id`,
     )
   ).rows[0].id;
   const person = (
     await admin.query(
-      `insert into data_synth.people (id,full_name,email,department_id,home_address,phone)
-     values (gen_random_uuid(),'P','p@x', $1, $2, '555') returning id`,
+      `insert into data_synth.people (${R}, id,full_name,email,department_id,home_address,phone)
+     values (${RV}, gen_random_uuid(),'P','p@x', $1, $2, '555') returning id`,
       [dep, DENIED_CANARY],
     )
   ).rows[0].id;
   await admin.query(
-    `insert into data_synth.salaries (id,person_id,job_title,base_salary,currency,effective_date,ssn)
-     values (gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`,
+    `insert into data_synth.salaries (${R}, id,person_id,job_title,base_salary,currency,effective_date,ssn)
+     values (${RV}, gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`,
     [person, SSN_CANARY],
   );
   // grant mia EVERYTHING grantable so the ONLY thing blocking canaries is posture, not missing grant

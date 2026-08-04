@@ -209,7 +209,7 @@ describe("taxonomies", () => {
       },
     });
     expect(cfg.collections.notes!.fields.category).toEqual({
-      posture: { read: "allow", write: "deny" },
+      posture: { read: "allow", write: "deny", unmask: "deny" },
       type: "text",
     });
     expect(cfg.taxonomies.category!.terms!.hr!.label).toBe("HR");
@@ -233,7 +233,7 @@ describe("taxonomies", () => {
       },
     });
     expect(cfg.collections.briefs!.fields.category).toEqual({
-      posture: { read: "deny", write: "deny" },
+      posture: { read: "deny", write: "deny", unmask: "deny" },
       type: "text",
     });
   });
@@ -255,7 +255,7 @@ describe("taxonomies", () => {
       },
     });
     expect(cfg.collections.briefs!.fields.category).toEqual({
-      posture: { read: "allow", write: "deny" },
+      posture: { read: "allow", write: "deny", unmask: "deny" },
       type: "text",
     });
   });

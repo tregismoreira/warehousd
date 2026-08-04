@@ -5,17 +5,19 @@ import { grantableFields, writableFields } from "../src/config/load";
 describe("two-axis postures", () => {
   it("bare 'allow' normalizes to {read:allow, write:deny}", () => {
     const p = normalizePosture("allow");
-    expect(p).toEqual({ read: "allow", write: "deny" });
+    expect(p).toEqual({ read: "allow", write: "deny", unmask: "deny" });
   });
 
   it("bare 'deny' normalizes to {read:deny, write:deny}", () => {
     const p = normalizePosture("deny");
-    expect(p).toEqual({ read: "deny", write: "deny" });
+    expect(p).toEqual({ read: "deny", write: "deny", unmask: "deny" });
   });
 
   it("object form round-trips unchanged", () => {
     const p = { read: "allow", write: "allow" };
-    expect(normalizePosture(p)).toEqual(p);
+    // The third axis is filled in rather than dropped: an object posture that predates `unmask`
+    // means "no unmask", and normalizePosture says so explicitly instead of leaving it absent.
+    expect(normalizePosture(p)).toEqual({ ...p, unmask: "deny" });
   });
 
   it("readPosture and writePosture extract the right axis", () => {
@@ -41,10 +43,10 @@ describe("two-axis postures", () => {
     });
 
     const c = cfg.collections.people!;
-    expect(c.fields.id!.posture).toEqual({ read: "allow", write: "deny" });
-    expect(c.fields.email!.posture).toEqual({ read: "allow", write: "deny" });
-    expect(c.fields.phone!.posture).toEqual({ read: "deny", write: "deny" });
-    expect(c.fields.salary!.posture).toEqual({ read: "deny", write: "allow" });
+    expect(c.fields.id!.posture).toEqual({ read: "allow", write: "deny", unmask: "deny" });
+    expect(c.fields.email!.posture).toEqual({ read: "allow", write: "deny", unmask: "deny" });
+    expect(c.fields.phone!.posture).toEqual({ read: "deny", write: "deny", unmask: "deny" });
+    expect(c.fields.salary!.posture).toEqual({ read: "deny", write: "allow", unmask: "deny" });
   });
 
   it("view_join + write:allow is a config error", () => {
@@ -121,7 +123,7 @@ describe("two-axis postures", () => {
 
     // When we normalize it, bare strings become {read, write}
     const id_posture = normalizePosture((oldJSON.fields.id as any).posture);
-    expect(id_posture).toEqual({ read: "allow", write: "deny" });
+    expect(id_posture).toEqual({ read: "allow", write: "deny", unmask: "deny" });
   });
 
   it("writable:true requires at least one writable field", () => {

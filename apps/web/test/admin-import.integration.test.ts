@@ -102,7 +102,7 @@ describe("POST /api/admin/import", () => {
     await POST(upload(anaCookie, "departments", `id,name\n${U(4)},Audited`) as any);
     const ev = await getAppPool().query(
       `select user_id, env, collection, outcome from app.audit_events
-       where intent->>'op' = 'import' order by at desc limit 1`,
+       where intent->>'op' like 'import:%' order by at desc limit 1`,
     );
     expect(ev.rows[0]).toMatchObject({
       user_id: "ana",
