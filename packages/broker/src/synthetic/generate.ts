@@ -73,6 +73,30 @@ export async function generateSynthetic(
       }
     }
     if (pkField) pkByCollection[name] = pkField;
+    // Rows are accumulated and inserted in batches rather than one statement each.
+    //
+    // A round trip per row was tolerable when a row was its declared fields; every dataset is
+    // revisioned now, so each one also carries seven bookkeeping columns, and harbor generates
+    // a few thousand rows. One statement per row made `warehousd seed` — and the regenerate
+    // suite — slow enough to cross a 30s test timeout under parallel load.
+    const pending: unknown[][] = [];
+    let pendingCols: string[] = [];
+    const flush = async () => {
+      if (!pending.length) return;
+      const allCols = [...REV_INSERT_COLS, ...pendingCols];
+      const width = allCols.length;
+      const params: unknown[] = [];
+      const tuples = pending.map((row, r) => {
+        const holes = row.map((_, k) => `$${r * width + k + 1}`);
+        params.push(...row);
+        return `(${holes.join(",")})`;
+      });
+      await db.query(
+        `insert into data_synth.${name} (${allCols.join(",")}) values ${tuples.join(",")}`,
+        params,
+      );
+      pending.length = 0;
+    };
     for (let i = 0; i < n; i++) {
       const cols: string[] = [],
         vals: unknown[] = [];
@@ -142,14 +166,17 @@ export async function generateSynthetic(
           );
       }
       // Revision bookkeeping ahead of the data columns, matching the column list built beside it.
-      const allCols = [...REV_INSERT_COLS, ...cols];
-      const allVals = [...revInsertValues(cols.map((c2) => c2.replace(/"/g, ""))), ...vals];
-      const ph = allVals.map((_, k) => `$${k + 1}`).join(",");
-      await db.query(
-        `insert into data_synth.${name} (${allCols.join(",")}) values (${ph})`,
-        allVals,
-      );
+      pendingCols = cols;
+      pending.push([...revInsertValues(cols.map((c2) => c2.replace(/"/g, ""))), ...vals]);
+      // Postgres caps a statement at 65535 bound parameters, so the batch is bounded by row
+      // width rather than by a fixed row count — a wide collection would otherwise blow the
+      // limit at a size that worked for a narrow one.
+      if (
+        pending.length >= Math.max(1, Math.floor(20_000 / (cols.length + REV_INSERT_COLS.length)))
+      )
+        await flush();
     }
+    await flush();
     idsByCollection[name] = ids;
   }
 

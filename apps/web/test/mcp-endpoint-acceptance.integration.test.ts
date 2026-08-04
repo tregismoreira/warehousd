@@ -14,6 +14,7 @@ import { upsertClientPolicy, SEED_REV_COLUMNS, SEED_REV_VALUES } from "@warehous
 import {
   DENIED_CANARY,
   SSN_CANARY,
+  MASK_RAW_CANARY,
   LIVE_ONLY_CANARY,
   DOC_RESTRICTED_CANARY,
 } from "../../../packages/broker/test/fixtures/canaries";
@@ -47,9 +48,9 @@ beforeAll(async () => {
     )
   ).rows[0].id;
   await admin.query(
-    `insert into data_synth.salaries (${R}, id,person_id,job_title,base_salary,currency,effective_date,ssn)
-     values (${RV}, gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`,
-    [person, SSN_CANARY],
+    `insert into data_synth.salaries (${R}, id,person_id,job_title,base_salary,currency,effective_date,ssn,bank_account,pay_band)
+     values (${RV}, gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2,$3,97300)`,
+    [person, SSN_CANARY, `${MASK_RAW_CANARY}-4321`],
   );
 
   // mia: full grantable fields on people/salaries (dev + live), and policies (dev + live).
@@ -60,7 +61,7 @@ beforeAll(async () => {
     await admin.query(
       `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at) values
        ('mia','people', array['id','full_name','email','department_name','department_id'],$1,'approved',$2),
-       ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date'],$1,'approved',$2),
+       ('mia','salaries', array['id','person_id','job_title','base_salary','currency','effective_date','bank_account','pay_band'],$1,'approved',$2),
        ('mia','policies', array['title','content','owner','updated_at','category'],$1,'approved',$2)`,
       [env, expiresAt],
     );
@@ -155,6 +156,11 @@ describe("hostile-intent probe suite over MCP (§10 test 4)", () => {
       const payload = JSON.stringify(out);
       expect(payload.includes(DENIED_CANARY), `canary in response of "${probe.name}"`).toBe(false);
       expect(payload.includes(SSN_CANARY), `canary in response of "${probe.name}"`).toBe(false);
+      // bank_account IS granted to mia, so only the mask keeps its raw value out of an
+      // otherwise-allowed response — the strictest of the three canaries on this surface.
+      expect(payload.includes(MASK_RAW_CANARY), `canary in response of "${probe.name}"`).toBe(
+        false,
+      );
     }
   });
 

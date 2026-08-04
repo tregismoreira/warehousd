@@ -9,7 +9,7 @@ import { applyConfig } from "../src/apply/apply";
 import { createPools, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import { loadConfig } from "../src/config/load";
-import { DENIED_CANARY, SSN_CANARY } from "./fixtures/canaries";
+import { DENIED_CANARY, SSN_CANARY, MASK_RAW_CANARY } from "./fixtures/canaries";
 import type { QueryIntent } from "../src/types";
 import { makeCtx } from "./helpers/ctx";
 import { captureLogs } from "./helpers/log-capture";
@@ -52,14 +52,28 @@ beforeAll(async () => {
     )
   ).rows[0].id;
   await admin.query(
-    `insert into data_synth.salaries (${R}, id,person_id,job_title,base_salary,currency,effective_date,ssn)
-     values (${RV}, gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2)`,
-    [person, SSN_CANARY],
+    `insert into data_synth.salaries (${R}, id,person_id,job_title,base_salary,currency,effective_date,ssn,bank_account,pay_band)
+     values (${RV}, gen_random_uuid(), $1, 'Senior Accountant', 100000,'USD','2023-01-01',$2,$3,97300)`,
+    [person, SSN_CANARY, `${MASK_RAW_CANARY}-4321`],
   );
   // grant mia EVERYTHING grantable so the ONLY thing blocking canaries is posture, not missing grant
   for (const [c, fields] of [
     ["people", ["id", "full_name", "email", "department_name", "department_id"]],
-    ["salaries", ["id", "person_id", "job_title", "base_salary", "currency", "effective_date"]],
+    [
+      "salaries",
+      [
+        "id",
+        "person_id",
+        "job_title",
+        "base_salary",
+        "currency",
+        "effective_date",
+        // Masked fields ARE grantable — the probes assert that granting one still does not
+        // make it filterable, which is a different rule from posture: deny.
+        "bank_account",
+        "pay_band",
+      ],
+    ],
   ] as const)
     await admin.query(
       `insert into app.grants (user_id,collection,allowed_fields,env,status)
@@ -97,7 +111,10 @@ it("no probe leaks any denied canary; outcomes match expectations", async () => 
 
   for (const [i, probe] of probes.entries()) {
     expect(results[i]?.outcome, `probe "${probe.name}"`).toBe(probe.expect);
-    for (const canary of [DENIED_CANARY, SSN_CANARY]) {
+    // MASK_RAW_CANARY sits behind `bank_account`, which mia IS granted — so unlike the other
+    // two this one is reachable by an allowed intent, and only the mask keeps it out of the
+    // response. That makes it the strictest of the three.
+    for (const canary of [DENIED_CANARY, SSN_CANARY, MASK_RAW_CANARY]) {
       expect(results[i]?.payload.includes(canary), `canary in response of "${probe.name}"`).toBe(
         false,
       );
@@ -105,7 +122,7 @@ it("no probe leaks any denied canary; outcomes match expectations", async () => 
   }
   // no canary reached any captured log line — console or raw stream
   const logText = capture.text();
-  for (const canary of [DENIED_CANARY, SSN_CANARY])
+  for (const canary of [DENIED_CANARY, SSN_CANARY, MASK_RAW_CANARY])
     expect(logText.includes(canary), "canary in captured logs").toBe(false);
   // the table still exists (sql-injection probe did not drop it)
   const still = await admin.query(`select count(*)::int c from data_synth.people`);

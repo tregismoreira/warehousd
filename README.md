@@ -153,11 +153,15 @@ synthetic:
   documents_per_collection: { people: 40 }
 ```
 
-Postures are two-tier and have two axes. `posture: deny` means the field can
+Postures are two-tier and have three axes. `posture: deny` means the field can
 *never* be granted without editing the file. `posture: allow` only makes a field
 **grantable** — it stays denied per user until a manager approves a grant
 covering it. A bare value governs *reading* and leaves writing denied; the long
 form `posture: { read: allow, write: allow }` opts a field into the write path.
+`read: mask` is the level in between: readable, but as a transform computed in
+SQL, so the raw value never leaves Postgres. Add `unmask: allow` and the raw
+value becomes grantable too — a manager ticks it per grant, and the audit row
+says who saw it.
 
 Every key: [configuration.md](docs/configuration.md).
 
@@ -337,12 +341,12 @@ yet built:
 | SSO — OIDC and SAML | **real** | Better Auth SSO plugin; automated OIDC and SAML round trips against Keycloak. Connecting a hosted IdP is a [documented manual runbook](docs/configure-sso.md). |
 | Admin / manager / member web UI | **real** | |
 | Audit log | **real** | Insert-only for the app role. |
-| Real-data import | *simplified* | Admin-only CSV/JSON append into `data_live` through an `INSERT`-only role. No update or delete path. |
+| Real-data import | **real** | Admin-only CSV/JSON, with append, upsert and delete modes and a dry-run preview. Every mode writes revisions: the import role holds no UPDATE on a data column and no DELETE at all, so a correction supersedes a value rather than overwriting it. |
 | App-schema migrations | **real** | Ordered and versioned, recorded in `app.schema_migrations`. Applied under an advisory lock so concurrent boots cannot race, each in its own transaction so a failure rolls back and can be retried rather than leaving a half-applied schema. Collection DDL remains additive — type changes, renames and drops are still not applied to an existing collection. |
 | Semantic / vector search | *stubbed* | `vector(1536)` column and pgvector are reserved but not populated. |
 | `warehousd deploy` | **real** | Provisions to Fly.io; enforces the demo-off expectation mechanically. |
 | Write path (MCP, REST, and review queue) | **real** | Append-only revisions; `proposal_only` grants hold writes pending until a human approves. Approve/reject are never MCP tools. |
-| Masking / transform postures | *not built* | Fields are allow or deny — nothing in between. |
+| Masking / transform postures | **real** | `read: mask` with seven transforms, computed in SQL so the raw value is never fetched. Masked fields are projection-only — filtering, ordering, grouping and aggregating over one are refused, which is what stops a mask being decorative. `unmask: allow` makes the raw value separately grantable. |
 | Connect-in-place to external databases | *not built* | Collections live in warehousd's Postgres. |
 | PDF/DOCX extraction, upload UI | *not built* | Indexing reads local directories. |
 | Multi-tenancy (`org_id`) | *partial* | Every grant, audit event and document carries an org, isolated by a view predicate and RLS. A single implicit org is created at bootstrap; there is no UI for creating or switching orgs yet. |
@@ -431,8 +435,8 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 
 Semantic search over the reserved embedding column · document upload with
 PDF/DOCX extraction · connect-in-place collections over external Postgres ·
-masking postures · aggregate-only postures with inference-leak protection ·
-deploy targets · IdP group→role mapping.
+aggregate-only postures with inference-leak protection · deploy targets ·
+IdP group→role mapping.
 
 [docs/roadmap.md](docs/roadmap.md) has the detail, and states where the
 open-source line sits: everything shipped is MIT and stays MIT.

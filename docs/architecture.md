@@ -511,7 +511,7 @@ grant rather than finding one.
 
 ## Postures, verbs, and writability
 
-A posture has **two axes**. A bare value sets the read axis and leaves write
+A posture has **three axes**. A bare value sets the read axis and leaves write
 denied, so every configuration written before the write path existed stays valid
 and nothing becomes writable by accident:
 
@@ -519,6 +519,22 @@ and nothing becomes writable by accident:
 email: { type: text, posture: allow } # read allow, write deny
 base_salary: { type: numeric, posture: { read: deny, write: allow } }
 ```
+
+The read axis has three settings, not two: `allow`, `mask`, `deny`. `mask` is a
+disclosure **level** between the other two — the field is grantable, and what a
+grant receives is a transformed value computed in SQL, so the raw one is never
+fetched. `unmask: allow` is the third axis and makes the raw value *grantable*,
+one more application of the same two-tier rule the other axes use: the config
+sets a ceiling, a grant decides who reaches it, and the audit row records which
+fields a decision actually returned unmasked.
+
+Masking is sound only for projection, so the broker refuses a masked field in
+`filters`, `orderBy`, `groupBy` and `aggregate` (`collectComputed` in
+`verbs/read.ts`). A masked field that can still be compared against is not
+masked: ordering comparisons recover a banded number by bisection, `like` walks a
+redacted string, and `min`/`max` return the raw extremes. The one exception is a
+grant's own `document_filter`, which is author-supplied by a manager rather than
+by the model — the same exception that lets a denied `path` gate documents.
 
 `view_join` fields are **always** write-deny, structurally — a joined view is not
 updatable in Postgres and the field belongs to another collection anyway. Asking

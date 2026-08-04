@@ -145,9 +145,9 @@ The sequence hints are dense and stable for a given row count, which is what let
 committed seed documents reference a generated row by slug. Shrinking a
 collection's row count below a slug a document names breaks indexing loudly.
 
-### Postures are two-tier, on two axes
+### Postures are two-tier, on three axes
 
-A posture governs reading and writing separately:
+A posture governs reading, writing, and unmasking separately:
 
 ```yaml
 email:       { type: text,    posture: allow }                        # read allow, write deny
@@ -159,7 +159,7 @@ base_salary: { type: numeric, posture: { read: deny, write: allow } }
   editing this file.
 - `allow` on an axis — the field is *grantable* for it. It is still denied for
   every user until a manager approves a grant covering it.
-- A field with no posture is denied on both. There is no third state.
+- A field with no posture is denied on every axis.
 - **A bare `allow` or `deny` sets the read axis and leaves write denied.** That
   is what keeps every configuration written before the write path existed valid,
   and stops any field becoming writable by accident.
@@ -168,6 +168,64 @@ base_salary: { type: numeric, posture: { read: deny, write: allow } }
 
 Denied fields are still useful: a denied `path` on a file collection can gate
 which documents a grant reaches without ever being readable.
+
+### Masking
+
+`read: mask` is the third setting on the read axis. The field is grantable, and
+what a grant gets back is a **transformed** value rather than the stored one:
+
+```yaml
+bank_account:
+  type: text
+  posture: { read: mask, write: deny }
+  mask: { transform: last4 }            # ••••4321
+
+pay_band:
+  type: numeric
+  posture: { read: mask, write: deny, unmask: allow }
+  mask: { transform: bucket, width: 25000 }
+```
+
+The transform is computed **in SQL**, so the raw value is never fetched — it
+cannot appear in a response, an error body or a log line, which is the same
+standard `deny` sets. Masking applied after the rows came back would fail all
+four and look identical in a passing test.
+
+`unmask: allow` is the second tier, and it works exactly like `read: allow`: it
+makes the raw value **grantable**, not readable. A manager still has to tick it
+per grant, and the audit row records which fields a decision returned unmasked.
+Omit it and nobody sees the raw value without editing this file.
+
+| transform | types | result |
+| --- | --- | --- |
+| `redact` | any | `[redacted]` |
+| `last4` | text | `••••4321` |
+| `first: { chars: N }` | text | the first N characters, then `…` |
+| `hash` | any | a keyed HMAC — equal values hash equal, so rows still group |
+| `bucket: { width: N }` | numeric, int | quantised down to the band below |
+| `year` | date, timestamptz | the year alone |
+| `domain` | text | whatever follows the `@` |
+
+`hash` needs `WAREHOUSD_MASK_KEY`. There is deliberately no default: a default
+key is a public key, and the point of `hash` is a pseudonym only this deployment
+can correlate.
+
+**A masked field can be projected and nothing else.** It cannot appear in
+`filters`, `orderBy`, `groupBy` or `aggregate` — those refuse with
+`field_denied`. This is not a limitation to work around; it is what makes the
+mask real. A banded salary you can still compare against falls to bisection in
+about ten queries, `like` walks a redacted string one character at a time, and
+`min`/`max` return the raw extremes outright.
+
+A grant's own `document_filter` is the deliberate exception and may still
+reference a masked column — it is written by a human manager rather than by the
+model, the same reason a denied `path` can gate documents.
+
+Refused at config load, because each one is a way for a mask to look applied and
+not be: masking a `pk` (identity has to round-trip), masking a `searchable: true`
+field (the generated `<field>_tsv` column indexes the raw value), masking a file
+collection's `content` or `path`, a transform its column type cannot compute, and
+`unmask: allow` on a field that is not masked.
 
 ### Writable collections
 

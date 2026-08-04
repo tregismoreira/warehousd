@@ -34,8 +34,6 @@ it is in the repository today, it is MIT tomorrow.
   local directories of `.md` and `.txt`.
 - **Connect-in-place collections** over an external Postgres, rather than
   requiring data to live in warehousd's own database.
-- **Masking and transform postures.** Fields are allow or deny today, with
-  nothing in between.
 - **Aggregate-only postures** with inference-leak protection — computing
   `avg(base_salary)` without row access. This needs minimum-group-size or
   differential-privacy machinery to be safe, which is why it is not built:

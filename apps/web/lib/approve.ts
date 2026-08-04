@@ -1,7 +1,13 @@
-import { findCollection, grantableFields, type WarehousdConfig } from "@warehousd/broker";
+import {
+  findCollection,
+  grantableFields,
+  unmaskableFields,
+  type WarehousdConfig,
+} from "@warehousd/broker";
 
 export type ApproveOpts = {
   allowedFields?: string[];
+  unmaskedFields?: string[];
   expiresAt?: string;
   documentFilters?: { field: string; op: "in"; value: string[] }[];
 };
@@ -10,6 +16,7 @@ export type ApprovalInput = {
   collection: string;
   allowedFields?: unknown;
   expiresAt?: unknown;
+  unmaskedFields?: unknown;
   selectedPaths?: unknown;
   selectedTerms?: unknown;
 };
@@ -42,6 +49,20 @@ export function buildApproval(
   }
 
   const opts: ApproveOpts = { allowedFields: approved };
+
+  // Unmasking is a second, narrower decision on top of the field list. approveGrant re-checks
+  // both rules against the config — this is the surface that has to refuse them with a code the
+  // console can render, rather than letting the broker throw a generic invalid_unmask at a form
+  // that cannot say which box was wrong.
+  const unmasked = strings(input.unmaskedFields);
+  if (unmasked.length) {
+    const unmaskable = unmaskableFields(cfg, input.collection);
+    for (const f of unmasked) {
+      if (!approved.includes(f)) return { ok: false, error: "unmask_not_granted" };
+      if (!unmaskable.includes(f)) return { ok: false, error: "field_not_unmaskable" };
+    }
+    opts.unmaskedFields = unmasked;
+  }
 
   if (input.expiresAt !== undefined && input.expiresAt !== null && input.expiresAt !== "") {
     if (typeof input.expiresAt !== "string") return { ok: false, error: "invalid_expiry" };
