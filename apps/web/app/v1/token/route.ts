@@ -36,9 +36,13 @@ const SUBJECT_TOKEN_ALGS = [
 // object — constructing one per request threw that cache away and made every exchange an
 // outbound fetch to the IdP, which is both slow and a lever for anyone who can drive exchanges.
 // Keyed on the URI as well as the issuer id so re-pointing an issuer's jwks_uri takes effect.
+//
+// The separator is a NUL, written as an escape rather than as a literal byte: neither an issuer id
+// nor a URL can contain one, so no pair of them can collide by spelling. It used to be a literal
+// \0 in the source, which made git treat this whole file as binary and its diffs unreviewable.
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 function jwksFor(issuerId: string, jwksUri: string): ReturnType<typeof createRemoteJWKSet> {
-  const key = `${issuerId} ${jwksUri}`;
+  const key = `${issuerId}\0${jwksUri}`;
   let set = jwksCache.get(key);
   if (!set) {
     set = createRemoteJWKSet(new URL(jwksUri));
