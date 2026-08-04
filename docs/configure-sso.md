@@ -175,10 +175,27 @@ Behaviour worth knowing before you rely on it:
   warehousd knows nothing about; that is not an error.
 - **A missing or empty claim yields `default_role`**, not a refused login. An
   IdP that stops sending groups must not promote anyone, and must not lock
-  everyone out either.
-- **Registration-time only.** The map is applied when the account is created, so
-  a promotion or demotion made in **Admin → Users** is never undone by the next
-  login. To re-apply it, delete the account and let it be provisioned again.
+  everyone out either. Membership follows the same rule with one distinction
+  that matters: a claim that is *absent* changes nothing at all, while a claim
+  that arrives *empty* is an answer — the IdP said this user is in no group, and
+  sso-sourced membership is cleared to match. A provider registration that
+  forgets to map the claim therefore cannot silently revoke everyone's groups.
+- **Console-pinned membership survives a re-sync.** An admin can add groups by
+  hand (`PUT /api/admin/users/{id}/groups`); those rows carry `source: 'manual'`
+  and an SSO login replaces only the rows it owns. Neither source overwrites the
+  other.
+- **The ROLE is registration-time only.** The map is applied when the account is
+  created, so a promotion or demotion made in **Admin → Users** is never undone
+  by the next login. To re-apply it, delete the account and let it be
+  provisioned again.
+- **MEMBERSHIP syncs on every login.** The same claim also feeds
+  `app.user_groups`, which is what a `group:` principal on a per-document ACL
+  resolves against — see
+  [Per-document ACLs](architecture.md#per-document-acls). That is a fact about
+  the directory rather than a decision somebody made in the console, so freezing
+  it at first login would be worse than not offering it. The two are told apart
+  by a marker table (`app.sso_provisioned`), which is what lets the hook run
+  every login without re-deriving the role.
 - **A provider with no entry here provisions `member`**, exactly as before.
 
 Both ways this can silently do nothing — the claim never mapped at registration,

@@ -1265,6 +1265,11 @@ Refusals return a reason code plus a request-access hint — never a denied valu
 never SQL. Tool descriptions state the governance model plainly: the model
 reading them is the first consumer of the security posture.
 
+Absent from the table on purpose, alongside `approve`/`reject`: **there is no
+tool for editing a document's ACL.** The model may propose a write and may ask
+for access; it may not decide who else can read something. See
+[Per-document ACLs](#per-document-acls).
+
 Clients find the authorization server through the standard discovery documents
 under `app/.well-known/`: `oauth-authorization-server` (RFC 8414) and
 `oauth-protected-resource` (RFC 9728). A connector needs only the `/mcp` URL —

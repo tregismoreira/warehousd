@@ -671,4 +671,6 @@ treated as zero, so a typo cannot silently remove the ceiling it meant to raise.
 [`examples/harbor/warehousd.yml`](../examples/harbor/warehousd.yml) is a
 working configuration for the demo company: 20 collections including
 relational data, sensitive compensation records, a time series, three file
-collections with bound taxonomies, and dataset-sourced vocabulary terms.
+collections with bound taxonomies, dataset-sourced vocabulary terms, one
+writable collection behind the proposal path, and one (`announcements`) with
+per-document ACLs turned on.

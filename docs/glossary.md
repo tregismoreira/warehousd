@@ -20,6 +20,9 @@ is one sentence: **a Collection holds Documents; each Document has Fields.**
 | **Broker** | The library that turns `(identity, grants, intent)` into documents or a refusal. The only thing that reads collection data. |
 | **Adapter** | A thin protocol translator in front of the broker — the MCP server, the web UI, anything future. |
 | **Taxonomy / vocabulary** | A named set of **terms** bound to a collection, so grants can be scoped to a subset of documents. Supports single or multiple terms per document; may be defined inline (YAML) or sourced from a dataset collection. |
+| **ACL** | The list of principals a single document is restricted to. A document with no ACL is readable by anyone the grant covers; a document with one is readable only by its principals. An ACL narrows a grant and never widens one. Only on a collection declaring `acl: true`. |
+| **Principal** | Who a caller *is*, for an ACL: `user:<id>` or `group:<name>`. The namespace is required — without it a group named the same as a user id would grant that user's access. |
+| **Group** | A named set of users, held in warehousd's own `app.user_groups` and derived from the caller's id on every request. Synced from an IdP's group claim on login, or pinned by an admin. Never read from a token. |
 | **Row** | Internal only: the SQL tuple the broker materializes, 1:1 with a document. It lives in the query-builder and DDL layers and never appears in a public contract. |
 
 ## Words we don't use
