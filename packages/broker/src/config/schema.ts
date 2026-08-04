@@ -465,6 +465,37 @@ export const DeploySchema = z
   });
 export type DeployConfig = z.infer<typeof DeploySchema>;
 
+// Semantic search, off unless declared. Absent means `search_documents` behaves exactly as it
+// always has and the embedding column stays unpopulated — which is the honest default, because
+// embedding a corpus is a decision with a cost and, for a remote provider, a disclosure.
+//
+// `dimensions` has no default on purpose. It has to match the model, and getting it wrong shows
+// up from Postgres as a cast error on the insert that names neither the model nor this key.
+export const EmbeddingSchema = z
+  .object({
+    provider: z.enum(["local", "openai", "http"]).default("local"),
+    model: z.string(),
+    dimensions: z.number().int().positive().max(4096),
+    base_url: z.string().optional(),
+    api_key: z.string().optional(),
+  })
+  .strict()
+  .superRefine((e, ctx) => {
+    if (e.provider === "http" && !e.base_url)
+      ctx.addIssue({
+        code: "custom",
+        message: "embedding.provider `http` requires `base_url`",
+      });
+    // Local runs in-process and has nothing to authenticate to. Accepting a key here would read
+    // as "this is configured" while the key went nowhere.
+    if (e.provider === "local" && (e.base_url || e.api_key))
+      ctx.addIssue({
+        code: "custom",
+        message: "embedding.provider `local` takes neither `base_url` nor `api_key`",
+      });
+  });
+export type EmbeddingConfig = z.infer<typeof EmbeddingSchema>;
+
 export const ConfigSchema = z
   .object({
     project: z.string(),
@@ -529,6 +560,7 @@ export const ConfigSchema = z
     synthetic: z
       .object({ documents_per_collection: z.record(z.string(), z.number()).default({}) })
       .default({ documents_per_collection: {} }),
+    embedding: EmbeddingSchema.optional(),
     deploy: DeploySchema.optional(),
   })
   .strict()

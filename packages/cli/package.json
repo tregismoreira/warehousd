@@ -1,9 +1,9 @@
 {
   "name": "warehousd",
   "version": "0.1.0",
-  "description": "Governed MCP data platform — CLI",
+  "description": "Governed MCP data platform \u2014 CLI",
   "license": "MIT",
-  "author": "Thiago Régis",
+  "author": "Thiago R\u00e9gis",
   "keywords": [
     "mcp",
     "claude",
@@ -39,7 +39,8 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "@warehousd/providers": "workspace:*"
   },
   "devDependencies": {
     "@clack/prompts": "^0.11.0",

@@ -31,6 +31,7 @@ module.exports = [
         // projects `pnpm typecheck` runs; keep the two lists in step.
         project: [
           "packages/broker/tsconfig.test.json",
+          "packages/providers/tsconfig.test.json",
           "packages/cli/tsconfig.test.json",
           "apps/web/tsconfig.test.json",
           "tsconfig.tools.json",

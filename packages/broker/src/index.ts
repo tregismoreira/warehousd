@@ -23,6 +23,15 @@ export {
   envRefs,
 } from "./config/load";
 export { maskExpr, UnsupportedMask, MASK_KEY_ENV } from "./sql/mask";
+export {
+  ExtractionFailed,
+  type Embedder,
+  type BinaryExtractor,
+  type ExtractedText,
+} from "./providers";
+export { embedCollection, embedChunks, type EmbedProgress } from "./embedding/sync";
+export { DEFAULT_EMBEDDING_DIMENSIONS } from "./apply/ddl";
+export { EmbeddingSchema, type EmbeddingConfig } from "./config/schema";
 export type { WarehousdConfig } from "./config/schema";
 export {
   fileMetadataFields,

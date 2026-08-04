@@ -1,6 +1,11 @@
 import type { WarehousdConfig } from "../config/schema";
 import { fileMetadataFields } from "../config/schema";
 
+// The width of the embedding column when no `embedding:` block is configured. Matches the
+// default local model (bge-small-en-v1.5), so turning semantic search on later with the default
+// provider needs no column rebuild.
+export const DEFAULT_EMBEDDING_DIMENSIONS = 384;
+
 const PG_TYPE: Record<string, string> = {
   uuid: "uuid",
   text: "text",
@@ -49,6 +54,14 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
     const metadataCol = metadataCols.length > 0 ? metadataCols.join(",") + "," : "";
     const termAlter = termAlters.length > 0 ? termAlters.join("") : "";
     const metadataAlter = metadataAlters.length > 0 ? metadataAlters.join("") : "";
+    // The embedding column's width comes from the config, because it has to match the model.
+    // Absent config still creates the column — semantic search can be turned on later without a
+    // table rebuild — at the dimension of the default local model.
+    const dims = cfg.embedding?.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
+    // HNSW rather than IVFFlat: IVFFlat has to be built over existing rows to pick its lists, so
+    // creating it here — on an empty table, before anything is indexed — would produce an index
+    // that never recovers. HNSW needs no training pass and stays correct as rows arrive.
+    // `vector_cosine_ops` matches the normalised vectors the embedders return.
     return `
       create table if not exists ${schema}."${collection}__files" (
         id uuid primary key,
@@ -59,6 +72,9 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
         checksum text not null,
         updated_at timestamptz not null);
       alter table ${schema}."${collection}__files" add column if not exists org_id text not null default 'default';${termAlter}${metadataAlter}
+      alter table ${schema}."${collection}__files" add column if not exists content_type text;
+      alter table ${schema}."${collection}__files" add column if not exists byte_size integer;
+      alter table ${schema}."${collection}__files" add column if not exists blob bytea;
       create table if not exists ${schema}."${collection}__documents" (
         id uuid primary key,
         org_id text not null default 'default',
@@ -66,11 +82,13 @@ export function tableDDL(env: "dev" | "live", collection: string, cfg: Warehousd
         document_seq int not null,
         content text not null,
         tsv tsvector generated always as (to_tsvector('english', content)) stored,
-        embedding vector(1536),
+        embedding vector(${dims}),
         unique (file_id, document_seq));
       alter table ${schema}."${collection}__documents" add column if not exists org_id text not null default 'default';
       create index if not exists "${collection}__documents_tsv_idx"
         on ${schema}."${collection}__documents" using gin (tsv);
+      create index if not exists "${collection}__documents_embedding_idx"
+        on ${schema}."${collection}__documents" using hnsw (embedding vector_cosine_ops);
     `;
   }
 
@@ -208,8 +226,12 @@ export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdC
     // no grant can carry it and no client intent can select it (buildSelect draws its columns
     // from the YAML field set). It is here because it is the indexer's change-detection key, and
     // the console's file inventory reads this view — the read role holds SELECT on nothing else.
+    // `embedding` joins `tsv` and `checksum` as a structural column: it names no configured
+    // field, so no grant can carry it and buildSelect can never project it — its columns come
+    // from the YAML field set. It is here because the read role holds SELECT on this view and
+    // nothing else, and a semantic search has to be able to rank by it.
     return `${recreate}
-      select c.id as document_id, c.document_seq, c.content, c.tsv,
+      select c.id as document_id, c.document_seq, c.content, c.tsv, c.embedding,
              d.id as file_id, d.title, d.path, d.owner, d.updated_at, d.checksum${termSels}${metadataSels}
       from ${schema}."${collection}__documents" c
       join ${schema}."${collection}__files" d on d.id = c.file_id and d.org_id = c.org_id

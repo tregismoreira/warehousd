@@ -1,6 +1,14 @@
 import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
-import { tableDDL, viewDDL, grantViewDDL, grantImportDDL, rlsDDL, grantWriteDDL } from "./ddl";
+import {
+  tableDDL,
+  viewDDL,
+  grantViewDDL,
+  grantImportDDL,
+  rlsDDL,
+  grantWriteDDL,
+  DEFAULT_EMBEDDING_DIMENSIONS,
+} from "./ddl";
 
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
   await db.query(`create extension if not exists vector`);
@@ -34,6 +42,28 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
   for (const name of Object.keys(cfg.collections)) {
     const c = cfg.collections[name];
     if (!c) throw new Error(`Unknown collection: ${name}`);
+
+    // A changed embedding dimension means a changed model, and pgvector cannot widen a column
+    // in place. The stored vectors are derived data — re-derivable by `warehousd embed` — so the
+    // column is dropped and recreated rather than the apply refusing. Detected via atttypmod,
+    // which is where pgvector keeps the width.
+    if (c.type === "file") {
+      const want = cfg.embedding?.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
+      for (const env of ["dev", "live"] as const) {
+        const schema = env === "dev" ? "data_synth" : "data_live";
+        const cur = await db.query<{ atttypmod: number }>(
+          `select a.atttypmod from pg_attribute a
+             join pg_class t on t.oid = a.attrelid
+             join pg_namespace n on n.oid = t.relnamespace
+           where n.nspname = $1 and t.relname = $2 and a.attname = 'embedding' and a.attnum > 0`,
+          [schema, `${name}__documents`],
+        );
+        const have = cur.rows[0]?.atttypmod;
+        if (have !== undefined && have > 0 && have !== want) {
+          await db.query(`alter table ${schema}."${name}__documents" drop column embedding`);
+        }
+      }
+    }
 
     // Migration detection: every dataset is revisioned now, so a pre-existing table WITHOUT
     // _rev* columns cannot be brought forward by `create table if not exists` — the alters

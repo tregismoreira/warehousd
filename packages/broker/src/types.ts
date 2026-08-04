@@ -40,10 +40,14 @@ export type QueryIntent = {
   groupBy?: string[] | undefined;
 };
 
+export type SearchMode = "text" | "semantic" | "hybrid";
+
 export type DocSearchIntent = {
   collection: string;
   q: string;
   fields?: string[] | undefined;
+  // Absent means "text", which is what every caller written before semantic search sends.
+  mode?: SearchMode | undefined;
   limit?: number | undefined;
   offset?: number | undefined;
 };

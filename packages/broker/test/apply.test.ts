@@ -96,6 +96,10 @@ describe("file collection apply", () => {
           "content",
           "document_id",
           "document_seq",
+          // Structural, like tsv and checksum: named by no configured field, so no grant can
+          // carry it and buildSelect cannot project it. Present because the read role sees only
+          // this view, and a semantic search has to rank by it.
+          "embedding",
           "file_id",
           "owner",
           "path",

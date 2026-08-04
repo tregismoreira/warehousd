@@ -75,10 +75,20 @@ export const QueryIntentSchema = z.object({
   groupBy: z.array(Ident).optional(),
 });
 
+export const SEARCH_MODES = ["text", "semantic", "hybrid"] as const;
+
+// `mode` defaults to `text`, so a client that predates semantic search behaves exactly as before.
+//
+// There is deliberately NO way to supply a vector. The vector is derived server-side from `q`,
+// because a client-supplied one is an oracle: it would let a caller probe the embedding space of
+// documents their grant excludes, reading similarity out of a corpus they cannot read. Extra keys
+// are ignored by these schemas by design (see the note above), so a forged `vector` is dropped
+// rather than refused — a caller must not be able to tell the difference.
 export const DocSearchIntentSchema = z.object({
   collection: Ident,
   q: z.string(),
   fields: z.array(Ident).optional(),
+  mode: z.enum(SEARCH_MODES).optional(),
   limit: Limit.optional(),
   offset: Offset.optional(),
 });

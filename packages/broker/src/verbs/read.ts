@@ -191,6 +191,18 @@ export function makeReadVerbs(d: VerbDeps) {
     // Check if searchable: file collections always support search (via tsv column);
     // dataset collections need at least one searchable: true field
     const isFile = c.type === "file";
+
+    // Vector modes need three things, and each missing one is the caller's to fix rather than
+    // something to paper over by quietly running a text search instead: a caller who asked for
+    // `semantic` and silently got `text` cannot tell, and would draw conclusions from a ranking
+    // that is not the one they requested.
+    const mode = intent.mode ?? "text";
+    if (mode !== "text") {
+      // Only a file collection has an embedding column — a dataset document is a row, and there
+      // is nothing chunked to embed.
+      if (!isFile) return audit.refuse(intent.collection, "invalid_intent", { intent });
+      if (!d.embedder) return audit.refuse(intent.collection, "invalid_intent", { intent });
+    }
     const searchableFields = isFile
       ? []
       : Object.entries(c.fields)
@@ -221,6 +233,10 @@ export function makeReadVerbs(d: VerbDeps) {
     // `content`, which cannot be masked either.
     const plan = maskPlan(cfg, intent.collection, c, grant.unmaskedFields);
     try {
+      // The query vector is derived HERE, from the caller's `q`, after their grant has been
+      // loaded and checked. There is no path by which a caller supplies one: that would be an
+      // oracle over the embedding space of documents their grant excludes.
+      const qVector = mode === "text" ? undefined : (await d.embedder!.embed([intent.q]))[0];
       const { text, values } = buildSelect(
         ctx.env,
         {
@@ -236,6 +252,8 @@ export function makeReadVerbs(d: VerbDeps) {
           isMultiValueField,
           searchFields: searchableFields,
           maskFor: plan.maskFor,
+          mode,
+          ...(qVector ? { qVector } : {}),
         },
       );
       const documents = await withOrg(

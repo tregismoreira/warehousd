@@ -62,6 +62,10 @@ export function buildSelect(
     isMultiValueField?: (field: string) => boolean;
     searchFields?: string[];
     maskFor?: (field: string) => MaskConfig | null;
+    // The query vector, already derived server-side from `q` by the read verb. Present only for
+    // `semantic` and `hybrid`. There is no path from a client-supplied vector to here.
+    qVector?: number[];
+    mode?: "text" | "semantic" | "hybrid";
   } = {},
 ): { text: string; values: unknown[] } {
   const schema = dataSchema(env);
@@ -103,16 +107,35 @@ export function buildSelect(
   const isFileSearch = !opts.searchFields?.length;
   const tsvExpr = isFileSearch ? "tsv" : opts.searchFields!.map((f) => q(`${f}_tsv`)).join(" || ");
 
+  const mode = opts.mode ?? "text";
+  // The projection alone, before any ranking column is appended. Hybrid needs it separately
+  // because it wraps the whole thing in CTEs.
+  const projection = selectClause;
   let rankExpr: string | null = null;
   let searchSlot: string | null = null;
+  let vectorSlot: string | null = null;
+  let tsq: string | null = null;
   if (opts.q !== undefined) {
-    searchSlot = param(opts.q); // ONE slot, reused for WHERE and ORDER BY
-    const tsq = `websearch_to_tsquery('english', ${searchSlot})`;
-    rankExpr = `ts_rank_cd(${tsvExpr}, ${tsq})`;
-    selectClause += `, ${rankExpr} as "_rank"`;
-    // document_seq is a file-collection column: one file yields many documents, and the seq
-    // identifies which. A dataset document is the whole row, so there is nothing to number.
-    if (isFileSearch) selectClause += `, "document_seq"`;
+    // Only bind the query text when the statement will actually reference it. A pure semantic
+    // search ranks by vector alone and matches no tsquery, so binding it there left a parameter
+    // present in the values array and absent from the text — which Postgres reports as "could
+    // not determine data type of parameter $1", several layers away from the cause.
+    if (mode !== "semantic") {
+      searchSlot = param(opts.q); // ONE slot, reused for WHERE and ORDER BY
+      tsq = `websearch_to_tsquery('english', ${searchSlot})`;
+    }
+    if (opts.qVector) vectorSlot = param(`[${opts.qVector.join(",")}]`);
+    // Cosine distance turned into a similarity, so bigger is better exactly as ts_rank_cd is.
+    // `<=>` is the operator the HNSW index in tableDDL is built for.
+    const vecRank = vectorSlot ? `1 - (embedding <=> ${vectorSlot}::vector)` : null;
+    rankExpr =
+      mode === "semantic" && vecRank ? vecRank : tsq ? `ts_rank_cd(${tsvExpr}, ${tsq})` : null;
+    if (mode !== "hybrid") {
+      selectClause += `, ${rankExpr} as "_rank"`;
+      // document_seq is a file-collection column: one file yields many documents, and the seq
+      // identifies which. A dataset document is the whole row, so there is nothing to number.
+      if (isFileSearch) selectClause += `, "document_seq"`;
+    }
   }
 
   let text = `select ${selectClause} from ${view}`;
@@ -176,11 +199,47 @@ export function buildSelect(
     }
   }
 
-  // Add full-text search WHERE clause if q is present (reuses searchSlot)
-  if (searchSlot !== null)
+  // The lexical match. NOT applied in semantic mode: the whole point of a vector search is to
+  // find documents that do not contain the query's words.
+  if (searchSlot !== null && mode !== "semantic" && mode !== "hybrid")
     where.push(`${tsvExpr} @@ websearch_to_tsquery('english', ${searchSlot})`);
 
-  if (where.length) text += ` where ${where.join(" and ")}`;
+  const limit = Math.min(Math.max(1, intent.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
+  const offset = intent.offset && intent.offset > 0 ? ` offset ${Math.floor(intent.offset)}` : "";
+  // Every predicate — the caller's filters AND the grant's document filters — in one string,
+  // built once. Both hybrid CTEs below interpolate this same value, which is the property that
+  // makes hybrid as tightly scoped as the two single-mode paths. Two predicate builders is the
+  // drift hazard grants/filters.ts already documents; this is the same rule one layer down.
+  const whereClause = where.length ? ` where ${where.join(" and ")}` : "";
+
+  if (mode === "hybrid" && vectorSlot && tsq) {
+    // Reciprocal Rank Fusion. Chosen over a weighted sum of scores because ts_rank_cd and cosine
+    // similarity are not on a common scale and have no principled conversion — RRF only uses each
+    // list's ORDER, so there is no normalisation constant to get wrong. k=60 is the value from the
+    // original paper and is not sensitive.
+    //
+    // The two CTEs both read `scoped`, so the grant's predicates are applied BEFORE either
+    // ranking and before either LIMIT. Ranking first and filtering afterwards would leak: a
+    // caller asking for 5 would get however many of the global top-5 their grant allows, and the
+    // shortfall itself reports how many documents they cannot see.
+    const K = 60;
+    const pool = Math.min(MAX_LIMIT, Math.max(limit * 10, 50));
+    const text2 =
+      `with scoped as (select ${projection}, "document_id", tsv, embedding, "document_seq" from ${view}${whereClause}), ` +
+      `t as (select "document_id", row_number() over (order by ts_rank_cd(tsv, ${tsq}) desc) as rk ` +
+      `from scoped where tsv @@ ${tsq} limit ${pool}), ` +
+      `v as (select "document_id", row_number() over (order by embedding <=> ${vectorSlot}::vector) as rk ` +
+      `from scoped where embedding is not null limit ${pool}) ` +
+      `select scoped.*, ` +
+      `(coalesce(1.0/(${K} + t.rk), 0) + coalesce(1.0/(${K} + v.rk), 0)) as "_rank" ` +
+      `from scoped left join t on t."document_id" = scoped."document_id" ` +
+      `left join v on v."document_id" = scoped."document_id" ` +
+      `where t.rk is not null or v.rk is not null ` +
+      `order by "_rank" desc limit ${limit}${offset}`;
+    return { text: text2, values };
+  }
+
+  text += whereClause;
 
   if (intent.groupBy && intent.groupBy.length)
     text += ` group by ${intent.groupBy.map(q).join(", ")}`;
@@ -190,9 +249,7 @@ export function buildSelect(
   else if (intent.orderBy)
     text += ` order by ${q(intent.orderBy.field)} ${intent.orderBy.dir === "desc" ? "desc" : "asc"}`;
 
-  const limit = Math.min(Math.max(1, intent.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
-  text += ` limit ${limit}`;
-  if (intent.offset && intent.offset > 0) text += ` offset ${Math.floor(intent.offset)}`;
+  text += ` limit ${limit}${offset}`;
 
   return { text, values };
 }

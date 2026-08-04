@@ -1,5 +1,6 @@
 import type { WarehousdConfig } from "./config/schema";
 import type { Pools } from "./db/pools";
+import type { Embedder } from "./providers";
 import { makeVerbDeps } from "./verbs/deps";
 import { makeReadVerbs } from "./verbs/read";
 import { makeMutateVerb } from "./verbs/mutate";
@@ -17,8 +18,12 @@ import { makeHistoryVerbs } from "./verbs/history";
 // What is left is the wiring, and the guarantee that every adapter still gets exactly the same
 // object it always did. No verb closes over this scope any more: each family takes VerbDeps
 // explicitly, so what a verb touches is visible in its signature and a test can hand it a stub.
-export function makeBroker(pools: Pools, cfg: WarehousdConfig) {
-  const deps = makeVerbDeps(pools, cfg);
+export function makeBroker(
+  pools: Pools,
+  cfg: WarehousdConfig,
+  opts: { embedder?: Embedder | undefined } = {},
+) {
+  const deps = makeVerbDeps(pools, cfg, opts);
 
   const { query, describeCollection, listCollections, searchDocuments, getDocument } =
     makeReadVerbs(deps);
