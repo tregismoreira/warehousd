@@ -187,9 +187,6 @@ importers:
 
   packages/cli:
     dependencies:
-      '@warehousd/providers':
-        specifier: workspace:*
-        version: link:../providers
       mammoth:
         specifier: ^1.12.0
         version: 1.12.0
@@ -212,6 +209,9 @@ importers:
       '@warehousd/broker':
         specifier: workspace:*
         version: link:../broker
+      '@warehousd/providers':
+        specifier: workspace:*
+        version: link:../providers
       commander:
         specifier: ^15.0.0
         version: 15.0.0

@@ -11,7 +11,10 @@ export default defineConfig({
   platform: "node",
   clean: true,
   // Inline every dependency, including the unpublished @warehousd/broker and
-  // @warehousd/providers workspace packages and their yaml/zod deps.
+  // @warehousd/providers workspace packages and their yaml/zod deps. Both are therefore
+  // devDependencies: a `workspace:*` spec left in the published `dependencies` is one npm cannot
+  // resolve from the registry, and `npm install -g` of the tarball fails on it immediately. Only
+  // the four externals below are real runtime dependencies.
   //
   // Four stay external. `pg` does runtime feature detection and optional native lookups that do
   // not survive bundling. The document parsers and the ONNX runtime are loaded through dynamic

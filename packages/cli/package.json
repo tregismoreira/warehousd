@@ -40,7 +40,6 @@
   },
   "dependencies": {
     "pg": "^8.13.0",
-    "@warehousd/providers": "workspace:*",
     "unpdf": "^1.8.0",
     "mammoth": "^1.12.0"
   },
@@ -49,6 +48,7 @@
     "@types/node": "^26.1.2",
     "@types/pg": "^8.20.0",
     "@warehousd/broker": "workspace:*",
+    "@warehousd/providers": "workspace:*",
     "commander": "^15.0.0",
     "picocolors": "^1.1.1",
     "tsup": "^8"
