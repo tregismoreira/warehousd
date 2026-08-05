@@ -1,17 +1,16 @@
 import { createInterface } from "node:readline/promises";
 import { Pool } from "pg";
 import { join } from "node:path";
-import { loadConfig, envRefs } from "@warehousd/broker";
+import { loadConfig, envRefs, type DeployConfig, type WarehousdConfig } from "@warehousd/broker";
 import { preflight } from "./deploy/preflight";
 import { databaseCapabilities } from "./deploy/database-checks";
-import { readDeployOutputs, ensureState, writeDeployOutputs, stateDir } from "./state";
+import { readDeployOutputs, ensureState, writeDeployOutputs, stateDir, type State } from "./state";
 import { writeBundle } from "./deploy/bundle";
-import { resolveBaseImage, renderDeployDockerfile, renderFlyToml } from "./deploy/fly-toml";
 import { renderConfigDiff } from "./deploy/diff";
 import { confirmDestroy } from "./deploy/destroy";
 import { buildDeployOutputs, formatDeployOutputs } from "./deploy/outputs";
+import { targetFor, type TargetContext } from "./deploy/targets";
 import { existingMigrations } from "./migrate";
-import { run, tryRun, appExists } from "./fly";
 import { renderChecks } from "./ui/render";
 import { plainTheme, type Theme } from "./ui/theme";
 
@@ -44,13 +43,14 @@ async function ssoConfiguredInDatabase(dbUrl: string): Promise<boolean> {
   }
 }
 
-async function pollHealth(url: string, timeoutMs: number): Promise<void> {
+/** `baseUrl` is the app's root; the endpoint is appended here and nowhere else. */
+async function pollHealth(baseUrl: string, timeoutMs: number): Promise<void> {
   const startTime = Date.now();
   const interval = HEALTH_CHECK_INTERVAL_MS;
 
   while (Date.now() - startTime < timeoutMs) {
     try {
-      const response = await fetch(`${url}/api/health`);
+      const response = await fetch(`${baseUrl}/api/health`);
       if (response.status === 200) {
         return;
       }
@@ -61,6 +61,33 @@ async function pollHealth(url: string, timeoutMs: number): Promise<void> {
   }
 
   throw new Error(`Health check timeout after ${timeoutMs}ms`);
+}
+
+/**
+ * The bag every `DeployTarget` method is called with. Assembled here, in the one place that has
+ * read the config, so a target never loads it again and never disagrees about where the bundle is.
+ */
+function targetContext(args: {
+  dir: string;
+  cfg: WarehousdConfig;
+  deploy: DeployConfig;
+  state: State | null;
+  localBuild: boolean;
+  say: (msg: string) => void;
+}): TargetContext {
+  const deployDir = join(stateDir(args.dir), "deploy");
+  return {
+    projectDir: args.dir,
+    cfg: args.cfg,
+    deploy: args.deploy,
+    appName: args.deploy.app_name,
+    region: args.deploy.region,
+    state: args.state,
+    deployDir,
+    contextDir: join(deployDir, "context"),
+    localBuild: args.localBuild,
+    say: args.say,
+  };
 }
 
 export async function runDeploy(
@@ -112,20 +139,17 @@ export async function runDeploy(
       return;
     }
 
-    // Destroy the app
-    run(["apps", "destroy", appName, "--yes"]);
-
-    // Destroy the database if managed. `tryRun`, not `run`: a deploy that failed between
-    // `apps create` and `postgres create` leaves no database app, and throwing here would make
-    // the teardown of a half-provisioned deploy impossible — the app itself is already gone by
-    // this point, so the operator would be left with an error and nothing left to retry.
-    if (cfg.deploy.database.managed) {
-      const dbAppName = `${appName}-db`;
-      const removed = tryRun(["apps", "destroy", dbAppName, "--yes"]);
-      if (!removed.ok) {
-        say(`No database app ${dbAppName} to destroy.`);
-      }
-    }
+    const target = targetFor(cfg.deploy.target);
+    await target.destroy(
+      targetContext({
+        dir,
+        cfg,
+        deploy: cfg.deploy,
+        state: null,
+        localBuild: !!opts.localBuild,
+        say,
+      }),
+    );
 
     return;
   }
@@ -168,7 +192,7 @@ export async function runDeploy(
 
   const deploy = cfg.deploy;
   const appName = deploy.app_name;
-  const region = deploy.region;
+  const target = targetFor(deploy.target);
 
   // Diff with previous state
   const prevOutputs = readDeployOutputs(dir);
@@ -193,33 +217,39 @@ export async function runDeploy(
 
   // Ensure state (generates secrets)
   const state = ensureState(dir);
+  const ctx = targetContext({
+    dir,
+    cfg,
+    deploy,
+    state,
+    localBuild: !!opts.localBuild,
+    say,
+  });
 
-  // Create app if it doesn't exist
-  if (!appExists(appName)) {
-    run(["apps", "create", appName]);
-  }
+  await target.ensureApp(ctx);
 
-  // Create database if managed.
-  //
-  // `null` for the managed case is the point, not an omission. `postgres attach` generates a user
-  // and password and sets DATABASE_URL on the app itself; those credentials are Fly's, are shown
-  // once, and cannot be read back out. Any URL invented here — the old code built one from the
-  // *local* Docker password in state.json — would simply be wrong. The entrypoint falls back to
-  // DATABASE_URL, which is the value that actually works.
+  // Under `managed: true` the target provisions its own Postgres and says what URL, if any, came
+  // back. A target with no `provisionDatabase` cannot honour `managed` at all, and saying so here
+  // is better than the release command failing with no database and no explanation.
   let databaseUrl: string | null;
   if (deploy.database.managed) {
-    const dbAppName = `${appName}-db`;
-    if (!appExists(dbAppName)) {
-      run(["postgres", "create", "--name", dbAppName, "--region", region]);
-      run(["postgres", "attach", "--app", appName, dbAppName]);
+    if (!target.provisionDatabase) {
+      throw new Error(
+        `deploy.database.managed is not supported on ${target.label}. ` +
+          `Set deploy.database.url to a Postgres you run instead.`,
+      );
     }
-    databaseUrl = null;
+    databaseUrl = await target.provisionDatabase(ctx);
   } else {
     databaseUrl = deploy.database.url ?? null;
   }
 
   // Build secrets input as KEY=VALUE lines
-  const appUrl = `https://${appName}.fly.dev`;
+  const appUrl = await target.appUrl(ctx);
+  // Falls back to the app name when the target serves no URL of its own (a Compose stack the
+  // operator points their own hostname at). It is a seed for the admin account's address, not a
+  // route to anything.
+  const adminEmail = `admin@${appUrl ? new URL(appUrl).host : appName}`;
 
   // The four role-scoped URLs are deliberately NOT set here. They are derived server-side from
   // APP_DATABASE_URL and WAREHOUSD_DATA_ROLE_PASSWORD (apps/web/app/lib/broker.ts), which is the
@@ -232,8 +262,11 @@ export async function runDeploy(
     ...(databaseUrl ? [`APP_DATABASE_URL=${databaseUrl}`] : []),
     `WAREHOUSD_DATA_ROLE_PASSWORD=${state.dataRolePassword}`,
     `BETTER_AUTH_SECRET=${state.betterAuthSecret}`,
-    `BETTER_AUTH_URL=${appUrl}`,
-    `WAREHOUSD_ADMIN_EMAIL=admin@${appName}.fly.dev`,
+    // Omitted, not empty, when the target serves no URL of its own: Better Auth reads its own
+    // default from the request when this is unset, and `BETTER_AUTH_URL=null` would break every
+    // callback rather than fall back.
+    ...(appUrl ? [`BETTER_AUTH_URL=${appUrl}`] : []),
+    `WAREHOUSD_ADMIN_EMAIL=${adminEmail}`,
     `WAREHOUSD_ADMIN_PASSWORD=${state.adminPassword}`,
     `WAREHOUSD_DEV_CLIENT_SECRET=${state.devClientSecret}`,
   ];
@@ -264,50 +297,32 @@ export async function runDeploy(
     }
   }
 
-  // Import secrets
-  run(["secrets", "import", "--app", appName, "--stage"], { input: secretsInput.join("\n") });
+  await target.setSecrets(ctx, secretsInput);
 
-  // Write bundle and deploy files
-  const deployDir = join(stateDir(dir), "deploy");
-  const contextDir = join(deployDir, "context");
-  writeBundle(cfg, dir, contextDir);
+  // The bundle is written before the target ships it, and after the secrets are staged — the order
+  // the Fly runbook has always used, kept because a target that stages secrets separately from the
+  // release wants them in place before the image arrives.
+  writeBundle(cfg, dir, ctx.contextDir);
 
-  const baseImage = resolveBaseImage(cfg);
-  const dockerfile = renderDeployDockerfile(baseImage);
-  const dockerfilePath = join(deployDir, "Dockerfile");
-  const fs = await import("node:fs");
-  fs.writeFileSync(dockerfilePath, dockerfile);
+  await target.deploy(ctx);
 
-  const flyTomlContent = renderFlyToml({ appName, region });
-  const flyTomlPath = join(deployDir, "fly.toml");
-  fs.writeFileSync(flyTomlPath, flyTomlContent);
-
-  // Deploy using flyctl
-  const deployArgs = ["deploy", "--config", flyTomlPath, "--dockerfile", dockerfilePath];
-  if (!opts.localBuild) {
-    deployArgs.push("--remote-only");
-  } else {
-    // Local build needs Docker to be available
-    const docker = await import("./docker");
-    docker.assertDocker();
-  }
-
-  run(deployArgs);
-
-  // Poll health endpoint
-  try {
-    await pollHealth(`${appUrl}/api/health`, HEALTH_CHECK_TIMEOUT_MS);
-  } catch (err: unknown) {
-    // On timeout, fetch flyctl logs
-    const logsOutput = run(["logs", "--app", appName]);
-    throw new Error(`Container health check failed: ${String(err)}\n\nFly logs:\n${logsOutput}`, {
-      cause: err,
-    });
+  // Only a target that serves a URL has anything to poll. A stack the operator has yet to start
+  // would just time out here for three minutes and then be reported as a failed deploy.
+  if (appUrl) {
+    try {
+      await pollHealth(appUrl, HEALTH_CHECK_TIMEOUT_MS);
+    } catch (err: unknown) {
+      const logsOutput = await target.logs?.(ctx);
+      const trailer = logsOutput ? `\n\n${target.label} logs:\n${logsOutput}` : "";
+      throw new Error(`Container health check failed: ${String(err)}${trailer}`, { cause: err });
+    }
   }
 
   // Write outputs and print
   const outputs = buildDeployOutputs({
-    appName,
+    // `http://localhost:<port>` is what a stack the operator runs themselves publishes, and what
+    // `warehousd start` prints for the same thing (src/outputs.ts).
+    baseUrl: appUrl ?? `http://localhost:${cfg.server.port}`,
     cfg,
     databaseUrl: deploy.database.managed ? null : databaseUrl,
     now: new Date(),
@@ -318,7 +333,6 @@ export async function runDeploy(
 
   writeDeployOutputs(dir, outputs);
 
-  const adminEmail = `admin@${appName}.fly.dev`;
   if (json) {
     // The machine contract, matching `start --json`: full values, because a caller that asked for
     // JSON asked for the credential too. This is the payload a CI deploy wants back.

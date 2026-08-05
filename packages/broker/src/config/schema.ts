@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DB_PROVIDER_IDS } from "../db/providers";
+import { DEPLOY_TARGET_IDS } from "./targets";
 
 export const FILE_FIELDS = ["title", "content", "path", "owner", "updated_at"] as const;
 
@@ -589,18 +590,22 @@ export const CollectionSchema = z
 // normally says so on its own (db/providers/index.ts, detectProvider). It exists for a url that
 // does not advertise it — a CNAME, a proxy — where the wrong answer is not a parse error but a
 // role that cannot authenticate. See docs/deploy-database.md.
+//
+// `region` is only checked for being present. Its *shape* belongs to the target and is checked by
+// the target's pre-flight (packages/cli/src/deploy/targets), which can say "gru, iad" for Fly and
+// "us-west2" for somewhere else. A schema that knew one target's slug format would have to be
+// edited for every new one, and would report a bad region as a config parse error instead of a
+// named pre-flight refusal.
 export const DeploySchema = z
   .object({
-    target: z.literal("fly"),
+    target: z.enum(DEPLOY_TARGET_IDS),
     app_name: z
       .string()
       .regex(
         /^[a-z0-9][a-z0-9-]{0,62}$/,
         "app_name must be a valid Fly app name (lowercase alphanumerics and dashes)",
       ),
-    region: z
-      .string()
-      .regex(/^[a-z]{3}$/, "region must be a 3-letter Fly region code (e.g. gru, iad)"),
+    region: z.string().min(1, "region must not be empty"),
     image: z.string().optional(),
     database: z
       .object({

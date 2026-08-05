@@ -652,18 +652,36 @@ describe("deploy config", () => {
     ).toThrow(/valid Fly app name/);
   });
 
-  it("rejects region that is not 3 letters", () => {
+  // The shape of a region belongs to the target, not to this schema — Fly's slugs are three
+  // letters, Railway's are `us-west2`, a Compose file has none. A `/^[a-z]{3}$/` here would have to
+  // be edited for every target added, and would report a wrong region as a config parse error
+  // rather than as the named pre-flight refusal the target can give it
+  // (packages/cli/src/deploy/targets/fly.ts, the `fly-region` check).
+  it("accepts a region this schema cannot judge, and leaves it to the target", () => {
+    const cfg = ConfigSchema.parse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "fly",
+        app_name: "my-app",
+        region: "us-west2",
+        database: { managed: true },
+      },
+    });
+    expect(cfg.deploy?.region).toBe("us-west2");
+  });
+
+  it("rejects an empty region", () => {
     expect(() =>
       ConfigSchema.parse({
         ...baseWithDeploy,
         deploy: {
           target: "fly",
           app_name: "my-app",
-          region: "brazil",
+          region: "",
           database: { managed: true },
         },
       }),
-    ).toThrow(/3-letter Fly region code/);
+    ).toThrow(/region must not be empty/);
   });
 
   it("rejects database with neither managed nor url", () => {

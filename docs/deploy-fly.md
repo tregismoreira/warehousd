@@ -33,7 +33,9 @@ deploy:
 The app name must match `^[a-z0-9][a-z0-9-]{0,62}$` (no capital letters or
 underscores) and is globally unique on Fly — you may need to adjust it. Region
 codes are [Fly's three-letter region slugs](https://fly.io/docs/reference/regions/);
-`gru` is São Paulo.
+`gru` is São Paulo. The region is checked by pre-flight rather than by the config
+schema — a region that is not a Fly slug shows up as a failed `fly-region` check
+before anything is created, not as a YAML parse error.
 
 If you already run a Postgres and want to attach it instead of letting Fly
 manage one, use:
