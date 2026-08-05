@@ -314,10 +314,18 @@ function stripScheme(host: string): string {
  * that already had a domain reports when `domain` says only that it already has one.
  */
 function appUrl(ctx: TargetContext): Promise<string | null> {
-  const out = tryRun(
+  // The flagged form first. A CLI old enough not to know `--port` or `--json` rejects the whole
+  // invocation rather than ignoring the flag, and that must not be a deploy with no domain: the
+  // bare form is what every version has always understood, and it still generates one — just
+  // without the port hint that makes it work before the first deployment exists.
+  let out = tryRun(
     ["domain", "--service", ctx.appName, "--port", String(CONTAINER_PORT), "--json"],
     { cwd: ctx.projectDir },
   ).out;
+  if (out === "") {
+    out = tryRun(["domain", "--service", ctx.appName], { cwd: ctx.projectDir }).out;
+  }
+
   const printed = /([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i.exec(out.replace(/^https?:\/\//gm, ""));
   const host =
     hostFromJson(out) ?? printed?.[1] ?? variables(ctx, ctx.appName).RAILWAY_PUBLIC_DOMAIN;

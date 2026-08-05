@@ -53,13 +53,19 @@ Scaffolds `warehousd.yml` and adds `warehousd.local.yml` and `.warehousd/` to
 `.gitignore`, creating that file if it does not exist. It does not create seed
 directories or `.warehousd/` — `start` does that.
 
-In a terminal it asks for the project name, the port, whether to manage Postgres,
-which deploy target to scaffold a `deploy:` block for, and — only if you are
-bringing your own Postgres — who hosts it. Both lists are read from the target
-and provider registries, so they never go stale. Piped, in CI, under `--json` or
+In a terminal it asks for the project name, the port, which database to use **for
+local development**, which deploy target to scaffold a `deploy:` block for, which
+database to use **in production** on that target, and — only if production is a
+Postgres you already run — who hosts it. Both lists are read from the target and
+provider registries, so they never go stale. Piped, in CI, under `--json` or
 `--no-input` it writes the template without asking.
 
-`--target` and `--db-provider` answer the last two questions from a script, so a
+The two database questions are independent. Docker locally and Supabase in
+production is the ordinary case, and it is what one shared answer could not
+express: `--db-provider` decides `deploy.database` only, and never rewrites the
+top-level `database:` block.
+
+`--target` and `--db-provider` answer the deploy questions from a script, so a
 non-interactive run can still specify every field the wizard collects:
 
 ```bash
@@ -464,6 +470,14 @@ supplied `deploy.database.url` themselves.
 
 There is no `devClient` in a deploy — that is a local `start` affordance only.
 `env` is `"dev"` because deploys seed `data_synth` only.
+
+`deploy --json` prints that object on stdout with five things the file does not
+carry: `adminEmail` and `adminPassword` (a caller that asked for JSON asked for
+the credential), `target` and `label` for where it went, `databaseHint` for
+reaching a database no URL was printed for, and `notes` — whatever the target
+still needs the operator to do. `notes` matters most where the file says least:
+a Compose deploy renders a stack and starts nothing, and the line saying so has
+to reach a CI caller too, not only the summary panel.
 
 `.warehousd/` also holds `state.json` (generated passwords and secrets).
 **Neither file is ever committed** — `init` adds the directory to `.gitignore`.

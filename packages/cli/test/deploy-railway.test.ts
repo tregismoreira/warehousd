@@ -478,6 +478,23 @@ describe("appUrl", () => {
     );
   });
 
+  // A CLI old enough not to know --port or --json rejects the whole invocation rather than
+  // ignoring the flag. Falling back to the bare form is what keeps that from being a deploy with
+  // no domain at all — which would be worse than the bug this flag fixes.
+  it("retries the bare form when the flags are not understood", async () => {
+    onSubcommand({
+      domain: () => {
+        const argv = vi.mocked(execFileSyncRef).mock.calls.at(-1)?.[1] as string[];
+        if (argv.includes("--json")) throw new Error("unexpected argument '--json' found");
+        return "Your service is now available at harbor.up.railway.app";
+      },
+    });
+
+    expect(await railway.appUrl(context(load()))).toBe("https://harbor.up.railway.app");
+    expect(calls()).toContain("domain --service harbor-warehousd --port 8722 --json");
+    expect(calls()).toContain("domain --service harbor-warehousd");
+  });
+
   // A domain command that failed outright is not a deploy with no address: the service may already
   // have one, and the variable is where that is readable.
   it("still resolves when domain fails but the variable carries the host", async () => {

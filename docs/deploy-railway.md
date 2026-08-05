@@ -81,7 +81,10 @@ x  railway-project  this directory is linked to the Railway project "scratch",
                     unlink`, or change app_name to match.
 ```
 
-None of the three mutate anything. `warehousd doctor` runs them too.
+None of the three mutate anything. `warehousd doctor --deploy` runs them too,
+without deploying — plain `doctor` does not, because these reach for the Railway
+CLI and the production database while the rest of it asks only about this
+machine.
 
 ## 3. Deploy
 
@@ -111,7 +114,10 @@ What happens, in order:
    running deployment for Railway to infer one from, and without it a first
    deploy got no domain at all. The `--json` body is what warehousd reads; the
    printed line is a fallback for older CLI versions, and `RAILWAY_PUBLIC_DOMAIN`
-   is read back for a service that already had one.
+   is read back for a service that already had one. A CLI old enough to reject
+   `--port` or `--json` outright gets one more attempt at the bare
+   `railway domain --service <app>`, so an old install is a domain generated the
+   slower way rather than a deploy with no address.
 4. **`railway variables --set …`** — the generated secrets, plus `PORT`,
    `WAREHOUSD_PROJECT_DIR` and `NODE_ENV`. Fly gets those three from `fly.toml`'s
    `[env]`; Railway has no equivalent file, so they travel the same channel.
