@@ -128,6 +128,16 @@ export {
   type ClientPolicy as EnvScopeClientPolicy,
 } from "./oauth/env-scope";
 export * from "./db/bootstrap";
+export { UNQUALIFIED_EXTENSIONS } from "./db/search-path";
+export {
+  dbProviders,
+  detectProvider,
+  resolveProvider,
+  DB_PROVIDER_IDS,
+  type DbProvider,
+  type DbProviderId,
+  type ProviderCheck,
+} from "./db/providers";
 export {
   indexCollection,
   planUpload,

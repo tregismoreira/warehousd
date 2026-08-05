@@ -255,10 +255,25 @@ export async function bootstrap(): Promise<void> {
 
     // Inject the role-scoped URLs for the app to use. The write roles are separate
     // principals from the read roles — a read pool can never write, whatever the broker does.
-    process.env.DEV_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_dev", rolePw);
-    process.env.LIVE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_live", rolePw);
-    process.env.DEV_WRITE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_dev_write", rolePw);
-    process.env.LIVE_WRITE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_live_write", rolePw);
+    //
+    // The provider comes from the config this process just applied, and app/lib/broker.ts reads
+    // the same key: the two derive independently (this process's env does not reach the server)
+    // and have to agree on how a role is spelled on this host.
+    const provider = cfg.deploy?.database.provider;
+    process.env.DEV_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_dev", rolePw, provider);
+    process.env.LIVE_DATABASE_URL = dataRoleUrl(appUrl, "warehousd_live", rolePw, provider);
+    process.env.DEV_WRITE_DATABASE_URL = dataRoleUrl(
+      appUrl,
+      "warehousd_dev_write",
+      rolePw,
+      provider,
+    );
+    process.env.LIVE_WRITE_DATABASE_URL = dataRoleUrl(
+      appUrl,
+      "warehousd_live_write",
+      rolePw,
+      provider,
+    );
 
     console.log("bootstrap complete");
   } finally {

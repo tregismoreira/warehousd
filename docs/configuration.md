@@ -61,6 +61,7 @@ deploy:
   database:
     managed: true      # provision Fly Postgres, OR:
     # url: ${env:PROD_DATABASE_URL}   # attach a Postgres you already run
+    # provider: supabase              # optional — only with url; usually detected from the host
 taxonomies: {}         # see below
 collections: {}        # required
 synthetic:
@@ -110,6 +111,14 @@ names the target (`fly` is the only value), the globally unique app name, the
 Fly region, and — most critically — **exactly one** of `managed: true` or a
 `database.url`. An `image:` override is optional; if unset, the published image
 is used. See [deploy-fly.md](deploy-fly.md) for the full deployment runbook.
+
+`database.provider` names who runs the Postgres behind `database.url`:
+`supabase`, `neon`, `railway` or `generic`. It is normally unnecessary — the
+host says so on its own — and only matters where it changes how a role is
+spelled in a connection string, which today means Supabase's pooler. Setting it
+without a `url` is an error. `warehousd deploy` also runs a set of `db-*`
+pre-flight checks against that URL. See
+[deploy-database.md](deploy-database.md).
 
 ## Collections
 

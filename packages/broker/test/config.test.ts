@@ -738,6 +738,60 @@ describe("deploy config", () => {
     const cfg = ConfigSchema.parse(baseWithDeploy);
     expect(cfg.deploy).toBeUndefined();
   });
+
+  it("accepts database.provider alongside url", () => {
+    const cfg = ConfigSchema.parse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "fly",
+        app_name: "my-app",
+        region: "gru",
+        database: { url: "postgres://db.example.com", provider: "supabase" },
+      },
+    });
+    expect(cfg.deploy?.database.provider).toBe("supabase");
+  });
+
+  it("leaves database.provider undefined when it is not declared", () => {
+    const cfg = ConfigSchema.parse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "fly",
+        app_name: "my-app",
+        region: "gru",
+        database: { url: "postgres://db.example.com" },
+      },
+    });
+    expect(cfg.deploy?.database.provider).toBeUndefined();
+  });
+
+  // A provider with no url names where a database that is not there is hosted.
+  it("rejects database.provider without a url", () => {
+    const r = ConfigSchema.safeParse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "fly",
+        app_name: "my-app",
+        region: "gru",
+        database: { managed: true, provider: "supabase" },
+      },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("only applies alongside");
+  });
+
+  it("rejects an unknown database.provider", () => {
+    const r = ConfigSchema.safeParse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "fly",
+        app_name: "my-app",
+        region: "gru",
+        database: { url: "postgres://db.example.com", provider: "cloudsql" },
+      },
+    });
+    expect(r.success).toBe(false);
+  });
 });
 
 describe("envRefs", () => {

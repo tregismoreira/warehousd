@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DB_PROVIDER_IDS } from "../db/providers";
 
 export const FILE_FIELDS = ["title", "content", "path", "owner", "updated_at"] as const;
 
@@ -583,6 +584,11 @@ export const CollectionSchema = z
 //
 // `image` overrides the published server image. It exists so a deploy can run against a locally
 // built or otherwise unpublished base — the same need `server.image` covers for the local CLI.
+//
+// `database.provider` names where that url is hosted, and is only ever an override: the host
+// normally says so on its own (db/providers/index.ts, detectProvider). It exists for a url that
+// does not advertise it — a CNAME, a proxy — where the wrong answer is not a parse error but a
+// role that cannot authenticate. See docs/deploy-database.md.
 export const DeploySchema = z
   .object({
     target: z.literal("fly"),
@@ -596,7 +602,13 @@ export const DeploySchema = z
       .string()
       .regex(/^[a-z]{3}$/, "region must be a 3-letter Fly region code (e.g. gru, iad)"),
     image: z.string().optional(),
-    database: z.object({ managed: z.boolean().optional(), url: z.string().optional() }).strict(),
+    database: z
+      .object({
+        managed: z.boolean().optional(),
+        url: z.string().optional(),
+        provider: z.enum(DB_PROVIDER_IDS).optional(),
+      })
+      .strict(),
   })
   .strict()
   .superRefine((d, ctx) => {
@@ -606,6 +618,14 @@ export const DeploySchema = z
       ctx.addIssue({
         code: "custom",
         message: "deploy.database requires exactly one of `managed: true` or `url`",
+      });
+    // A provider with no url names where a database that does not exist here is hosted. Under
+    // `managed: true` the target provisions the database and its own module knows what it built,
+    // so this key would decide nothing while reading as though it did.
+    if (d.database.provider && !hasUrl)
+      ctx.addIssue({
+        code: "custom",
+        message: "deploy.database.provider only applies alongside `url`",
       });
   });
 export type DeployConfig = z.infer<typeof DeploySchema>;

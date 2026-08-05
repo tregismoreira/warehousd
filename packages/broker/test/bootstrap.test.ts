@@ -105,4 +105,24 @@ describe("bootstrap", () => {
     expect(parsed.username).toBe("role%40example");
     expect(parsed.password).toBe("pass%20with%20spaces");
   });
+
+  // Invariant 5 lives on this. Through Supavisor the username carries the project, so a bare
+  // `warehousd_dev` authenticates as nobody — and the tempting "fix" is to fall back to the owner
+  // url, at which point the dev role reads data_live and the wall is gone.
+  it("dataRoleUrl keeps the Supabase project ref the pooler routes on", () => {
+    const appUrl =
+      "postgres://postgres.abcdefghij:owner@aws-0-sa-east-1.pooler.supabase.com:5432/postgres";
+    const parsed = new URL(dataRoleUrl(appUrl, "warehousd_dev", "newpass"));
+    expect(parsed.username).toBe("warehousd_dev.abcdefghij");
+    expect(parsed.password).toBe("newpass");
+    expect(parsed.hostname).toBe("aws-0-sa-east-1.pooler.supabase.com");
+  });
+
+  it("dataRoleUrl takes an explicit provider over the host", () => {
+    const appUrl = "postgres://postgres.abcdefghij:owner@pg.example.com:5432/postgres";
+    expect(new URL(dataRoleUrl(appUrl, "warehousd_dev", "pw")).username).toBe("warehousd_dev");
+    expect(new URL(dataRoleUrl(appUrl, "warehousd_dev", "pw", "supabase")).username).toBe(
+      "warehousd_dev.abcdefghij",
+    );
+  });
 });

@@ -3,6 +3,7 @@ import {
   envRefs,
   auditEnabled,
   planFromConfigs,
+  type DbProviderId,
   type WarehousdConfig,
 } from "@warehousd/broker";
 import { FlyError, assertFly } from "../fly";
@@ -19,6 +20,15 @@ export type PreflightInput = {
   allowLocalLogin: boolean;
   allowDisabledAudit?: boolean | undefined;
   ssoLookup?: ((dbUrl: string) => Promise<boolean>) | undefined;
+  // Injected for the same reason ssoLookup is: the real one dials a database, and a unit test
+  // should be able to exercise the wiring without one.
+  dbCapabilities?:
+    ((dbUrl: string, opts: DatabaseCapabilityOptions) => Promise<PreflightCheck[]>) | undefined;
+};
+
+export type DatabaseCapabilityOptions = {
+  requireFdw: boolean;
+  provider?: DbProviderId | undefined;
 };
 
 // Deploying with local password login still enabled, and no identity provider behind it, is the
@@ -217,6 +227,18 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
   checks.push(schemaMigrationsCheck(input.projectDir, cfg));
 
   checks.push(await ssoOrLocalLoginCheck(input, cfg));
+
+  // Only when a url is configured. Under `database.managed: true` the target has not provisioned
+  // the database yet, so there is nothing to connect to and these checks could never pass — the
+  // same reasoning that shaped ssoOrLocalLoginCheck above.
+  const dbUrl = cfg?.deploy?.database.url;
+  if (dbUrl && input.dbCapabilities) {
+    const opts: DatabaseCapabilityOptions = {
+      requireFdw: Object.keys(cfg?.sources ?? {}).length > 0,
+      provider: cfg?.deploy?.database.provider,
+    };
+    checks.push(...(await input.dbCapabilities(dbUrl, opts)));
+  }
 
   // flyctl-ready: check assertFly() doesn't throw
   let flyReady = true;
