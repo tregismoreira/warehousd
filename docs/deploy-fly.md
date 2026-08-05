@@ -3,6 +3,10 @@
 End-to-end walkthrough of provisioning a warehousd stack to Fly.io and
 connecting Claude to it.
 
+To run the stack on hardware you control instead, see
+[deploy-compose.md](deploy-compose.md); `deploy.target` is what chooses between
+them.
+
 ## Prerequisites
 
 - A Fly account. [Sign up free](https://fly.io).

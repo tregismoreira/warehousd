@@ -624,7 +624,20 @@ describe("deploy config", () => {
     expect(cfg.deploy?.app_name).toBe("my-app");
   });
 
-  it("rejects target other than fly", () => {
+  it("accepts every target the registry registers", () => {
+    const cfg = ConfigSchema.parse({
+      ...baseWithDeploy,
+      deploy: {
+        target: "compose",
+        app_name: "my-app",
+        region: "local",
+        database: { managed: true },
+      },
+    });
+    expect(cfg.deploy?.target).toBe("compose");
+  });
+
+  it("rejects a target no module registers", () => {
     expect(() =>
       ConfigSchema.parse({
         ...baseWithDeploy,

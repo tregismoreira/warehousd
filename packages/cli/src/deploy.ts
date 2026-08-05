@@ -345,6 +345,7 @@ export async function runDeploy(
     `${formatDeployOutputs(
       outputs,
       { adminEmail, adminPassword: state.adminPassword },
+      { label: target.label, databaseHint: target.databaseHint, notes: target.notes?.(ctx) },
       { theme, showSecrets: opts.showSecrets ?? false },
     )}\n`,
   );

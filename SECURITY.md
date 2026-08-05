@@ -39,18 +39,23 @@ not vulnerabilities in warehousd:
 
 - **Serve over TLS.** Sessions, OAuth codes, and tokens all cross the wire.
   `warehousd deploy` enforces this by serving over HTTPS automatically on
-  Fly.io. Other deployments remain the operator's responsibility.
+  Fly.io. Other deployments remain the operator's responsibility — the
+  `compose` target publishes on loopback for a reverse proxy to terminate TLS
+  in front of, and says so in its summary; it cannot do the terminating.
 - **Turn demo mode off** (`demo: false` / no `WAREHOUSD_DEMO`). Demo mode seeds
   three accounts with the password `demo` and shows them on the login page.
-  `warehousd deploy` refuses the deployment if demo mode is on, so the
-  expectation is mechanically enforced for Fly deployments. Local deployments
-  remain the operator's responsibility.
+  `warehousd deploy` refuses the deployment if demo mode is on, whichever
+  target it is deploying to, so the expectation is mechanically enforced for
+  every deployment it makes. Containers you start yourself remain the
+  operator's responsibility.
 - **Never point a file collection's `source` at real corporate files.** `source`
   is dev content by definition. `source_live` is not: the container bootstrap
   indexes it into `data_live` on every start where the directory is present, so
   treat naming it as granting the deployment read access to that content.
-  `warehousd deploy` never ships those directories into the image, so a Fly
-  deployment cannot index them; local and self-managed containers can, and
+  `warehousd deploy` never puts those directories in the bundle it ships — as
+  an image layer on Fly.io, as a read-only bind mount under `compose` — so no
+  deployment it makes can index them; a container you mount the project
+  directory into yourself can, and
   `warehousd index <collection> --env live` remains the explicit one-off path.
 - **Keep `warehousd.yml` and `warehousd.local.yml` operator-controlled.** Config
   is trusted input — it is the file that decides what can ever be granted.

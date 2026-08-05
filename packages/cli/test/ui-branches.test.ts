@@ -175,10 +175,53 @@ describe("render branches", () => {
         databaseUrl: null,
         env: "dev",
       },
+      target: { label: "Fly.io", databaseHint: "managed by Fly Postgres — `fly postgres connect`" },
       theme: plainTheme,
     });
     expect(s).toContain("fly postgres connect");
     expect(s).not.toContain("Admin login");
+  });
+
+  // The hint and the heading are the target's words, not this module's. Both used to name Fly
+  // unconditionally, which is the whole reason they are arguments now.
+  it("names the target it was given, and no other", () => {
+    const s = renderDeploySummary({
+      outputs: {
+        mcpUrl: "http://localhost:8722/mcp",
+        apiUrl: "http://localhost:8722",
+        adminUrl: "http://localhost:8722/admin",
+        databaseUrl: null,
+        env: "dev",
+      },
+      target: {
+        label: "Docker Compose",
+        databaseHint: "the `db` service",
+        notes: ["Nothing is running yet", "TLS is yours to terminate"],
+      },
+      theme: plainTheme,
+    });
+    expect(s).toContain("warehousd deployed to Docker Compose");
+    expect(s).toContain("the `db` service");
+    expect(s).not.toMatch(/fly/i);
+  });
+
+  // A footer of several lines used to indent only its first, so the notes would have stepped out
+  // to column zero under the panel they belong to.
+  it("indents every footer line alike", () => {
+    const s = renderDeploySummary({
+      outputs: {
+        mcpUrl: "http://localhost:8722/mcp",
+        apiUrl: "http://localhost:8722",
+        adminUrl: "http://localhost:8722/admin",
+        databaseUrl: null,
+        env: "dev",
+      },
+      target: { label: "Docker Compose", databaseHint: "the `db` service", notes: ["first"] },
+      theme: plainTheme,
+    });
+    const first = s.split("\n").find((l) => l.includes("first"));
+    const masked = s.split("\n").find((l) => l.includes("Secrets are masked"));
+    expect(first?.indexOf("first")).toBe(masked?.indexOf("Secrets"));
   });
 
   it("shows a deploy database URL in full on request", () => {
@@ -191,6 +234,7 @@ describe("render branches", () => {
         databaseUrl: url,
         env: "dev",
       },
+      target: { label: "Fly.io", databaseHint: "managed by Fly Postgres" },
       theme: plainTheme,
       showSecrets: true,
     });

@@ -1,6 +1,7 @@
 import { DEPLOY_TARGET_IDS, type DeployTargetId } from "@warehousd/broker";
 import type { DeployTarget } from "./types";
 import { fly } from "./fly";
+import { compose } from "./compose";
 
 /**
  * Every place warehousd can deploy to.
@@ -12,6 +13,7 @@ import { fly } from "./fly";
  */
 export const targets = {
   fly,
+  compose,
 } satisfies Record<DeployTargetId, DeployTarget>;
 
 export function targetFor(id: DeployTargetId): DeployTarget {

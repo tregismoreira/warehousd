@@ -103,6 +103,13 @@ describe("formatDeployOutputs", () => {
     collections: {},
   } as any;
 
+  // What the fly target registers. It is an argument now rather than a string inside the renderer,
+  // which is what lets a Compose deploy print its own.
+  const flyTarget = {
+    label: "Fly.io",
+    databaseHint: "managed by Fly Postgres — `fly postgres connect`",
+  };
+
   it("contains the mcpUrl", () => {
     const outputs = buildDeployOutputs({
       baseUrl: "https://myapp.fly.dev",
@@ -110,10 +117,11 @@ describe("formatDeployOutputs", () => {
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const formatted = formatDeployOutputs(outputs, {
-      adminEmail: "admin@example.com",
-      adminPassword: "secret123",
-    });
+    const formatted = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "secret123" },
+      flyTarget,
+    );
     expect(formatted).toContain("https://myapp.fly.dev/mcp");
   });
 
@@ -127,33 +135,49 @@ describe("formatDeployOutputs", () => {
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const masked = formatDeployOutputs(outputs, {
-      adminEmail: "admin@example.com",
-      adminPassword: "mysecretpassword",
-    });
+    const masked = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "mysecretpassword" },
+      flyTarget,
+    );
     expect(masked).not.toContain("mysecretpassword");
     expect(masked).toContain("myse...word");
 
     const shown = formatDeployOutputs(
       outputs,
       { adminEmail: "admin@example.com", adminPassword: "mysecretpassword" },
+      flyTarget,
       { showSecrets: true },
     );
     expect(shown).toContain("mysecretpassword");
   });
 
-  it("mentions fly postgres connect when databaseUrl is null", () => {
+  // Was "mentions fly postgres connect when databaseUrl is null", which it did on every target.
+  // The hint is the target's to supply now, and this asserts it is the one that was supplied.
+  it("shows the target's own hint when databaseUrl is null", () => {
     const outputs = buildDeployOutputs({
       baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const formatted = formatDeployOutputs(outputs, {
-      adminEmail: "admin@example.com",
-      adminPassword: "secret123",
-    });
-    expect(formatted).toContain("fly postgres connect");
+    expect(
+      formatDeployOutputs(
+        outputs,
+        { adminEmail: "admin@example.com", adminPassword: "secret123" },
+        flyTarget,
+      ),
+    ).toContain("fly postgres connect");
+
+    const compose = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "secret123" },
+      { label: "Docker Compose", databaseHint: "the `db` service", notes: ["start it yourself"] },
+    );
+    expect(compose).toContain("the `db` service");
+    expect(compose).toContain("warehousd deployed to Docker Compose");
+    expect(compose).toContain("start it yourself");
+    expect(compose).not.toContain("fly postgres connect");
   });
 
   it("includes the database URL, with only its password masked", () => {
@@ -164,10 +188,11 @@ describe("formatDeployOutputs", () => {
       databaseUrl: dbUrl,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const formatted = formatDeployOutputs(outputs, {
-      adminEmail: "admin@example.com",
-      adminPassword: "secret123",
-    });
+    const formatted = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "secret123" },
+      flyTarget,
+    );
     // Host, user and database name are the reason anyone reads this line; the credential is not.
     expect(formatted).toContain("prod.example.com/db");
     expect(formatted).toContain("postgres://user:");
@@ -177,6 +202,7 @@ describe("formatDeployOutputs", () => {
       formatDeployOutputs(
         outputs,
         { adminEmail: "admin@example.com", adminPassword: "secret123" },
+        flyTarget,
         { showSecrets: true },
       ),
     ).toContain(dbUrl);
