@@ -29,14 +29,24 @@ export function buildDeployOutputs(args: {
   };
 }
 
+/**
+ * `target` is what the panel cannot get from `DeployOutputs`: the name to print in the title and
+ * the command to offer when the target manages the database itself. Both used to be Fly literals
+ * in the renderer.
+ */
 export function formatDeployOutputs(
   o: DeployOutputs,
-  extra: { adminEmail: string; adminPassword: string },
+  extra: {
+    adminEmail: string;
+    adminPassword: string;
+    target: { label: string; databaseHint: string };
+  },
   opts?: { theme?: Theme | undefined; showSecrets?: boolean | undefined },
 ): string {
   return renderDeploySummary({
     outputs: o,
     admin: { email: extra.adminEmail, password: extra.adminPassword },
+    target: extra.target,
     theme: opts?.theme ?? plainTheme,
     showSecrets: opts?.showSecrets ?? false,
   });

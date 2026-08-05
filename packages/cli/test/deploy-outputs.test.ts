@@ -96,6 +96,10 @@ describe("buildDeployOutputs", () => {
   });
 });
 
+// The label and the hint reach the panel from the target, so the summary of a Railway deploy does
+// not offer `fly postgres connect`. Here it is Fly's, which is what these assertions are about.
+const FLY = { label: "Fly.io", databaseHint: "managed by Fly Postgres — `fly postgres connect`" };
+
 describe("formatDeployOutputs", () => {
   const cfg = {
     project: "test-app",
@@ -113,6 +117,7 @@ describe("formatDeployOutputs", () => {
     const formatted = formatDeployOutputs(outputs, {
       adminEmail: "admin@example.com",
       adminPassword: "secret123",
+      target: FLY,
     });
     expect(formatted).toContain("https://myapp.fly.dev/mcp");
   });
@@ -130,19 +135,20 @@ describe("formatDeployOutputs", () => {
     const masked = formatDeployOutputs(outputs, {
       adminEmail: "admin@example.com",
       adminPassword: "mysecretpassword",
+      target: FLY,
     });
     expect(masked).not.toContain("mysecretpassword");
     expect(masked).toContain("myse...word");
 
     const shown = formatDeployOutputs(
       outputs,
-      { adminEmail: "admin@example.com", adminPassword: "mysecretpassword" },
+      { adminEmail: "admin@example.com", adminPassword: "mysecretpassword", target: FLY },
       { showSecrets: true },
     );
     expect(shown).toContain("mysecretpassword");
   });
 
-  it("mentions fly postgres connect when databaseUrl is null", () => {
+  it("prints the target's own database hint when databaseUrl is null", () => {
     const outputs = buildDeployOutputs({
       baseUrl: "https://myapp.fly.dev",
       cfg,
@@ -152,8 +158,32 @@ describe("formatDeployOutputs", () => {
     const formatted = formatDeployOutputs(outputs, {
       adminEmail: "admin@example.com",
       adminPassword: "secret123",
+      target: FLY,
     });
     expect(formatted).toContain("fly postgres connect");
+  });
+
+  // The panel is the last thing a deploy prints, and it used to be titled "warehousd deployed to
+  // Fly" and to answer `fly postgres connect` whatever it had just deployed to — which was true of
+  // the only target there was, and wrong the moment there were two.
+  it("names no target it did not deploy to", () => {
+    const outputs = buildDeployOutputs({
+      baseUrl: "https://myapp.up.railway.app",
+      cfg,
+      databaseUrl: null,
+      now: new Date("2025-01-01T00:00:00Z"),
+    });
+    const formatted = formatDeployOutputs(outputs, {
+      adminEmail: "admin@example.com",
+      adminPassword: "secret123",
+      target: {
+        label: "Railway",
+        databaseHint: "managed by Railway Postgres — `railway connect Postgres`",
+      },
+    });
+    expect(formatted).toContain("deployed to Railway");
+    expect(formatted).toContain("railway connect Postgres");
+    expect(formatted.toLowerCase()).not.toContain("fly");
   });
 
   it("includes the database URL, with only its password masked", () => {
@@ -167,6 +197,7 @@ describe("formatDeployOutputs", () => {
     const formatted = formatDeployOutputs(outputs, {
       adminEmail: "admin@example.com",
       adminPassword: "secret123",
+      target: FLY,
     });
     // Host, user and database name are the reason anyone reads this line; the credential is not.
     expect(formatted).toContain("prod.example.com/db");
@@ -176,7 +207,7 @@ describe("formatDeployOutputs", () => {
     expect(
       formatDeployOutputs(
         outputs,
-        { adminEmail: "admin@example.com", adminPassword: "secret123" },
+        { adminEmail: "admin@example.com", adminPassword: "secret123", target: FLY },
         { showSecrets: true },
       ),
     ).toContain(dbUrl);

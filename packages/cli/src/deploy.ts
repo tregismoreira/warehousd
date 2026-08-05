@@ -344,7 +344,11 @@ export async function runDeploy(
   process.stdout.write(
     `${formatDeployOutputs(
       outputs,
-      { adminEmail, adminPassword: state.adminPassword },
+      {
+        adminEmail,
+        adminPassword: state.adminPassword,
+        target: { label: target.label, databaseHint: target.databaseHint },
+      },
       { theme, showSecrets: opts.showSecrets ?? false },
     )}\n`,
   );

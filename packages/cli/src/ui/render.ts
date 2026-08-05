@@ -133,6 +133,12 @@ export function renderDeploySummary(opts: {
     env: string;
   };
   admin?: { email: string; password: string } | undefined;
+  /**
+   * Where this went, in the target's own words. Required rather than defaulted: this panel used to
+   * be titled "warehousd deployed to Fly" and to answer `fly postgres connect` for every managed
+   * database, which was true of the only target there was and wrong the moment there were two.
+   */
+  target: { label: string; databaseHint: string };
   theme: Theme;
   showSecrets?: boolean | undefined;
 }): string {
@@ -149,7 +155,7 @@ export function renderDeploySummary(opts: {
         ? showSecrets
           ? outputs.databaseUrl
           : maskUrlPassword(outputs.databaseUrl, theme.unicode)
-        : "managed by Fly Postgres — `fly postgres connect`",
+        : opts.target.databaseHint,
     },
     { label: "Env", value: outputs.env },
   ];
@@ -166,7 +172,7 @@ export function renderDeploySummary(opts: {
   }
 
   return renderPanel({
-    title: "warehousd deployed to Fly",
+    title: `warehousd deployed to ${opts.target.label}`,
     sections,
     theme,
     showSecrets,

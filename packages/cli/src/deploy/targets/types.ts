@@ -52,8 +52,16 @@ export type TargetPreflightInput = {
  */
 export type DeployTarget = {
   id: DeployTargetId;
-  /** Human name, for checklist details and error messages. */
+  /** Human name, for checklist details, error messages and the deploy summary's title. */
   label: string;
+  /**
+   * What the summary prints for `Database` when the target manages it and no URL came back.
+   *
+   * It belongs to the target because it is an instruction to run one — `fly postgres connect` on
+   * Fly, `railway connect Postgres` on Railway. It is not on `DeployOutputs`, which is serialised
+   * to `.warehousd/outputs.deploy.json`: a hint is what to print, not what was deployed.
+   */
+  databaseHint: string;
   /** Is the target's CLI present and authenticated, is the region one it has? Never mutates. */
   preflight(input: TargetPreflightInput): Promise<PreflightCheck[]>;
   /** Create the app/project on the target. Idempotent: a redeploy calls it too. */

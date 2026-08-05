@@ -175,6 +175,7 @@ describe("render branches", () => {
         databaseUrl: null,
         env: "dev",
       },
+      target: { label: "Fly.io", databaseHint: "managed by Fly Postgres — `fly postgres connect`" },
       theme: plainTheme,
     });
     expect(s).toContain("fly postgres connect");
@@ -191,6 +192,7 @@ describe("render branches", () => {
         databaseUrl: url,
         env: "dev",
       },
+      target: { label: "Fly.io", databaseHint: "managed by Fly Postgres — `fly postgres connect`" },
       theme: plainTheme,
       showSecrets: true,
     });
