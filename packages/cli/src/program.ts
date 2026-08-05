@@ -440,20 +440,20 @@ program
         ],
         theme,
         showSecrets: o.show,
-        ...(o.show ? {} : { footer: "Masked — add --show to reveal, or --json for a script" }),
+        ...(o.show ? {} : { footer: ["Masked — add --show to reveal, or --json for a script"] }),
       })}\n`,
     );
   });
 program
   .command("deploy")
-  .description("deploy this project to Fly.io, or tear it down with --destroy")
+  .description("deploy this project to deploy.target, or tear it down with --destroy")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--allow-local-login", "permit deploying without SSO configured", false)
   .option("--allow-disabled-audit", "permit deploying with audit.enabled: false", false)
   .option("-y, --yes", "skip the config-diff confirmation", false)
   .option(
     "--local-build",
-    "build with the local Docker daemon instead of Fly's remote builder",
+    "build with the local Docker daemon instead of Fly's remote builder (fly only)",
     false,
   )
   .option("--destroy", "tear down the deployed app", false)

@@ -52,14 +52,15 @@ export type TargetPreflightInput = {
  */
 export type DeployTarget = {
   id: DeployTargetId;
-  /** Human name, for checklist details, error messages and the deploy summary's title. */
+  /** Human name, for checklist details, error messages and the deploy summary's heading. */
   label: string;
   /**
-   * What the summary prints for `Database` when the target manages it and no URL came back.
+   * Where to find the database when `managed: true` left no URL to print.
    *
-   * It belongs to the target because it is an instruction to run one — `fly postgres connect` on
-   * Fly, `railway connect Postgres` on Railway. It is not on `DeployOutputs`, which is serialised
-   * to `.warehousd/outputs.deploy.json`: a hint is what to print, not what was deployed.
+   * The summary used to say ``managed by Fly Postgres — `fly postgres connect` `` for every managed
+   * deploy on any target, which was the last Fly-specific string in shared rendering code. It is
+   * not part of `DeployOutputs` because that is serialised to `.warehousd/outputs.deploy.json`, and
+   * a sentence about a CLI does not belong in a machine contract.
    */
   databaseHint: string;
   /** Is the target's CLI present and authenticated, is the region one it has? Never mutates. */
@@ -89,4 +90,12 @@ export type DeployTarget = {
   appUrl(ctx: TargetContext): Promise<string | null>;
   /** Recent logs, appended to a health-check failure. Absent when the target has none to offer. */
   logs?(ctx: TargetContext): Promise<string>;
+  /**
+   * What the operator still has to do, and what is theirs to secure — printed under the summary.
+   *
+   * Absent when a successful deploy leaves nothing outstanding, which is every target that runs
+   * the container itself. It exists for the one that does not: a rendered Compose stack is not a
+   * running one, and the line saying so must survive `--quiet`, which silences `say`.
+   */
+  notes?(ctx: TargetContext): string[];
 };

@@ -30,23 +30,20 @@ export function buildDeployOutputs(args: {
 }
 
 /**
- * `target` is what the panel cannot get from `DeployOutputs`: the name to print in the title and
- * the command to offer when the target manages the database itself. Both used to be Fly literals
- * in the renderer.
+ * `target` has no default on purpose. The summary names where the deployment went and how to reach
+ * a database it did not print a URL for, and the only honest source for both is the target that
+ * just ran — a fallback here would be the Fly wording it replaced, quietly wrong everywhere else.
  */
 export function formatDeployOutputs(
   o: DeployOutputs,
-  extra: {
-    adminEmail: string;
-    adminPassword: string;
-    target: { label: string; databaseHint: string };
-  },
+  extra: { adminEmail: string; adminPassword: string },
+  target: { label: string; databaseHint: string; notes?: string[] | undefined },
   opts?: { theme?: Theme | undefined; showSecrets?: boolean | undefined },
 ): string {
   return renderDeploySummary({
     outputs: o,
+    target,
     admin: { email: extra.adminEmail, password: extra.adminPassword },
-    target: extra.target,
     theme: opts?.theme ?? plainTheme,
     showSecrets: opts?.showSecrets ?? false,
   });

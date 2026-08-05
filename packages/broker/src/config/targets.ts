@@ -12,7 +12,7 @@
  * all broker-side, gets to derive its union with `keyof typeof` instead; this is the same idea
  * split across a package boundary.
  */
-export const DEPLOY_TARGET_IDS = ["fly", "railway"] as const;
+export const DEPLOY_TARGET_IDS = ["fly", "railway", "compose"] as const;
 
 export type DeployTargetId = (typeof DEPLOY_TARGET_IDS)[number];
 

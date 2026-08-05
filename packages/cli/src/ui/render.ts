@@ -27,7 +27,8 @@ export function renderPanel(opts: {
   sections: Section[];
   theme: Theme;
   showSecrets?: boolean | undefined;
-  footer?: string | undefined;
+  /** One line each. Wrapped text belongs in the caller, which knows what it is saying. */
+  footer?: string[] | undefined;
 }): string {
   const { theme } = opts;
   const showSecrets = opts.showSecrets ?? false;
@@ -51,9 +52,11 @@ export function renderPanel(opts: {
     }
   }
 
-  if (opts.footer) {
+  // Indented per line rather than as one string: a footer of several lines used to align only its
+  // first, and the deploy summary now carries what an operator still has to do.
+  if (opts.footer && opts.footer.length > 0) {
     lines.push("");
-    lines.push(`${INDENT}${theme.c.dim(opts.footer)}`);
+    for (const line of opts.footer) lines.push(`${INDENT}${theme.c.dim(line)}`);
   }
 
   lines.push("");
@@ -120,10 +123,20 @@ export function renderStartSummary(opts: {
     sections,
     theme,
     showSecrets,
-    footer: showSecrets ? undefined : "Secrets are masked — reveal with `warehousd secrets --show`",
+    footer: showSecrets
+      ? undefined
+      : ["Secrets are masked — reveal with `warehousd secrets --show`"],
   });
 }
 
+/**
+ * `target` is passed in rather than known here.
+ *
+ * This module renders; it does not know where a deployment went. It used to: the heading read
+ * "warehousd deployed to Fly" and a managed database was reported as `fly postgres connect`, on
+ * every target, so a Compose deploy would have named a target it had not deployed to twice in five
+ * lines.
+ */
 export function renderDeploySummary(opts: {
   outputs: {
     mcpUrl: string;
@@ -132,13 +145,8 @@ export function renderDeploySummary(opts: {
     databaseUrl: string | null;
     env: string;
   };
+  target: { label: string; databaseHint: string; notes?: string[] | undefined };
   admin?: { email: string; password: string } | undefined;
-  /**
-   * Where this went, in the target's own words. Required rather than defaulted: this panel used to
-   * be titled "warehousd deployed to Fly" and to answer `fly postgres connect` for every managed
-   * database, which was true of the only target there was and wrong the moment there were two.
-   */
-  target: { label: string; databaseHint: string };
   theme: Theme;
   showSecrets?: boolean | undefined;
 }): string {
@@ -171,12 +179,19 @@ export function renderDeploySummary(opts: {
     });
   }
 
+  // The notes come first: they are what is still to be done, and the masking line is a standing
+  // remark about the panel above it.
+  const footer = [
+    ...(opts.target.notes ?? []),
+    ...(showSecrets ? [] : ["Secrets are masked — reveal with `warehousd secrets --show`"]),
+  ];
+
   return renderPanel({
     title: `warehousd deployed to ${opts.target.label}`,
     sections,
     theme,
     showSecrets,
-    footer: showSecrets ? undefined : "Secrets are masked — reveal with `warehousd secrets --show`",
+    footer,
   });
 }
 

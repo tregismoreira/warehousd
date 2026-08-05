@@ -390,11 +390,11 @@ experience and the production security model are the same machinery.
 ```
 
 When the target manages Postgres, `databaseUrl` is `null` — connect through the
-target instead (`fly postgres connect`, `railway connect Postgres`), which is
-what the deploy summary prints in its place. Writing a production Postgres URL
-into a file in the repo is exactly the
-credential-at-rest the pre-flight exists to prevent. It is echoed back only when
-the operator supplied `deploy.database.url` themselves.
+target instead (`fly postgres connect`, `railway connect Postgres`, `docker
+compose exec`), which is what the deploy summary prints in its place. Writing a
+production Postgres URL into a file in the repo is exactly the credential-at-rest
+the pre-flight exists to prevent. It is echoed back only when the operator
+supplied `deploy.database.url` themselves.
 
 There is no `devClient` in a deploy — that is a local `start` affordance only.
 `env` is `"dev"` because deploys seed `data_synth` only.
