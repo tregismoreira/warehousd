@@ -304,7 +304,7 @@ grant check rather than a shared service account.
 
 | Command | Purpose |
 |---|---|
-| `warehousd init` | Scaffold `warehousd.yml` and `.gitignore` entries. Asks, in a terminal. |
+| `warehousd init` | Scaffold `warehousd.yml` and `.gitignore` entries. Asks, in a terminal; `--target` and `--db-provider` answer it from a script. |
 | `warehousd start` | Start server + Postgres, apply config, seed, print outputs. |
 | `warehousd restart` | Stop, then start again. |
 | `warehousd stop [--destroy -y]` | Stop containers; optionally drop the volume. |

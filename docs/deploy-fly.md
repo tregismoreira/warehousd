@@ -23,7 +23,8 @@ the stack on hardware you control, [deploy-compose.md](deploy-compose.md).
 
 ### 1. Add the deploy config to warehousd.yml
 
-Edit `examples/harbor/warehousd.yml` to add a `deploy:` block:
+Edit `examples/harbor/warehousd.yml` to add a `deploy:` block. On a new project
+`warehousd init --target fly` scaffolds this same block for you:
 
 ```yaml
 deploy:

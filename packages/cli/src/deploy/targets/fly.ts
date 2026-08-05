@@ -128,6 +128,7 @@ export const fly: DeployTarget = {
   id: "fly",
   label: "Fly.io",
   databaseHint: "managed by Fly Postgres — `fly postgres connect`",
+  exampleRegion: "gru",
   preflight,
   ensureApp,
   provisionDatabase,

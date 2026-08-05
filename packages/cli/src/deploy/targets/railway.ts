@@ -280,6 +280,7 @@ export const railway: DeployTarget = {
   id: "railway",
   label: "Railway",
   databaseHint: "managed by Railway Postgres — `railway connect Postgres`",
+  exampleRegion: "us-west2",
   preflight,
   ensureApp,
   provisionDatabase,

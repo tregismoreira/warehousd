@@ -63,6 +63,15 @@ export type DeployTarget = {
    * a sentence about a CLI does not belong in a machine contract.
    */
   databaseHint: string;
+  /**
+   * A region this target actually has, for the `deploy:` block `warehousd init` scaffolds.
+   *
+   * `region` is required by `DeploySchema` and its shape belongs to the target, so a scaffold that
+   * guessed one would write a file that fails the target's own pre-flight. It lives here for the
+   * same reason `databaseHint` does: nothing outside `deploy/targets` may branch on a target id,
+   * so per-target text is a member rather than a lookup table somewhere else.
+   */
+  exampleRegion: string;
   /** Is the target's CLI present and authenticated, is the region one it has? Never mutates. */
   preflight(input: TargetPreflightInput): Promise<PreflightCheck[]>;
   /** Create the app/project on the target. Idempotent: a redeploy calls it too. */

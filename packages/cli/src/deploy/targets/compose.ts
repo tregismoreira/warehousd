@@ -258,6 +258,9 @@ export const compose: DeployTarget = {
   id: "compose",
   label: "Docker Compose",
   databaseHint: `the \`${DB_SERVICE}\` service — \`docker compose -f ${COMPOSE_FILE} exec ${DB_SERVICE} psql -U ${DB_USER} ${DB_NAME}\``,
+  // Compose has no regions, and `region` is a required key with nothing to say here. "local" is
+  // the honest placeholder — a machine the operator runs — and nothing validates it.
+  exampleRegion: "local",
   preflight,
   ensureApp,
   provisionDatabase,

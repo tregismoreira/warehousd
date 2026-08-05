@@ -1,4 +1,6 @@
 import { confirm as clackConfirm, text, select, isCancel, cancel } from "@clack/prompts";
+import { dbProviders, type DbProviderId, type DeployTargetId } from "@warehousd/broker";
+import { targets } from "../deploy/targets";
 
 // The only module that talks to @clack/prompts.
 //
@@ -41,7 +43,26 @@ export async function confirm(opts: {
   return answer;
 }
 
-export type InitAnswers = { project: string; port: number; managed: boolean };
+/**
+ * `dbProvider` is null exactly when `managed` is true: under `managed` the target provisions the
+ * database and knows what it built, and `DeploySchema` refuses a `provider` with no `url` for that
+ * reason — it would name where a database that does not exist here is hosted.
+ */
+export type InitAnswers = {
+  project: string;
+  port: number;
+  managed: boolean;
+  target: DeployTargetId;
+  dbProvider: DbProviderId | null;
+};
+
+/**
+ * Both selects below are built by mapping a registry, so a fourth target or provider appears in
+ * the wizard with no edit to this file — the same property the registries exist for.
+ */
+function optionsFrom(registry: Record<string, { id: string; label: string }>) {
+  return Object.values(registry).map((e) => ({ value: e.id, label: e.label }));
+}
 
 export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | null> {
   const project = await text({
@@ -76,10 +97,44 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
     initialValue: defaults.managed ? "managed" : "external",
   });
   if (isCancel(database)) return null;
+  const managed = database === "managed";
+
+  const target = await select({
+    message: "Deploy target",
+    options: optionsFrom(targets),
+    initialValue: String(defaults.target),
+  });
+  if (isCancel(target)) return null;
+
+  // Only alongside a url. Under `managed` the target provisions the database, and naming a
+  // provider for it would be a key that decided nothing while reading as though it did.
+  let dbProvider: DbProviderId | null = null;
+  if (!managed) {
+    const provider = await select({
+      message: "Who hosts that Postgres",
+      options: optionsFrom(dbProviders),
+      initialValue: String(defaults.dbProvider ?? "generic"),
+    });
+    if (isCancel(provider)) return null;
+    dbProvider = idIn(provider, dbProviders, "generic");
+  }
 
   return {
     project: String(project) || defaults.project,
     port: Number(port) || defaults.port,
-    managed: database === "managed",
+    managed,
+    target: idIn(target, targets, defaults.target),
+    dbProvider,
   };
+}
+
+/**
+ * Narrow a select's answer back to a registry id.
+ *
+ * The options came from the registry, so the `in` can only fail if clack handed back something
+ * else entirely — but proving membership beats asserting it, which is what `noUncheckedIndexedAccess`
+ * and `strict` are on for.
+ */
+function idIn<T extends string>(value: unknown, registry: Record<string, unknown>, fallback: T): T {
+  return typeof value === "string" && value in registry ? (value as T) : fallback;
 }

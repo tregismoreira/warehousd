@@ -12,9 +12,10 @@
 
 import { Command } from "commander";
 import { resolve, basename } from "node:path";
+import { DEPLOY_TARGET_IDS, DB_PROVIDER_IDS } from "@warehousd/broker";
 import { resolveDbUrl, tryResolveDbUrl, runApply, runSeed, runIndex, runEmbed } from "./index";
 import { buildPlan, renderPlan, writeMigration, migrationStatus } from "./migrate";
-import { runInit } from "./init";
+import { runInit, initDefaults } from "./init";
 import { runStart } from "./start";
 import { runStop } from "./stop";
 import { runStatus } from "./status";
@@ -117,18 +118,21 @@ program
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--force", "overwrite an existing warehousd.yml")
   .option("--no-input", "never prompt; write the default template")
+  .option("--target <id>", `scaffold a deploy block for: ${DEPLOY_TARGET_IDS.join(", ")}`)
+  .option("--db-provider <id>", `who hosts deploy.database.url: ${DB_PROVIDER_IDS.join(", ")}`)
   .action(async (o) => {
     const { reporter, json } = ui();
+    const { defaults, fromFlags } = initDefaults({
+      project: basename(resolve(o.dir)) || "my-app",
+      target: o.target,
+      dbProvider: o.dbProvider,
+    });
+
     // The wizard only runs where there is somebody to answer it. Piped, in CI, under --json or
-    // --no-input, `init` writes exactly the template it always wrote.
+    // --no-input, `init` writes the template — with the deploy block filled in when --target
+    // named one, so a non-interactive run can still specify every field.
     const interactive = o.input !== false && !json && isInteractive();
-    const answers = interactive
-      ? await promptInit({
-          project: basename(resolve(o.dir)) || "my-app",
-          port: 8722,
-          managed: true,
-        })
-      : null;
+    const answers = interactive ? await promptInit(defaults) : fromFlags ? defaults : null;
     if (interactive && !answers) {
       reporter.fail("Cancelled.");
       process.exit(1);

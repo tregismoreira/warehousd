@@ -53,14 +53,34 @@ Scaffolds `warehousd.yml` and adds `warehousd.local.yml` and `.warehousd/` to
 `.gitignore`, creating that file if it does not exist. It does not create seed
 directories or `.warehousd/` — `start` does that.
 
-In a terminal it asks for the project name, the port and whether to manage
-Postgres, then applies those answers to the template. Piped, in CI, under
-`--json` or `--no-input` it writes the default template without asking.
+In a terminal it asks for the project name, the port, whether to manage Postgres,
+which deploy target to scaffold a `deploy:` block for, and — only if you are
+bringing your own Postgres — who hosts it. Both lists are read from the target
+and provider registries, so they never go stale. Piped, in CI, under `--json` or
+`--no-input` it writes the template without asking.
 
-| Flag         |                                           |
-| ------------ | ----------------------------------------- |
-| `--force`    | Overwrite an existing `warehousd.yml`.    |
-| `--no-input` | Never prompt; write the default template. |
+`--target` and `--db-provider` answer the last two questions from a script, so a
+non-interactive run can still specify every field the wizard collects:
+
+```bash
+warehousd init --no-input --target railway --db-provider supabase
+```
+
+Without `--target` no `deploy:` block is written and the template's commented one
+is left in place — the block is optional and only `warehousd deploy` reads it.
+`--db-provider` alone is refused, since it names where `deploy.database.url` is
+hosted and there is no block for it to sit in.
+
+| Flag                 |                                                                             |
+| -------------------- | --------------------------------------------------------------------------- |
+| `--force`            | Overwrite an existing `warehousd.yml`.                                      |
+| `--no-input`         | Never prompt; write the template.                                           |
+| `--target <id>`      | Scaffold a `deploy:` block for `fly`, `railway` or `compose`.                |
+| `--db-provider <id>` | Who hosts `deploy.database.url`: `supabase`, `neon`, `railway`, `generic`.   |
+
+The scaffolded `app_name` is the project name as a DNS label (`Acme Data` becomes
+`acme-data`) and `region` is one the target actually has, so the file it writes
+passes that target's own pre-flight rather than failing it on first deploy.
 
 ### `start`
 
@@ -297,13 +317,26 @@ when a remote provider rate-limits halfway through a corpus.
 ### `deploy`
 
 Provisions a warehousd stack from the same `warehousd.yml` to whichever
-`deploy.target` names — `fly`, `railway` or `compose`. A pre-flight checklist
-must pass before anything is created: the `deploy:` block exists, all
-`${env:VAR}` references resolve, demo mode is off, the audit trail is on or
-`--allow-disabled-audit` is passed, SSO or `--allow-local-login` is configured,
-and the target's own checks pass — for Fly, that `flyctl` is installed and
-authenticated and that `region` is one of its three-letter slugs; for Railway,
-the same of the `railway` CLI plus which project this directory is linked to.
+`deploy.target` names. Three exist, and they differ enough to have a runbook
+each:
+
+| `deploy.target` | Where the container runs                    | Runbook                                |
+| --------------- | ------------------------------------------- | -------------------------------------- |
+| `fly`           | A Fly.io app                                | [deploy-fly.md](deploy-fly.md)         |
+| `railway`       | A Railway project                           | [deploy-railway.md](deploy-railway.md) |
+| `compose`       | A rendered Compose stack you start yourself | [deploy-compose.md](deploy-compose.md) |
+
+Each takes either `database.managed: true`, and provisions Postgres itself, or a
+`database.url` you bring. Pointing one at a hosted Postgres — Supabase, Neon,
+Railway — is [deploy-database.md](deploy-database.md).
+
+A pre-flight checklist must pass before anything is created: the `deploy:` block
+exists, all `${env:VAR}` references resolve, demo mode is off, the audit trail is
+on or `--allow-disabled-audit` is passed, SSO or `--allow-local-login` is
+configured, and the target's own checks pass — for Fly, that `flyctl` is
+installed and authenticated and that `region` is one of its three-letter slugs;
+for Railway, the same of the `railway` CLI plus which project this directory is
+linked to; for Compose, only what it is about to write.
 Every check is printed if any fail — nothing is created until all pass.
 
 The server image is not yet published (the repo is private and no release tag
@@ -326,7 +359,7 @@ while the default `--remote-only` path does not.
 | `--allow-disabled-audit` | Deploy a project configured with `audit.enabled: false`. Nothing it does will be recorded.      |
 | `-y, --yes`           | Skip the re-deploy diff prompt (one-time deploys always prompt).                                   |
 | `--local-build`       | Build the image locally; otherwise use the published one.                                          |
-| `--destroy`           | Tear down the Fly app and database. Requires typing the app name exactly; `--yes` does not bypass. |
+| `--destroy`           | Tear down what the target created. Requires typing the app name exactly; `--yes` does not bypass. |
 | `--show-secrets`      | Print the admin password and database URL in full instead of masked.                               |
 
 A failed pre-flight is rendered by the same checklist as `doctor`, so it honours
@@ -347,15 +380,20 @@ Other changes:
 Deploy y/n (without --yes)?
 ```
 
-The deployment creates a Fly app, provisions or attaches Postgres, sets secrets
-via `flyctl secrets import --stage` on **stdin** (never argv, never written to
-disk), builds a thin `FROM <published-image>` layer containing only the project
-bundle, and runs the existing container bootstrap as Fly's `release_command`
-(so a failed migration aborts the deploy and the previous release stays serving).
-The bundle deliberately excludes `source_live` directories and
-`warehousd.local.yml` — live documents never leave the operator's machine.
+Every target runs the same steps in the same order: create the app or project,
+provision or attach Postgres, ship the secrets, write the project bundle, push
+it. What happens inside a step is the target's own — Fly sets secrets on
+`flyctl secrets import --stage`'s **stdin** (never argv, never written to disk)
+and runs the container bootstrap as a `release_command`, so a failed migration
+aborts the deploy and the previous release stays serving; Compose writes a
+`.warehousd/deploy.env` at mode 0600 and starts nothing at all. Each builds a
+thin `FROM <published-image>` layer containing only the project bundle, and that
+bundle deliberately excludes `source_live` directories and `warehousd.local.yml`
+— live documents never leave the operator's machine.
 
-Then it polls `/api/health` and writes `.warehousd/outputs.deploy.json`.
+Then it polls `/api/health` and writes `.warehousd/outputs.deploy.json`. A target
+that renders files rather than running them has no URL to poll yet, so the health
+check is skipped and the summary prints what is left to start.
 
 `--destroy` requires typing the app name exactly (e.g. `harbor-warehousd`), with
 no `--yes` bypass, to prevent accidental teardown.

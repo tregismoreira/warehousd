@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { loadConfig } from "@warehousd/broker";
-import { runInit } from "../src/init";
+import { runInit, initDefaults } from "../src/init";
 
 describe("runInit", () => {
   let projectDir: string;
@@ -102,6 +102,62 @@ describe("runInit", () => {
     // Should have exactly one .warehousd/ line
     const count = (content.match(/\.warehousd\//g) || []).length;
     expect(count).toBe(1);
+  });
+
+  // The template ships the deploy block commented out, so a run with nothing to say about
+  // deployment writes a config with no `deploy:` key rather than one naming a target nobody chose.
+  it("leaves the deploy block commented when no target was named", async () => {
+    await runInit(projectDir);
+    expect(loadConfig(projectDir).deploy).toBeUndefined();
+  });
+
+  // The gate on this change: --no-input has to be able to specify every field the wizard collects,
+  // and what it writes has to survive the same loader a hand-written file goes through.
+  it("writes a loadable managed deploy block from --target alone", async () => {
+    const { defaults, fromFlags } = initDefaults({ project: "harbor", target: "compose" });
+    expect(fromFlags).toBe(true);
+    await runInit(projectDir, { force: true, answers: defaults });
+
+    const cfg = loadConfig(projectDir);
+    expect(cfg.deploy).toEqual({
+      target: "compose",
+      app_name: "harbor",
+      region: "local",
+      database: { managed: true },
+    });
+  });
+
+  it("writes a loadable url-and-provider deploy block from --target and --db-provider", async () => {
+    process.env.PROD_DATABASE_URL = "postgres://u:p@db.abc.supabase.co:5432/postgres";
+    const { defaults } = initDefaults({
+      project: "Harbor Data",
+      target: "railway",
+      dbProvider: "supabase",
+    });
+    expect(defaults.managed).toBe(false);
+    await runInit(projectDir, { force: true, answers: defaults });
+
+    const cfg = loadConfig(projectDir);
+    expect(cfg.deploy).toEqual({
+      target: "railway",
+      app_name: "harbor-data",
+      region: "us-west2",
+      database: { url: process.env.PROD_DATABASE_URL, provider: "supabase" },
+    });
+    delete process.env.PROD_DATABASE_URL;
+  });
+
+  it("refuses a provider with no target, since it would have no block to sit in", () => {
+    expect(() => initDefaults({ project: "harbor", dbProvider: "neon" })).toThrow("--target");
+  });
+
+  it("refuses an unregistered target or provider, naming the ones that exist", () => {
+    expect(() => initDefaults({ project: "harbor", target: "vercel" })).toThrow(
+      /--target must be one of: fly, railway, compose/,
+    );
+    expect(() =>
+      initDefaults({ project: "harbor", target: "fly", dbProvider: "planetscale" }),
+    ).toThrow(/--db-provider must be one of: supabase, neon, railway, generic/);
   });
 
   it("overwrites warehousd.yml with --force", async () => {
