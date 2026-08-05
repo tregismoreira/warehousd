@@ -298,8 +298,9 @@ Provisions a warehousd stack to Fly.io from the same `warehousd.yml`. A
 pre-flight checklist must pass before anything is created: the `deploy:` block
 exists, all `${env:VAR}` references resolve, demo mode is off, the audit trail is
 on or `--allow-disabled-audit` is passed, SSO or `--allow-local-login` is
-configured, and `flyctl` is installed and authenticated. Every check is printed
-if any fail — nothing is created until all pass.
+configured, and the target's own checks pass — for Fly, that `flyctl` is
+installed and authenticated and that `region` is one of its three-letter slugs.
+Every check is printed if any fail — nothing is created until all pass.
 
 The server image is not yet published (the repo is private and no release tag
 exists). Until it is, build the base locally and pass `--local-build`:

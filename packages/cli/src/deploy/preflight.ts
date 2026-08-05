@@ -3,10 +3,11 @@ import {
   envRefs,
   auditEnabled,
   planFromConfigs,
+  DEFAULT_DEPLOY_TARGET_ID,
   type DbProviderId,
   type WarehousdConfig,
 } from "@warehousd/broker";
-import { FlyError, assertFly } from "../fly";
+import { targetFor } from "./targets";
 import { readDeployOutputs } from "../state";
 import { existingMigrations } from "../migrate";
 
@@ -240,24 +241,18 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
     checks.push(...(await input.dbCapabilities(dbUrl, opts)));
   }
 
-  // flyctl-ready: check assertFly() doesn't throw
-  let flyReady = true;
-  let flyDetail = "flyctl is ready";
-  try {
-    assertFly();
-  } catch (err: unknown) {
-    flyReady = false;
-    if (err instanceof FlyError) {
-      flyDetail = err.message;
-    } else {
-      flyDetail = err instanceof Error ? err.message : "Unknown error checking flyctl";
-    }
-  }
-  checks.push({
-    id: "flyctl-ready",
-    ok: flyReady,
-    detail: flyDetail,
-  });
+  // Whatever the target says about itself: its CLI, its authentication, its region format. This
+  // file knows none of that — see packages/cli/src/deploy/targets. Falls back to the default target
+  // when the config did not load or has no `deploy:` block, because "flyctl is not installed" is
+  // still worth saying to someone whose warehousd.yml is broken for an unrelated reason.
+  const targetId = cfg?.deploy?.target ?? DEFAULT_DEPLOY_TARGET_ID;
+  checks.push(
+    ...(await targetFor(targetId).preflight({
+      projectDir: input.projectDir,
+      cfg,
+      env: input.env,
+    })),
+  );
 
   // Determine overall result: ok if every check is ok
   const allOk = checks.every((c) => c.ok);

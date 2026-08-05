@@ -452,6 +452,51 @@ collections:
     expect(deployArgs).not.toContain("--remote-only");
   });
 
+  // The caller used to pass `${appUrl}/api/health` to a pollHealth that appends `/api/health`
+  // itself, so a real deploy polled .../api/health/api/health, got a 404 for three minutes and then
+  // reported a failed release for an app that was serving fine. Nothing caught it because fetch is
+  // stubbed here to answer 200 whatever the URL — so the URL is what this asserts.
+  it("polls /api/health once, not twice", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+deploy:
+  target: fly
+  app_name: test-app
+  region: sea
+  database:
+    managed: true
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const { execFileSync } = await import("node:child_process");
+    vi.mocked(execFileSync).mockImplementation((_cmd: string, args?: readonly string[]) => {
+      const argv = args ? Array.from(args) : [];
+      if (argv[0] === "version" || argv[0] === "auth" || argv[0] === "status") {
+        return "flyctl version 0.1.0\n";
+      }
+      return "OK\n";
+    });
+
+    const polled: string[] = [];
+    global.fetch = vi.fn((input: RequestInfo | URL) => {
+      polled.push(input instanceof Request ? input.url : input.toString());
+      return Promise.resolve(new Response("OK", { status: 200 }));
+    });
+
+    await runDeploy(projectDir, { yes: true, allowLocalLogin: true });
+
+    expect(polled).toEqual(["https://test-app.fly.dev/api/health"]);
+  });
+
   it("pre-flight failure issues NO mutating flyctl command", async () => {
     writeFileSync(
       join(projectDir, "warehousd.yml"),
@@ -496,6 +541,58 @@ collections:
       if (!(err instanceof Error && err.message === "exit")) {
         throw err;
       }
+    }
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(mutatingCommands).toHaveLength(0);
+
+    exitSpy.mockRestore();
+  });
+
+  // The region used to be rejected by DeploySchema, so a bad one could never reach here at all.
+  // Now that the target owns the rule, the thing that has to stay true is that its refusal still
+  // stops the deploy before anything is created — the same guarantee as the check above.
+  it("a region the target refuses issues NO mutating flyctl command", async () => {
+    writeFileSync(
+      join(projectDir, "warehousd.yml"),
+      `
+project: test
+deploy:
+  target: fly
+  app_name: test-app
+  region: brazil
+  database:
+    managed: true
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`,
+    );
+
+    const { execFileSync } = await import("node:child_process");
+    const mutatingCommands: string[] = [];
+
+    vi.mocked(execFileSync).mockImplementation((_cmd: string, args?: readonly string[]) => {
+      const argsArray = args ? Array.from(args) : [];
+      const subcommand = argsArray[0];
+      if (subcommand && ["apps", "postgres", "secrets", "deploy"].includes(subcommand)) {
+        mutatingCommands.push(subcommand);
+      }
+      return "flyctl version 0.1.0\n";
+    });
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("exit");
+    });
+
+    try {
+      await runDeploy(projectDir, { yes: true, allowLocalLogin: true });
+    } catch (err: unknown) {
+      if (!(err instanceof Error && err.message === "exit")) throw err;
     }
 
     expect(exitSpy).toHaveBeenCalledWith(1);

@@ -59,6 +59,8 @@ export type {
   NormalizedPosture,
 } from "./config/schema";
 export { unmaskPosture, isGrantable, READ_POSTURES, MaskSchema } from "./config/schema";
+// The deploy target ids, for DeploySchema here and for the CLI's target registry there.
+export { DEPLOY_TARGET_IDS, DEFAULT_DEPLOY_TARGET_ID, type DeployTargetId } from "./config/targets";
 export { applyConfig } from "./apply/apply";
 // Per-document ACLs. The read/write verbs hang off the broker object (broker.ts); what is exported
 // here is what an adapter needs around them — the manager identity type, group membership, and the

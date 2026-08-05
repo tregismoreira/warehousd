@@ -13,9 +13,9 @@ describe("buildDeployOutputs", () => {
     collections: {},
   } as any;
 
-  it("mcpUrl starts with https and embeds the appName", () => {
+  it("mcpUrl is the target base URL plus /mcp", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -23,9 +23,9 @@ describe("buildDeployOutputs", () => {
     expect(outputs.mcpUrl).toMatch(/^https:\/\/myapp\.fly\.dev\/mcp$/);
   });
 
-  it("apiUrl starts with https and embeds the appName", () => {
+  it("apiUrl is the target base URL", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -33,9 +33,9 @@ describe("buildDeployOutputs", () => {
     expect(outputs.apiUrl).toMatch(/^https:\/\/myapp\.fly\.dev$/);
   });
 
-  it("adminUrl starts with https and embeds the appName", () => {
+  it("adminUrl is the target base URL plus /admin", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -45,7 +45,7 @@ describe("buildDeployOutputs", () => {
 
   it("databaseUrl is null under managed Postgres", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -56,7 +56,7 @@ describe("buildDeployOutputs", () => {
   it("databaseUrl is echoed when supplied", () => {
     const dbUrl = "postgres://user:pass@prod.example.com/db";
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: dbUrl,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -66,7 +66,7 @@ describe("buildDeployOutputs", () => {
 
   it("env is always dev", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -77,7 +77,7 @@ describe("buildDeployOutputs", () => {
   it("deployedAt is an ISO string of the provided date", () => {
     const date = new Date("2025-01-15T12:34:56.789Z");
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: date,
@@ -87,7 +87,7 @@ describe("buildDeployOutputs", () => {
 
   it("configSnapshot is a reference to the config", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -103,17 +103,25 @@ describe("formatDeployOutputs", () => {
     collections: {},
   } as any;
 
+  // What the fly target registers. It is an argument now rather than a string inside the renderer,
+  // which is what lets a Compose deploy print its own.
+  const flyTarget = {
+    label: "Fly.io",
+    databaseHint: "managed by Fly Postgres — `fly postgres connect`",
+  };
+
   it("contains the mcpUrl", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const formatted = formatDeployOutputs(outputs, {
-      adminEmail: "admin@example.com",
-      adminPassword: "secret123",
-    });
+    const formatted = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "secret123" },
+      flyTarget,
+    );
     expect(formatted).toContain("https://myapp.fly.dev/mcp");
   });
 
@@ -122,52 +130,69 @@ describe("formatDeployOutputs", () => {
   // `warehousd secrets --show` or `--json` instead.
   it("masks the admin password, and shows it only when asked", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const masked = formatDeployOutputs(outputs, {
-      adminEmail: "admin@example.com",
-      adminPassword: "mysecretpassword",
-    });
+    const masked = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "mysecretpassword" },
+      flyTarget,
+    );
     expect(masked).not.toContain("mysecretpassword");
     expect(masked).toContain("myse...word");
 
     const shown = formatDeployOutputs(
       outputs,
       { adminEmail: "admin@example.com", adminPassword: "mysecretpassword" },
+      flyTarget,
       { showSecrets: true },
     );
     expect(shown).toContain("mysecretpassword");
   });
 
-  it("mentions fly postgres connect when databaseUrl is null", () => {
+  // Was "mentions fly postgres connect when databaseUrl is null", which it did on every target.
+  // The hint is the target's to supply now, and this asserts it is the one that was supplied.
+  it("shows the target's own hint when databaseUrl is null", () => {
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const formatted = formatDeployOutputs(outputs, {
-      adminEmail: "admin@example.com",
-      adminPassword: "secret123",
-    });
-    expect(formatted).toContain("fly postgres connect");
+    expect(
+      formatDeployOutputs(
+        outputs,
+        { adminEmail: "admin@example.com", adminPassword: "secret123" },
+        flyTarget,
+      ),
+    ).toContain("fly postgres connect");
+
+    const compose = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "secret123" },
+      { label: "Docker Compose", databaseHint: "the `db` service", notes: ["start it yourself"] },
+    );
+    expect(compose).toContain("the `db` service");
+    expect(compose).toContain("warehousd deployed to Docker Compose");
+    expect(compose).toContain("start it yourself");
+    expect(compose).not.toContain("fly postgres connect");
   });
 
   it("includes the database URL, with only its password masked", () => {
     const dbUrl = "postgres://user:supersecretpassword@prod.example.com/db";
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: dbUrl,
       now: new Date("2025-01-01T00:00:00Z"),
     });
-    const formatted = formatDeployOutputs(outputs, {
-      adminEmail: "admin@example.com",
-      adminPassword: "secret123",
-    });
+    const formatted = formatDeployOutputs(
+      outputs,
+      { adminEmail: "admin@example.com", adminPassword: "secret123" },
+      flyTarget,
+    );
     // Host, user and database name are the reason anyone reads this line; the credential is not.
     expect(formatted).toContain("prod.example.com/db");
     expect(formatted).toContain("postgres://user:");
@@ -177,6 +202,7 @@ describe("formatDeployOutputs", () => {
       formatDeployOutputs(
         outputs,
         { adminEmail: "admin@example.com", adminPassword: "secret123" },
+        flyTarget,
         { showSecrets: true },
       ),
     ).toContain(dbUrl);
@@ -201,7 +227,7 @@ describe("writeDeployOutputs and readDeployOutputs", () => {
       collections: {},
     } as any;
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -218,7 +244,7 @@ describe("writeDeployOutputs and readDeployOutputs", () => {
       collections: {},
     } as any;
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
@@ -236,7 +262,7 @@ describe("writeDeployOutputs and readDeployOutputs", () => {
       collections: {},
     } as any;
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: "postgres://localhost/test",
       now: new Date("2025-01-01T00:00:00Z"),
@@ -255,7 +281,7 @@ describe("writeDeployOutputs and readDeployOutputs", () => {
     process.env.DATABASE_URL = "postgres://localhost/test";
     const cfg = loadConfig(join(__dirname, "..", "..", "..", "examples", "harbor"));
     const outputs = buildDeployOutputs({
-      appName: "myapp",
+      baseUrl: "https://myapp.fly.dev",
       cfg,
       databaseUrl: null,
       now: new Date("2025-01-01T00:00:00Z"),
