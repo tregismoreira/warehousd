@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { loadConfig, envRefs } from "../src/config/load";
 import { readPosture, ConfigSchema } from "../src/config/schema";
+import { DEPLOY_TARGET_IDS } from "../src/config/targets";
 import { must } from "./helpers/must";
 
 let dir: string;
@@ -624,20 +625,24 @@ describe("deploy config", () => {
     expect(cfg.deploy?.app_name).toBe("my-app");
   });
 
-  it("accepts every target the registry registers", () => {
-    const cfg = ConfigSchema.parse({
-      ...baseWithDeploy,
-      deploy: {
-        target: "compose",
-        app_name: "my-app",
-        region: "local",
-        database: { managed: true },
-      },
-    });
-    expect(cfg.deploy?.target).toBe("compose");
+  it("accepts every registered target", () => {
+    for (const target of DEPLOY_TARGET_IDS) {
+      const cfg = ConfigSchema.parse({
+        ...baseWithDeploy,
+        deploy: {
+          target,
+          app_name: "my-app",
+          // Judged by the target's own pre-flight, not here — which is what lets one schema hold
+          // Fly's `gru` and Railway's `us-west2`.
+          region: "us-west2",
+          database: { managed: true },
+        },
+      });
+      expect(cfg.deploy?.target).toBe(target);
+    }
   });
 
-  it("rejects a target no module registers", () => {
+  it("rejects a target nobody registered", () => {
     expect(() =>
       ConfigSchema.parse({
         ...baseWithDeploy,
@@ -651,6 +656,9 @@ describe("deploy config", () => {
     ).toThrow();
   });
 
+  // The rule is a DNS label, which is what every target makes of this name — a Fly app, a Railway
+  // project, a Compose service. The message used to say "a valid Fly app name", naming one target
+  // in a schema that validates all of them.
   it("rejects app_name with uppercase or underscore", () => {
     expect(() =>
       ConfigSchema.parse({
@@ -662,7 +670,7 @@ describe("deploy config", () => {
           database: { managed: true },
         },
       }),
-    ).toThrow(/valid Fly app name/);
+    ).toThrow(/valid host name/);
   });
 
   // The shape of a region belongs to the target, not to this schema — Fly's slugs are three

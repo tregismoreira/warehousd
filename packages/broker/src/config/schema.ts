@@ -599,11 +599,14 @@ export const CollectionSchema = z
 export const DeploySchema = z
   .object({
     target: z.enum(DEPLOY_TARGET_IDS),
+    // A DNS label, which is what every target makes of this name: Fly's app name, Railway's
+    // project name, a Compose service. The rule is generic on purpose — the message used to say
+    // "a valid Fly app name", which named one target in a schema that validates all of them.
     app_name: z
       .string()
       .regex(
         /^[a-z0-9][a-z0-9-]{0,62}$/,
-        "app_name must be a valid Fly app name (lowercase alphanumerics and dashes)",
+        "app_name must be a valid host name (lowercase letters, digits and dashes, starting with a letter or digit)",
       ),
     region: z.string().min(1, "region must not be empty"),
     image: z.string().optional(),

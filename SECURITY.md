@@ -38,10 +38,11 @@ warehousd assumes the operator does these; failures caused by not doing them are
 not vulnerabilities in warehousd:
 
 - **Serve over TLS.** Sessions, OAuth codes, and tokens all cross the wire.
-  `warehousd deploy` enforces this by serving over HTTPS automatically on
-  Fly.io. Other deployments remain the operator's responsibility — the
-  `compose` target publishes on loopback for a reverse proxy to terminate TLS
-  in front of, and says so in its summary; it cannot do the terminating.
+  `warehousd deploy` enforces this by serving over HTTPS automatically on the
+  platform targets, Fly.io and Railway, which terminate TLS on the domains they
+  issue. Other deployments remain the operator's responsibility — the `compose`
+  target publishes on loopback for a reverse proxy to terminate TLS in front of,
+  and says so in its summary; it cannot do the terminating.
 - **Turn demo mode off** (`demo: false` / no `WAREHOUSD_DEMO`). Demo mode seeds
   three accounts with the password `demo` and shows them on the login page.
   `warehousd deploy` refuses the deployment if demo mode is on, whichever
@@ -53,7 +54,8 @@ not vulnerabilities in warehousd:
   indexes it into `data_live` on every start where the directory is present, so
   treat naming it as granting the deployment read access to that content.
   `warehousd deploy` never puts those directories in the bundle it ships — as
-  an image layer on Fly.io, as a read-only bind mount under `compose` — so no
+  an image layer on Fly.io and Railway, as a read-only bind mount under
+  `compose` — so no
   deployment it makes can index them; a container you mount the project
   directory into yourself can, and
   `warehousd index <collection> --env live` remains the explicit one-off path.

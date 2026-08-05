@@ -317,7 +317,7 @@ grant check rather than a shared service account.
 | `warehousd seed [--no-reindex]` | Regenerate synthetic data, then re-index file collections. |
 | `warehousd index <collection>` | Re-index a file collection (`.md`, `.txt`, `.pdf`, `.docx`). |
 | `warehousd embed [collection]` | Fill embeddings for semantic search. Resumable. |
-| `warehousd deploy` | Ship to Fly.io behind a production pre-flight. |
+| `warehousd deploy` | Ship to Fly.io, Railway or a Compose file behind a production pre-flight. |
 
 Every command takes `--json`, `-q/--quiet`, `--no-color` and `--verbose`.
 Progress goes to stderr and results to stdout, so `warehousd status --json | jq`
@@ -354,7 +354,7 @@ yet built:
 | Real-data import | **real** | Admin-only CSV/JSON, with append, upsert and delete modes and a dry-run preview. Every mode writes revisions: the import role holds no UPDATE on a data column and no DELETE at all, so a correction supersedes a value rather than overwriting it. |
 | App-schema migrations | **real** | Ordered and versioned, recorded in `app.schema_migrations`. Applied under an advisory lock so concurrent boots cannot race, each in its own transaction so a failure rolls back and can be retried rather than leaving a half-applied schema. Collection DDL remains additive — type changes, renames and drops are still not applied to an existing collection. |
 | Semantic / vector search | **real** | `text`, `semantic` and `hybrid` modes on `search_documents`; HNSW over pgvector, dimension from config. Hybrid is Reciprocal Rank Fusion over two CTEs that both read one scoped CTE, so grant predicates apply before either ranking and either LIMIT. The query vector is derived server-side — a client cannot supply one. Local ONNX embedder by default; OpenAI-compatible endpoints are opt-in. |
-| `warehousd deploy` | **real** | Provisions to Fly.io; enforces the demo-off expectation mechanically. |
+| `warehousd deploy` | **real** | Provisions to Fly.io, Railway or a rendered Compose stack, each behind one `DeployTarget`; enforces the demo-off expectation mechanically whichever it is. |
 | Write path (MCP, REST, and review queue) | **real** | Append-only revisions; `proposal_only` grants hold writes pending until a human approves. Approve/reject are never MCP tools. |
 | Masking / transform postures | **real** | `read: mask` with seven transforms, computed in SQL so the raw value is never fetched. Masked fields are projection-only — filtering, ordering, grouping and aggregating over one are refused, which is what stops a mask being decorative. `unmask: allow` makes the raw value separately grantable. |
 | Connect-in-place to external databases | **real** | `postgres_fdw` foreign tables inside `data_live`, so views, grants, postures and the SQL builder are unchanged. Read-only enforced by the database; columns declared rather than imported; `apply` verifies the remote matches. Tenant isolation is the view predicate alone — one wall rather than two, see SECURITY.md. |
@@ -429,6 +429,7 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 | [docs/connect-claude.md](docs/connect-claude.md) | Adding the MCP connector end to end |
 | [docs/configure-sso.md](docs/configure-sso.md) | Registering an OIDC or SAML IdP |
 | [docs/deploy-fly.md](docs/deploy-fly.md) | End-to-end Fly.io deployment runbook |
+| [docs/deploy-railway.md](docs/deploy-railway.md) | End-to-end Railway deployment runbook |
 | [docs/deploy-compose.md](docs/deploy-compose.md) | Running the stack on your own machine with Docker Compose |
 | [docs/deploy-database.md](docs/deploy-database.md) | Pointing a deployment at Supabase, Neon, Railway or your own Postgres |
 | [examples/harbor/README.md](examples/harbor/README.md) | The demo project end to end — collections, personas, the grant arc |
@@ -448,8 +449,8 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 
 ## Roadmap
 
-Aggregate-only postures with inference-leak protection · more deploy targets ·
-IdP group→role mapping.
+Aggregate-only postures with inference-leak protection · IdP group→role
+mapping.
 
 [docs/roadmap.md](docs/roadmap.md) has the detail, and states where the
 open-source line sits: everything shipped is MIT and stays MIT.

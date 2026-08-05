@@ -54,12 +54,13 @@ sso:                     # optional. Absent means every SSO user is provisioned 
         wh-managers: manager
       default_role: member   # default member
 deploy:
-  target: fly          # only supported value
-  app_name: harbor-warehousd   # ^[a-z0-9][a-z0-9-]{0,62}$, globally unique on Fly
+  target: fly          # fly | railway | compose
+  app_name: harbor-warehousd   # ^[a-z0-9][a-z0-9-]{0,62}$; the Fly app, Railway project
+                               # or Compose service name, so unique where the target requires it
   region: gru          # whatever the target calls a region; checked at pre-flight, not here
   image: warehousd:local   # optional — override the published base image
   database:
-    managed: true      # provision Fly Postgres, OR:
+    managed: true      # let the target provision Postgres, OR:
     # url: ${env:PROD_DATABASE_URL}   # attach a Postgres you already run
     # provider: supabase              # optional — only with url; usually detected from the host
 taxonomies: {}         # see below
