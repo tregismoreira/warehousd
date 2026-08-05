@@ -158,6 +158,12 @@ matching the CLI's own version. An entry below therefore describes both.
   `no-explicit-any`.
 - Coverage measurement (`pnpm test:coverage`), merged across both test passes.
 - CodeQL, Dependabot, `pnpm audit`, and SHA-pinned GitHub Actions.
+- A release is gated on a full CI run. `release.yml` opens the GitHub Release as a draft, calls
+  `ci.yml` as a reusable workflow against the tagged commit, and publishes the image, the npm
+  package and the release itself only once every job is green. A tag matched neither of `ci.yml`'s
+  triggers, so `git push --follow-tags` published whatever the tag pointed at with no test having
+  run against it. A prerelease now goes to npm's `next` dist-tag instead of becoming what a bare
+  `npm i warehousd` installs, matching the `:latest` handling the image tags already had.
 - The test harness sweeps its own leftover databases instead of leaking one per suite per run.
 
 ### Fixed

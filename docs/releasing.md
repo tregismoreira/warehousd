@@ -9,6 +9,9 @@ They are coupled: `warehousd start` pulls `ghcr.io/tregismoreira/warehousd:<cli-
 where `<cli-version>` is baked into the bundle by tsup at build time. **The Docker tag the
 release pushes is bare — `0.2.0`, not `v0.2.0`.** The `v` prefix lives only on the git tag.
 
+A GitHub Release is published alongside them, carrying the generated notes and the packed CLI
+tarball. It is a record, not a distribution channel: nothing installs from it.
+
 ## Versioning policy
 
 warehousd follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). One version
@@ -60,28 +63,56 @@ git push --follow-tags
 The tag must be `v` + the exact `version` in `packages/cli/package.json`. The workflow
 refuses to run otherwise.
 
+Then wait. A draft release appears within a minute, the full test suite runs against the tagged
+commit, and nothing reaches npm or ghcr.io until all of it is green — expect roughly twenty
+minutes before the release publishes itself.
+
 ## What `.github/workflows/release.yml` does
 
-| Job      | Needs             | What it does                                                                                                                                                                                      |
-| -------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `verify` | —                 | Rejects non-tag refs (so a stray `workflow_dispatch` can't publish), asserts the tag matches the package version, and emits `version` (bare) plus `prerelease`. Holds no permissions.             |
-| `image`  | `verify`          | Builds `apps/web/Dockerfile` for amd64 + arm64 and pushes `:<version>` (what the CLI pulls), `:v<version>` (for humans), and `:latest` — the last only when the version has no prerelease suffix. |
-| `npm`    | `verify`, `image` | Builds and publishes the CLI with `--provenance`. Requires the `NPM_TOKEN` secret.                                                                                                                |
+| Job       | Needs                             | What it does                                                                                                                                                                                     |
+| --------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `verify`  | —                                 | Rejects non-tag refs (so a stray `workflow_dispatch` can't publish), asserts the tag matches the package version, and emits `version` (bare) plus `prerelease`. Holds no permissions.             |
+| `draft`   | `verify`                          | Creates the GitHub Release as a **draft**, with generated notes. Idempotent, so a re-run does not trip over its own first attempt.                                                                |
+| `gates`   | `verify`                          | Calls `ci.yml` as a reusable workflow: lint, typecheck, format, audit, both vitest passes, the browser suite on three shards, the tarball smoke test and the Docker e2e run — against the tag.    |
+| `image`   | `verify`, `gates`                 | Builds `apps/web/Dockerfile` for amd64 + arm64 and pushes `:<version>` (what the CLI pulls), `:v<version>` (for humans), and `:latest` — the last only when the version has no prerelease suffix. |
+| `npm`     | `verify`, `gates`, `image`        | Builds the CLI, packs the tarball as a run artifact, and publishes with `--provenance` under the `latest` or `next` dist-tag. Requires the `NPM_TOKEN` secret.                                    |
+| `publish` | `verify`, `draft`, `image`, `npm` | Attaches the packed tarball to the release and flips the draft to published (as a prerelease where applicable).                                                                                   |
 
-Ordering matters: the version check used to live in the npm job, so a bad run could move
-`:latest` before anything validated it.
+Ordering matters twice over. The version check used to live in the npm job, so a bad run could
+move `:latest` before anything validated it. And until `gates` existed, a tag matched neither of
+`ci.yml`'s triggers — `push: [main]` nor `pull_request` — so `git push --follow-tags` published
+whatever the tag pointed at with no test having run against it at all. `ci.yml` is *called*, not
+copied: a second copy of those jobs would drift from the one pull requests run, and the point of
+the gate is that a release is held to the same bar a branch is.
+
+A release therefore occupies about six runners for roughly twenty minutes before anything reaches
+a registry. That is the price of the gate, and it is paid on tags only.
+
+## When a gate fails
+
+Nothing was published — `image`, `npm` and `publish` all sit behind `gates`, and a red suite
+leaves the draft release unpublished. npm and ghcr.io are untouched, so there is nothing to yank.
+
+Tags are not reused. Delete the draft and the tag, fix the branch, and cut a new version:
+
+```bash
+gh release delete v0.2.0 --yes
+git push --delete origin v0.2.0
+git tag -d v0.2.0
+```
 
 ## Prereleases
 
-Any version containing a `-` is treated as a prerelease and does **not** move `:latest`:
+Any version containing a `-` is treated as a prerelease. It does **not** move the `:latest` image
+tag, it publishes to npm under the `next` dist-tag rather than `latest`, and the GitHub Release is
+marked as a prerelease:
 
 ```bash
 # in packages/cli/package.json: "version": "0.3.0-rc.1"
 git tag v0.3.0-rc.1 && git push --follow-tags
 ```
 
-Note that npm still publishes it under the `latest` dist-tag unless you add `--tag next` to
-the publish step — the prerelease handling above covers the Docker side only.
+Installing one is then explicit — `npm i warehousd@next`, or `npx warehousd@0.3.0-rc.1`.
 
 ## Verifying a release
 

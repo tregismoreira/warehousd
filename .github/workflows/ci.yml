@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Called by release.yml on a tag. A tag matches neither trigger above, so before this the
+  # release path ran no gate at all: `git push --follow-tags` went straight to npm and ghcr.io.
+  # The `changes` job below classifies anything that is not a pull request as "run everything",
+  # and inside a called workflow `github.event_name` is the caller's event — `push`, for a tag —
+  # so a release run gets every job with no path filtering.
+  workflow_call:
 
 # Every job declares its own `permissions` as well. This is the floor: a job that forgets to narrow
 # still cannot write. release.yml has done this since it was written (`permissions: {}` on verify);
