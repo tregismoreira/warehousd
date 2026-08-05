@@ -864,8 +864,10 @@ unbounded growth is the price of a trail the application cannot rewrite.
 For backups, the order that matters is: `app.grants`, `app.audit_events` and
 `app.change_log` are irreplaceable; `data_synth` regenerates from the config with
 a fixed seed (`warehousd regen-synth`); `data_live` has its own upstream and an
-append-only import path. See [deploy-fly.md](deploy-fly.md#backups) for the
-mechanics on Fly.
+append-only import path. The mechanics are per target:
+[deploy-fly.md](deploy-fly.md#backups),
+[deploy-railway.md](deploy-railway.md#backups) and
+[deploy-compose.md](deploy-compose.md#backups).
 
 ## Client credentials and the collection ceiling
 

@@ -71,12 +71,12 @@ is left in place — the block is optional and only `warehousd deploy` reads it.
 `--db-provider` alone is refused, since it names where `deploy.database.url` is
 hosted and there is no block for it to sit in.
 
-| Flag                 |                                                                                |
-| -------------------- | ------------------------------------------------------------------------------ |
-| `--force`            | Overwrite an existing `warehousd.yml`.                                         |
-| `--no-input`         | Never prompt; write the template.                                              |
-| `--target <id>`      | Scaffold a `deploy:` block for `fly`, `railway` or `compose`.                   |
-| `--db-provider <id>` | Who hosts `deploy.database.url`: `supabase`, `neon`, `railway` or `generic`.    |
+| Flag                 |                                                                             |
+| -------------------- | --------------------------------------------------------------------------- |
+| `--force`            | Overwrite an existing `warehousd.yml`.                                      |
+| `--no-input`         | Never prompt; write the template.                                           |
+| `--target <id>`      | Scaffold a `deploy:` block for `fly`, `railway` or `compose`.                |
+| `--db-provider <id>` | Who hosts `deploy.database.url`: `supabase`, `neon`, `railway`, `generic`.   |
 
 The scaffolded `app_name` is the project name as a DNS label (`Acme Data` becomes
 `acme-data`) and `region` is one the target actually has, so the file it writes
