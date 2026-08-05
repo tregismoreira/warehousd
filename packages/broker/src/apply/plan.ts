@@ -1,5 +1,5 @@
-import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
+import type { Queryable } from "../db/queryable";
 import { declaredTables, declaredPkField, type DeclaredColumn } from "./ddl";
 
 /**
@@ -160,7 +160,7 @@ function normalizeUdt(udtName: string, dataType: string): string {
 
 type ActualColumn = { schema: string; table: string; column: string; pgType: string };
 
-async function reflectColumns(db: Pool): Promise<ActualColumn[]> {
+async function reflectColumns(db: Queryable): Promise<ActualColumn[]> {
   const { rows } = await db.query<{
     table_schema: string;
     table_name: string;
@@ -183,7 +183,7 @@ async function reflectColumns(db: Pool): Promise<ActualColumn[]> {
 // The declared pk is a real primary key on a plain dataset, and the <collection>_current_idx
 // unique index on a writable one (where _rev holds the primary key). Read both, so pk_change means
 // the same thing either way.
-async function reflectPk(db: Pool): Promise<Map<string, string>> {
+async function reflectPk(db: Queryable): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const pk = await db.query<{ table_schema: string; table_name: string; column_name: string }>(
     `select tc.table_schema, tc.table_name, kcu.column_name
@@ -213,7 +213,7 @@ async function reflectPk(db: Pool): Promise<Map<string, string>> {
  * `applyConfig` acts on, and the only producer that can see a column whose type drifted without
  * any config change to explain it.
  */
-export async function planFromSchema(db: Pool, cfg: WarehousdConfig): Promise<SchemaChange[]> {
+export async function planFromSchema(db: Queryable, cfg: WarehousdConfig): Promise<SchemaChange[]> {
   const actual = await reflectColumns(db);
   const pks = await reflectPk(db);
   const changes: SchemaChange[] = [];

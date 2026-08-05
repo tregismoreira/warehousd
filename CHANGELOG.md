@@ -160,4 +160,21 @@ matching the CLI's own version. An entry below therefore describes both.
 - CodeQL, Dependabot, `pnpm audit`, and SHA-pinned GitHub Actions.
 - The test harness sweeps its own leftover databases instead of leaking one per suite per run.
 
+### Fixed
+
+- warehousd works against a hosted Postgres that installs its extensions outside `public`.
+  Supabase ships pgcrypto preinstalled in a schema called `extensions`, which made
+  `create extension if not exists pgcrypto` a silent no-op — and left every unqualified reference
+  to one of those extensions unresolvable for the data roles, whose `search_path` is
+  `"$user", public`. The failure mode was the worst kind: apply succeeded, boot succeeded, and the
+  first masked read (`hmac`) or semantic search (`<=>`) failed at request time as an
+  `internal_error`. `applyConfig` now reads back where `vector`, `pgcrypto` and `postgres_fdw`
+  actually landed, grants the `warehousd_*` roles usage on that schema, and puts it on their
+  `search_path` — scoped to the one database, because roles are cluster-global. A Postgres that
+  keeps its extensions in `public` is left untouched.
+- The boot wait for Postgres no longer leaks a connection pool per failed attempt. It constructed
+  one per retry and ended it only on success, so a 60s wait at 500ms intervals left up to 120
+  dangling. Against a local container that answers immediately this cost nothing; against a hosted
+  endpoint resuming from suspend, the whole wait is failed attempts.
+
 [Unreleased]: https://github.com/tregismoreira/warehousd/commits/main
