@@ -11,6 +11,13 @@ on:
 permissions:
   contents: read
 
+# Two tags pushed close together must not interleave their publishes: the second would race the
+# first for `:latest` and for npm's dist-tag. Queue them instead of cancelling — a release that is
+# already halfway through pushing an image should finish, not be abandoned mid-registry.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # Runs first and with no permissions: nothing is pushed anywhere until the ref is a tag
   # and the tag matches the CLI package version exactly.
@@ -43,8 +50,53 @@ jobs:
             *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
           esac
 
-  image:
+  # The release exists as a draft for the whole of `gates` below, and is published by `publish` at
+  # the very end. Nothing about the draft is visible to a consumer — npm and ghcr.io are what a
+  # user installs from, and neither is touched until the suite is green — but it gives the run a
+  # place to hang generated notes, and a red gate leaves an unpublished draft behind rather than
+  # nothing at all.
+  draft:
     needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # --generate-notes diffs against the previous tag, which a shallow clone does not have.
+          fetch-depth: 0
+
+      # Idempotent: a re-run of a failed release must not fail here on a draft its own first
+      # attempt created.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; leaving it alone."
+            exit 0
+          fi
+          gh release create "$TAG" --draft --title "$TAG" --generate-notes
+
+  # The whole of CI, against the tagged commit: lint, typecheck, format, audit, both vitest passes,
+  # the browser suite, the tarball smoke test and the Docker e2e run. Until this existed a tag push
+  # matched neither of ci.yml's triggers, so `git push --follow-tags` published whatever the tag
+  # pointed at with nothing having run against it.
+  #
+  # ci.yml is called rather than copied. A second copy of these jobs would drift from the one the
+  # pull requests run, and the entire point of the gate is that a release is held to the same bar a
+  # branch is. A local `uses: ./…` always resolves at the caller's ref, so this runs the tag's own
+  # workflow definitions and checks out the tag. No `secrets:` block: no job in ci.yml reads one.
+  gates:
+    needs: verify
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  image:
+    needs: [verify, gates]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -75,7 +127,7 @@ jobs:
             ${{ needs.verify.outputs.prerelease == 'false' && 'ghcr.io/tregismoreira/warehousd:latest' || '' }}
 
   npm:
-    needs: [verify, image]
+    needs: [verify, gates, image]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -99,6 +151,50 @@ jobs:
       # Path filter, not name filter: `warehousd` also matches the private root package.
       - run: pnpm --filter ./packages/cli build
 
-      - run: pnpm --filter ./packages/cli publish --no-git-checks --access public --provenance
+      # Packed before publishing, so the bytes attached to the GitHub Release are this same build
+      # and a failure here costs nothing — the registry has not been touched yet.
+      - name: Pack the CLI
+        working-directory: packages/cli
+        run: echo "tarball=$(npm pack --silent --pack-destination "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-tarball
+          path: ${{ runner.temp }}/*.tgz
+          if-no-files-found: error
+
+      # The dist-tag is explicit because npm's default is `latest` whatever the version says: a
+      # 0.3.0-rc.1 published without this becomes what a bare `npm i warehousd` installs. The
+      # Docker side has always handled the same case, in the `tags:` block above.
+      - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ needs.verify.outputs.prerelease == 'true' && 'next' || 'latest' }}
+        run: pnpm --filter ./packages/cli publish --no-git-checks --access public --provenance --tag "$DIST_TAG"
+
+  # Last, and only once both registries have the artifacts: the published release is the signal
+  # that a version is real, so it must not appear while an image or a tarball is still missing.
+  publish:
+    needs: [verify, draft, image, npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cli-tarball
+          path: ${{ runner.temp }}/cli-tarball
+
+      # --clobber so a re-run replaces the asset rather than failing on the name.
+      # GitHub excludes a prerelease from "Latest release" on its own, so `--prerelease` is the
+      # only flag needed here.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "$RUNNER_TEMP"/cli-tarball/*.tgz --clobber
+          gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE"
