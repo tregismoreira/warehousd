@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { execFileSync } from "child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "path";
@@ -20,27 +20,12 @@ import {
   type WarehousdConfig,
 } from "@warehousd/broker";
 import { auth } from "../lib/auth.js";
+import { waitForPostgres } from "./wait-for-postgres.js";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
-}
-
-// Wait for Postgres to be ready, retrying for the given timeout
-async function waitForPostgres(appUrl: string, timeoutMs: number): Promise<Pool> {
-  const startTime = Date.now();
-  while (Date.now() - startTime < timeoutMs) {
-    try {
-      const db = new Pool({ connectionString: appUrl });
-      await db.query("select 1");
-      await db.end();
-      return new Pool({ connectionString: appUrl });
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-  }
-  throw new Error(`Timeout waiting for Postgres after ${timeoutMs}ms`);
 }
 
 // Create admin user if it doesn't exist

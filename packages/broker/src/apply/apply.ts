@@ -13,6 +13,8 @@ import {
   DEFAULT_EMBEDDING_DIMENSIONS,
 } from "./ddl";
 import { planFromSchema, type SchemaChange } from "./plan";
+import { ensureExtensionSearchPath } from "../db/search-path";
+import type { Queryable } from "../db/queryable";
 
 // A file collection's documents hang off its files table by FK, and are rebuilt by the indexer
 // from the same source directory, so the two are always dropped as a pair.
@@ -34,7 +36,7 @@ function tablesToDrop(table: string): string[] {
  * Throws one error listing every blocked change rather than one per change: an operator editing
  * their config should see the whole bill, not discover it a field at a time across six deploys.
  */
-async function resolveDestructiveChanges(db: Pool, cfg: WarehousdConfig): Promise<void> {
+async function resolveDestructiveChanges(db: Queryable, cfg: WarehousdConfig): Promise<void> {
   const changes = (await planFromSchema(db, cfg)).filter((c) => c.destructive);
   if (changes.length === 0) return;
 
@@ -88,7 +90,29 @@ async function resolveDestructiveChanges(db: Pool, cfg: WarehousdConfig): Promis
   }
 }
 
+/**
+ * The whole apply runs on ONE connection, checked out for the duration.
+ *
+ * Not a tidiness preference. `ensureExtensionSearchPath` sets a session `search_path` that the
+ * DDL below depends on — `vector(n)` and `vector_cosine_ops` are unqualified — and a session
+ * setting only holds for the connection that received it. Handed a `Pool`, every statement here
+ * would pick whichever client happened to be idle; that reuses one client in practice for
+ * sequential awaits, which is an implementation detail of `pg` and not something DDL correctness
+ * should rest on. Checking one out makes it a fact instead.
+ *
+ * It also removes the interleaving question entirely: nothing else can run a statement between
+ * `resolveDestructiveChanges` deciding a table is empty and the DDL that acts on that.
+ */
 export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
+  const client = await db.connect();
+  try {
+    await applyOn(client, cfg);
+  } finally {
+    client.release();
+  }
+}
+
+async function applyOn(db: Queryable, cfg: WarehousdConfig): Promise<void> {
   await db.query(`create extension if not exists vector`);
   // hmac(), for `mask: { transform: hash }`. Created unconditionally rather than only when some
   // collection declares that transform: a later `warehousd apply` adding one must not be the
@@ -99,6 +123,14 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
   // Postgres forbids it should not fail to boot over a feature it does not use.
   if (Object.keys(cfg.sources ?? {}).length > 0)
     await db.query(`create extension if not exists postgres_fdw`);
+
+  // Immediately after the three above, because it reads back where they actually landed. A
+  // hosted Postgres that ships one of them preinstalled outside `public` makes the
+  // `if not exists` a no-op and leaves every unqualified reference to it unresolvable — see
+  // db/search-path.ts. Here rather than in ensureSchemasAndRoles because the extensions do not
+  // exist yet at that point, and here rather than in the entrypoint because `warehousd apply`
+  // has to stay correct on a re-run too.
+  await ensureExtensionSearchPath(db);
 
   // The shared per-document ACL table, before everything else. Two things need it early: a
   // collection with `acl: true` joins it, so `create view` fails outright if it is not there yet,
@@ -253,7 +285,7 @@ export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void>
  * can be selected at its declared type — rather than approximating it from catalogue metadata.
  */
 async function verifyExternalShape(
-  db: Pool,
+  db: Queryable,
   collection: string,
   cfg: WarehousdConfig,
 ): Promise<void> {
