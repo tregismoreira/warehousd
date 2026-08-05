@@ -44,15 +44,23 @@ export async function confirm(opts: {
 }
 
 /**
- * `dbProvider` is null exactly when `managed` is true: under `managed` the target provisions the
- * database and knows what it built, and `DeploySchema` refuses a `provider` with no `url` for that
- * reason — it would name where a database that does not exist here is hosted.
+ * Two database answers, not one.
+ *
+ * `managed` is about the *local* stack — whether the CLI runs Postgres in Docker on this machine.
+ * `deployManaged` is about production. They were one flag, so choosing a deploy provider also
+ * rewrote the local block to `${env:DATABASE_URL}` and "Docker locally, Supabase in production" —
+ * the ordinary case — could not be scaffolded at all.
+ *
+ * `dbProvider` is null exactly when `deployManaged` is true: under `managed` the target provisions
+ * the database and knows what it built, and `DeploySchema` refuses a `provider` with no `url` for
+ * that reason — it would name where a database that does not exist here is hosted.
  */
 export type InitAnswers = {
   project: string;
   port: number;
   managed: boolean;
   target: DeployTargetId;
+  deployManaged: boolean;
   dbProvider: DbProviderId | null;
 };
 
@@ -88,8 +96,11 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
   });
   if (isCancel(port)) return null;
 
+  // Local first, and about this machine only — the deploy question comes after the target, below.
+  // One question used to answer both, which made "Docker locally, Supabase in production"
+  // unscaffoldable.
   const database = await select({
-    message: "Database",
+    message: "Database for local development",
     options: [
       { value: "managed", label: "Let warehousd run Postgres in Docker", hint: "recommended" },
       { value: "external", label: "Bring my own, via database.url" },
@@ -105,11 +116,26 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
     initialValue: String(defaults.target),
   });
   if (isCancel(target)) return null;
+  const targetId = idIn(target, targets, defaults.target);
+
+  // Asked after the target, because it is the target that would provision one. The phrasing names
+  // it for the same reason: "let Railway provision it" is a different question from "let warehousd
+  // run Docker here", and they were the same prompt.
+  const deployDatabase = await select({
+    message: `Database in production, on ${targets[targetId].label}`,
+    options: [
+      { value: "managed", label: `Let ${targets[targetId].label} provision Postgres` },
+      { value: "external", label: "Attach a Postgres I already run" },
+    ],
+    initialValue: defaults.deployManaged ? "managed" : "external",
+  });
+  if (isCancel(deployDatabase)) return null;
+  const deployManaged = deployDatabase === "managed";
 
   // Only alongside a url. Under `managed` the target provisions the database, and naming a
   // provider for it would be a key that decided nothing while reading as though it did.
   let dbProvider: DbProviderId | null = null;
-  if (!managed) {
+  if (!deployManaged) {
     const provider = await select({
       message: "Who hosts that Postgres",
       options: optionsFrom(dbProviders),
@@ -123,7 +149,8 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
     project: String(project) || defaults.project,
     port: Number(port) || defaults.port,
     managed,
-    target: idIn(target, targets, defaults.target),
+    target: targetId,
+    deployManaged,
     dbProvider,
   };
 }

@@ -105,6 +105,44 @@ collections:
     expect(checks.map((c) => c.id)).toEqual(["flyctl-ready"]);
   });
 
+  // A teardown has to be able to finish against a half-provisioned deploy. Destroying the app used
+  // to throw when there was no app — a deploy that failed before `apps create`, or a repeated
+  // `--destroy` — and so never reached the database app, leaving the expensive half standing and
+  // the operator an error with nothing left to retry.
+  it("destroy carries on to the database app when the app itself is already gone", async () => {
+    const { execFileSync } = await import("node:child_process");
+    vi.mocked(execFileSync).mockImplementation((_cmd, args) => {
+      const argv = args as string[];
+      if (argv[0] === "apps" && argv[1] === "destroy" && argv[2] === "test-app") {
+        throw new Error("Could not find App test-app");
+      }
+      return "";
+    });
+
+    writeFileSync(join(projectDir, "warehousd.yml"), projectYaml("gru"));
+    const cfg = loadConfig(projectDir);
+    const said: string[] = [];
+
+    await targetFor("fly").destroy({
+      projectDir,
+      cfg,
+      deploy: cfg.deploy!,
+      appName: "test-app",
+      region: "gru",
+      state: null,
+      deployDir: join(projectDir, ".warehousd", "deploy"),
+      contextDir: join(projectDir, ".warehousd", "deploy", "context"),
+      localBuild: false,
+      say: (msg) => said.push(msg),
+    });
+
+    const argvs = vi
+      .mocked(execFileSync)
+      .mock.calls.map((c) => (Array.isArray(c[1]) ? (c[1] as string[]).join(" ") : ""));
+    expect(argvs).toContain("apps destroy test-app-db --yes");
+    expect(said.join("\n")).toContain("No app test-app to destroy");
+  });
+
   it("reports flyctl as missing without a deploy block or a loadable config", async () => {
     const { execFileSync } = await import("node:child_process");
     vi.mocked(execFileSync).mockImplementation(() => {

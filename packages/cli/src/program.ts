@@ -49,7 +49,7 @@ program
   .option("--json", "machine-readable output on stdout", false)
   .option("-q, --quiet", "only errors and results", false)
   .option("--no-color", "disable colour (also honours NO_COLOR)")
-  .option("--verbose", "echo every docker and flyctl command", false)
+  .option("--verbose", "echo every docker, flyctl and railway command", false)
   .addHelpText(
     "after",
     `
@@ -412,9 +412,16 @@ program
   .command("doctor")
   .description("check Docker, the server image, ports and config before anything breaks")
   .option("-d, --dir <dir>", "project dir", process.cwd())
+  // Opt-in because it dials the production database and the target's CLI, which the rest of doctor
+  // does not: everything else here is a question about this machine.
+  .option(
+    "--deploy",
+    "also run the deploy pre-flight against deploy.target and its database",
+    false,
+  )
   .action(async (o) => {
     const { theme, json } = ui();
-    const result = await runDoctor(o.dir);
+    const result = await runDoctor(o.dir, { deploy: o.deploy });
     if (json) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } else {

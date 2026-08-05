@@ -210,6 +210,19 @@ function deploy(ctx: TargetContext): Promise<void> {
 }
 
 /**
+ * The default warning is "this will destroy <app> and its database" — which for this target is
+ * simply untrue, and the prompt was asking the operator to confirm a teardown that then printed
+ * "Nothing was destroyed". A prompt that overstates what it does is one people learn to type
+ * through.
+ */
+function destroyWarning(ctx: TargetContext): string {
+  return (
+    `This destroys nothing: ${COMPOSE_FILE} and ${relativePaths(ctx).env} stay on disk, and the ` +
+    `stack itself is yours to stop. What follows is the command that does it.`
+  );
+}
+
+/**
  * Prints the teardown command rather than running it.
  *
  * Every other target destroys something it created on a machine it owns. Here the stack is running
@@ -267,6 +280,7 @@ export const compose: DeployTarget = {
   setSecrets,
   deploy,
   destroy,
+  destroyWarning,
   appUrl,
   notes,
 };

@@ -48,6 +48,32 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Changed
 
+- **`deploy.region` is no longer validated as a three-letter slug by the schema.** Region format
+  belongs to the target, not to the config loader — `us-west2` could not be expressed at all, and
+  a bad region produced a zod issue naming a line number instead of a refusal naming the target.
+  It is a target pre-flight check now (`fly-region`, `railway-region`), which can say which codes
+  that target actually has.
+- The deploy summary names the target it deployed to, and how to reach a database it did not print
+  a URL for. Both used to be Fly's wording on every target: `` managed by Fly Postgres — `fly
+  postgres connect` `` after a Railway deploy.
+- The `app_name` validation message no longer names Fly. The constraint is a DNS label, which every
+  target shares.
+- `warehousd doctor --deploy` runs the deploy pre-flight — the target's own checks and the `db-*`
+  capability probe — without deploying. They were previously unreachable outside `warehousd
+  deploy`, so the only way to find out whether a hosted Postgres would work was to start one.
+  Opt-in, because unlike the rest of `doctor` they dial the production database and the target's
+  CLI. Nothing mutates.
+- `warehousd init` asks about the local database and the production one separately. One shared
+  answer meant choosing a deploy provider also rewrote the *local* `database:` block to
+  `${env:DATABASE_URL}` — so "Docker locally, Supabase in production", the ordinary case, could not
+  be scaffolded.
+- `warehousd deploy --json` carries the target's id and label, its database hint, and its notes.
+  `DeployTarget.notes` exists so a Compose deploy cannot suppress the line saying nothing is
+  running yet; it survived `--quiet` but `--json` returned before anything read it, so a CI caller
+  was told the deploy had succeeded and not that nothing had started.
+- `--destroy` asks the target what it is about to do. It promised "this will destroy <app> and its
+  database, which may hold real data" for every target and then printed "Nothing was destroyed" on
+  Compose, which controls no machine of its own.
 - The audit-failure log no longer carries a driver error's row values. Postgres reports them in
   the error's `DETAIL` field ("Key (home_address)=(...) already exists"), and that line logs the
   richest context the broker produces — it is the only remaining trace of a decision that went
@@ -70,6 +96,38 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Added
 
+- **`deploy.target` — `fly | railway | compose`.** Where a deployment's container runs is a
+  `DeployTarget` behind a registry, and every behavioural difference between the three is a method
+  on it: nothing outside `packages/cli/src/deploy/targets` branches on a target id, and a fourth
+  target is one new file. `fly` remains the default, so an existing `deploy:` block is unchanged.
+  - **Railway.** `railway init`/`add` for the project and its service, `railway add --database
+    postgres` under `managed: true`, a generated `railway.json` carrying the health check and
+    `deploy.region` (Railway has no `--region` flag anywhere), and `railway up --detach`. Railway
+    has no `release_command` equivalent, so the image's own CMD runs the bootstrap and then serves
+    in one container. `railway variables --set K=V` is the only way that CLI sets a variable and
+    the value travels in argv — `--verbose` redacts it, a failed call throws with the CLI's stderr
+    stripped, and `docs/deploy-railway.md` states the residual exposure.
+  - **Docker Compose.** Renders `docker-compose.deploy.yml` and a mode-0600 env file beside the
+    project bundle, and starts nothing: the stack runs on a machine this command does not control.
+    No secret appears in the compose file, `/project` is mounted read-only, and the server is
+    published on loopback for a reverse proxy to sit in front of.
+- **`deploy.database.provider` — `supabase | neon | railway | generic`.** Role URLs are derived
+  through a provider registry rather than by swapping the username. On Supabase's Supavisor pooler
+  the username carries the project ref, so "the same database as `warehousd_dev`" is spelled
+  `warehousd_dev.<project_ref>` — a bare role name authenticates as nobody. The key is an override
+  for a host that does not advertise who runs it (a CNAME, a proxy); the hostname decides
+  otherwise, and `generic` behaves exactly as every URL did before the registry existed.
+- **Deploy pre-flight probes the target database** before an image is built, as `db-reachable`,
+  `db-can-create-role`, `db-extensions`, `db-search-path` and `db-provider`. Every one of these
+  failures otherwise surfaced at the release command or, worse, at the first masked read. They are
+  read-only: they ask the catalogue what is possible, they never create a role or an extension to
+  find out. `db-can-create-role` asks about *inherited* privilege, because Neon's `neondb_owner`
+  and RDS's owner roles get `CREATEROLE` through a grantor role rather than as an attribute;
+  `db-search-path` decides on capability rather than on the roles that happen to exist, so a first
+  deploy against a database that has never booted is answered rather than waved through; and
+  `db-provider` refuses a configured provider the host contradicts.
+- `warehousd init --target <id>` and `--db-provider <id>` scaffold a `deploy:` block
+  non-interactively, with a region the chosen target actually has.
 - **Per-document ACLs.** A grant can scope to a *set* of documents but could never exempt an
   individual one — document filters are `eq`/`in`, ANDed, with no `OR` and no negation. A
   collection that declares `acl: true` gets the orthogonal rule instead: a document with no ACL is
@@ -168,6 +226,21 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ### Fixed
 
+- The deploy health poll requested `/api/health/api/health` and timed out for three minutes against
+  an app that was serving. The endpoint was appended twice — once by the caller and once inside the
+  poll — so a successful deploy was reported as a failed one.
+- A first Railway deploy no longer fails at `railway domain`. The domain is generated before the
+  deploy, because `BETTER_AUTH_URL` has to be in the secrets the release reads, so the service has
+  no deployment and Railway has no port to infer one from; the container port is passed explicitly
+  now, and the `--json` body is preferred over the printed line, whose wording has changed across
+  CLI versions.
+- A first Railway deploy no longer refuses over a database that is still provisioning. `railway
+  add --database postgres` returns once the request is accepted, not once the database exists, so
+  reading its `DATABASE_URL` immediately afterwards saw nothing and reported "check the database
+  provisioned cleanly" on the happy path. The read is retried for up to 30s.
+- `warehousd deploy --destroy` on Fly can tear down a half-provisioned deploy. Destroying the app
+  threw when there was no app — a deploy that failed before `apps create`, or a repeated
+  `--destroy` — and never reached the database app, leaving the expensive half standing.
 - warehousd works against a hosted Postgres that installs its extensions outside `public`.
   Supabase ships pgcrypto preinstalled in a schema called `extensions`, which made
   `create extension if not exists pgcrypto` a silent no-op — and left every unqualified reference

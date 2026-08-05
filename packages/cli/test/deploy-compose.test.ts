@@ -304,6 +304,57 @@ describe("the compose target", () => {
     expect(existsSync(join(projectDir, ENV_FILE))).toBe(true);
   });
 
+  // The prompt used to promise "this will destroy <app> and its database, which may hold real
+  // data" for every target, and then this one printed "Nothing was destroyed". A prompt that
+  // overstates what it does is one people learn to type through.
+  it("warns about what --destroy actually does here, not about a database", () => {
+    const cfg = { deploy: { database: { managed: true } } };
+    const warning = targetFor("compose").destroyWarning!({
+      projectDir,
+      cfg: cfg as never,
+      deploy: cfg.deploy as never,
+      appName: "test-app",
+      region: "local",
+      state: null,
+      deployDir: join(stateDir(projectDir), "deploy"),
+      contextDir: join(stateDir(projectDir), "deploy", "context"),
+      localBuild: false,
+      say: () => undefined,
+    });
+
+    expect(warning).toContain("destroys nothing");
+    expect(warning).not.toMatch(/real data/);
+    expect(warning).toContain(COMPOSE_FILE);
+  });
+
+  // `notes` exists because a Compose deploy renders a file and starts nothing, and the line saying
+  // so must not be suppressible. It survived --quiet, which silences `say`, but --json returned
+  // before anything read it: a CI caller was told the deploy succeeded and not that nothing ran.
+  it("--json carries the target, its database hint and its notes", async () => {
+    writeFileSync(join(projectDir, "warehousd.yml"), projectYaml("    managed: true"));
+
+    const written: string[] = [];
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+    try {
+      await runDeploy(projectDir, { yes: true, allowLocalLogin: true, json: true });
+    } finally {
+      stdout.mockRestore();
+    }
+
+    const payload = JSON.parse(written.join(""));
+    expect(payload.target).toBe("compose");
+    expect(payload.label).toBe("Docker Compose");
+    expect(payload.databaseHint).toContain("docker compose");
+    expect(payload.notes.join("\n")).toContain("Nothing is running yet");
+    expect(payload.notes.join("\n")).toContain("TLS is yours to terminate");
+    // Still the whole outputs contract, plus the credentials --json is asked for.
+    expect(payload.apiUrl).toBe("http://localhost:8722");
+    expect(payload.adminEmail).toBe("admin@test-app");
+  });
+
   // The attached-database branch cannot go through runDeploy: pre-flight dials `database.url` for
   // its capability checks, and there is no Postgres here to dial. The branch itself is one line —
   // an attached database has its own password, and POSTGRES_PASSWORD would be interpolated into a

@@ -1,9 +1,12 @@
 import type { Pool } from "pg";
 import { MIGRATIONS } from "./migrations";
 
-// Fixed advisory-lock key. The container entrypoint is the Fly release command, and a rolling
-// deploy or `docker compose up --scale` can start two of them against one database; without this
-// both would try to apply the same migration and the loser would fail on a half-applied one.
+// Fixed advisory-lock key. The bootstrap runs in one of two shapes — Fly runs it as a
+// `release_command` on a one-off machine before the new release takes traffic, while Railway and
+// Compose run it as the container's own CMD (docs/deploy-railway.md, "The release command") — and
+// both can have two of them against one database at once: a rolling deploy, or
+// `docker compose up --scale`. Without this both would try to apply the same migration and the
+// loser would fail on a half-applied one.
 const LOCK_KEY = 87220001;
 
 /**
@@ -12,9 +15,11 @@ const LOCK_KEY = 87220001;
  *
  * Each migration runs in its own transaction, so a failure rolls that migration back and leaves
  * the ledger consistent: a corrected migration can be retried on the next boot rather than
- * needing the database repaired by hand. That matters because a failed migration aborts the Fly
- * release and the previous release keeps serving — the database has to still be in a state the
- * old code can use.
+ * needing the database repaired by hand. That matters in both deploy shapes, differently. On Fly a
+ * failed migration aborts the release and the previous one keeps serving, so the database has to
+ * still be in a state the old code can use. On Railway and Compose the bootstrap is the
+ * container's own CMD, so a failure is a container that does not come up — and the next attempt
+ * has to be able to start from where this one stopped.
  */
 export async function migrateApp(db: Pool): Promise<string[]> {
   await db.query(`create schema if not exists app`);

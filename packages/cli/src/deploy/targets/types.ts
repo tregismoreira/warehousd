@@ -91,6 +91,15 @@ export type DeployTarget = {
   deploy(ctx: TargetContext): Promise<void>;
   destroy(ctx: TargetContext): Promise<void>;
   /**
+   * What the operator is about to agree to, above the type-the-app-name prompt.
+   *
+   * Absent when the default is true: `--destroy` destroys the app and its database, and the
+   * database may hold real data. It exists for the target where that sentence is a lie — Compose
+   * destroys nothing, because the stack is running on a machine this command does not control, and
+   * a prompt that overstates what it does trains people to type through prompts.
+   */
+  destroyWarning?(ctx: TargetContext): string;
+  /**
    * The base URL to poll `/api/health` against and to print.
    *
    * null means the operator starts the stack themselves, which skips the health poll — there is no

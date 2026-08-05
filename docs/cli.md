@@ -201,6 +201,30 @@ you want to know which part is at fault.
   ✓  containers   2 container(s), server running
 ```
 
+| Flag       |                                                              |
+| ---------- | ------------------------------------------------------------ |
+| `--deploy` | Also run the deploy pre-flight — see below. Off by default.   |
+
+`--deploy` appends the checks `warehousd deploy` runs before it builds anything:
+the target's own (`flyctl-ready`, `railway-region`, `compose-renders-only` …)
+and the `db-*` capability probe against `deploy.database.url`. Nothing mutates —
+every one of them is a read.
+
+It is opt-in because the rest of `doctor` is a question about this machine,
+answered from local state, while these dial the production database and the
+target's CLI. Without the flag they are unreachable outside a deploy, which
+meant the only way to find out whether a hosted Postgres would work was to start
+one.
+
+The inputs are the ones `deploy` uses, so what you see is what a deploy would
+say — including `sso-or-local-login` refusing a project with no identity
+provider configured and no `--allow-local-login`. That is an accurate report of
+a deploy that would be refused, not a broken local stack.
+
+```
+warehousd doctor --deploy
+```
+
 ### `secrets`
 
 The generated credentials, masked unless asked otherwise.
@@ -358,7 +382,7 @@ while the default `--remote-only` path does not.
 | `--allow-local-login` | Enable `admin@warehousd.local` with a generated password, in addition to any configured SSO.       |
 | `--allow-disabled-audit` | Deploy a project configured with `audit.enabled: false`. Nothing it does will be recorded.      |
 | `-y, --yes`           | Skip the re-deploy diff prompt (one-time deploys always prompt).                                   |
-| `--local-build`       | Build the image locally; otherwise use the published one.                                          |
+| `--local-build`       | Fly only. Build the image locally; otherwise use Fly's remote builder. Railway always builds remotely and Compose builds nothing. |
 | `--destroy`           | Tear down what the target created. Requires typing the app name exactly; `--yes` does not bypass. |
 | `--show-secrets`      | Print the admin password and database URL in full instead of masked.                               |
 

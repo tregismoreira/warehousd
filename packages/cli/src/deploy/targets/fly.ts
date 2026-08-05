@@ -100,13 +100,16 @@ async function deploy(ctx: TargetContext): Promise<void> {
   run(deployArgs);
 }
 
+// `tryRun` throughout, and for the same reason on both lines: a teardown has to be able to finish
+// against a half-provisioned deploy. The app itself used to be a `run` — so a deploy that failed
+// before `apps create`, or a second `--destroy`, threw on the app that was already gone and never
+// reached the database app, leaving the expensive half standing. Railway's destroy already worked
+// this way.
 function destroy(ctx: TargetContext): Promise<void> {
-  run(["apps", "destroy", ctx.appName, "--yes"]);
+  if (!tryRun(["apps", "destroy", ctx.appName, "--yes"]).ok) {
+    ctx.say(`No app ${ctx.appName} to destroy.`);
+  }
 
-  // `tryRun`, not `run`: a deploy that failed between `apps create` and `postgres create` leaves no
-  // database app, and throwing here would make the teardown of a half-provisioned deploy
-  // impossible — the app itself is already gone by this point, so the operator would be left with
-  // an error and nothing left to retry.
   if (ctx.deploy.database.managed) {
     const dbApp = dbAppName(ctx.appName);
     if (!tryRun(["apps", "destroy", dbApp, "--yes"]).ok) {

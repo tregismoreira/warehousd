@@ -101,9 +101,17 @@ What happens, in order:
    warehousd reads `DATABASE_URL` back off that service and sets it as
    `APP_DATABASE_URL` on the app — preferring the private
    `*.railway.internal` hostname, which skips the public proxy and its egress,
-   and falling back to `DATABASE_PUBLIC_URL`.
-3. **`railway domain`** — generates the public hostname if the service has none,
-   which is what `BETTER_AUTH_URL` and the health poll need.
+   and falling back to `DATABASE_PUBLIC_URL`. Provisioning is asynchronous on
+   Railway's side, so that read is retried for up to 30s before it is treated as
+   a database that failed to come up.
+3. **`railway domain --port 8722 --json`** — generates the public hostname if
+   the service has none, which is what `BETTER_AUTH_URL` and the health poll
+   need. The port is passed explicitly because this runs *before* the deploy —
+   `BETTER_AUTH_URL` has to be in the secrets the release reads — so there is no
+   running deployment for Railway to infer one from, and without it a first
+   deploy got no domain at all. The `--json` body is what warehousd reads; the
+   printed line is a fallback for older CLI versions, and `RAILWAY_PUBLIC_DOMAIN`
+   is read back for a service that already had one.
 4. **`railway variables --set …`** — the generated secrets, plus `PORT`,
    `WAREHOUSD_PROJECT_DIR` and `NODE_ENV`. Fly gets those three from `fly.toml`'s
    `[env]`; Railway has no equivalent file, so they travel the same channel.

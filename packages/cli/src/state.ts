@@ -26,9 +26,9 @@ export type Outputs = {
   };
 };
 
-// Outputs written to disk after a Fly deployment. Unlike the local outputs contract, databaseUrl
-// is null when Fly manages Postgres — never write a production URL into a file at rest. devClient
-// does not apply to production deploys.
+// Outputs written to disk after a deployment, whichever target ran it. Unlike the local outputs
+// contract, databaseUrl is null when the target manages Postgres — never write a production URL
+// into a file at rest. devClient does not apply to production deploys.
 export type DeployOutputs = {
   mcpUrl: string;
   apiUrl: string;

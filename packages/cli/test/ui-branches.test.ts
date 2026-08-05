@@ -69,6 +69,7 @@ const DEFAULTS: InitAnswers = {
   port: 8722,
   managed: true,
   target: "fly",
+  deployManaged: true,
   dbProvider: null,
 };
 
@@ -110,6 +111,7 @@ describe("promptInit validation", () => {
       port: 9999,
       managed: true,
       target: "fly",
+      deployManaged: true,
       dbProvider: null,
     });
   });
@@ -140,12 +142,14 @@ describe("applyAnswers", () => {
     port: 9001,
     managed: true,
     target: "fly",
+    deployManaged: true,
     dbProvider: null,
   };
   const EXTERNAL: InitAnswers = {
     ...MANAGED,
     managed: false,
     target: "railway",
+    deployManaged: false,
     dbProvider: "supabase",
   };
 
@@ -201,6 +205,23 @@ describe("applyAnswers", () => {
     );
     // Exactly one of the two shapes — DeploySchema refuses both.
     expect(out).not.toContain("    managed: true");
+  });
+
+  // The two blocks answer different questions and used to share one flag, so a deploy provider
+  // rewrote the local database as well. This is the pair that could not be expressed.
+  it("keeps the local database managed while the deploy one is somebody else's", () => {
+    const out = applyAnswers(TEMPLATE, { ...MANAGED, deployManaged: false, dbProvider: "neon" });
+    expect(out).toContain("# database:");
+    expect(out).not.toContain("database:\n  url:");
+    expect(out).toContain("    url: ${env:PROD_DATABASE_URL}");
+    expect(out).toContain("    provider: neon");
+  });
+
+  it("keeps a local url while the target still provisions production", () => {
+    const out = applyAnswers(TEMPLATE, { ...MANAGED, managed: false });
+    expect(out).toContain("database:\n  url: ${env:DATABASE_URL}");
+    expect(out).toContain("    managed: true");
+    expect(out).not.toContain("PROD_DATABASE_URL");
   });
 
   it("slugifies the project name into an app name the schema accepts", () => {

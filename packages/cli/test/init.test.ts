@@ -134,7 +134,7 @@ describe("runInit", () => {
       target: "railway",
       dbProvider: "supabase",
     });
-    expect(defaults.managed).toBe(false);
+    expect(defaults.deployManaged).toBe(false);
     await runInit(projectDir, { force: true, answers: defaults });
 
     const cfg = loadConfig(projectDir);
@@ -145,6 +145,58 @@ describe("runInit", () => {
       database: { url: process.env.PROD_DATABASE_URL, provider: "supabase" },
     });
     delete process.env.PROD_DATABASE_URL;
+  });
+
+  /**
+   * The ordinary case, and the one a single shared flag made unscaffoldable: Docker locally,
+   * somebody else's Postgres in production. `--db-provider` used to set one `managed` flag that
+   * both blocks read, so naming a deploy provider rewrote the *local* database to
+   * `${env:DATABASE_URL}` — a dev stack pointed at whatever that variable happened to hold.
+   */
+  it("leaves the local database block alone when only the deploy one is somebody else's", async () => {
+    process.env.PROD_DATABASE_URL = "postgres://u:p@db.abc.supabase.co:5432/postgres";
+    const { defaults } = initDefaults({
+      project: "harbor",
+      target: "fly",
+      dbProvider: "supabase",
+    });
+    expect(defaults.managed).toBe(true);
+    await runInit(projectDir, { force: true, answers: defaults });
+
+    const written = readFileSync(join(projectDir, "warehousd.yml"), "utf8");
+    expect(written).toContain("# database:");
+    expect(written).toContain("#   managed: true");
+    // Only the deploy block carries a url, and it is the production one.
+    expect(written).toMatch(/^ {4}url: \$\{env:PROD_DATABASE_URL\}$/m);
+    expect(written).not.toMatch(/^ {2}url: /m);
+
+    const cfg = loadConfig(projectDir);
+    expect(cfg.database).toBeUndefined();
+    expect(cfg.deploy?.database).toEqual({
+      url: process.env.PROD_DATABASE_URL,
+      provider: "supabase",
+    });
+    delete process.env.PROD_DATABASE_URL;
+  });
+
+  // The other half of the split: a local database of your own says nothing about production, where
+  // the target is still free to provision one.
+  it("keeps a local url and a managed deploy database independent", async () => {
+    await runInit(projectDir, {
+      force: true,
+      answers: {
+        project: "harbor",
+        port: 8722,
+        managed: false,
+        target: "fly",
+        deployManaged: true,
+        dbProvider: null,
+      },
+    });
+
+    const cfg = loadConfig(projectDir);
+    expect(cfg.database?.url).toBe(process.env.DATABASE_URL);
+    expect(cfg.deploy?.database).toEqual({ managed: true });
   });
 
   it("refuses a provider with no target, since it would have no block to sit in", () => {

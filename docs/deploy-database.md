@@ -22,7 +22,7 @@ invariant rather than a convenience:
 
 | Need | Why |
 | --- | --- |
-| `CREATEROLE` or superuser on the connecting role | Boot creates `warehousd_dev`, `warehousd_live`, `warehousd_dev_write` and `warehousd_live_write` and rotates their passwords. Those four roles **are** the dev/live wall: the database refuses a cross-environment read, not the broker. |
+| `CREATEROLE` or superuser on the connecting role, directly or inherited | Boot creates `warehousd_dev`, `warehousd_live`, `warehousd_dev_write` and `warehousd_live_write` and rotates their passwords. Those four roles **are** the dev/live wall: the database refuses a cross-environment read, not the broker. Membership counts — see below. |
 | `vector` and `pgcrypto` | `pgcrypto` for `hmac()`, behind `mask: { transform: hash }`; `vector` for semantic search and the file-collection embedding column. |
 | `postgres_fdw`, only if you declare `sources:` | Neither Supabase nor Neon allows it. A project with no external source is never asked for it. |
 | A reachable schema for any of the above installed outside `public` | Covered below. |
@@ -40,7 +40,37 @@ lines in the pre-flight output:
 ```
 
 These run only when `database.url` is set. Under `managed: true` there is no
-database yet to ask.
+database yet to ask. `warehousd doctor --deploy` runs the same lines without
+deploying anything.
+
+### CREATEROLE through membership
+
+`db-can-create-role` asks whether the connecting role has `CREATEROLE` or
+`SUPERUSER` **directly or through any role it inherits from**, not whether the
+attribute is set on the role itself. That distinction is the whole check on a
+hosted provider: Neon's `neondb_owner` has neither attribute and gets
+`CREATEROLE` through membership in `neon_superuser`, and RDS has the same shape
+with `rds_superuser`. Reading the role's own attributes refused every correctly
+configured Neon project.
+
+One caveat, stated rather than hidden: stock Postgres does not confer
+`CREATEROLE` through membership — role attributes are not inherited — so on a
+vanilla server this check can pass for a role that would still fail at boot. It
+errs toward not blocking on purpose. The providers this matters for patch
+exactly this behaviour, and the release command still catches the genuine
+failure; refusing every Neon deployment up front does not.
+
+### db-search-path on a first deploy
+
+`db-search-path` decides on capability, not on the roles that happen to exist.
+On a database that has never booted there are no `warehousd_*` roles yet, so
+"which of them lack usage on the extension schema" is a question with no rows —
+and the check used to read that as a pass. It now refuses unless the connecting
+role owns the schema, or `PUBLIC` already holds usage on it (which a role
+created later inherits).
+
+That is the run where the answer matters. After the first boot,
+`ensureExtensionSearchPath` has already done the work.
 
 ## Extensions outside `public`
 
@@ -67,9 +97,23 @@ provider-specific checks — is the fallback for anything unrecognised, which is
 exactly how every URL behaved before this key existed.
 
 Set it when the host does not advertise the provider: a CNAME onto your own
-domain, or a proxy in front. Getting it wrong is not a parse error; it is a
-role that cannot authenticate. Setting it without a `url` is refused, because
-it would name where a database that is not there is hosted.
+domain, or a proxy in front. Setting it without a `url` is refused, because it
+would name where a database that is not there is hosted.
+
+Getting it wrong is not a parse error; it is a role that cannot authenticate.
+So `db-provider` refuses a value the host contradicts — `provider: supabase` on
+a `*.neon.tech` url — naming both:
+
+```
+✗ db-provider  warehousd.yml says provider: supabase (Supabase), but
+               ep-cool-1.eu-central-1.aws.neon.tech:5432 is a Neon host. Role names are
+               derived per provider, so the wrong one produces a role that cannot
+               authenticate. Set provider: neon, or drop the key and let the host decide.
+```
+
+A value set over a host nothing recognises stays valid, and is left alone —
+that is the CNAME case the key exists for, and the only one where you know more
+than the hostname does.
 
 `warehousd init --db-provider <id>` writes the key, alongside the `--target` that
 gives it a block to sit in. It is worth setting there even when the host would
@@ -115,9 +159,12 @@ Add `?sslmode=require` to the URL. Neon's proxy negotiates TLS regardless, so
 this is about your client refusing a downgrade rather than about today's
 connection being in the clear; the pre-flight says so rather than refusing.
 
-Connect as `neondb_owner` (or whichever role owns the database). Roles created
-through SQL are not members of `neon_superuser`, which is fine — the four
-warehousd roles never need to own anything, only the grants boot hands them.
+Connect as `neondb_owner` (or whichever role owns the database). It has no
+`CREATEROLE` attribute of its own — it is a member of `neon_superuser`, which
+is where the privilege comes from, and `db-can-create-role` asks the inherited
+question for exactly this reason. Roles created through SQL are not members of
+`neon_superuser`, which is fine: the four warehousd roles never need to own
+anything, only the grants boot hands them.
 
 A Neon endpoint that has scaled to zero takes a few seconds to wake. Boot waits
 up to 60s for Postgres to answer, so a suspended endpoint is a slow first

@@ -7,6 +7,9 @@ import type { InitAnswers } from "./ui/prompt";
 /** The port the template ships with, and what the wizard offers. */
 const DEFAULT_PORT = 8722;
 
+// The two id lists are interpolated from the registries rather than hand-written, the same way the
+// flag help in program.ts already builds them: a fourth target or provider must not be able to
+// appear everywhere except the file `init` writes.
 const WAREHOUSD_TEMPLATE =
   `project: my-app
 server:
@@ -17,7 +20,7 @@ server:
   "${env:DATABASE_URL}" +
   `      # alternative: bring your own Postgres
 # deploy:                         # read only by \`warehousd deploy\` — see docs/cli.md
-#   target: fly                   # fly | railway | compose
+#   target: fly                   # ${DEPLOY_TARGET_IDS.join(" | ")}
 #   app_name: my-app              # unique on the target: lowercase letters, digits and dashes
 #   region: gru                   # whatever the target calls a region
 #   database:
@@ -25,7 +28,7 @@ server:
 #     url: ` +
   "${env:PROD_DATABASE_URL}" +
   `  # attach a Postgres you already run
-#     provider: supabase          # supabase | neon | railway | generic — usually detected
+#     provider: supabase          # ${DB_PROVIDER_IDS.join(" | ")} — usually detected
 
 collections:
   announcements:
@@ -112,10 +115,15 @@ export function initDefaults(opts: {
     defaults: {
       project: opts.project,
       port: DEFAULT_PORT,
-      // Naming a provider is saying the database is somebody else's, which is the answer the
-      // wizard's "bring my own" gives.
-      managed: dbProvider === null,
+      // `--db-provider` is about production, and says nothing about this machine. It used to set
+      // the one shared flag, so naming a deploy provider rewrote the *local* database block to
+      // `${env:DATABASE_URL}` as well — and "Docker locally, Supabase in production" could not be
+      // scaffolded at all.
+      managed: true,
       target: oneOf(opts.target, DEPLOY_TARGET_IDS, "--target") ?? DEFAULT_DEPLOY_TARGET_ID,
+      // Naming a provider is saying the production database is somebody else's, which is the answer
+      // the wizard's "attach a Postgres I already run" gives.
+      deployManaged: dbProvider === null,
       dbProvider,
     },
     fromFlags: opts.target !== undefined,
@@ -155,10 +163,11 @@ function renderDeployBlock(answers: InitAnswers): string {
     `  region: ${targets[answers.target].exampleRegion}`,
     "  database:",
   ];
-  if (answers.dbProvider) {
-    lines.push("    url: ${env:PROD_DATABASE_URL}", `    provider: ${answers.dbProvider}`);
-  } else {
+  if (answers.deployManaged) {
     lines.push("    managed: true");
+  } else {
+    lines.push("    url: ${env:PROD_DATABASE_URL}");
+    if (answers.dbProvider) lines.push(`    provider: ${answers.dbProvider}`);
   }
   return `${lines.join("\n")}\n`;
 }
