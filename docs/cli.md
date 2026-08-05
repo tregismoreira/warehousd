@@ -53,13 +53,19 @@ Scaffolds `warehousd.yml` and adds `warehousd.local.yml` and `.warehousd/` to
 `.gitignore`, creating that file if it does not exist. It does not create seed
 directories or `.warehousd/` — `start` does that.
 
-In a terminal it asks for the project name, the port, whether to manage Postgres,
-which deploy target to scaffold a `deploy:` block for, and — only if you are
-bringing your own Postgres — who hosts it. Both lists are read from the target
-and provider registries, so they never go stale. Piped, in CI, under `--json` or
+In a terminal it asks for the project name, the port, which database to use **for
+local development**, which deploy target to scaffold a `deploy:` block for, which
+database to use **in production** on that target, and — only if production is a
+Postgres you already run — who hosts it. Both lists are read from the target and
+provider registries, so they never go stale. Piped, in CI, under `--json` or
 `--no-input` it writes the template without asking.
 
-`--target` and `--db-provider` answer the last two questions from a script, so a
+The two database questions are independent. Docker locally and Supabase in
+production is the ordinary case, and it is what one shared answer could not
+express: `--db-provider` decides `deploy.database` only, and never rewrites the
+top-level `database:` block.
+
+`--target` and `--db-provider` answer the deploy questions from a script, so a
 non-interactive run can still specify every field the wizard collects:
 
 ```bash
@@ -199,6 +205,30 @@ you want to know which part is at fault.
   ✓  image        warehousd:dev (WAREHOUSD_IMAGE, present locally)
   ✗  port:server  8722 is held by container other_server — stop it, or change the port in warehousd.yml
   ✓  containers   2 container(s), server running
+```
+
+| Flag       |                                                              |
+| ---------- | ------------------------------------------------------------ |
+| `--deploy` | Also run the deploy pre-flight — see below. Off by default.   |
+
+`--deploy` appends the checks `warehousd deploy` runs before it builds anything:
+the target's own (`flyctl-ready`, `railway-region`, `compose-renders-only` …)
+and the `db-*` capability probe against `deploy.database.url`. Nothing mutates —
+every one of them is a read.
+
+It is opt-in because the rest of `doctor` is a question about this machine,
+answered from local state, while these dial the production database and the
+target's CLI. Without the flag they are unreachable outside a deploy, which
+meant the only way to find out whether a hosted Postgres would work was to start
+one.
+
+The inputs are the ones `deploy` uses, so what you see is what a deploy would
+say — including `sso-or-local-login` refusing a project with no identity
+provider configured and no `--allow-local-login`. That is an accurate report of
+a deploy that would be refused, not a broken local stack.
+
+```
+warehousd doctor --deploy
 ```
 
 ### `secrets`
@@ -358,7 +388,7 @@ while the default `--remote-only` path does not.
 | `--allow-local-login` | Enable `admin@warehousd.local` with a generated password, in addition to any configured SSO.       |
 | `--allow-disabled-audit` | Deploy a project configured with `audit.enabled: false`. Nothing it does will be recorded.      |
 | `-y, --yes`           | Skip the re-deploy diff prompt (one-time deploys always prompt).                                   |
-| `--local-build`       | Build the image locally; otherwise use the published one.                                          |
+| `--local-build`       | Fly only. Build the image locally; otherwise use Fly's remote builder. Railway always builds remotely and Compose builds nothing. |
 | `--destroy`           | Tear down what the target created. Requires typing the app name exactly; `--yes` does not bypass. |
 | `--show-secrets`      | Print the admin password and database URL in full instead of masked.                               |
 
@@ -440,6 +470,14 @@ supplied `deploy.database.url` themselves.
 
 There is no `devClient` in a deploy — that is a local `start` affordance only.
 `env` is `"dev"` because deploys seed `data_synth` only.
+
+`deploy --json` prints that object on stdout with five things the file does not
+carry: `adminEmail` and `adminPassword` (a caller that asked for JSON asked for
+the credential), `target` and `label` for where it went, `databaseHint` for
+reaching a database no URL was printed for, and `notes` — whatever the target
+still needs the operator to do. `notes` matters most where the file says least:
+a Compose deploy renders a stack and starts nothing, and the line saying so has
+to reach a CI caller too, not only the summary panel.
 
 `.warehousd/` also holds `state.json` (generated passwords and secrets).
 **Neither file is ever committed** — `init` adds the directory to `.gitignore`.

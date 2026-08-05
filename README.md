@@ -309,7 +309,7 @@ grant check rather than a shared service account.
 | `warehousd restart` | Stop, then start again. |
 | `warehousd stop [--destroy -y]` | Stop containers; optionally drop the volume. |
 | `warehousd status` | Health and the outputs block. |
-| `warehousd doctor` | Check Docker, image, ports and config before anything breaks. |
+| `warehousd doctor` | Check Docker, image, ports and config before anything breaks. `--deploy` adds the deploy pre-flight. |
 | `warehousd logs [-f]` | Container logs, without assembling the container name. |
 | `warehousd open [admin\|mcp\|api]` | Open it in a browser. |
 | `warehousd secrets [--show]` | The generated credentials, masked by default. |

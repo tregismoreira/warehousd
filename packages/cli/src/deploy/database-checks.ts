@@ -1,5 +1,11 @@
 import { Pool } from "pg";
-import { resolveProvider, UNQUALIFIED_EXTENSIONS, type DbProviderId } from "@warehousd/broker";
+import {
+  dbProviders,
+  detectProvider,
+  resolveProvider,
+  UNQUALIFIED_EXTENSIONS,
+  type DbProviderId,
+} from "@warehousd/broker";
 import { hostOf } from "../preflight";
 import type { PreflightCheck } from "./preflight";
 
@@ -14,7 +20,8 @@ const DB_CHECK_TIMEOUT_MS = 5000;
 // apply.ts — if that condition changes, this one has to change with it.
 const ALWAYS_REQUIRED = ["vector", "pgcrypto"] as const;
 
-type Row = Record<string, unknown>;
+/** One row of a catalogue query, read by name rather than narrowed — pg types nothing for us. */
+export type Row = Record<string, unknown>;
 
 /**
  * Can this database do what a warehousd deployment needs, asked before an image is pushed.
@@ -80,23 +87,41 @@ export async function databaseCapabilities(
 // ensureSchemasAndRoles creates four roles and rotates their passwords on every boot. A connect-as
 // role that cannot do that produces a deployment that fails at the release command, after the
 // image is built and pushed.
+//
+// The question is asked about *inherited* privilege, not about the role's own attributes. Every
+// hosted provider this feature exists for hands CREATEROLE out through a grantor role rather than
+// setting it on the project owner: Neon's `neondb_owner` gets it through `neon_superuser`, RDS
+// through `rds_superuser`. Reading `pg_roles` for `current_user` alone refused all of them.
+//
+// The caveat, stated rather than hidden: stock Postgres does not confer CREATEROLE through
+// membership — role attributes are not inherited — so on a vanilla server this can pass for a role
+// that would still fail at boot. That is the safe direction to be wrong. The providers that matter
+// patch exactly this, the check errs toward not blocking, and the release command still catches
+// the genuine failure; refusing every Neon deployment does not.
+//
+// `'usage'` rather than `'member'`: only an inheritable membership confers anything without a
+// `set role`, and boot issues none.
 async function canCreateRoleCheck(db: Pool): Promise<PreflightCheck> {
   const id = "db-can-create-role";
   try {
-    const res = await db.query<{ ok: boolean; who: string }>(
-      `select (rolcreaterole or rolsuper) as ok, rolname as who
-         from pg_roles where rolname = current_user`,
+    // An aggregate with no GROUP BY, so there is always exactly one row — `ok` is null rather
+    // than the row being absent when nothing matched, and null reads as "no" below.
+    const res = await db.query<{ ok: boolean | null; who: string }>(
+      `select bool_or(r.rolcreaterole or r.rolsuper) as ok, current_user as who
+         from pg_roles r
+        where pg_has_role(current_user, r.oid, 'usage')`,
     );
     const row = res.rows[0];
-    if (!row) return { id, ok: false, detail: "current_user is not in pg_roles" };
+    if (!row) return { id, ok: false, detail: "could not read current_user's role memberships" };
     return row.ok
       ? { id, ok: true, detail: `${row.who} may create roles` }
       : {
           id,
           ok: false,
           detail:
-            `${row.who} has neither CREATEROLE nor SUPERUSER, and boot creates the four ` +
-            `warehousd_* roles. Connect as the project's owner role.`,
+            `${row.who} has neither CREATEROLE nor SUPERUSER, neither directly nor through any ` +
+            `role it is a member of, and boot creates the four warehousd_* roles. Connect as the ` +
+            `project's owner role.`,
         };
   } catch (err: unknown) {
     return { id, ok: false, detail: detailOf(err) };
@@ -131,12 +156,34 @@ async function extensionsCheck(db: Pool, requireFdw: boolean): Promise<Preflight
 }
 
 /**
+ * Is this extension schema out of reach for the roles boot will create?
+ *
+ * Decided on capability, not on the roles that happen to exist right now. `lacking` counts the
+ * `warehousd_*` roles that do not hold usage — and on a database that has never booted there are
+ * none, which made it 0 for every schema and the whole check a pass that had verified nothing, on
+ * precisely the run where the answer matters. After the first boot `ensureExtensionSearchPath` has
+ * already done the work, so that is the run where it is least needed.
+ *
+ * Two ways the schema is fine regardless of who holds what today: this role owns it and can grant
+ * usage, or `PUBLIC` already holds usage — which a role created later inherits. Failing both, a
+ * cluster with no warehousd roles yet is unproven rather than proven, and `role_count = 0` is what
+ * says so.
+ *
+ * Exported because that first-deploy branch cannot be reached from a test: `pg_roles` is
+ * cluster-global and this repo's suites share one Postgres, so `warehousd_*` roles always exist by
+ * the time anything runs (AGENTS.md, "Machine load").
+ */
+export function searchPathBlocked(r: Row): boolean {
+  if (r.can_grant === true || r.public_usage === true) return false;
+  return Number(r.role_count) === 0 || Number(r.lacking) > 0;
+}
+
+/**
  * Will `ensureExtensionSearchPath` (broker db/search-path.ts) be able to do its job here?
  *
  * It grants USAGE on each extension schema to the warehousd roles, then puts that schema on their
- * search_path. Two ways that is already fine: the roles hold the privilege (a provider that grants
- * it to everyone), or we own the schema and can grant it. Neither, and the apply throws — which is
- * the right thing for it to do, but a much more expensive place to find out.
+ * search_path. Neither of `searchPathBlocked`'s two escapes, and the apply throws — which is the
+ * right thing for it to do, but a much more expensive place to find out.
  */
 async function searchPathCheck(db: Pool): Promise<PreflightCheck> {
   const id = "db-search-path";
@@ -145,6 +192,8 @@ async function searchPathCheck(db: Pool): Promise<PreflightCheck> {
       `select n.nspname                                     as schema,
               string_agg(e.extname, ', ' order by e.extname) as exts,
               pg_has_role(current_user, n.nspowner, 'USAGE') as can_grant,
+              has_schema_privilege('public', n.nspname, 'usage') as public_usage,
+              (select count(*) from pg_roles where rolname like 'warehousd\\_%') as role_count,
               (select count(*) from pg_roles r
                 where r.rolname like 'warehousd\\_%'
                   and not has_schema_privilege(r.rolname, n.nspname, 'usage')) as lacking
@@ -161,7 +210,7 @@ async function searchPathCheck(db: Pool): Promise<PreflightCheck> {
         detail: "every installed extension is in `public`, which every role already reaches",
       };
 
-    const blocked = res.rows.filter((r) => Number(r.lacking) > 0 && r.can_grant !== true);
+    const blocked = res.rows.filter(searchPathBlocked);
     const described = res.rows.map((r) => `${String(r.exts)} in "${String(r.schema)}"`).join("; ");
     if (blocked.length === 0)
       return { id, ok: true, detail: `${described} — reachable, or grantable by this role` };
@@ -188,6 +237,9 @@ async function providerChecks(
   id: DbProviderId | undefined,
   db: Pool | null,
 ): Promise<PreflightCheck[]> {
+  const mismatch = providerMismatch(url, id);
+  if (mismatch) return [mismatch];
+
   const provider = resolveProvider(url, id);
   if (!provider.checks) {
     return [
@@ -207,6 +259,36 @@ async function providerChecks(
     ];
   }
   return provider.checks(parsed, db);
+}
+
+/**
+ * A configured `provider` that contradicts the host it is set on.
+ *
+ * `resolveProvider` takes the configured id verbatim, which is what the key is for — but nothing
+ * checked it against the url, so `provider: supabase` on a `*.neon.tech` host derived
+ * `warehousd_dev.<something>` and authenticated as nobody. That is the exact failure the key
+ * exists to prevent (docs/deploy-database.md, "The provider key"), and it is not a parse error:
+ * without this, the first sign of it is a role that cannot log in.
+ *
+ * A configured id over a host nothing recognises stays valid. That is the CNAME-onto-your-own-
+ * domain case the key was added for, and it is the only case where the operator knows more than
+ * the hostname does.
+ */
+function providerMismatch(url: string, id: DbProviderId | undefined): PreflightCheck | null {
+  if (id === undefined) return null;
+  const detected = detectProvider(url);
+  if (detected.id === "generic" || detected.id === id) return null;
+
+  const configured = dbProviders[id];
+  return {
+    id: "db-provider",
+    ok: false,
+    detail:
+      `warehousd.yml says provider: ${id} (${configured.label}), but ${hostOf(url)} is a ` +
+      `${detected.label} host. Role names are derived per provider, so the wrong one produces a ` +
+      `role that cannot authenticate. Set provider: ${detected.id}, or drop the key and let the ` +
+      `host decide.`,
+  };
 }
 
 function detailOf(err: unknown): string {

@@ -17,6 +17,20 @@ const EXAMPLE_REGIONS = "us-west2, us-east4, europe-west4, asia-southeast1";
 const DB_SERVICE = "Postgres";
 
 /**
+ * The port the image listens on, which Railway has to be told twice.
+ *
+ * Once as `PORT` in the service's variables, because Railway has no `fly.toml [env]` equivalent;
+ * once on `railway domain`, because generating a domain otherwise depends on Railway having
+ * detected a port from a running deployment — and on a first deploy there is none. It was a
+ * literal in both places.
+ */
+const CONTAINER_PORT = 8722;
+
+/** How long to wait for `railway add --database postgres` to finish provisioning, and how often. */
+const DB_READY_TIMEOUT_MS = 30_000;
+const DB_READY_INTERVAL_MS = 2000;
+
+/**
  * Railway's config-as-code file, read from the root of whatever `railway up` uploads.
  *
  * It is this target's `fly.toml`, and it carries the same two things for the same reasons:
@@ -164,21 +178,32 @@ function ensureApp(ctx: TargetContext): Promise<void> {
  * The plain container behind it has a superuser `POSTGRES_USER` and no pooler, so `create role` and
  * `create extension` work with no special handling (packages/broker/src/db/providers/railway.ts).
  */
-function provisionDatabase(ctx: TargetContext): Promise<string | null> {
+async function provisionDatabase(ctx: TargetContext): Promise<string | null> {
   const linked = linkedProject(ctx.projectDir);
   if (!linked?.services.includes(DB_SERVICE)) {
     run(["add", "--database", "postgres"], { cwd: ctx.projectDir });
   }
 
-  const vars = variables(ctx, DB_SERVICE);
-  const url = vars.DATABASE_URL ?? vars.DATABASE_PUBLIC_URL;
-  if (!url) {
-    throw new RailwayError(
-      `Railway's ${DB_SERVICE} service reported no DATABASE_URL or DATABASE_PUBLIC_URL. ` +
-        `Check the database provisioned cleanly: railway open`,
-    );
+  // `railway add` returns once Railway has accepted the request, not once the database exists —
+  // provisioning continues on their side. Reading the variables straight afterwards therefore sees
+  // no DATABASE_URL on a first deploy, which used to be reported as "check the database
+  // provisioned cleanly" on the happy path. The retry is the whole difference between that and
+  // waiting the few seconds it takes. `add` is deliberately outside the loop: it is not
+  // idempotent, and a second one would provision a second database.
+  const deadline = Date.now() + DB_READY_TIMEOUT_MS;
+  for (;;) {
+    const vars = variables(ctx, DB_SERVICE);
+    const url = vars.DATABASE_URL ?? vars.DATABASE_PUBLIC_URL;
+    if (url) return url;
+    if (Date.now() >= deadline) {
+      throw new RailwayError(
+        `Railway's ${DB_SERVICE} service reported no DATABASE_URL or DATABASE_PUBLIC_URL after ` +
+          `${DB_READY_TIMEOUT_MS / 1000}s. Check the database provisioned cleanly: railway open`,
+      );
+    }
+    ctx.say(`Waiting for Railway to finish provisioning ${DB_SERVICE}…`);
+    await new Promise((resolve) => setTimeout(resolve, DB_READY_INTERVAL_MS));
   }
-  return Promise.resolve(url);
 }
 
 /**
@@ -196,7 +221,7 @@ function setSecrets(ctx: TargetContext, lines: string[]): Promise<void> {
   const args = ["variables", "--service", ctx.appName];
   for (const line of [
     ...lines,
-    "PORT=8722",
+    `PORT=${CONTAINER_PORT}`,
     "WAREHOUSD_PROJECT_DIR=/project",
     "NODE_ENV=production",
   ]) {
@@ -251,17 +276,59 @@ function destroy(ctx: TargetContext): Promise<void> {
   return Promise.resolve();
 }
 
+/** The hostname out of `railway domain --json`, whichever key this CLI version spells it with. */
+function hostFromJson(out: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(out);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const body = parsed as { domain?: unknown; domains?: unknown };
+  if (typeof body.domain === "string" && body.domain) return stripScheme(body.domain);
+  const first = Array.isArray(body.domains) ? body.domains[0] : undefined;
+  if (typeof first === "string" && first) return stripScheme(first);
+  if (typeof first === "object" && first !== null) {
+    const domain = (first as { domain?: unknown }).domain;
+    if (typeof domain === "string" && domain) return stripScheme(domain);
+  }
+  return undefined;
+}
+
+function stripScheme(host: string): string {
+  return host.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
+
 /**
  * The service's public hostname, generating one if it has none.
  *
- * `railway domain` is the command that does both, and its output has been worded differently
- * across CLI versions, so the domain is read back from RAILWAY_PUBLIC_DOMAIN when the printed line
- * does not yield one.
+ * `--port` is what makes that generation work on a *first* deploy. `runDeploy` calls `appUrl`
+ * before `deploy`, because BETTER_AUTH_URL has to be in the secrets the release reads — so the
+ * service has no deployment yet and Railway has no port to infer. Without the flag it declines,
+ * `tryRun` swallows it, and the refusal below fired on the happy path.
+ *
+ * Three sources, in order of how much they are a contract. `--json` is the one worth relying on;
+ * the regex over the printed line stays behind it because the wording has changed across CLI
+ * versions and older ones print rather than serialise; RAILWAY_PUBLIC_DOMAIN is what a service
+ * that already had a domain reports when `domain` says only that it already has one.
  */
 function appUrl(ctx: TargetContext): Promise<string | null> {
-  const out = tryRun(["domain", "--service", ctx.appName], { cwd: ctx.projectDir }).out;
+  // The flagged form first. A CLI old enough not to know `--port` or `--json` rejects the whole
+  // invocation rather than ignoring the flag, and that must not be a deploy with no domain: the
+  // bare form is what every version has always understood, and it still generates one — just
+  // without the port hint that makes it work before the first deployment exists.
+  let out = tryRun(
+    ["domain", "--service", ctx.appName, "--port", String(CONTAINER_PORT), "--json"],
+    { cwd: ctx.projectDir },
+  ).out;
+  if (out === "") {
+    out = tryRun(["domain", "--service", ctx.appName], { cwd: ctx.projectDir }).out;
+  }
+
   const printed = /([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i.exec(out.replace(/^https?:\/\//gm, ""));
-  const host = printed?.[1] ?? variables(ctx, ctx.appName).RAILWAY_PUBLIC_DOMAIN;
+  const host =
+    hostFromJson(out) ?? printed?.[1] ?? variables(ctx, ctx.appName).RAILWAY_PUBLIC_DOMAIN;
 
   if (!host) {
     throw new RailwayError(

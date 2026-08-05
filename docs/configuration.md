@@ -122,8 +122,12 @@ this file and only one of them is valid for a given target. The runbooks are
 `supabase`, `neon`, `railway` or `generic`. It is normally unnecessary — the
 host says so on its own — and only matters where it changes how a role is
 spelled in a connection string, which today means Supabase's pooler. Setting it
-without a `url` is an error. `warehousd deploy` also runs a set of `db-*`
-pre-flight checks against that URL. See
+without a `url` is an error, and so is setting it to a provider the host
+contradicts: role names are derived per provider, so the wrong one produces a
+role that cannot authenticate. A value over a host nothing recognises is left
+alone — that is the CNAME case the key exists for. `warehousd deploy` also runs
+a set of `db-*` pre-flight checks against that URL, which
+`warehousd doctor --deploy` runs on their own. See
 [deploy-database.md](deploy-database.md).
 
 ## Collections

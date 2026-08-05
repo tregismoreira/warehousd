@@ -10,6 +10,24 @@ import {
 const roleOf = (url: string, role = "warehousd_dev") =>
   detectProvider(url).roleUsername(new URL(url), role);
 
+// The target registry is tied to its id list by `satisfies Record<DeployTargetId, DeployTarget>`,
+// which the provider registry cannot be: `dbProviders` is what *derives* DbProviderId, and
+// `DbProvider.id` is a plain string. So `{ neon: { id: "railway", … } }` compiles, `DB_PROVIDER_IDS`
+// still reads "neon", and `resolveProvider(url, "neon")` hands back Railway's module — role names
+// derived by the wrong provider, with nothing in the type system to say so.
+describe("the provider registry", () => {
+  it("registers exactly the ids DeploySchema accepts", () => {
+    expect(Object.keys(dbProviders).sort()).toEqual([...DB_PROVIDER_IDS].sort());
+  });
+
+  it("every registered provider answers to its own key", () => {
+    for (const id of DB_PROVIDER_IDS) {
+      expect(dbProviders[id].id).toBe(id);
+      expect(dbProviders[id].label.length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe("detectProvider", () => {
   it("picks supabase for the direct host and the pooler", () => {
     expect(

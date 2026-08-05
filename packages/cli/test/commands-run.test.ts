@@ -38,6 +38,7 @@ const INIT_DEFAULTS: InitAnswers = {
   port: 8722,
   managed: true,
   target: "fly",
+  deployManaged: true,
   dbProvider: null,
 };
 
@@ -164,6 +165,7 @@ describe("prompt wrappers", () => {
       port: 8722,
       managed: true,
       target: "fly",
+      deployManaged: true,
       dbProvider: null,
     });
   });
@@ -173,39 +175,62 @@ describe("prompt wrappers", () => {
     await expect(promptInit(INIT_DEFAULTS)).resolves.toBeNull();
   });
 
-  it("reads 'external' from the database question", async () => {
+  it("reads 'external' from the local database question", async () => {
     vi.mocked(clack.select).mockResolvedValueOnce("external");
     const answers = await promptInit(INIT_DEFAULTS);
     expect(answers?.managed).toBe(false);
   });
 
-  // The three selects in order: database, target, provider. The provider one is only reached
-  // because the first answer was "external".
+  // The selects in order: local database, target, deploy database, provider. The provider one is
+  // only reached because the *deploy* answer was "external" — the local one no longer decides it.
   it("collects the deploy target and the provider behind an external database", async () => {
     vi.mocked(clack.select)
-      .mockResolvedValueOnce("external")
+      .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("railway")
+      .mockResolvedValueOnce("external")
       .mockResolvedValueOnce("supabase");
     const answers = await promptInit(INIT_DEFAULTS);
-    expect(answers).toMatchObject({ managed: false, target: "railway", dbProvider: "supabase" });
+    expect(answers).toMatchObject({
+      managed: true,
+      target: "railway",
+      deployManaged: false,
+      dbProvider: "supabase",
+    });
+  });
+
+  // The pair that one shared flag could not express: Docker on this machine, somebody else's
+  // Postgres in production.
+  it("keeps the local answer out of the deploy one", async () => {
+    vi.mocked(clack.select)
+      .mockResolvedValueOnce("external")
+      .mockResolvedValueOnce("fly")
+      .mockResolvedValueOnce("managed");
+    const answers = await promptInit(INIT_DEFAULTS);
+    expect(answers).toMatchObject({ managed: false, deployManaged: true, dbProvider: null });
   });
 
   it("never asks who hosts a database the target will provision", async () => {
-    vi.mocked(clack.select).mockResolvedValueOnce("managed").mockResolvedValueOnce("compose");
+    vi.mocked(clack.select)
+      .mockResolvedValueOnce("managed")
+      .mockResolvedValueOnce("compose")
+      .mockResolvedValueOnce("managed");
     const answers = await promptInit(INIT_DEFAULTS);
     expect(answers).toMatchObject({ managed: true, target: "compose", dbProvider: null });
-    expect(clack.select).toHaveBeenCalledTimes(2);
+    expect(clack.select).toHaveBeenCalledTimes(3);
   });
 
   it("offers every registered target and provider, not a hand-written list", async () => {
-    vi.mocked(clack.select).mockResolvedValueOnce("external");
+    vi.mocked(clack.select)
+      .mockResolvedValueOnce("managed")
+      .mockResolvedValueOnce("fly")
+      .mockResolvedValueOnce("external");
     await promptInit(INIT_DEFAULTS);
     const values = (i: number) =>
       (vi.mocked(clack.select).mock.calls[i]?.[0] as { options: { value: string }[] }).options.map(
         (o) => o.value,
       );
     expect(values(1)).toEqual([...DEPLOY_TARGET_IDS]);
-    expect(values(2)).toEqual([...DB_PROVIDER_IDS]);
+    expect(values(3)).toEqual([...DB_PROVIDER_IDS]);
   });
 
   it("falls back to the default target when the select hands back something unregistered", async () => {

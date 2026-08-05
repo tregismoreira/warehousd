@@ -148,7 +148,22 @@ export function containersCheck(dir: string): { check: Check; rows: ContainerRow
 
 export type DoctorResult = { ok: boolean; checks: Check[] };
 
-export async function runDoctor(dir: string): Promise<DoctorResult> {
+/**
+ * `--deploy` is opt-in, and stays that way.
+ *
+ * The deploy pre-flight dials the *production* database and the target's CLI; doctor is otherwise a
+ * question about the local stack on this machine, answered from local state. Running it by default
+ * would make a routine "why won't start work" command reach for a hosted Postgres and an
+ * authenticated flyctl. Off by default, the checks were unreachable altogether: the only way to
+ * find out whether a hosted Postgres would work was to begin a deploy.
+ *
+ * Nothing here mutates — every deploy check is a read, by construction (deploy/preflight.ts and
+ * each target's own `preflight`).
+ */
+export async function runDoctor(
+  dir: string,
+  opts: { deploy?: boolean } = {},
+): Promise<DoctorResult> {
   const checks: Check[] = [dockerCheck()];
 
   const cfg = configCheck(dir);
@@ -160,6 +175,30 @@ export async function runDoctor(dir: string): Promise<DoctorResult> {
     checks.push(...(await portCheck(dir)));
     checks.push(containersCheck(dir).check);
     checks.push(...(await sourceChecks(dir)));
+  }
+
+  if (opts.deploy) {
+    // Imported here rather than at the top so a plain `doctor` never loads the deploy path, the pg
+    // driver it pulls in, or any target module.
+    const [{ preflight }, { databaseCapabilities }, { ssoConfiguredInDatabase }] =
+      await Promise.all([
+        import("./deploy/preflight"),
+        import("./deploy/database-checks"),
+        import("./deploy"),
+      ]);
+    // The same inputs `deploy` uses, deliberately: the question this flag answers is "what would a
+    // deploy say", and neutralising the two overrides would have made doctor report
+    // "--allow-local-login passed" to someone who passed nothing. A refusal here is the honest
+    // answer — that deploy would refuse — not a broken local stack.
+    const result = await preflight({
+      projectDir: dir,
+      env: process.env,
+      allowLocalLogin: false,
+      allowDisabledAudit: false,
+      ssoLookup: ssoConfiguredInDatabase,
+      dbCapabilities: databaseCapabilities,
+    });
+    checks.push(...result.checks);
   }
 
   return { ok: checks.every((c) => c.ok), checks };

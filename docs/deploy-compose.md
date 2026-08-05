@@ -216,7 +216,9 @@ warehousd deploy --destroy
 
 This one **prints** the teardown command rather than running it. The stack is on
 your machine, possibly under a supervisor that would restart it, and a deploy
-tool reaching that far is a deploy tool that can take down more than it made:
+tool reaching that far is a deploy tool that can take down more than it made.
+The confirmation prompt says so — it still asks for the app name, but it does
+not claim it is about to destroy a database, because on this target it is not:
 
 ```bash
 docker compose -f docker-compose.deploy.yml down

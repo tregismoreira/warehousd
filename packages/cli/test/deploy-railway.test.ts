@@ -99,6 +99,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   rmSync(projectDir, { recursive: true, force: true });
+  vi.useRealTimers();
   vi.resetAllMocks();
 });
 
@@ -293,16 +294,40 @@ describe("provisionDatabase", () => {
     expect(calls()).not.toContain("add --database postgres");
   });
 
+  // Provisioning is asynchronous on Railway's side: `railway add` returns once the request is
+  // accepted, and the variables are empty until the database actually exists. Reading once meant a
+  // first deploy refused on the happy path.
+  it("waits for provisioning to finish rather than refusing the first empty read", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    onSubcommand({
+      status: () => status({ name: "harbor-warehousd", services: ["harbor-warehousd"] }),
+      add: () => "added",
+      variables: () =>
+        ++reads > 2 ? JSON.stringify({ DATABASE_URL: "postgres://u:p@h:5432/railway" }) : "{}",
+    });
+
+    const pending = railway.provisionDatabase!(context(load()));
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(await pending).toBe("postgres://u:p@h:5432/railway");
+    expect(reads).toBe(3);
+    // `add` is not idempotent — a retry that re-ran it would provision a second database.
+    expect(calls().filter((c) => c === "add --database postgres")).toHaveLength(1);
+  });
+
   // A deploy that proceeded with no database would fail at boot with nothing pointing at why.
-  it("refuses when the database service reports no URL at all", () => {
+  it("refuses when the database service reports no URL at all", async () => {
+    vi.useFakeTimers();
     onSubcommand({
       status: () => status({ name: "harbor-warehousd", services: ["Postgres"] }),
       variables: () => JSON.stringify({ PGDATA: "/var/lib/postgresql/data" }),
     });
 
-    // Thrown, not rejected: these methods are `execFileSync` throughout and hand back a settled
-    // promise, the shape fly.ts documents. `runDeploy` awaits them, which handles either.
-    expect(() => railway.provisionDatabase!(context(load()))).toThrow(/DATABASE_URL/);
+    const pending = railway.provisionDatabase!(context(load()));
+    const settled = expect(pending).rejects.toThrow(/DATABASE_URL/);
+    await vi.advanceTimersByTimeAsync(35_000);
+    await settled;
   });
 });
 
@@ -397,7 +422,40 @@ describe("renderRailwayJson", () => {
 });
 
 describe("appUrl", () => {
-  it("reads the domain railway generates", async () => {
+  // `runDeploy` calls appUrl *before* deploy, because BETTER_AUTH_URL has to be in the secrets the
+  // release reads. So on a first deploy the service has no deployment and Railway has no port to
+  // infer one from — without --port it declines to generate a domain at all, which used to be a
+  // refusal on the happy path.
+  it("names the service and the container port, so a first deploy can generate one", async () => {
+    onSubcommand({ domain: () => JSON.stringify({ domain: "harbor.up.railway.app" }) });
+
+    await railway.appUrl(context(load()));
+
+    expect(calls()).toContain("domain --service harbor-warehousd --port 8722 --json");
+  });
+
+  it("prefers the --json body, which is the contract", async () => {
+    onSubcommand({
+      domain: () =>
+        JSON.stringify({ domain: "https://harbor-warehousd-production.up.railway.app/" }),
+    });
+
+    expect(await railway.appUrl(context(load()))).toBe(
+      "https://harbor-warehousd-production.up.railway.app",
+    );
+  });
+
+  it("reads a domains array too, older CLI versions spelling it that way", async () => {
+    onSubcommand({
+      domain: () => JSON.stringify({ domains: [{ domain: "harbor.up.railway.app" }] }),
+    });
+
+    expect(await railway.appUrl(context(load()))).toBe("https://harbor.up.railway.app");
+  });
+
+  // The regex is the fallback, not the contract: the printed wording has changed across CLI
+  // versions, and a version that does not serialise still has to work.
+  it("falls back to the printed line when the body is not JSON", async () => {
     onSubcommand({
       domain: () =>
         "🚂 Your service is now available at harbor-warehousd-production.up.railway.app",
@@ -411,6 +469,39 @@ describe("appUrl", () => {
   it("falls back to RAILWAY_PUBLIC_DOMAIN when the printed line yields nothing", async () => {
     onSubcommand({
       domain: () => "Service already has a domain",
+      variables: () =>
+        JSON.stringify({ RAILWAY_PUBLIC_DOMAIN: "harbor-warehousd-production.up.railway.app" }),
+    });
+
+    expect(await railway.appUrl(context(load()))).toBe(
+      "https://harbor-warehousd-production.up.railway.app",
+    );
+  });
+
+  // A CLI old enough not to know --port or --json rejects the whole invocation rather than
+  // ignoring the flag. Falling back to the bare form is what keeps that from being a deploy with
+  // no domain at all — which would be worse than the bug this flag fixes.
+  it("retries the bare form when the flags are not understood", async () => {
+    onSubcommand({
+      domain: () => {
+        const argv = vi.mocked(execFileSyncRef).mock.calls.at(-1)?.[1] as string[];
+        if (argv.includes("--json")) throw new Error("unexpected argument '--json' found");
+        return "Your service is now available at harbor.up.railway.app";
+      },
+    });
+
+    expect(await railway.appUrl(context(load()))).toBe("https://harbor.up.railway.app");
+    expect(calls()).toContain("domain --service harbor-warehousd --port 8722 --json");
+    expect(calls()).toContain("domain --service harbor-warehousd");
+  });
+
+  // A domain command that failed outright is not a deploy with no address: the service may already
+  // have one, and the variable is where that is readable.
+  it("still resolves when domain fails but the variable carries the host", async () => {
+    onSubcommand({
+      domain: () => {
+        throw new Error("no domain");
+      },
       variables: () =>
         JSON.stringify({ RAILWAY_PUBLIC_DOMAIN: "harbor-warehousd-production.up.railway.app" }),
     });

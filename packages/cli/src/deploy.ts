@@ -26,7 +26,7 @@ const SSO_LOOKUP_TIMEOUT_MS = 5000;
 // that has never booted, and it genuinely has no SSO provider. 42P01 (undefined_table) is
 // therefore `false`, while a refused connection or a bad password propagates: pre-flight has to be
 // able to tell "no SSO configured" from "could not find out".
-async function ssoConfiguredInDatabase(dbUrl: string): Promise<boolean> {
+export async function ssoConfiguredInDatabase(dbUrl: string): Promise<boolean> {
   const db = new Pool({
     connectionString: dbUrl,
     connectionTimeoutMillis: SSO_LOOKUP_TIMEOUT_MS,
@@ -124,14 +124,29 @@ export async function runDeploy(
     }
 
     const appName = cfg.deploy.app_name;
+    const target = targetFor(cfg.deploy.target);
+    const ctx = targetContext({
+      dir,
+      cfg,
+      deploy: cfg.deploy,
+      state: null,
+      localBuild: !!opts.localBuild,
+      say,
+    });
+
+    // The target's own sentence when it has one. The default names the database because every
+    // target that provisions one destroys it here; Compose, which destroys nothing, says so
+    // instead of asking for confirmation of something that will not happen.
+    const warning =
+      target.destroyWarning?.(ctx) ??
+      `This will destroy ${appName} and its database, which may hold real data.`;
+
     const rl = createInterface({
       input: process.stdin,
       output: process.stdout,
     });
 
-    const typed = await rl.question(
-      `This will destroy ${appName} and its database, which may hold real data. Type the app name to confirm: `,
-    );
+    const typed = await rl.question(`${warning} Type the app name to confirm: `);
     rl.close();
 
     if (!confirmDestroy(typed, appName)) {
@@ -139,17 +154,7 @@ export async function runDeploy(
       return;
     }
 
-    const target = targetFor(cfg.deploy.target);
-    await target.destroy(
-      targetContext({
-        dir,
-        cfg,
-        deploy: cfg.deploy,
-        state: null,
-        localBuild: !!opts.localBuild,
-        say,
-      }),
-    );
+    await target.destroy(ctx);
 
     return;
   }
@@ -333,11 +338,33 @@ export async function runDeploy(
 
   writeDeployOutputs(dir, outputs);
 
+  // The same three things the summary panel carries, so the two renderings say the same thing.
+  // `notes` in particular: `DeployTarget.notes` exists because a Compose deploy renders a file and
+  // starts nothing, and the line saying so must not be suppressible — it survived `--quiet`, which
+  // silences `say`, but `--json` returned before anything ever read it. A CI caller was told a
+  // deploy had succeeded and not that nothing was running.
+  const targetInfo = {
+    label: target.label,
+    databaseHint: target.databaseHint,
+    notes: target.notes?.(ctx),
+  };
+
   if (json) {
     // The machine contract, matching `start --json`: full values, because a caller that asked for
     // JSON asked for the credential too. This is the payload a CI deploy wants back.
     process.stdout.write(
-      `${JSON.stringify({ ...outputs, adminEmail, adminPassword: state.adminPassword }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          ...outputs,
+          target: target.id,
+          ...targetInfo,
+          notes: targetInfo.notes ?? [],
+          adminEmail,
+          adminPassword: state.adminPassword,
+        },
+        null,
+        2,
+      )}\n`,
     );
     return;
   }
@@ -345,7 +372,7 @@ export async function runDeploy(
     `${formatDeployOutputs(
       outputs,
       { adminEmail, adminPassword: state.adminPassword },
-      { label: target.label, databaseHint: target.databaseHint, notes: target.notes?.(ctx) },
+      targetInfo,
       { theme, showSecrets: opts.showSecrets ?? false },
     )}\n`,
   );
