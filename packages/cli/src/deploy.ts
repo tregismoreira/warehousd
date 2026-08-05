@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { join } from "node:path";
 import { loadConfig, envRefs } from "@warehousd/broker";
 import { preflight } from "./deploy/preflight";
+import { databaseCapabilities } from "./deploy/database-checks";
 import { readDeployOutputs, ensureState, writeDeployOutputs, stateDir } from "./state";
 import { writeBundle } from "./deploy/bundle";
 import { resolveBaseImage, renderDeployDockerfile, renderFlyToml } from "./deploy/fly-toml";
@@ -136,6 +137,7 @@ export async function runDeploy(
     allowLocalLogin: !!opts.allowLocalLogin,
     allowDisabledAudit: !!opts.allowDisabledAudit,
     ssoLookup: ssoConfiguredInDatabase,
+    dbCapabilities: databaseCapabilities,
   });
 
   if (!preflightResult.ok) {

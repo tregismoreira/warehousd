@@ -49,6 +49,11 @@ deploy:
 
 Either `managed: true` or `url: ${env:...}` is required — not both.
 
+Pointing at a hosted Postgres — Supabase, Neon, Railway — needs a little more
+than the URL: read [deploy-database.md](deploy-database.md) first. It covers
+which connection string to copy (Supabase's transaction pooler will not work),
+and the `database.provider` key for a URL whose host does not say who runs it.
+
 ### 2. Confirm demo mode is off
 
 `warehousd deploy` refuses to run if `demo: true` is set in the YAML **or** if

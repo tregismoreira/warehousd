@@ -429,6 +429,7 @@ Claude Code, `.claude/hooks/` runs both scripts automatically.
 | [docs/connect-claude.md](docs/connect-claude.md) | Adding the MCP connector end to end |
 | [docs/configure-sso.md](docs/configure-sso.md) | Registering an OIDC or SAML IdP |
 | [docs/deploy-fly.md](docs/deploy-fly.md) | End-to-end Fly.io deployment runbook |
+| [docs/deploy-database.md](docs/deploy-database.md) | Pointing a deployment at Supabase, Neon, Railway or your own Postgres |
 | [examples/harbor/README.md](examples/harbor/README.md) | The demo project end to end — collections, personas, the grant arc |
 | [SECURITY.md](SECURITY.md) | Reporting a vulnerability, deployment expectations, known limitations |
 

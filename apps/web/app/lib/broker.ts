@@ -3,6 +3,7 @@ import {
   makeBroker,
   loadConfig,
   dataRoleUrl,
+  type DbProviderId,
   type Pools,
   type WarehousdConfig,
   type Embedder,
@@ -25,12 +26,21 @@ import { join } from "node:path";
 //
 // An explicit variable always wins — CONTRIBUTING.md's local setup and the test harnesses point
 // the roles at a database whose owner URL is not theirs to derive from.
-function roleUrl(explicit: string | undefined, role: string): string | undefined {
+//
+// `provider` comes from the same warehousd.yml the entrypoint reads, and it has to: the entrypoint
+// creates the roles and this process connects as them, from two processes that share no
+// environment, so a disagreement about how a role is spelled on this provider is an authentication
+// failure at the first governed query.
+function roleUrl(
+  explicit: string | undefined,
+  role: string,
+  provider: DbProviderId | undefined,
+): string | undefined {
   if (explicit) return explicit;
   const owner = process.env.APP_DATABASE_URL;
   const password = process.env.WAREHOUSD_DATA_ROLE_PASSWORD;
   if (!owner || !password) return undefined;
-  return dataRoleUrl(owner, role, password);
+  return dataRoleUrl(owner, role, password, provider);
 }
 
 // One set of pools per server process. URLs come from env (see docker-compose.yml).
@@ -76,8 +86,9 @@ function ensureConfigAndBroker(dir: string): CachedState {
     // The write URLs are optional: a deployment that sets neither has no mutation path at
     // all, which is the safer default. broker.mutate reports that as not_writable rather
     // than failing at connect time.
-    const dev = roleUrl(process.env.DEV_DATABASE_URL, "warehousd_dev");
-    const live = roleUrl(process.env.LIVE_DATABASE_URL, "warehousd_live");
+    const provider = cfg.deploy?.database.provider;
+    const dev = roleUrl(process.env.DEV_DATABASE_URL, "warehousd_dev", provider);
+    const live = roleUrl(process.env.LIVE_DATABASE_URL, "warehousd_live", provider);
     if (!dev || !live) {
       // Failing here beats connecting to whatever libpq defaults to. `new Pool({ connectionString:
       // undefined })` does not throw — it quietly targets localhost as the OS user, so the fault
@@ -92,8 +103,8 @@ function ensureConfigAndBroker(dir: string): CachedState {
       dev,
       live,
       imp: process.env.IMPORT_DATABASE_URL,
-      devWrite: roleUrl(process.env.DEV_WRITE_DATABASE_URL, "warehousd_dev_write"),
-      liveWrite: roleUrl(process.env.LIVE_WRITE_DATABASE_URL, "warehousd_live_write"),
+      devWrite: roleUrl(process.env.DEV_WRITE_DATABASE_URL, "warehousd_dev_write", provider),
+      liveWrite: roleUrl(process.env.LIVE_WRITE_DATABASE_URL, "warehousd_live_write", provider),
     });
     cached = {
       pools,

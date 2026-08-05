@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { resolveProvider, type DbProviderId } from "./providers";
 
 // Roles are cluster-global while databases are not, so two bootstraps running against
 // different databases on one cluster contend on the same pg_authid row and one of them fails
@@ -63,9 +64,23 @@ export async function ensureSchemasAndRoles(db: Pool, dataRolePassword: string):
   `);
 }
 
-export function dataRoleUrl(appUrl: string, role: string, password: string): string {
+/**
+ * The same database, connected to as one of the four warehousd roles.
+ *
+ * How a role is spelled in a connection string is the provider's business, not this function's:
+ * through Supabase's pooler the username carries the tenant, so a bare `warehousd_dev`
+ * authenticates as nobody. `provider` overrides the host-based detection for a deployment whose
+ * url does not advertise where it is (`deploy.database.provider`); absent, the host decides, and
+ * an unrecognised host resolves to `generic`, which swaps the username exactly as this always did.
+ */
+export function dataRoleUrl(
+  appUrl: string,
+  role: string,
+  password: string,
+  provider?: DbProviderId,
+): string {
   const u = new URL(appUrl);
-  u.username = encodeURIComponent(role);
+  u.username = encodeURIComponent(resolveProvider(appUrl, provider).roleUsername(u, role));
   u.password = encodeURIComponent(password);
   return u.toString();
 }

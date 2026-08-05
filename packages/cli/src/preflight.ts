@@ -212,7 +212,7 @@ async function sourceChecks(dir: string): Promise<Check[]> {
 }
 
 // host:port out of a connection string, with the credentials left behind.
-function hostOf(url: string): string {
+export function hostOf(url: string): string {
   try {
     const u = new URL(url);
     return `${u.hostname}:${u.port || "5432"}`;

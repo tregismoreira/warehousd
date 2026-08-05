@@ -12,7 +12,7 @@ import type { Queryable } from "./queryable";
 // ships pgcrypto preinstalled in a schema called `extensions`, so `create extension if not exists
 // pgcrypto` is a silent no-op and hmac() resolves for nobody. The failure mode is the bad one —
 // apply succeeds, boot succeeds, and the first masked read fails at request time.
-const EXTENSIONS = ["vector", "pgcrypto", "postgres_fdw"] as const;
+export const UNQUALIFIED_EXTENSIONS = ["vector", "pgcrypto", "postgres_fdw"] as const;
 
 // Names read back out of the catalogue, not names that came from validated config — so they are
 // QUOTED rather than validated. `ident()` in sql/ident.ts is the other rule and the right one for
@@ -48,7 +48,7 @@ export async function ensureExtensionSearchPath(db: Queryable): Promise<string |
        from pg_extension e join pg_namespace n on n.oid = e.extnamespace
       where e.extname = any($1::text[]) and n.nspname <> 'public'
       order by 1`,
-    [[...EXTENSIONS]],
+    [[...UNQUALIFIED_EXTENSIONS]],
   );
   const schemas = found.rows.map((r) => r.nspname);
   if (schemas.length === 0) return null;
@@ -86,7 +86,7 @@ export async function ensureExtensionSearchPath(db: Queryable): Promise<string |
       // request time, as `internal_error`, a long way from anything that names the cause.
       throw new Error(
         `Cannot grant usage on schema "${schema}" to ${missing.join(", ")}, and without it ` +
-          `those roles cannot resolve the ${EXTENSIONS.join("/")} objects installed there. ` +
+          `those roles cannot resolve the ${UNQUALIFIED_EXTENSIONS.join("/")} objects installed there. ` +
           `Connect as a role that owns "${schema}", or grant it by hand and re-apply.`,
         { cause: err },
       );

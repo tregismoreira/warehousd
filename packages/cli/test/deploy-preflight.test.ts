@@ -643,4 +643,97 @@ collections:
     const resultIds = result.checks.map((c) => c.id);
     expect(resultIds).toEqual(expectedIds);
   });
+
+  // The database capability probe. Injected the same way ssoLookup is, so the wiring can be
+  // exercised without a hosted Postgres on the other end.
+  describe("database capabilities", () => {
+    const withDeploy = (database: string) => `
+project: test
+server:
+  port: 8722
+deploy:
+  target: fly
+  app_name: my-app
+  region: gru
+  database:
+${database}
+collections:
+  docs:
+    description: Docs
+    fields:
+      title:
+        type: text
+        posture: allow
+`;
+
+    beforeEach(async () => {
+      const { execFileSync } = await import("node:child_process");
+      vi.mocked(execFileSync).mockReturnValue("flyctl version 0.1.0\n");
+    });
+
+    it("a refusal from the probe refuses the whole pre-flight", async () => {
+      writeFileSync(
+        join(projectDir, "warehousd.yml"),
+        withDeploy(`    url: postgres://u:p@db.example.com:6543/postgres
+    provider: supabase`),
+      );
+
+      const result = await preflight({
+        projectDir,
+        env: {},
+        allowLocalLogin: true,
+        dbCapabilities: () =>
+          Promise.resolve([{ id: "db-provider", ok: false, detail: "pooler port 6543" }]),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.checks.find((c) => c.id === "db-provider")?.detail).toBe("pooler port 6543");
+    });
+
+    it("passes the configured provider and the postgres_fdw condition through", async () => {
+      writeFileSync(
+        join(projectDir, "warehousd.yml"),
+        withDeploy(`    url: postgres://u:p@db.example.com:5432/postgres
+    provider: neon`),
+      );
+
+      let seen: unknown;
+      await preflight({
+        projectDir,
+        env: {},
+        allowLocalLogin: true,
+        dbCapabilities: (url, opts) => {
+          seen = { url, opts };
+          return Promise.resolve([]);
+        },
+      });
+
+      expect(seen).toEqual({
+        url: "postgres://u:p@db.example.com:5432/postgres",
+        // No `sources:` in this config, so postgres_fdw is not demanded — a hosted Postgres that
+        // forbids it must not be refused over a feature the project does not use.
+        opts: { requireFdw: false, provider: "neon" },
+      });
+    });
+
+    // Under `managed: true` the target has not provisioned anything yet, so there is nothing to
+    // connect to and the checks could never pass. Same reasoning as sso-or-local-login.
+    it("does not probe under database.managed", async () => {
+      writeFileSync(join(projectDir, "warehousd.yml"), withDeploy(`    managed: true`));
+
+      let called = false;
+      const result = await preflight({
+        projectDir,
+        env: {},
+        allowLocalLogin: true,
+        dbCapabilities: () => {
+          called = true;
+          return Promise.resolve([]);
+        },
+      });
+
+      expect(called).toBe(false);
+      expect(result.checks.some((c) => c.id.startsWith("db-"))).toBe(false);
+    });
+  });
 });
