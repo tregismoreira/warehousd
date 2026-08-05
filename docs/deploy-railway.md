@@ -24,6 +24,8 @@ does nothing on this target.
 
 ## 1. Add the deploy config
 
+On a new project `warehousd init --target railway` scaffolds this block for you.
+
 ```yaml
 deploy:
   target: railway

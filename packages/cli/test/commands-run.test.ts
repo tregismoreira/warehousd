@@ -30,7 +30,16 @@ import { execFileSync } from "node:child_process";
 import * as clack from "@clack/prompts";
 import { runLogs } from "../src/commands/logs";
 import { runOpen } from "../src/commands/open";
-import { confirm, promptInit } from "../src/ui/prompt";
+import { confirm, promptInit, type InitAnswers } from "../src/ui/prompt";
+import { DEPLOY_TARGET_IDS, DB_PROVIDER_IDS } from "@warehousd/broker";
+
+const INIT_DEFAULTS: InitAnswers = {
+  project: "my-app",
+  port: 8722,
+  managed: true,
+  target: "fly",
+  dbProvider: null,
+};
 
 let dir: string;
 
@@ -149,18 +158,59 @@ describe("prompt wrappers", () => {
   });
 
   it("collects the init answers", async () => {
-    const answers = await promptInit({ project: "my-app", port: 8722, managed: true });
-    expect(answers).toEqual({ project: "answer", port: 8722, managed: true });
+    const answers = await promptInit(INIT_DEFAULTS);
+    expect(answers).toEqual({
+      project: "answer",
+      port: 8722,
+      managed: true,
+      target: "fly",
+      dbProvider: null,
+    });
   });
 
   it("returns null when the wizard is cancelled", async () => {
     vi.mocked(clack.isCancel).mockReturnValueOnce(true);
-    await expect(promptInit({ project: "my-app", port: 8722, managed: true })).resolves.toBeNull();
+    await expect(promptInit(INIT_DEFAULTS)).resolves.toBeNull();
   });
 
   it("reads 'external' from the database question", async () => {
     vi.mocked(clack.select).mockResolvedValueOnce("external");
-    const answers = await promptInit({ project: "my-app", port: 8722, managed: true });
+    const answers = await promptInit(INIT_DEFAULTS);
     expect(answers?.managed).toBe(false);
+  });
+
+  // The three selects in order: database, target, provider. The provider one is only reached
+  // because the first answer was "external".
+  it("collects the deploy target and the provider behind an external database", async () => {
+    vi.mocked(clack.select)
+      .mockResolvedValueOnce("external")
+      .mockResolvedValueOnce("railway")
+      .mockResolvedValueOnce("supabase");
+    const answers = await promptInit(INIT_DEFAULTS);
+    expect(answers).toMatchObject({ managed: false, target: "railway", dbProvider: "supabase" });
+  });
+
+  it("never asks who hosts a database the target will provision", async () => {
+    vi.mocked(clack.select).mockResolvedValueOnce("managed").mockResolvedValueOnce("compose");
+    const answers = await promptInit(INIT_DEFAULTS);
+    expect(answers).toMatchObject({ managed: true, target: "compose", dbProvider: null });
+    expect(clack.select).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers every registered target and provider, not a hand-written list", async () => {
+    vi.mocked(clack.select).mockResolvedValueOnce("external");
+    await promptInit(INIT_DEFAULTS);
+    const values = (i: number) =>
+      (vi.mocked(clack.select).mock.calls[i]?.[0] as { options: { value: string }[] }).options.map(
+        (o) => o.value,
+      );
+    expect(values(1)).toEqual([...DEPLOY_TARGET_IDS]);
+    expect(values(2)).toEqual([...DB_PROVIDER_IDS]);
+  });
+
+  it("falls back to the default target when the select hands back something unregistered", async () => {
+    vi.mocked(clack.select).mockResolvedValueOnce("managed").mockResolvedValueOnce("nowhere");
+    const answers = await promptInit({ ...INIT_DEFAULTS, target: "compose" });
+    expect(answers?.target).toBe("compose");
   });
 });

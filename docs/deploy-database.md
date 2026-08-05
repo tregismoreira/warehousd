@@ -71,6 +71,11 @@ domain, or a proxy in front. Getting it wrong is not a parse error; it is a
 role that cannot authenticate. Setting it without a `url` is refused, because
 it would name where a database that is not there is hosted.
 
+`warehousd init --db-provider <id>` writes the key, alongside the `--target` that
+gives it a block to sit in. It is worth setting there even when the host would
+be recognised: at scaffold time the url is still a `${env:…}` reference, so there
+is no host to read it off yet.
+
 | Value | Host patterns | What differs |
 | --- | --- | --- |
 | `supabase` | `*.supabase.co`, `*.pooler.supabase.com` | Role names carry the project ref through the pooler; the transaction pooler is refused |

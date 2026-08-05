@@ -108,10 +108,15 @@ an admin belongs in the trusted file. See
 [configure-sso.md](configure-sso.md#4-map-idp-groups-to-warehousd-roles).
 
 The `deploy:` block is optional and required only by `warehousd deploy`. It
-names the target (`fly` is the only value), the globally unique app name, the
-Fly region, and — most critically — **exactly one** of `managed: true` or a
-`database.url`. An `image:` override is optional; if unset, the published image
-is used. See [deploy-fly.md](deploy-fly.md) for the full deployment runbook.
+names the target — `fly`, `railway` or `compose` — the app name, the region, and
+— most critically — **exactly one** of `managed: true` or a `database.url`. An
+`image:` override is optional; if unset, the published image is used.
+`warehousd init --target <id>` scaffolds the block. `region` is only checked for
+being present here: what a region *looks* like belongs to the target and is
+checked by its pre-flight, which is why `us-west2` and `gru` are both valid in
+this file and only one of them is valid for a given target. The runbooks are
+[deploy-fly.md](deploy-fly.md), [deploy-railway.md](deploy-railway.md) and
+[deploy-compose.md](deploy-compose.md).
 
 `database.provider` names who runs the Postgres behind `database.url`:
 `supabase`, `neon`, `railway` or `generic`. It is normally unnecessary — the

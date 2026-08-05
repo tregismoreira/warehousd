@@ -25,6 +25,10 @@ on. For a platform that does all of that for you, see
 
 ### 1. Add the deploy config to warehousd.yml
 
+On a new project `warehousd init --target compose` scaffolds this block for you.
+`region` is required by the schema and means nothing here — Compose has no
+regions, and nothing checks it.
+
 ```yaml
 deploy:
   target: compose

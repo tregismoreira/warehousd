@@ -12,10 +12,10 @@ vi.mock("@clack/prompts", () => ({
 }));
 
 import * as clack from "@clack/prompts";
-import { promptInit } from "../src/ui/prompt";
+import { promptInit, type InitAnswers } from "../src/ui/prompt";
 import { collectSecrets } from "../src/commands/secrets";
 import { renderDeploySummary, renderStatus, renderChecks } from "../src/ui/render";
-import { applyAnswers } from "../src/init";
+import { applyAnswers, appNameFor } from "../src/init";
 import { plainTheme } from "../src/ui/theme";
 
 let dir: string;
@@ -64,10 +64,18 @@ describe("collectSecrets with only one file present", () => {
   });
 });
 
+const DEFAULTS: InitAnswers = {
+  project: "my-app",
+  port: 8722,
+  managed: true,
+  target: "fly",
+  dbProvider: null,
+};
+
 describe("promptInit validation", () => {
   /** Pull the `validate` callback clack was handed, so its branches can be exercised directly. */
   async function validatorFor(callIndex: number) {
-    await promptInit({ project: "my-app", port: 8722, managed: true });
+    await promptInit(DEFAULTS);
     const call = vi.mocked(clack.text).mock.calls[callIndex]?.[0] as {
       validate?: (v: string) => string | undefined;
     };
@@ -96,8 +104,14 @@ describe("promptInit validation", () => {
 
   it("falls back to the defaults when the answers come back empty", async () => {
     vi.mocked(clack.text).mockResolvedValueOnce("").mockResolvedValueOnce("");
-    const answers = await promptInit({ project: "fallback", port: 9999, managed: true });
-    expect(answers).toEqual({ project: "fallback", port: 9999, managed: true });
+    const answers = await promptInit({ ...DEFAULTS, project: "fallback", port: 9999 });
+    expect(answers).toEqual({
+      project: "fallback",
+      port: 9999,
+      managed: true,
+      target: "fly",
+      dbProvider: null,
+    });
   });
 });
 
@@ -109,12 +123,34 @@ describe("applyAnswers", () => {
     "# database:",
     "#   managed: true                 # default — the CLI runs Postgres in Docker",
     "#   url: ${env:DATABASE_URL}      # alternative: bring your own Postgres",
+    "# deploy:                         # read only by `warehousd deploy`",
+    "#   target: fly                   # fly | railway | compose",
+    "#   app_name: my-app              # unique on the target",
+    "#   region: gru                   # whatever the target calls a region",
+    "#   database:",
+    "#     managed: true               # let the target provision Postgres, or instead:",
+    "#     url: ${env:PROD_DATABASE_URL}  # attach a Postgres you already run",
+    "#     provider: supabase          # supabase | neon | railway | generic",
     "",
     "collections: {}",
   ].join("\n");
 
+  const MANAGED: InitAnswers = {
+    project: "acme",
+    port: 9001,
+    managed: true,
+    target: "fly",
+    dbProvider: null,
+  };
+  const EXTERNAL: InitAnswers = {
+    ...MANAGED,
+    managed: false,
+    target: "railway",
+    dbProvider: "supabase",
+  };
+
   it("substitutes the project name and port", () => {
-    const out = applyAnswers(TEMPLATE, { project: "acme", port: 9001, managed: true });
+    const out = applyAnswers(TEMPLATE, MANAGED);
     expect(out).toContain("project: acme");
     expect(out).toContain("  port: 9001");
     // Managed is the template's default, so the database block stays commented.
@@ -122,14 +158,59 @@ describe("applyAnswers", () => {
   });
 
   it("uncomments the database block when the user brings their own Postgres", () => {
-    const out = applyAnswers(TEMPLATE, { project: "acme", port: 9001, managed: false });
+    const out = applyAnswers(TEMPLATE, EXTERNAL);
     expect(out).toContain("database:\n  url: ${env:DATABASE_URL}");
     expect(out).not.toContain("# database:");
   });
 
   it("keeps the rest of the template intact", () => {
-    const out = applyAnswers(TEMPLATE, { project: "acme", port: 9001, managed: true });
+    const out = applyAnswers(TEMPLATE, MANAGED);
     expect(out).toContain("collections: {}");
+  });
+
+  // The deploy block is the one part `init` writes that a target's own pre-flight will judge, so
+  // the region has to be one that target actually has rather than a generic placeholder.
+  it("writes a managed deploy block with the target's own region", () => {
+    const out = applyAnswers(TEMPLATE, MANAGED);
+    expect(out).toContain(
+      [
+        "deploy:",
+        "  target: fly",
+        "  app_name: acme",
+        "  region: gru",
+        "  database:",
+        "    managed: true",
+      ].join("\n"),
+    );
+    expect(out).not.toContain("# deploy:");
+    expect(out).not.toContain("PROD_DATABASE_URL");
+  });
+
+  it("writes a url and a provider instead when the database is somebody else's", () => {
+    const out = applyAnswers(TEMPLATE, EXTERNAL);
+    expect(out).toContain(
+      [
+        "deploy:",
+        "  target: railway",
+        "  app_name: acme",
+        "  region: us-west2",
+        "  database:",
+        "    url: ${env:PROD_DATABASE_URL}",
+        "    provider: supabase",
+      ].join("\n"),
+    );
+    // Exactly one of the two shapes — DeploySchema refuses both.
+    expect(out).not.toContain("    managed: true");
+  });
+
+  it("slugifies the project name into an app name the schema accepts", () => {
+    const out = applyAnswers(TEMPLATE, { ...MANAGED, project: "Acme Data_Co!" });
+    expect(out).toContain("  app_name: acme-data-co");
+  });
+
+  it("falls back to my-app when a project name slugifies to nothing", () => {
+    expect(appNameFor("!!!")).toBe("my-app");
+    expect(appNameFor("a".repeat(80))).toHaveLength(63);
   });
 });
 
