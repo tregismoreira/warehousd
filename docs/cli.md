@@ -24,7 +24,7 @@ Available on every command.
 | `--json`      | Machine-readable output on stdout. Secrets are **not** masked — a caller that asked for JSON asked for them.                |
 | `-q, --quiet` | Suppress progress and confirmations. Errors always print, and `--json` always prints.                                       |
 | `--no-color`  | Disable colour. `NO_COLOR` and `TERM=dumb` are honoured too, and colour is off automatically when output is not a terminal. |
-| `--verbose`   | Echo every Docker and flyctl command, and its stderr.                                                                       |
+| `--verbose`   | Echo every Docker, flyctl and railway command, and its stderr.                                                              |
 
 These work on **every** command, `deploy` included. Progress goes to **stderr**;
 results and `--json` go to **stdout**. So `warehousd start 2>/dev/null` prints the
@@ -36,9 +36,11 @@ Two deliberate exceptions:
 
 - `--json` with `logs --follow` is an error, not a no-op — a stream has no end to
   serialise.
-- `--verbose` never prints a failing `fly secrets` payload. flyctl echoes the
-  offending assignment on that path, so it stays redacted; a debug flag that
-  prints secrets is a secret-printing flag.
+- `--verbose` never prints a failing `fly secrets` or `railway variables --set`
+  payload. Both CLIs echo the offending assignment on that path, so it stays
+  redacted — and `railway variables --set` carries the value in argv, so its
+  trace prints `NAME=***` rather than the value. A debug flag that prints
+  secrets is a secret-printing flag.
 
 ## Commands
 
@@ -294,12 +296,14 @@ when a remote provider rate-limits halfway through a corpus.
 
 ### `deploy`
 
-Provisions a warehousd stack to Fly.io from the same `warehousd.yml`. A
-pre-flight checklist must pass before anything is created: the `deploy:` block
-exists, all `${env:VAR}` references resolve, demo mode is off, the audit trail is
-on or `--allow-disabled-audit` is passed, SSO or `--allow-local-login` is
-configured, and the target's own checks pass — for Fly, that `flyctl` is
-installed and authenticated and that `region` is one of its three-letter slugs.
+Provisions a warehousd stack from the same `warehousd.yml` to whichever
+`deploy.target` names — `fly`, `railway` or `compose`. A pre-flight checklist
+must pass before anything is created: the `deploy:` block exists, all
+`${env:VAR}` references resolve, demo mode is off, the audit trail is on or
+`--allow-disabled-audit` is passed, SSO or `--allow-local-login` is configured,
+and the target's own checks pass — for Fly, that `flyctl` is installed and
+authenticated and that `region` is one of its three-letter slugs; for Railway,
+the same of the `railway` CLI plus which project this directory is linked to.
 Every check is printed if any fail — nothing is created until all pass.
 
 The server image is not yet published (the repo is private and no release tag

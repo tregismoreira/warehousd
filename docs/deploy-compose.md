@@ -8,7 +8,8 @@ targets get from a platform — TLS, restarts across reboots, backups — is you
 This is the target to pick when the answer to "where does the data sit" has to
 be "here". It is also the least automated one: nothing in this runbook creates
 an account, and nothing warehousd runs ever touches the machine the stack runs
-on.
+on. For a platform that does all of that for you, see
+[deploy-fly.md](deploy-fly.md) or [deploy-railway.md](deploy-railway.md).
 
 ## Prerequisites
 
@@ -115,8 +116,8 @@ and the entrypoint applies the config. `docker compose ps` shows `healthy` when
 
 The server is published on `127.0.0.1:8722` — loopback only, deliberately.
 Sessions, OAuth codes and tokens all cross that wire, and
-[SECURITY.md](../SECURITY.md) is explicit that outside Fly.io the transport is
-the operator's responsibility.
+[SECURITY.md](../SECURITY.md) is explicit that off the platform targets the
+transport is the operator's responsibility.
 
 Put a terminator in front of it. Caddy is two lines:
 

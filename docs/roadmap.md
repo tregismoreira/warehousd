@@ -33,7 +33,6 @@ it is in the repository today, it is MIT tomorrow.
   differential-privacy machinery to be safe, which is why it is not built:
   aggregation is currently permitted only over fields the caller could already
   read row by row, so an aggregate can never reveal anything new.
-- **More deploy targets** beyond Fly.io.
 
 ## Not planned
 

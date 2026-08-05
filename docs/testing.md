@@ -543,10 +543,13 @@ checked by hand, because they need credentials or a product UI no test can drive
    sign-in through to the authorize endpoint. Two gaps remain: no test sends
    `providerType: "saml"`, and no test asserts what the page _looks_ like. Check
    those by eye against a registered SAML provider.
-4. **Deploying to Fly.io.** [deploy-fly.md](deploy-fly.md) — end-to-end
-   provisioning: configuring the `deploy:` block, ensuring demo is off and SSO
-   is configured, running the deploy, verifying the stack reaches health checks,
-   and connecting Claude to the deployed server.
+4. **Deploying.** [deploy-fly.md](deploy-fly.md),
+   [deploy-railway.md](deploy-railway.md), [deploy-compose.md](deploy-compose.md)
+   — end-to-end provisioning: configuring the `deploy:` block, ensuring demo is
+   off and SSO is configured, running the deploy, verifying the stack reaches
+   health checks, and connecting Claude to the deployed server. Every target has
+   unit tests with its CLI stubbed; none has ever been run against a real
+   account, so each one is its own manual pass.
    One narrower gap sits inside a covered surface: `admin-documents.spec.ts` drives
    the upload queue but not its **pause and resume buttons**, because the fixture
    files finish uploading faster than a test can press pause, and a test that

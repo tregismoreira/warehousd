@@ -3,7 +3,9 @@
 End-to-end walkthrough of provisioning a warehousd stack to Railway. It is the
 same runbook as [deploy-fly.md](deploy-fly.md) — same pre-flight, same secrets,
 same diff-and-confirm — with a different target behind it. This page covers only
-what differs.
+what differs. To run the stack on hardware you control instead, see
+[deploy-compose.md](deploy-compose.md); `deploy.target` is what chooses between
+the three.
 
 ## Prerequisites
 
