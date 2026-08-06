@@ -11,6 +11,23 @@ matching the CLI's own version. An entry below therefore describes both.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-05
+
+The first published release. Nothing preceded it, so the categories below are not a delta from
+an earlier version: **Security** is the enforcement this release ships with, and **Changed** and
+**Fixed** record decisions taken during development that a reader of the code would otherwise
+have to reconstruct from the history.
+
+Every component is listed with its status in the
+[README's component table](README.md#component-status), which is checked against the code. Two
+entries there are not `real` at this release: multi-tenancy is *partial* — every grant, audit
+event and document carries an org and is isolated by a view predicate and RLS, but a single
+implicit org is created at bootstrap and there is no UI for creating or switching orgs — and
+SCIM and compliance exports are *not built*.
+
+This is a `0.y.z` release. Per [docs/releasing.md](docs/releasing.md#versioning-policy), a minor
+bump before 1.0.0 may carry a breaking change; each one is recorded under **Changed**.
+
 ### Security
 
 - The credential endpoints refuse a request carrying an untrusted `Origin`. Better Auth's own
@@ -256,4 +273,5 @@ matching the CLI's own version. An entry below therefore describes both.
   dangling. Against a local container that answers immediately this cost nothing; against a hosted
   endpoint resuming from suspend, the whole wait is failed attempts.
 
-[Unreleased]: https://github.com/tregismoreira/warehousd/commits/main
+[Unreleased]: https://github.com/tregismoreira/warehousd/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/tregismoreira/warehousd/releases/tag/v0.1.0
