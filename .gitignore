@@ -20,3 +20,6 @@ apps/web/e2e/.auth/
 # Scratch review artifacts (browser screenshots taken during design/QA passes)
 .playwright-mcp/
 /*.png
+
+# macOS Finder metadata, written into any directory the Finder has opened.
+.DS_Store

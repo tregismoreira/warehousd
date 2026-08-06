@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - v*
+  # A rehearsal. Everything a tag run does except the two irreversible steps — the registry push
+  # and the npm publish — so the parts that only ever executed for real can be exercised against a
+  # branch first. `verify` below decides publish/rehearse from the ref alone, not from an input:
+  # an input can be set by whoever starts the run, and "only a tag publishes" must not be a choice.
   workflow_dispatch:
 
 # Floor for the whole file; every job narrows or widens from here deliberately.
@@ -19,36 +23,80 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Runs first and with no permissions: nothing is pushed anywhere until the ref is a tag
-  # and the tag matches the CLI package version exactly.
+  # Runs first and with no permissions. It decides one thing — may this run publish? — and every
+  # job that touches a registry or the release is gated on the answer. Only a tag whose name
+  # matches the CLI package version exactly gets `publish=true`; anything else rehearses.
+  #
+  # Ref values are passed through `env:` rather than interpolated into the script. A `${{ }}` in a
+  # `run:` block is substituted before the shell sees it, so a ref name is shell source rather than
+  # shell input — and a tag name is chosen by whoever pushes the tag.
   verify:
     runs-on: ubuntu-latest
     permissions: {}
     outputs:
       version: ${{ steps.check.outputs.version }}
       prerelease: ${{ steps.check.outputs.prerelease }}
+      publish: ${{ steps.check.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Verify tag matches package version
+      - name: Decide whether this run may publish
         id: check
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "${{ github.ref_type }}" != "tag" ]; then
-            echo "Error: Release must run from a tag, got ref '${{ github.ref }}'"
-            exit 1
-          fi
-          TAG_VERSION="${{ github.ref_name }}"
+          set -euo pipefail
           VERSION="$(node -p "require('./packages/cli/package.json').version")"
-          if [ "$TAG_VERSION" != "v$VERSION" ]; then
-            echo "Error: git tag '$TAG_VERSION' does not match package version 'v$VERSION'"
-            exit 1
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            if [ "$REF_NAME" != "v$VERSION" ]; then
+              echo "::error::git tag '$REF_NAME' does not match package version 'v$VERSION'"
+              exit 1
+            fi
+            PUBLISH=true
+          else
+            PUBLISH=false
+            echo "::notice::Rehearsal — '$REF_NAME' is not a tag, so nothing will be published."
           fi
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
           # 1.2.3-rc.1 is a prerelease; it must not move :latest
           case "$VERSION" in
             *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
             *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
           esac
+
+      # The changelog is the one release input nothing else checks. The tag is checked against
+      # package.json, the image against the tag, the tarball against the build — but a version
+      # whose notes were never cut, or cut and then left to go stale while the release slipped,
+      # publishes silently and cannot be corrected in place afterwards. Runs on a rehearsal too,
+      # which is the cheapest way to find out that the section is missing.
+      - name: Verify the changelog has a dated section for this version
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          ESCAPED="${VERSION//./\\.}"
+          if ! ENTRY="$(grep -oE "^## \[$ESCAPED\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md)"; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION] - YYYY-MM-DD' section."
+            echo "::error::Cut the [Unreleased] section to [$VERSION] before tagging."
+            exit 1
+          fi
+
+          ENTRY_DATE="${ENTRY##* }"
+          TODAY="$(date -u +%F)"
+          if [ "$ENTRY_DATE" \> "$TODAY" ]; then
+            echo "::error::CHANGELOG.md dates $VERSION as $ENTRY_DATE, which is in the future."
+            exit 1
+          fi
+
+          AGE=$(( ( $(date -u -d "$TODAY" +%s) - $(date -u -d "$ENTRY_DATE" +%s) ) / 86400 ))
+          if [ "$AGE" -gt 14 ]; then
+            echo "::warning::CHANGELOG.md dates $VERSION as $ENTRY_DATE, $AGE days ago. Stale?"
+          fi
+          echo "CHANGELOG.md: \`$ENTRY\`" >> "$GITHUB_STEP_SUMMARY"
 
   # The release exists as a draft for the whole of `gates` below, and is published by `publish` at
   # the very end. Nothing about the draft is visible to a consumer — npm and ghcr.io are what a
@@ -57,6 +105,7 @@ jobs:
   # nothing at all.
   draft:
     needs: verify
+    if: needs.verify.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -115,12 +164,17 @@ jobs:
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       # The bare tag (no `v`) is the one the CLI pulls — see packages/cli/src/start.ts.
+      #
+      # On a rehearsal `push` is false: both platforms are still built and the ghcr.io login above
+      # still runs, so the build and the credentials are exercised and only the layer upload is
+      # skipped. Pushing a throwaway tag would test more, and would also leave a package behind in
+      # a namespace whose first published artifact is meant to be a real release.
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: apps/web/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ needs.verify.outputs.publish == 'true' }}
           tags: |
             ghcr.io/tregismoreira/warehousd:${{ needs.verify.outputs.version }}
             ghcr.io/tregismoreira/warehousd:v${{ needs.verify.outputs.version }}
@@ -129,6 +183,18 @@ jobs:
   npm:
     needs: [verify, gates, image]
     runs-on: ubuntu-latest
+    # The publishing credential lives on this environment rather than on the repository, and the
+    # environment's deployment rule admits only `v*` tags. A repository secret is readable by any
+    # job in any workflow on any ref — and NPM_TOKEN has to be an all-packages token until the
+    # package exists and Trusted Publishing replaces it. Binding it here is what keeps that window
+    # narrow: the token is unreadable from every ref that is not a release tag.
+    #
+    # Conditional, and it has to be. A job that names an environment whose deployment rule excludes
+    # the current ref does not skip — it fails, with "Branch is not allowed to deploy". Naming it
+    # unconditionally would mean every rehearsal ended red on the one job it most needs to exercise.
+    # An empty string is how a job opts out of an environment entirely; the rehearsal is what
+    # confirms this resolves the way it reads, since a malformed value fails the whole run.
+    environment: ${{ needs.verify.outputs.publish == 'true' && 'npm-publish' || '' }}
     permissions:
       contents: read
       id-token: write
@@ -163,10 +229,22 @@ jobs:
           path: ${{ runner.temp }}/*.tgz
           if-no-files-found: error
 
+      # Everything the real publish does except the upload: the manifest, the file list, the
+      # bundled size and the dist-tag are all resolved and printed. `--provenance` is left off
+      # because generating an attestation means exchanging the OIDC token with the registry, which
+      # is not a dry run of anything — the flag's own failure mode (a private repository) is what
+      # `verify` and the repository's visibility already decide.
+      - name: Rehearse the publish
+        if: needs.verify.outputs.publish != 'true'
+        env:
+          DIST_TAG: ${{ needs.verify.outputs.prerelease == 'true' && 'next' || 'latest' }}
+        run: pnpm --filter ./packages/cli publish --no-git-checks --access public --tag "$DIST_TAG" --dry-run
+
       # The dist-tag is explicit because npm's default is `latest` whatever the version says: a
       # 0.3.0-rc.1 published without this becomes what a bare `npm i warehousd` installs. The
       # Docker side has always handled the same case, in the `tags:` block above.
       - name: Publish to npm
+        if: needs.verify.outputs.publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DIST_TAG: ${{ needs.verify.outputs.prerelease == 'true' && 'next' || 'latest' }}
@@ -176,6 +254,7 @@ jobs:
   # that a version is real, so it must not appear while an image or a tarball is still missing.
   publish:
     needs: [verify, draft, image, npm]
+    if: needs.verify.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

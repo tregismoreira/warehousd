@@ -39,6 +39,13 @@ COPY --from=builder --chown=node:node /app/package.json /app/pnpm-workspace.yaml
 COPY --from=builder --chown=node:node /app/packages/broker ./packages/broker
 COPY --from=builder --chown=node:node /app/apps/web ./apps/web
 
+# GHCR links a container package to a repository by this label and nothing else. Without it the
+# published package is an orphan: it does not inherit the repository's visibility or its Actions
+# access, so both have to be set by hand in the package settings after the first push, and the
+# package page carries no link back to the source. The URL is the repository rather than the
+# image, which is what the annotation specifies.
+LABEL org.opencontainers.image.source="https://github.com/tregismoreira/warehousd"
+
 ENV NODE_ENV=production \
     WAREHOUSD_PROJECT_DIR=/project \
     PORT=8722

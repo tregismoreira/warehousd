@@ -51,6 +51,17 @@ discovers it, and the changelog names that release.
 
 ## Cutting a release
 
+Every release updates `CHANGELOG.md`, and the workflow enforces it. Cut the accumulated
+`## [Unreleased]` section to `## [0.2.0] - YYYY-MM-DD`, leave a new empty `## [Unreleased]` above
+it, and move the link references at the foot of the file:
+
+```markdown
+[Unreleased]: https://github.com/tregismoreira/warehousd/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tregismoreira/warehousd/compare/v0.1.0...v0.2.0
+```
+
+Then bump, commit and tag:
+
 ```bash
 cd packages/cli
 npm version 0.2.0 --no-git-tag-version   # or edit package.json by hand
@@ -60,23 +71,49 @@ git tag v0.2.0
 git push --follow-tags
 ```
 
-The tag must be `v` + the exact `version` in `packages/cli/package.json`. The workflow
-refuses to run otherwise.
+Two things must agree with the tag, and `verify` refuses to run if either does not:
+
+- `version` in `packages/cli/package.json` must be exactly the tag without its `v`.
+- `CHANGELOG.md` must carry a `## [0.2.0] - YYYY-MM-DD` heading, dated today or earlier. A date
+  more than fourteen days old is a warning rather than a failure — that is usually a release that
+  slipped after its notes were written, which is worth seeing but not worth blocking.
+
+Nothing else checks the changelog, and a published version's notes cannot be corrected in place
+afterwards, which is why the check is here rather than left to review.
 
 Then wait. A draft release appears within a minute, the full test suite runs against the tagged
 commit, and nothing reaches npm or ghcr.io until all of it is green — expect roughly twenty
 minutes before the release publishes itself.
 
+## Rehearsing one
+
+`workflow_dispatch` on any branch runs the same workflow with publishing switched off:
+
+```bash
+gh workflow run release.yml --ref my-branch
+gh run watch
+```
+
+`verify` decides publish-versus-rehearse from the ref alone — a tag publishes, anything else does
+not — so there is no input to get wrong and no way for a dispatch to reach a registry. A rehearsal
+runs the version and changelog checks, the whole of `ci.yml`, the multi-architecture image build
+and `npm publish --dry-run`; it skips the layer upload, the real publish, and both release jobs.
+
+What it does **not** cover: the `NPM_TOKEN` secret is bound to the `npm-publish` environment,
+whose deployment rule admits only `v*` tags, so a rehearsal cannot read it. Registry
+authentication is therefore still first exercised for real on the first tag. That is deliberate —
+a credential a rehearsal can reach is a credential any branch can reach.
+
 ## What `.github/workflows/release.yml` does
 
 | Job       | Needs                             | What it does                                                                                                                                                                                     |
 | --------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `verify`  | —                                 | Rejects non-tag refs (so a stray `workflow_dispatch` can't publish), asserts the tag matches the package version, and emits `version` (bare) plus `prerelease`. Holds no permissions.             |
-| `draft`   | `verify`                          | Creates the GitHub Release as a **draft**, with generated notes. Idempotent, so a re-run does not trip over its own first attempt.                                                                |
+| `verify`  | —                                 | Emits `publish` (`true` only for a tag), `version` (bare) and `prerelease`. Asserts the tag matches the package version and that `CHANGELOG.md` has a dated section for it. Holds no permissions. |
+| `draft`   | `verify`                          | Creates the GitHub Release as a **draft**, with generated notes. Idempotent, so a re-run does not trip over its own first attempt. Skipped on a rehearsal.                                        |
 | `gates`   | `verify`                          | Calls `ci.yml` as a reusable workflow: lint, typecheck, format, audit, both vitest passes, the browser suite on three shards, the tarball smoke test and the Docker e2e run — against the tag.    |
-| `image`   | `verify`, `gates`                 | Builds `apps/web/Dockerfile` for amd64 + arm64 and pushes `:<version>` (what the CLI pulls), `:v<version>` (for humans), and `:latest` — the last only when the version has no prerelease suffix. |
-| `npm`     | `verify`, `gates`, `image`        | Builds the CLI, packs the tarball as a run artifact, and publishes with `--provenance` under the `latest` or `next` dist-tag. Requires the `NPM_TOKEN` secret.                                    |
-| `publish` | `verify`, `draft`, `image`, `npm` | Attaches the packed tarball to the release and flips the draft to published (as a prerelease where applicable).                                                                                   |
+| `image`   | `verify`, `gates`                 | Builds `apps/web/Dockerfile` for amd64 + arm64 and pushes `:<version>` (what the CLI pulls), `:v<version>` (for humans), and `:latest` — the last only when the version has no prerelease suffix. On a rehearsal it builds both platforms and pushes nothing. |
+| `npm`     | `verify`, `gates`, `image`        | Builds the CLI, packs the tarball as a run artifact, and publishes with `--provenance` under the `latest` or `next` dist-tag. Runs in the `npm-publish` environment, which is where `NPM_TOKEN` lives. On a rehearsal it runs `--dry-run` instead. |
+| `publish` | `verify`, `draft`, `image`, `npm` | Attaches the packed tarball to the release and flips the draft to published (as a prerelease where applicable). Skipped on a rehearsal.                                                           |
 
 Ordering matters twice over. The version check used to live in the npm job, so a bad run could
 move `:latest` before anything validated it. And until `gates` existed, a tag matched neither of
@@ -84,6 +121,10 @@ move `:latest` before anything validated it. And until `gates` existed, a tag ma
 whatever the tag pointed at with no test having run against it at all. `ci.yml` is *called*, not
 copied: a second copy of those jobs would drift from the one pull requests run, and the point of
 the gate is that a release is held to the same bar a branch is.
+
+One rule holds the whole file together: **only a tag publishes.** It is decided once, in `verify`,
+from `github.ref_type` and nothing else — not from a workflow input, which whoever starts a run
+could set. Every step that touches npm, ghcr.io or the release reads that one output.
 
 A release therefore occupies about six runners for roughly twenty minutes before anything reaches
 a registry. That is the price of the gate, and it is paid on tags only.
@@ -131,24 +172,21 @@ npx warehousd@0.2.0 stop --destroy --yes
 Provenance should show as a "Built and signed on GitHub Actions" badge on
 <https://www.npmjs.com/package/warehousd>.
 
-## One-time setup
+## What a release assumes about the registries
 
-Before the first tag push:
+Three properties of the publishing setup, stated here because a failing release usually means one
+of them has drifted rather than that the code is wrong:
 
-1. **The repo must be public.** npm dropped provenance support for private repos in 2023, so
-   `--provenance` hard-fails otherwise.
-2. **`NPM_TOKEN` repo secret** — an npm Granular Access Token, type _Automation_, permission
-   _Read and write_.
-
-Immediately after the first release:
-
-3. **Make the GHCR package public.**
-   `github.com/users/tregismoreira/packages/container/warehousd/settings` → Change visibility →
-   Public. A package first pushed from a private repo is private, so anonymous `docker pull`
-   fails until you flip it. Under _Manage Actions access_, also add the `warehousd` repo with
-   **Write** so later releases can push. ⚠️ Public is irreversible for that package.
-4. **Switch to npm Trusted Publishing (OIDC)** and delete `NPM_TOKEN` — this can only be
-   configured once the package exists.
+- **The repository is public.** npm dropped provenance support for private repositories in 2023,
+  so the `--provenance` flag in the `npm` job hard-fails otherwise.
+- **The `warehousd` npm package publishes over OIDC**, using the `id-token: write` permission on
+  that job. Where a `NPM_TOKEN` secret is configured instead, it lives on the `npm-publish`
+  environment rather than on the repository, and that environment admits only `v*` tags. A
+  repository secret is readable from any ref by any workflow; an environment secret is not.
+- **The GHCR package is public**, and grants the repository write access under _Manage Actions
+  access_. A container package inherits neither from the repository automatically, and an image
+  that is not anonymously pullable breaks `warehousd start` for every user rather than just for
+  the release.
 
 ## Moving the GHCR namespace
 
