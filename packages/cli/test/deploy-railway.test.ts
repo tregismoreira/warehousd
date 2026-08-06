@@ -381,8 +381,13 @@ describe("deploy", () => {
       "FROM ghcr.io/example/warehousd:test",
     );
     expect(readFileSync(join(ctx.deployDir, "railway.json"), "utf8")).toContain("/api/health");
-    // deployDir, not contextDir: `COPY context /project` resolves against the uploaded directory.
-    expect(calls()).toContain(`up --detach --service harbor-warehousd ${ctx.deployDir}`);
+    // The bundle is selected by cwd, not a PATH argument — railway CLI v5 uploads the current
+    // directory and silently ignores a PATH pointing elsewhere.
+    expect(calls()).toContain("up --detach --service harbor-warehousd");
+    const upCall = vi
+      .mocked(execFileSyncRef)
+      .mock.calls.find((c) => Array.isArray(c[1]) && (c[1] as string[])[0] === "up");
+    expect((upCall?.[2] as { cwd?: string } | undefined)?.cwd).toBe(ctx.deployDir);
   });
 
   // Railway builds remotely, always. There is no `--remote-only` to opt out of and no Docker
@@ -533,7 +538,8 @@ describe("destroy", () => {
 
     await railway.destroy(context(load()));
 
-    expect(calls()).toContain("delete --yes");
+    // --project is explicit: without a terminal the CLI refuses to infer it from the link.
+    expect(calls()).toContain("delete --yes --project harbor-warehousd");
   });
 
   // `railway delete` acts on whatever is linked. An operator who linked an existing project by

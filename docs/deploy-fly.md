@@ -100,7 +100,8 @@ For development, pass `--allow-local-login`:
 warehousd deploy --allow-local-login
 ```
 
-This creates an admin account `admin@warehousd.local` with a generated password.
+This creates an admin account `admin@<app_name>.fly.dev` with a generated
+password.
 The deploy summary shows it masked — run `warehousd secrets --show` for the
 plaintext, or read `.warehousd/state.json` (mode 0600). Local login works
 without an IdP.
@@ -110,7 +111,17 @@ without an IdP.
 The server image is not yet published. Until it is, build it locally:
 
 ```bash
-docker build -f apps/web/Dockerfile -t warehousd:local .
+docker build --platform linux/amd64 -f apps/web/Dockerfile -t warehousd:local .
+```
+
+`--platform` matters on Apple Silicon: Fly machines are amd64, and a default
+arm64 build fails the deploy with "no match for platform in manifest". If the
+emulated build segfaults under QEMU, enable Rosetta in Docker Desktop's
+settings, or build once on Fly's own builder and reference the pushed image:
+
+```bash
+flyctl deploy --config fly.toml --build-only --push --image-label base \
+  --dockerfile apps/web/Dockerfile .
 ```
 
 This takes a few minutes the first time. Once built, Fly caches it.

@@ -71,6 +71,8 @@ describe("renderFlyToml", () => {
     const toml = renderFlyToml({ appName: "test-app", region: "sea" });
     expect(toml).toContain("[http_service]");
     expect(toml).toContain("internal_port = 8722");
+    // flyctl refuses a service that names no process group once [processes] defines one.
+    expect(toml).toContain('processes = ["app"]');
     expect(toml).toContain('auto_stop_machines = "suspend"');
     expect(toml).toContain("min_machines_running = 1");
   });

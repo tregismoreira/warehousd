@@ -63,8 +63,16 @@ primary_region = "${o.region}"
 [processes]
   app = "pnpm --filter @warehousd/web start"
 
+# Without this Fly provisions its 256MB default, which a Next.js server plus the tsx bootstrap
+# OOM-thrashes in — health checks flap and requests hang while the kernel reclaims.
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
 [http_service]
   internal_port = 8722
+  processes = ["app"]
   force_https = true
   auto_stop_machines = "suspend"
   min_machines_running = 1

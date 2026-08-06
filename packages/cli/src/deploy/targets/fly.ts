@@ -49,6 +49,14 @@ function preflight(input: TargetPreflightInput): Promise<PreflightCheck[]> {
         : `region "${region}" is not a Fly region code. Fly uses three letters — gru, iad, sjc; ` +
           `see https://fly.io/docs/reference/regions/`,
     });
+  } else if (input.cfg?.deploy) {
+    // The schema no longer demands a region — Compose has none — so a Fly deploy that omitted it
+    // has to be refused here, before `apps create` runs with nowhere to put the machines.
+    checks.push({
+      id: "fly-region",
+      ok: false,
+      detail: "deploy.region is required for Fly — three letters, e.g. gru, iad, sjc",
+    });
   }
 
   return Promise.resolve(checks);
@@ -66,10 +74,17 @@ function ensureApp(ctx: TargetContext): Promise<void> {
 // back out. Any URL invented here — the old code built one from the *local* Docker password in
 // state.json — would simply be wrong. The entrypoint falls back to DATABASE_URL, which is the value
 // that actually works.
+// Preflight refuses a region-less config for this target, so reaching either call site without
+// one is a mistake in our own code — hence a throw, not a refusal.
+function requireRegion(ctx: TargetContext): string {
+  if (!ctx.region) throw new Error("deploy.region is required for Fly");
+  return ctx.region;
+}
+
 function provisionDatabase(ctx: TargetContext): Promise<string | null> {
   const dbApp = dbAppName(ctx.appName);
   if (!appExists(dbApp)) {
-    run(["postgres", "create", "--name", dbApp, "--region", ctx.region]);
+    run(["postgres", "create", "--name", dbApp, "--region", requireRegion(ctx)]);
     run(["postgres", "attach", "--app", ctx.appName, dbApp]);
   }
   return Promise.resolve(null);
@@ -85,9 +100,18 @@ async function deploy(ctx: TargetContext): Promise<void> {
   writeFileSync(dockerfilePath, renderDeployDockerfile(resolveBaseImage(ctx.cfg)));
 
   const flyTomlPath = join(ctx.deployDir, "fly.toml");
-  writeFileSync(flyTomlPath, renderFlyToml({ appName: ctx.appName, region: ctx.region }));
+  writeFileSync(flyTomlPath, renderFlyToml({ appName: ctx.appName, region: requireRegion(ctx) }));
 
-  const deployArgs = ["deploy", "--config", flyTomlPath, "--dockerfile", dockerfilePath];
+  // The bundle dir is the build context — flyctl defaults to the process cwd, where the
+  // Dockerfile's `COPY context /project` has nothing to copy.
+  const deployArgs = [
+    "deploy",
+    ctx.deployDir,
+    "--config",
+    flyTomlPath,
+    "--dockerfile",
+    dockerfilePath,
+  ];
   if (!ctx.localBuild) {
     deployArgs.push("--remote-only");
   } else {
@@ -95,6 +119,9 @@ async function deploy(ctx: TargetContext): Promise<void> {
     // build never loads the Docker probe at all.
     const docker = await import("../../docker");
     docker.assertDocker();
+    // flyctl defaults to its remote builder even without --remote-only, so a base image that only
+    // exists in the local daemon never resolves there. --local-only is what makes this flag real.
+    deployArgs.push("--local-only");
   }
 
   run(deployArgs);

@@ -253,8 +253,9 @@ export async function runDeploy(
   const appUrl = await target.appUrl(ctx);
   // Falls back to the app name when the target serves no URL of its own (a Compose stack the
   // operator points their own hostname at). It is a seed for the admin account's address, not a
-  // route to anything.
-  const adminEmail = `admin@${appUrl ? new URL(appUrl).host : appName}`;
+  // route to anything — but it still has to parse as an email: a bare app name has no dot in its
+  // domain and Better Auth refuses it, which kills the bootstrap on first boot.
+  const adminEmail = `admin@${appUrl ? new URL(appUrl).host : `${appName}.local`}`;
 
   // The four role-scoped URLs are deliberately NOT set here. They are derived server-side from
   // APP_DATABASE_URL and WAREHOUSD_DATA_ROLE_PASSWORD (apps/web/app/lib/broker.ts), which is the
@@ -274,6 +275,7 @@ export async function runDeploy(
     `WAREHOUSD_ADMIN_EMAIL=${adminEmail}`,
     `WAREHOUSD_ADMIN_PASSWORD=${state.adminPassword}`,
     `WAREHOUSD_DEV_CLIENT_SECRET=${state.devClientSecret}`,
+    `WAREHOUSD_MASK_KEY=${state.maskKey}`,
   ];
 
   // Add WAREHOUSD_DISABLE_LOCAL_LOGIN unless allowLocalLogin is set
@@ -288,6 +290,25 @@ export async function runDeploy(
     secretsInput.push(`SSO_CLIENT_SECRET=${process.env.SSO_CLIENT_SECRET}`);
   if (process.env.ANTHROPIC_API_KEY)
     secretsInput.push(`ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`);
+  // Better Auth refuses any SSO discovery URL whose origin is not in trustedOrigins, so an issuer
+  // shipped without its origin is an SSO registration that can never succeed. An explicit
+  // WAREHOUSD_TRUSTED_ORIGINS wins; otherwise derive the one origin the issuer implies. And when
+  // the target serves no URL of its own, BETTER_AUTH_URL is omitted and the middleware's origin
+  // gate falls back to the container-internal port — so the published localhost origin has to be
+  // trusted here, or a Compose stack on any other server.port refuses every browser sign-in.
+  const trustedOrigins: string[] = [];
+  if (process.env.WAREHOUSD_TRUSTED_ORIGINS) {
+    trustedOrigins.push(process.env.WAREHOUSD_TRUSTED_ORIGINS);
+  } else if (process.env.SSO_ISSUER) {
+    try {
+      trustedOrigins.push(new URL(process.env.SSO_ISSUER).origin);
+    } catch {
+      // An unparseable issuer fails later, at registration, with Better Auth's own message.
+    }
+  }
+  if (!appUrl) trustedOrigins.push(`http://localhost:${cfg.server.port}`);
+  if (trustedOrigins.length)
+    secretsInput.push(`WAREHOUSD_TRUSTED_ORIGINS=${trustedOrigins.join(",")}`);
 
   // Add every envRefs name if present in process.env
   const refs = envRefs(dir);

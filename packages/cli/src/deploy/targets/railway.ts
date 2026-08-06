@@ -118,6 +118,14 @@ function preflight(input: TargetPreflightInput): Promise<PreflightCheck[]> {
         : `region "${region}" is not a Railway region code. Railway uses ${EXAMPLE_REGIONS}; ` +
           `see https://docs.railway.com/reference/deployment-regions`,
     });
+  } else if (input.cfg?.deploy) {
+    // Same reasoning as Fly's: the schema admits a region-less deploy block for Compose's sake,
+    // so a target with regions has to demand one itself.
+    checks.push({
+      id: "railway-region",
+      ok: false,
+      detail: `deploy.region is required for Railway — ${EXAMPLE_REGIONS}`,
+    });
   }
 
   // Which project this directory is linked to is the one thing that can silently send a deploy
@@ -236,6 +244,8 @@ function deploy(ctx: TargetContext): Promise<void> {
     join(ctx.deployDir, "Dockerfile"),
     renderDeployDockerfile(resolveBaseImage(ctx.cfg)),
   );
+  // Preflight refuses a region-less config for this target; reaching here without one is our bug.
+  if (!ctx.region) throw new Error("deploy.region is required for Railway");
   writeFileSync(join(ctx.deployDir, "railway.json"), renderRailwayJson({ region: ctx.region }));
 
   // `--detach` returns once Railway has accepted the upload. What follows is `runDeploy`'s poll of
@@ -244,9 +254,13 @@ function deploy(ctx: TargetContext): Promise<void> {
   // `deployDir` and not `contextDir`: the Dockerfile and railway.json sit beside the bundle, and
   // `COPY context /project` resolves against the directory that was uploaded.
   //
+  // The bundle is selected by cwd, not by the PATH argument: railway CLI v5 uploads "the current
+  // directory" and a PATH pointing elsewhere is silently ignored, so Railpack analyzed the project
+  // dir, found no Dockerfile and failed the build.
+  //
   // `--local-build` has no meaning here. Railway builds remotely, always; there is no equivalent
   // of `flyctl deploy --remote-only` to opt out of, and no Docker daemon involved on this machine.
-  run(["up", "--detach", "--service", ctx.appName, ctx.deployDir], { cwd: ctx.projectDir });
+  run(["up", "--detach", "--service", ctx.appName], { cwd: ctx.deployDir });
   return Promise.resolve();
 }
 
@@ -268,7 +282,9 @@ function destroy(ctx: TargetContext): Promise<void> {
     );
   }
 
-  if (!tryRun(["delete", "--yes"], { cwd: ctx.projectDir }).ok) {
+  // `--project` is explicit because without a terminal the CLI refuses to infer it from the link,
+  // and the guard above has already pinned the link to this very name.
+  if (!tryRun(["delete", "--yes", "--project", ctx.appName], { cwd: ctx.projectDir }).ok) {
     ctx.say(
       `Could not delete the Railway project ${ctx.appName}. Remove it from the dashboard: railway open`,
     );

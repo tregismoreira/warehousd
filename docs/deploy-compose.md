@@ -26,22 +26,19 @@ on. For a platform that does all of that for you, see
 ### 1. Add the deploy config to warehousd.yml
 
 On a new project `warehousd init --target compose` scaffolds this block for you.
-`region` is required by the schema and means nothing here — Compose has no
-regions, and nothing checks it.
+There is no `region` — Compose has no regions, and the schema does not ask for
+one here. (Fly and Railway demand theirs at pre-flight instead.)
 
 ```yaml
 deploy:
   target: compose
   app_name: harbor-warehousd
-  region: local
   database:
     managed: true
 ```
 
 `app_name` becomes the Compose project name, which is what keeps two stacks on
-one host from adopting each other's containers. `region` is required by the
-config schema and means nothing here — Compose has no regions. Record where the
-machine is; nothing reads it.
+one host from adopting each other's containers.
 
 `managed: true` puts a `pgvector/pgvector:pg16` service in the rendered file,
 with a named volume and a password generated into `.warehousd/state.json`. To
@@ -52,7 +49,6 @@ instead, and read [deploy-database.md](deploy-database.md) first:
 deploy:
   target: compose
   app_name: harbor-warehousd
-  region: local
   database:
     url: ${env:PROD_DATABASE_URL}
 ```
@@ -141,7 +137,11 @@ docker compose --env-file .warehousd/deploy.env -f docker-compose.deploy.yml up 
 
 The deploy omits `BETTER_AUTH_URL` rather than guessing it: with no platform
 hostname to read, any value it invented would be wrong, and an empty one would
-break every callback instead of falling back to the request.
+break every callback instead of falling back to the request. Until you set it,
+browser sign-ins are accepted only from `http://localhost:<server.port>` — the
+deploy writes that origin into `WAREHOUSD_TRUSTED_ORIGINS` in `deploy.env`, and
+the sign-in origin gate refuses any other. Setting `BETTER_AUTH_URL` is what
+makes your proxy's hostname a trusted origin too.
 
 **If you widen the published port** to `0.0.0.0` and serve plaintext HTTP, you
 are sending session cookies in the clear. Demo mode is refused by pre-flight;
