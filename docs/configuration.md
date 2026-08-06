@@ -111,10 +111,11 @@ The `deploy:` block is optional and required only by `warehousd deploy`. It
 names the target — `fly`, `railway` or `compose` — the app name, the region, and
 — most critically — **exactly one** of `managed: true` or a `database.url`. An
 `image:` override is optional; if unset, the published image is used.
-`warehousd init --target <id>` scaffolds the block. `region` is only checked for
-being present here: what a region *looks* like belongs to the target and is
-checked by its pre-flight, which is why `us-west2` and `gru` are both valid in
-this file and only one of them is valid for a given target. The runbooks are
+`warehousd init --target <id>` scaffolds the block. `region` is optional here —
+Compose has none to name — and everything about it belongs to the target's
+pre-flight: Fly and Railway refuse its absence there, and what a region *looks*
+like is theirs too, which is why `us-west2` and `gru` are both valid in this
+file and only one of them is valid for a given target. The runbooks are
 [deploy-fly.md](deploy-fly.md), [deploy-railway.md](deploy-railway.md) and
 [deploy-compose.md](deploy-compose.md).
 
@@ -281,9 +282,11 @@ Omit it and nobody sees the raw value without editing this file.
 | `year` | date, timestamptz | the year alone |
 | `domain` | text | whatever follows the `@` |
 
-`hash` needs `WAREHOUSD_MASK_KEY`. There is deliberately no default: a default
-key is a public key, and the point of `hash` is a pseudonym only this deployment
-can correlate.
+`hash` needs `WAREHOUSD_MASK_KEY`. `warehousd start` and `warehousd deploy`
+generate one per project into `.warehousd/state.json` and ship it with the other
+secrets; set it by hand only when running the image without the CLI. There is
+deliberately no baked-in default: a default key is a public key, and the point
+of `hash` is a pseudonym only this deployment can correlate.
 
 **A masked field can be projected and nothing else.** It cannot appear in
 `filters`, `orderBy`, `groupBy` or `aggregate` — those refuse with
@@ -658,7 +661,7 @@ Set on the container or the dev process, not in YAML:
 | `DEV_WRITE_DATABASE_URL` / `LIVE_WRITE_DATABASE_URL` | The per-env write roles behind `broker.mutate`. They hold `INSERT`, `SELECT`, and `UPDATE` on the two revision-bookkeeping columns only — never on a data column, and never `DELETE`. Unset means no mutation path for that env. |
 | `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` | Session and token signing; the app's public origin. |
 | `WAREHOUSD_PROJECT_DIR` | Where `warehousd.yml` lives (`/project` in the container). |
-| `WAREHOUSD_TRUSTED_ORIGINS` | Comma-separated origins allowed as OIDC/SAML issuers. Required for loopback or private-network IdPs — see [configure-sso.md](configure-sso.md). |
+| `WAREHOUSD_TRUSTED_ORIGINS` | Comma-separated origins allowed as OIDC/SAML issuers and as browser sign-in origins. Every IdP's issuer origin must be listed — `warehousd deploy` derives it from `SSO_ISSUER` when unset, and a Compose deploy adds `http://localhost:<server.port>` — see [configure-sso.md](configure-sso.md). |
 | `WAREHOUSD_DISABLE_LOCAL_LOGIN` | `true` forces every sign-in through SSO. |
 | `WAREHOUSD_DEMO` | `true` behaves like `demo: true`. |
 | `WAREHOUSD_IMAGE` | Server image the CLI should run, if `server.image` is unset. |

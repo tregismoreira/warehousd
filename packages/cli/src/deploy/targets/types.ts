@@ -14,7 +14,9 @@ export type TargetContext = {
   cfg: WarehousdConfig;
   deploy: DeployConfig;
   appName: string;
-  region: string;
+  /** Absent when the config names none. Targets with regions refuse that in preflight; Compose,
+      which has none to name, never reads this. */
+  region: string | undefined;
   /**
    * The generated credentials, for a target that has to send them.
    *

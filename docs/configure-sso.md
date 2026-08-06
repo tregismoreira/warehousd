@@ -11,18 +11,20 @@ picks the right client-side flow automatically based on the provider's `type`.
 
 ## Prerequisite: `WAREHOUSD_TRUSTED_ORIGINS`
 
-Better Auth's OIDC discovery **rejects loopback and private-network hosts by
-default** (`discovery_private_host`). If your IdP is self-hosted, on a private
-network, or running locally (e.g. a test Keycloak container), you must list
-its origin in `WAREHOUSD_TRUSTED_ORIGINS` (comma-separated) **before**
-registering it — otherwise registration fails immediately with that error.
+Better Auth refuses to fetch OIDC discovery from any origin not listed in
+`WAREHOUSD_TRUSTED_ORIGINS` (comma-separated) — public IdPs included, not just
+loopback and private-network hosts. Registering a provider whose issuer origin
+is missing from the list fails immediately with a "not trusted by your trusted
+origins configuration" error.
 
 ```bash
-WAREHOUSD_TRUSTED_ORIGINS=http://127.0.0.1:8780
+WAREHOUSD_TRUSTED_ORIGINS=https://your-tenant.us.auth0.com
 ```
 
-Public, internet-reachable IdPs (Okta, Entra ID, Google Workspace) do not need
-to be listed here.
+`warehousd deploy` derives this for you: when `WAREHOUSD_TRUSTED_ORIGINS` is
+not set in its environment, it ships the origin of `SSO_ISSUER` as the value.
+Set it explicitly when you have more than one IdP, or a locally run one (e.g. a
+test Keycloak container).
 
 ---
 

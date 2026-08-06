@@ -12,6 +12,9 @@ export type State = {
   // the process that has to print it is this one: the container stores only a hash of it, so it
   // cannot be read back out of the database on a later `start`.
   devClientSecret: string;
+  // HMAC key for `mask: { transform: hash }`. Without it every read of a hash-masked field is an
+  // internal_error, so it is provisioned with the rest rather than left to the operator.
+  maskKey: string;
 };
 
 export type Outputs = {
@@ -88,6 +91,7 @@ export function ensureState(dir: string): State {
     betterAuthSecret: existing.betterAuthSecret ?? randomBytes(24).toString("hex"),
     adminPassword: existing.adminPassword ?? randomBytes(24).toString("hex"),
     devClientSecret: existing.devClientSecret ?? randomBytes(32).toString("hex"),
+    maskKey: existing.maskKey ?? randomBytes(32).toString("hex"),
   };
 
   // Write state with restricted permissions

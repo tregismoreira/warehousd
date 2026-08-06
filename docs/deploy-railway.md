@@ -13,8 +13,11 @@ the three.
 - The `railway` CLI, installed and authenticated:
   ```bash
   npm i -g @railway/cli     # or: brew install railway
-  railway login             # or export RAILWAY_TOKEN=... for CI
+  railway login             # or, for CI, export RAILWAY_API_TOKEN=<account token>
   ```
+  Mind the variable name: an **account** token goes in `RAILWAY_API_TOKEN`.
+  `RAILWAY_TOKEN` is for project-scoped tokens, and an account token placed
+  there fails `railway whoami` — which is exactly what pre-flight runs.
 - An SSO provider configured (OIDC or SAML), or willingness to run with local
   login enabled. SSO is documented in [configure-sso.md](configure-sso.md).
 

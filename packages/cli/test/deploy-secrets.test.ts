@@ -403,9 +403,12 @@ collections:
     await runDeploy(projectDir, { yes: true, allowLocalLogin: true });
 
     expect(deployArgs).toContain("--remote-only");
+    // The bundle dir must be flyctl's working directory: the build context has to contain the
+    // `context/` tree the rendered Dockerfile copies, and flyctl defaults to the process cwd.
+    expect(deployArgs[1]).toBe(join(projectDir, ".warehousd", "deploy"));
   });
 
-  it("--remote-only absent with localBuild: true", async () => {
+  it("--remote-only absent and --local-only present with localBuild: true", async () => {
     writeFileSync(
       join(projectDir, "warehousd.yml"),
       `
@@ -450,6 +453,9 @@ collections:
     await runDeploy(projectDir, { yes: true, allowLocalLogin: true, localBuild: true });
 
     expect(deployArgs).not.toContain("--remote-only");
+    // Without --local-only flyctl still builds remotely, where a local-daemon base image
+    // never resolves.
+    expect(deployArgs).toContain("--local-only");
   });
 
   // The caller used to pass `${appUrl}/api/health` to a pollHealth that appends `/api/health`

@@ -385,7 +385,7 @@ while the default `--remote-only` path does not.
 | Flag                  |                                                                                                    |
 | --------------------- | -------------------------------------------------------------------------------------------------- |
 | `-d, --dir <dir>`     | Project directory (default: current).                                                              |
-| `--allow-local-login` | Enable `admin@warehousd.local` with a generated password, in addition to any configured SSO.       |
+| `--allow-local-login` | Enable an admin account with a generated password (`admin@<host>`, e.g. `admin@myapp.fly.dev`; `admin@<app_name>.local` on Compose), in addition to any configured SSO. |
 | `--allow-disabled-audit` | Deploy a project configured with `audit.enabled: false`. Nothing it does will be recorded.      |
 | `-y, --yes`           | Skip the re-deploy diff prompt (one-time deploys always prompt).                                   |
 | `--local-build`       | Fly only. Build the image locally; otherwise use Fly's remote builder. Railway always builds remotely and Compose builds nothing. |

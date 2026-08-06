@@ -194,7 +194,7 @@ describe("the compose target", () => {
     // to the request, and an empty value would break every callback instead.
     expect(env).not.toContain("BETTER_AUTH_URL");
     // Seeded off app_name, there being no host to seed off.
-    expect(env).toContain("WAREHOUSD_ADMIN_EMAIL=admin@test-app");
+    expect(env).toContain("WAREHOUSD_ADMIN_EMAIL=admin@test-app.local");
 
     // The values are generated per deploy, so the file itself cannot be snapshotted; its keys can,
     // and they are the contract — one missing name is a container that boots and then refuses.
@@ -211,6 +211,8 @@ describe("the compose target", () => {
         "WAREHOUSD_ADMIN_EMAIL",
         "WAREHOUSD_ADMIN_PASSWORD",
         "WAREHOUSD_DEV_CLIENT_SECRET",
+        "WAREHOUSD_MASK_KEY",
+        "WAREHOUSD_TRUSTED_ORIGINS",
         "POSTGRES_PASSWORD",
       ]
     `);
@@ -352,7 +354,7 @@ describe("the compose target", () => {
     expect(payload.notes.join("\n")).toContain("TLS is yours to terminate");
     // Still the whole outputs contract, plus the credentials --json is asked for.
     expect(payload.apiUrl).toBe("http://localhost:8722");
-    expect(payload.adminEmail).toBe("admin@test-app");
+    expect(payload.adminEmail).toBe("admin@test-app.local");
   });
 
   // The attached-database branch cannot go through runDeploy: pre-flight dials `database.url` for

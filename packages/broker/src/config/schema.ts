@@ -608,7 +608,9 @@ export const DeploySchema = z
         /^[a-z0-9][a-z0-9-]{0,62}$/,
         "app_name must be a valid host name (lowercase letters, digits and dashes, starting with a letter or digit)",
       ),
-    region: z.string().min(1, "region must not be empty"),
+    // Optional because not every target has regions — Compose runs wherever the operator runs it.
+    // A target that does need one refuses its absence in `preflight`, with its own message.
+    region: z.string().min(1, "region must not be empty").optional(),
     image: z.string().optional(),
     database: z
       .object({

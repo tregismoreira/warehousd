@@ -176,6 +176,7 @@ export async function runStart(
       // The container stores only a hash of this, so this process stays the only holder of the
       // plaintext — which is what lets `start` keep printing it on every run.
       WAREHOUSD_DEV_CLIENT_SECRET: st.devClientSecret,
+      WAREHOUSD_MASK_KEY: st.maskKey,
       WAREHOUSD_DEMO: String(p.cfg.demo ?? false),
       WAREHOUSD_SEED: String(opts.seed ?? 42),
     },
