@@ -117,6 +117,12 @@ grant flow demonstrable on a fresh install.
    request, so there is no token to wait out.
 6. Open the audit log as Ana. Every step above is a row, refusals included.
 
+**[SCENARIOS.md](SCENARIOS.md) takes that from six steps to twenty**, in
+difficulty order — term-scoped grants, per-document ACLs, masking and unmasking,
+aggregation and its ceiling, MCP and REST, the governed write path, dev/live
+isolation, and the operator's loop. Each one names the observable fact that makes
+the claim true rather than asserted.
+
 ## What is in the config
 
 `warehousd.yml` is the whole of it — one file, reviewed in git, and the only
