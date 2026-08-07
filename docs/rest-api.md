@@ -26,19 +26,11 @@ A thin HTTP adapter for programmatic access to collections, governed by the same
 | GET | `/v1/grants` | (custom) | List grants for the authenticated user | 200 |
 | POST | `/v1/grants` | (custom) | Request access to a collection | 201 |
 
-**There is deliberately no `GET /v1/proposals/{id}`.** `listProposals` returns no field
-values, so reading the *proposed content* of a single proposal is a separate, more privileged
-call — `broker.getProposal`, reachable only through the console's session route
-`GET /api/proposals/{id}`. Reviewing proposed content is a console-only surface. Exposing it
-over `/v1` would be a new public API commitment rather than a gap to close, so it is left to
-its own decision.
+**There is deliberately no `GET /v1/proposals/{id}`.** `listProposals` returns no field values, so reading the *proposed content* of a single proposal is a separate, more privileged call — `broker.getProposal`, reachable only through the console's session route `GET /api/proposals/{id}`. Reviewing proposed content is a console-only surface. Exposing it over `/v1` would be a new public API commitment rather than a gap to close, so it is left to its own decision.
 
 ## Status codes and reasons
 
-All refusals return a `reason` code; never a denied field value, never SQL. `/v1/token` uses a
-separate, OAuth-standard error-code scheme (`invalid_request`, `invalid_client`,
-`unauthorized_client`, `invalid_grant`, `unsupported_grant_type`, `server_error`) rather than the
-broker refusal reasons below — the two tables do not share a mapping function.
+All refusals return a `reason` code; never a denied field value, never SQL. `/v1/token` uses a separate, OAuth-standard error-code scheme (`invalid_request`, `invalid_client`, `unauthorized_client`, `invalid_grant`, `unsupported_grant_type`, `server_error`) rather than the broker refusal reasons below — the two tables do not share a mapping function.
 
 **Data routes** (`/v1/collections/...`, `/v1/proposals/...`, `/v1/grants`, `/v1/changes`) — mapped by `restStatus()`:
 
@@ -71,10 +63,7 @@ broker refusal reasons below — the two tables do not share a mapping function.
 
 **Special case: conflict detection.** A mutation with an `If-Match: "{rev}"` header that conflicts returns 412 (Precondition Failed), while a conflict without the header returns 409 (Conflict). Both carry `reason: "conflict"` in the JSON response body.
 
-Approving a proposal can also return 409: either the proposal overlaps a field
-changed since it was derived, or the document it creates came into existence in the
-meantime and the promotion lost the race for the current-revision index. Both are
-retriable by re-reading and re-proposing, which is why they are not 500.
+Approving a proposal can also return 409: either the proposal overlaps a field changed since it was derived, or the document it creates came into existence in the meantime and the promotion lost the race for the current-revision index. Both are retriable by re-reading and re-proposing, which is why they are not 500.
 
 ## Authentication: client_credentials flow (headless applications)
 

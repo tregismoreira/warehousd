@@ -8,9 +8,9 @@ apps/web/next-env.d.ts
 apps/web/test-results/
 apps/web/playwright-report/
 
-# Prose is out of scope. The docs, the README and SECURITY.md are hand-wrapped at a deliberate
-# width with deliberate line breaks — a formatter would rewrite hundreds of lines to no benefit and
-# make every later docs diff harder to read. Prettier here is for code.
+# Prose is out of scope. Markdown paragraphs are one line each and soft-wrap in the editor, so
+# there is nothing for a formatter to reflow — and Prettier's proseWrap would fight that by
+# re-imposing a print width. Prettier here is for code. See AGENTS.md, "Code conventions".
 *.md
 
 # Fixtures are records of what an external system produced, not source we write. Reformatting one

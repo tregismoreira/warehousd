@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 636" width="960" height="636" role="img"
+     aria-label="warehousd is a modular monolith. Two host processes consume one broker library: the Next.js application, whose thin adapters are the MCP server, the REST API and the web UI; and the warehousd CLI, which applies config, runs migrations, seeds synthetic data and imports. The broker is a pure library with no HTTP, MCP, UI or LLM imports, turning identity, grants and a query intent into rows or a refusal, auditing every decision before the response returns. The adapters inject what the broker must not contain: the providers package for embedding and file extraction, and the audit sink. Postgres holds the app schema alongside separate data_live and data_synth schemas.">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#5B6471"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="636" rx="10" fill="#0F1115"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace">
+
+    <!-- ── request plane: the next.js application ───────────────────────── -->
+
+    <text x="30" y="96" font-size="10" letter-spacing="1.6" fill="#7E8A9A">REQUEST PLANE — NEXT.JS APPLICATION</text>
+    <rect x="30" y="108" width="560" height="200" rx="6" fill="#1A1E23" stroke="#31373F"/>
+    <text x="46" y="136" font-size="13" fill="#7E8A9A">adapters — thin, replaceable</text>
+    <line x1="46" y1="150" x2="574" y2="150" stroke="#31373F"/>
+    <g font-size="13" fill="#F4F6F8">
+      <text x="46" y="176">MCP server</text>
+      <text x="46" y="199">REST API</text>
+      <text x="46" y="222">Web UI</text>
+      <text x="46" y="245">[future]</text>
+    </g>
+    <g font-size="13" fill="#7E8A9A">
+      <text x="210" y="176">streamable HTTP, OAuth 2.1</text>
+      <text x="210" y="199">/v1, RFC 8693 token exchange</text>
+      <text x="210" y="222">admin / manager / member</text>
+      <text x="210" y="245">CMS delivery, apps</text>
+    </g>
+    <line x1="46" y1="262" x2="574" y2="262" stroke="#31373F"/>
+    <text x="46" y="288" font-size="13" fill="#7E8A9A">Better Auth — sessions, SSO, OAuth</text>
+
+    <!-- ── operator plane: the cli ──────────────────────────────────────── -->
+
+    <text x="620" y="96" font-size="10" letter-spacing="1.6" fill="#7E8A9A">OPERATOR PLANE — warehousd CLI</text>
+    <rect x="620" y="108" width="310" height="200" rx="6" fill="#1A1E23" stroke="#31373F"/>
+    <text x="636" y="136" font-size="13" fill="#7E8A9A">runs the same broker</text>
+    <line x1="636" y1="150" x2="914" y2="150" stroke="#31373F"/>
+    <g font-size="13" fill="#F4F6F8">
+      <text x="636" y="176">apply</text>
+      <text x="636" y="199">migrate</text>
+      <text x="636" y="222">seed</text>
+      <text x="636" y="245">import</text>
+    </g>
+    <g font-size="13" fill="#7E8A9A">
+      <text x="746" y="176">config</text>
+      <text x="746" y="199">schema</text>
+      <text x="746" y="222">synthetic</text>
+      <text x="746" y="245">+ indexing</text>
+    </g>
+    <line x1="636" y1="262" x2="914" y2="262" stroke="#31373F"/>
+    <text x="636" y="288" font-size="13" fill="#7E8A9A">no second data path</text>
+
+    <!-- ── broker ───────────────────────────────────────────────────────── -->
+
+    <line x1="310" y1="312" x2="310" y2="340" stroke="#5B6471" stroke-width="1.5" marker-end="url(#a)"/>
+    <line x1="775" y1="312" x2="775" y2="340" stroke="#5B6471" stroke-width="1.5" marker-end="url(#a)"/>
+
+    <text x="30" y="332" font-size="10" letter-spacing="1.6" fill="#1D9E75">BROKER</text>
+    <rect x="30" y="344" width="900" height="110" rx="6" fill="#1A1E23" stroke="#1D9E75"/>
+    <text x="46" y="374" font-size="13" fill="#1D9E75">a pure library — zero HTTP, MCP, UI or LLM imports</text>
+    <line x1="46" y1="388" x2="914" y2="388" stroke="#31373F"/>
+    <text x="46" y="414" font-size="13" fill="#F4F6F8">(identity, grants, intent)  →  rows | refusal</text>
+    <text x="46" y="437" font-size="13" fill="#7E8A9A">every decision audited before the response returns</text>
+
+    <!-- ── injected at the edge, and the database ───────────────────────── -->
+
+    <line x1="250" y1="492" x2="250" y2="460" stroke="#5B6471" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a)"/>
+    <line x1="460" y1="492" x2="460" y2="460" stroke="#5B6471" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a)"/>
+    <line x1="870" y1="458" x2="870" y2="490" stroke="#5B6471" stroke-width="1.5" marker-end="url(#a)"/>
+
+    <text x="30" y="484" font-size="10" letter-spacing="1.6" fill="#7E8A9A">INJECTED BY THE ADAPTERS</text>
+    <rect x="30" y="496" width="270" height="96" rx="6" fill="#1A1E23" stroke="#31373F"/>
+    <text x="46" y="524" font-size="13" fill="#F4F6F8">@warehousd/providers</text>
+    <text x="46" y="547" font-size="13" fill="#7E8A9A">embedder, PDF/DOCX, XLSX</text>
+    <text x="46" y="570" font-size="13" fill="#7E8A9A">heavy deps, kept outside</text>
+
+    <rect x="325" y="496" width="270" height="96" rx="6" fill="#1A1E23" stroke="#31373F"/>
+    <text x="341" y="524" font-size="13" fill="#F4F6F8">audit sink</text>
+    <text x="341" y="547" font-size="13" fill="#7E8A9A">postgres | stdout-json</text>
+    <text x="341" y="570" font-size="13" fill="#7E8A9A">| webhook</text>
+
+    <text x="620" y="484" font-size="10" letter-spacing="1.6" fill="#7E8A9A">POSTGRES — SINGLE INSTANCE</text>
+    <rect x="620" y="496" width="310" height="96" rx="6" fill="#1A1E23" stroke="#31373F"/>
+    <text x="636" y="524" font-size="13" fill="#F4F6F8">app</text>
+    <text x="746" y="524" font-size="11" fill="#7E8A9A">grants, postures, audit*</text>
+    <text x="636" y="547" font-size="13" fill="#F4F6F8">data_live</text>
+    <text x="746" y="547" font-size="11" fill="#7E8A9A">real</text>
+    <text x="636" y="570" font-size="13" fill="#F4F6F8">data_synth</text>
+    <text x="746" y="570" font-size="11" fill="#7E8A9A">synthetic</text>
+
+    <text x="30" y="614" font-size="11" fill="#7E8A9A">* only when the configured sink is `postgres` — stdout-json and webhook send the trail somewhere else</text>
+
+  </g>
+</svg>
