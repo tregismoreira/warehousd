@@ -28,12 +28,7 @@ export async function GET(req: NextRequest) {
   const ctx = await deriveContext(req);
   if (!ctx) return Response.json({ error: "unauthenticated" }, { status: 401 });
 
-  const result = await getBroker().broker.explainAccess(
-    ctx,
-    { kind: "console" },
-    collection,
-    subject,
-  );
+  const result = await getBroker().broker.explainAccess(ctx, collection, subject);
 
   if (!result.ok) {
     const status =

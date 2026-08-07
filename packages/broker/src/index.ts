@@ -1,11 +1,6 @@
 export * from "./types";
 export { makeBroker } from "./broker";
-export type {
-  AccessExplanation,
-  ExplainAsker,
-  ExplainResult,
-  FieldExplanation,
-} from "./verbs/explain";
+export type { AccessExplanation, ExplainResult, FieldExplanation } from "./verbs/explain";
 // The runtime shapes behind types.ts. Adapters parse with these so a malformed body answers 400
 // before it costs a grant lookup; the broker parses again regardless (see checkIntent).
 export {

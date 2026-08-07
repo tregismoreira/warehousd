@@ -37,8 +37,6 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
   },
 });
 
-const CONSOLE = { kind: "console" } as const;
-
 async function user(id: string, role: string) {
   await app.query(
     `insert into app."user" (id, name, email, "emailVerified", role, "orgId", "createdAt", "updatedAt")
@@ -100,23 +98,23 @@ async function grantTo(principal: string, fields: string[], opts: { unmasked?: s
 
 describe("explainAccess is not reachable through a grant", () => {
   it("refuses a member asking about somebody else", async () => {
-    const res = await broker.explainAccess(makeCtx({ userId: "mia" }), CONSOLE, "salaries", "ana");
+    const res = await broker.explainAccess(makeCtx({ userId: "mia" }), "salaries", "ana");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("not_authorized");
   });
 
   it("lets a member ask about themselves — 'I can't see X' has to be self-diagnosable", async () => {
-    const res = await broker.explainAccess(makeCtx({ userId: "mia" }), CONSOLE, "salaries", "mia");
+    const res = await broker.explainAccess(makeCtx({ userId: "mia" }), "salaries", "mia");
     expect(res.ok).toBe(true);
   });
 
   it("lets a manager ask about anybody", async () => {
-    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), CONSOLE, "salaries", "ana");
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "salaries", "ana");
     expect(res.ok).toBe(true);
   });
 
   it("refuses an unknown collection", async () => {
-    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), CONSOLE, "nope", "ana");
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "nope", "ana");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("unknown_collection");
   });
@@ -124,7 +122,7 @@ describe("explainAccess is not reachable through a grant", () => {
 
 describe("it names the first rule that said no", () => {
   it("posture for a denied field, no_grant before one exists", async () => {
-    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), CONSOLE, "salaries", "ana");
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "salaries", "ana");
     if (!res.ok) throw new Error("unreachable");
     const by = new Map(res.fields.map((f) => [f.field, f]));
 
@@ -145,7 +143,7 @@ describe("it names the first rule that said no", () => {
 
   it("not_in_grant for a field the grant leaves out, masked for one it carries transformed", async () => {
     await grantTo("user:ana", ["id", "person", "salary_band"]);
-    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), CONSOLE, "salaries", "ana");
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "salaries", "ana");
     if (!res.ok) throw new Error("unreachable");
     const by = new Map(res.fields.map((f) => [f.field, f]));
 
@@ -164,7 +162,7 @@ describe("it names the first rule that said no", () => {
 
   it("reports raw once the grant carries the unmask", async () => {
     await grantTo("user:mia", ["id", "salary_band"], { unmasked: ["salary_band"] });
-    const res = await broker.explainAccess(makeCtx({ userId: "mia" }), CONSOLE, "salaries", "mia");
+    const res = await broker.explainAccess(makeCtx({ userId: "mia" }), "salaries", "mia");
     if (!res.ok) throw new Error("unreachable");
     const band = res.fields.find((f) => f.field === "salary_band");
     expect(band).toMatchObject({ unmasked: true, blockedBy: null, effect: "raw" });
@@ -182,12 +180,7 @@ describe("it makes §P1's specificity rule legible", () => {
     await user("carl", "member");
     const id = await grantTo("group:legal", ["id", "person"]);
 
-    const res = await broker.explainAccess(
-      makeCtx({ userId: "boss" }),
-      CONSOLE,
-      "salaries",
-      "carl",
-    );
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "salaries", "carl");
     if (!res.ok) throw new Error("unreachable");
     expect(res.grant).toMatchObject({ id, principal: "group:legal" });
     // "Inherited, from this group" rather than "somehow".
@@ -213,12 +206,7 @@ describe("it counts the documents the grant actually reaches", () => {
     expect(r.ok).toBe(true);
     await user("scoped", "member");
 
-    const res = await broker.explainAccess(
-      makeCtx({ userId: "boss" }),
-      CONSOLE,
-      "salaries",
-      "scoped",
-    );
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "salaries", "scoped");
     if (!res.ok) throw new Error("unreachable");
     // Two of the three rows are Legal. A predicate that scopes access and one that matches nothing
     // are indistinguishable without this number.
@@ -228,7 +216,7 @@ describe("it counts the documents the grant actually reaches", () => {
 
 describe("it never returns a field value", () => {
   it("describes the shape of the policy and nothing stored", async () => {
-    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), CONSOLE, "salaries", "ana");
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "salaries", "ana");
     // 'GB33' is the bank_account of every seeded row — the one value a denied field holds.
     expect(JSON.stringify(res)).not.toContain("GB33");
     expect(JSON.stringify(res)).not.toContain("97300");

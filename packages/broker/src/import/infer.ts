@@ -50,7 +50,18 @@ export type InferredPosture = {
   closedBecause?: string | undefined;
 };
 
-/** The posture a column gets before anybody has looked at it. */
+/**
+ * The posture a column gets before anybody has looked at it.
+ *
+ * **`deny` is checked before the email rule, and that ordering is deliberate.** `email_address`
+ * contains `address`, so it comes back denied rather than masked to its domain — the stricter of
+ * two plausible readings, chosen because every ambiguity here should resolve closed. The report
+ * says which word closed it, so an author who meant the looser one can see why and change it.
+ *
+ * Substring matching over-reaches by design: `comp` catches `company_name` and `completed_at` as
+ * well as `compensation`. A denied column that should not be is a line to edit in a proposal
+ * nobody has applied yet; an exposed one is a disclosure.
+ */
 export function inferPosture(field: string): InferredPosture {
   const f = field.toLowerCase();
   const hit = SENSITIVE_HEADERS.find((s) => f.includes(s));

@@ -22,12 +22,10 @@ import type { VerbDeps } from "./deps";
 // So this is a SEPARATE verb with a separate authorisation, exactly like setDocumentAcl: it is not
 // reachable through any grant, there is no MCP tool for it, and it is audited like every other
 // decision. It answers about a SUBJECT, to a caller who is entitled to ask about that subject.
-
-/**
- * WHO is asking. Identity only — the broker reads the role from the database itself, because an
- * adapter that could assert "I am an admin" would move the decision outside the trust boundary.
- */
-export type ExplainAsker = { kind: "console" };
+//
+// The asker is `ctx` and nothing else. There is deliberately no parameter for "I am a console" or
+// "I am an admin": the role is read from the database here, so an adapter cannot assert it, and a
+// parameter that looked like it authorised and did not would eventually be trusted by somebody.
 
 export type FieldExplanation = {
   field: string;
@@ -112,7 +110,6 @@ export function makeExplainVerb(d: VerbDeps) {
    */
   async function explainAccess(
     ctx: BrokerContext,
-    _who: ExplainAsker,
     collection: string,
     subjectUserId: string,
   ): Promise<ExplainResult> {

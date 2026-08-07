@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadConfig } from "@warehousd/broker";
+import { loadConfig, inferPosture } from "@warehousd/broker";
 import {
   runImportMap,
   runImportValidate,
@@ -210,5 +210,41 @@ describe("init --from reuses the same inference", () => {
 describe("defaultCollectionName", () => {
   it("takes the file stem", () => {
     expect(defaultCollectionName("/tmp/People Directory.xlsx")).toBe("people_directory");
+  });
+});
+
+// The inference is the security-relevant half of `import map`: it decides what a scaffold exposes
+// before anybody has read it. These pin the two rules that are easiest to change by accident.
+describe("inferPosture precedence", () => {
+  it("closes anything whose name contains a sensitive word, and says which", () => {
+    expect(inferPosture("Base Salary (USD)")).toMatchObject({ posture: "deny" });
+    expect(inferPosture("iban")).toMatchObject({ posture: "deny" });
+    expect(inferPosture("home_address").closedBecause).toContain("address");
+  });
+
+  it("masks an email to its domain", () => {
+    expect(inferPosture("work_email")).toMatchObject({
+      posture: { read: "mask" },
+      mask: { transform: "domain" },
+    });
+  });
+
+  // Both rules match `email_address`. Deny wins — the stricter reading, chosen because every
+  // ambiguity here should resolve closed, and the report names the word that closed it.
+  it("denies email_address rather than masking it", () => {
+    const p = inferPosture("email_address");
+    expect(p.posture).toBe("deny");
+    expect(p.closedBecause).toContain("address");
+  });
+
+  // Substring matching over-reaches by design: a denied column that should not be is a line to
+  // edit in a proposal nobody has applied yet; an exposed one is a disclosure.
+  it("over-reaches rather than under-reaches", () => {
+    expect(inferPosture("company_name").posture).toBe("deny");
+    expect(inferPosture("completed_at").posture).toBe("deny");
+  });
+
+  it("leaves an ordinary column open", () => {
+    expect(inferPosture("full_name")).toEqual({ posture: "allow" });
   });
 });
