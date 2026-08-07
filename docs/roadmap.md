@@ -1,9 +1,9 @@
 # Roadmap
 
 What is planned, and where the open-source line sits. For what is built *today*,
-the component status table in [README.md](../README.md#component-status) is the
-authoritative list — it marks each component `real`, `simplified`, `stubbed` or
-`not built`, and it is checked against the code rather than against intentions.
+[status.md](status.md) is the authoritative list — it marks each component
+`real`, `partial` or `not built`, and it is checked against the code rather than
+against intentions.
 
 ## The open-core line
 
