@@ -1,7 +1,6 @@
 # Glossary
 
-The words warehousd uses, and the ones it deliberately does not. The core model
-is one sentence: **a Collection holds Documents; each Document has Fields.**
+The words warehousd uses, and the ones it deliberately does not. The core model is one sentence: **a Collection holds Documents; each Document has Fields.**
 
 | Term | Meaning |
 |---|---|
@@ -28,7 +27,5 @@ is one sentence: **a Collection holds Documents; each Document has Fields.**
 ## Words we don't use
 
 - **Item** — deleted. "Document" is the only word for a queryable record.
-- **Chunk** — retired as a noun. "Chunking" is the verb for the segmentation
-  step; each resulting segment is a Document.
-- **Table** and **column** — Postgres implementation details. In the product
-  surface they are Collection and Field.
+- **Chunk** — retired as a noun. "Chunking" is the verb for the segmentation step; each resulting segment is a Document.
+- **Table** and **column** — Postgres implementation details. In the product surface they are Collection and Field.

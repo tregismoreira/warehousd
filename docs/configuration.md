@@ -1,11 +1,8 @@
 # Configuration reference
 
-`warehousd.yml` is the source of truth. It lives at the root of the project that
-*uses* warehousd — not inside warehousd's own repo — so governance is reviewed
-and versioned in the same pull requests as the app it governs.
+`warehousd.yml` is the source of truth. It lives at the root of the project that *uses* warehousd — not inside warehousd's own repo — so governance is reviewed and versioned in the same pull requests as the app it governs.
 
-`warehousd init` scaffolds it; `warehousd start` and `warehousd apply` apply it
-idempotently.
+`warehousd init` scaffolds it; `warehousd start` and `warehousd apply` apply it idempotently.
 
 ## File resolution
 
@@ -14,13 +11,9 @@ idempotently.
 | `warehousd.yml` | Committed. The source of truth. |
 | `warehousd.local.yml` | Optional, gitignored. Deep-merged over the base — personal ports, smaller document counts, a real connection string. |
 
-`${env:VAR_NAME}` anywhere in either file is replaced with that environment
-variable, so secrets never live in YAML. An unresolved reference is a hard error
-at load. Variable names must match `[A-Z0-9_]+`. References inside YAML comments
-are left alone.
+`${env:VAR_NAME}` anywhere in either file is replaced with that environment variable, so secrets never live in YAML. An unresolved reference is a hard error at load. Variable names must match `[A-Z0-9_]+`. References inside YAML comments are left alone.
 
-Config is **trusted input** — whoever can write these files already decides what
-is grantable.
+Config is **trusted input** — whoever can write these files already decides what is grantable.
 
 ## Top level
 
@@ -73,88 +66,35 @@ synthetic:
   documents_per_collection: {}
 ```
 
-Setting `database.url` skips the managed Postgres container entirely. The server
-still runs as a container, and `warehousd stop --destroy` will not touch a
-database it does not manage.
+Setting `database.url` skips the managed Postgres container entirely. The server still runs as a container, and `warehousd stop --destroy` will not touch a database it does not manage.
 
-`demo: true` seeds `ana@demo.local` (admin), `marcus@demo.local` (manager), and
-`mia@demo.local` (member), all with the password `demo`, and shows them on the
-login page. **Never enable it on a deployment reachable by anyone else.**
+`demo: true` seeds `ana@demo.local` (admin), `marcus@demo.local` (manager), and `mia@demo.local` (member), all with the password `demo`, and shows them on the login page. **Never enable it on a deployment reachable by anyone else.**
 
-`audit.enabled: false` turns the audit trail off for the whole deployment.
-Nothing is written to `app.audit_events` — allows, refusals and imports alike —
-and every result comes back with `auditId: null` instead of a row id. Decisions
-themselves are unchanged: a refusal still refuses, a grant is still required,
-and the only difference is that no record survives the response. This exists for
-lower environments; `warehousd deploy` refuses a project configured this way
-unless you pass `--allow-disabled-audit`, and the admin audit page says plainly
-that it is off rather than showing an empty table.
+`audit.enabled: false` turns the audit trail off for the whole deployment. Nothing is written to `app.audit_events` — allows, refusals and imports alike — and every result comes back with `auditId: null` instead of a row id. Decisions themselves are unchanged: a refusal still refuses, a grant is still required, and the only difference is that no record survives the response. This exists for lower environments; `warehousd deploy` refuses a project configured this way unless you pass `--allow-disabled-audit`, and the admin audit page says plainly that it is off rather than showing an empty table.
 
-Because it is a plain boolean it overrides cleanly per machine, either from
-`warehousd.local.yml`:
+Because it is a plain boolean it overrides cleanly per machine, either from `warehousd.local.yml`:
 
 ```yaml
 audit: { enabled: false }
 ```
 
-or from the environment, since `${env:…}` is substituted before the YAML is
-parsed and so yields a real boolean:
+or from the environment, since `${env:…}` is substituted before the YAML is parsed and so yields a real boolean:
 
 ```yaml
 audit: { enabled: ${env:WAREHOUSD_AUDIT} }   # WAREHOUSD_AUDIT=false
 ```
 
-`audit.sink` decides where a decision goes. `postgres` writes
-`app.audit_events` and is the only sink the console can query — the audit
-browser and the access-review view read that table, so a deployment that
-forwards elsewhere keeps the trail and loses the console's view of it.
-`stdout-json` writes one JSON object per decision on stdout for a log pipeline
-to collect; `webhook` POSTs each decision to `audit.url` and needs it.
+`audit.sink` decides where a decision goes. `postgres` writes `app.audit_events` and is the only sink the console can query — the audit browser and the access-review view read that table, so a deployment that forwards elsewhere keeps the trail and loses the console's view of it. `stdout-json` writes one JSON object per decision on stdout for a log pipeline to collect; `webhook` POSTs each decision to `audit.url` and needs it.
 
-Whatever the sink, the rule that makes the trail worth having is unchanged: a
-decision that could not be recorded is not an allow. A sink that cannot accept
-an event — a non-2xx from the collector, a closed pipe — turns the allow it was
-recording into an `internal_error` refusal. `webhook` is therefore synchronous
-with the decision and not queued, and a slow collector slows every governed
-call. That is the cost of the guarantee.
+Whatever the sink, the rule that makes the trail worth having is unchanged: a decision that could not be recorded is not an allow. A sink that cannot accept an event — a non-2xx from the collector, a closed pipe — turns the allow it was recording into an `internal_error` refusal. `webhook` is therefore synchronous with the decision and not queued, and a slow collector slows every governed call. That is the cost of the guarantee.
 
-Because it is synchronous, the wait is bounded: `audit.timeout_ms` (default
-5000, maximum 60000) is how long the collector has to answer, and running out
-of time counts as a failed write like any other — so the call is refused rather
-than allowed, and never left hanging. A collector that accepts the connection
-and then goes quiet would otherwise hold every governed call open for as long as
-the platform allows.
+Because it is synchronous, the wait is bounded: `audit.timeout_ms` (default 5000, maximum 60000) is how long the collector has to answer, and running out of time counts as a failed write like any other — so the call is refused rather than allowed, and never left hanging. A collector that accepts the connection and then goes quiet would otherwise hold every governed call open for as long as the platform allows.
 
-The `sso:` block maps an identity provider's groups to warehousd roles at
-JIT provisioning. It lives here rather than alongside the provider registration
-because a provider is registered at runtime through the admin API, while this
-file is operator-controlled trusted input — and a rule that decides who becomes
-an admin belongs in the trusted file. See
-[configure-sso.md](configure-sso.md#4-map-idp-groups-to-warehousd-roles).
+The `sso:` block maps an identity provider's groups to warehousd roles at JIT provisioning. It lives here rather than alongside the provider registration because a provider is registered at runtime through the admin API, while this file is operator-controlled trusted input — and a rule that decides who becomes an admin belongs in the trusted file. See [configure-sso.md](configure-sso.md#4-map-idp-groups-to-warehousd-roles).
 
-The `deploy:` block is optional and required only by `warehousd deploy`. It
-names the target — `fly`, `railway` or `compose` — the app name, the region, and
-— most critically — **exactly one** of `managed: true` or a `database.url`. An
-`image:` override is optional; if unset, the published image is used.
-`warehousd init --target <id>` scaffolds the block. `region` is optional here —
-Compose has none to name — and everything about it belongs to the target's
-pre-flight: Fly and Railway refuse its absence there, and what a region *looks*
-like is theirs too, which is why `us-west2` and `gru` are both valid in this
-file and only one of them is valid for a given target. The runbooks are
-[deploy-fly.md](deploy-fly.md), [deploy-railway.md](deploy-railway.md) and
-[deploy-compose.md](deploy-compose.md).
+The `deploy:` block is optional and required only by `warehousd deploy`. It names the target — `fly`, `railway` or `compose` — the app name, the region, and — most critically — **exactly one** of `managed: true` or a `database.url`. An `image:` override is optional; if unset, the published image is used. `warehousd init --target <id>` scaffolds the block. `region` is optional here — Compose has none to name — and everything about it belongs to the target's pre-flight: Fly and Railway refuse its absence there, and what a region *looks* like is theirs too, which is why `us-west2` and `gru` are both valid in this file and only one of them is valid for a given target. The runbooks are [deploy-fly.md](deploy-fly.md), [deploy-railway.md](deploy-railway.md) and [deploy-compose.md](deploy-compose.md).
 
-`database.provider` names who runs the Postgres behind `database.url`:
-`supabase`, `neon`, `railway` or `generic`. It is normally unnecessary — the
-host says so on its own — and only matters where it changes how a role is
-spelled in a connection string, which today means Supabase's pooler. Setting it
-without a `url` is an error, and so is setting it to a provider the host
-contradicts: role names are derived per provider, so the wrong one produces a
-role that cannot authenticate. A value over a host nothing recognises is left
-alone — that is the CNAME case the key exists for. `warehousd deploy` also runs
-a set of `db-*` pre-flight checks against that URL, which
-`warehousd doctor --deploy` runs on their own. See
-[deploy-database.md](deploy-database.md).
+`database.provider` names who runs the Postgres behind `database.url`: `supabase`, `neon`, `railway` or `generic`. It is normally unnecessary — the host says so on its own — and only matters where it changes how a role is spelled in a connection string, which today means Supabase's pooler. Setting it without a `url` is an error, and so is setting it to a provider the host contradicts: role names are derived per provider, so the wrong one produces a role that cannot authenticate. A value over a host nothing recognises is left alone — that is the CNAME case the key exists for. `warehousd deploy` also runs a set of `db-*` pre-flight checks against that URL, which `warehousd doctor --deploy` runs on their own. See [deploy-database.md](deploy-database.md).
 
 ## Collections
 
@@ -178,29 +118,13 @@ collections:
       home_address:    { type: text, posture: deny }
 ```
 
-Collection and field names must both match `[a-z_][a-z0-9_]*` (case-insensitive),
-and a collection name may not contain `__` — that is reserved for file-collection
-storage tables. Anything else is rejected at config load rather than reaching DDL.
+Collection and field names must both match `[a-z_][a-z0-9_]*` (case-insensitive), and a collection name may not contain `__` — that is reserved for file-collection storage tables. Anything else is rejected at config load rather than reaching DDL.
 
-`grant_expiry_days` is the expiry stamped on an approved grant when the approver
-names none of their own; an approver's explicit choice always wins, and a
-collection that declares nothing keeps the old behaviour of no expiry. It is per
-collection because the answer is not uniform — a salaries collection wants thirty
-days and a public announcements one wants none. Grants lapsing within a week
-appear in the manager inbox, and **Access review** lists every approved grant
-older than a chosen window with when it was last exercised.
+`grant_expiry_days` is the expiry stamped on an approved grant when the approver names none of their own; an approver's explicit choice always wins, and a collection that declares nothing keeps the old behaviour of no expiry. It is per collection because the answer is not uniform — a salaries collection wants thirty days and a public announcements one wants none. Grants lapsing within a week appear in the manager inbox, and **Access review** lists every approved grant older than a chosen window with when it was last exercised.
 
-`import.columns` maps a spreadsheet's HEADER to a field on this collection, and
-is resolved before the field lookup — so `Base Salary (USD)` reaches
-`base_salary` instead of reporting `unknown_column`, without anyone editing the
-sheet. It is deliberately not the `column:` key on a field, which means "the
-column's name on the remote table" and is only valid alongside `source_ref`.
-A mapping naming a field that does not exist is a config parse error, not an
-import-time one: the person holding the spreadsheet cannot fix the config.
+`import.columns` maps a spreadsheet's HEADER to a field on this collection, and is resolved before the field lookup — so `Base Salary (USD)` reaches `base_salary` instead of reporting `unknown_column`, without anyone editing the sheet. It is deliberately not the `column:` key on a field, which means "the column's name on the remote table" and is only valid alongside `source_ref`. A mapping naming a field that does not exist is a config parse error, not an import-time one: the person holding the spreadsheet cannot fix the config.
 
-`warehousd import map <file>` proposes a block like this from a real
-spreadsheet, and prints it for review rather than writing it — see
-[cli.md](cli.md).
+`warehousd import map <file>` proposes a block like this from a real spreadsheet, and prints it for review rather than writing it — see [cli.md](cli.md).
 
 ### Field options
 
@@ -218,24 +142,15 @@ spreadsheet, and prints it for review rather than writing it — see
 | `mask` | Required with `read: mask`, invalid without it. The transform applied in SQL — see [Masking](#masking). |
 | `column` | Only on a `source_ref` collection: the column's name on the remote table, when it differs. |
 
-Changing `type` on a field, removing a field, or moving `pk` is a **breaking
-change** once a collection holds live content: `apply` refuses it rather than
-leaving the column and the config disagreeing about what it holds. See
-[migrations.md](migrations.md) for the flow that gets you past it.
+Changing `type` on a field, removing a field, or moving `pk` is a **breaking change** once a collection holds live content: `apply` refuses it rather than leaving the column and the config disagreeing about what it holds. See [migrations.md](migrations.md) for the flow that gets you past it.
 
 #### `nullable`
 
-`nullable` governs two things and only two: whether the synthetic generator emits
-the occasional NULL, and whether import treats a missing value as
-`missing_required`. It never becomes a `not null` constraint — every column on a
-dataset collection is nullable in Postgres, `nullable: true` or not.
+`nullable` governs two things and only two: whether the synthetic generator emits the occasional NULL, and whether import treats a missing value as `missing_required`. It never becomes a `not null` constraint — every column on a dataset collection is nullable in Postgres, `nullable: true` or not.
 
-It cannot become one. Cyclic and self-referential foreign keys are inserted NULL
-and back-filled in a second pass, so `people.department_id` is genuinely NULL
-between the two — a `not null` column would make the generator impossible to run.
+It cannot become one. Cyclic and self-referential foreign keys are inserted NULL and back-filled in a second pass, so `people.department_id` is genuinely NULL between the two — a `not null` column would make the generator impossible to run.
 
-Read the flag as "this field is optional in the data I expect", not as a
-guarantee the database enforces.
+Read the flag as "this field is optional in the data I expect", not as a guarantee the database enforces.
 
 #### `view_join`
 
@@ -245,31 +160,21 @@ responsible_attorney_name: { type: text, posture: allow,
                              view_join: { table: people, column: full_name, on: responsible_attorney_id } }
 ```
 
-`on` must name a sibling field declared `fk: <table>.id` pointing at the same
-table; all three conditions are checked at config load. Each join gets its own
-alias (`j_<field_name>`), so one collection may join the same table several
-times — two attorneys on a matter, or `people.manager_id` back to `people`.
+`on` must name a sibling field declared `fk: <table>.id` pointing at the same table; all three conditions are checked at config load. Each join gets its own alias (`j_<field_name>`), so one collection may join the same table several times — two attorneys on a matter, or `people.manager_id` back to `people`.
 
-The column is derived, so it exists only on the view: it is never stored, and an
-import naming it is rejected as a `derived_column`.
+The column is derived, so it exists only on the view: it is never stored, and an import naming it is rejected as a `derived_column`.
 
 #### `gen`
 
-Field-name heuristics cover the generic cases (`*_email`, `*_name`, `*_address`).
-`gen` is for the ones they cannot tell apart — `matter_number`, `bar_number`,
-`client_number` and `invoice_number` are all `*number*`:
+Field-name heuristics cover the generic cases (`*_email`, `*_name`, `*_address`). `gen` is for the ones they cannot tell apart — `matter_number`, `bar_number`, `client_number` and `invoice_number` are all `*number*`:
 
 ```yaml
 client_number: { type: text, posture: allow, gen: client_number }
 ```
 
-Available: `client_number`, `matter_number`, `invoice_number`, `bar_number`
-(dense deterministic sequences derived from the row index — `C-0001`, `C-0002`, …),
-`company_name`, `industry`, `court_name`, `narrative`, `hourly_rate`.
+Available: `client_number`, `matter_number`, `invoice_number`, `bar_number` (dense deterministic sequences derived from the row index — `C-0001`, `C-0002`, …), `company_name`, `industry`, `court_name`, `narrative`, `hourly_rate`.
 
-The sequence hints are dense and stable for a given row count, which is what lets
-committed seed documents reference a generated row by slug. Shrinking a
-collection's row count below a slug a document names breaks indexing loudly.
+The sequence hints are dense and stable for a given row count, which is what lets committed seed documents reference a generated row by slug. Shrinking a collection's row count below a slug a document names breaks indexing loudly.
 
 ### Postures are two-tier, on three axes
 
@@ -280,25 +185,17 @@ email:       { type: text,    posture: allow }                        # read all
 base_salary: { type: numeric, posture: { read: deny, write: allow } }
 ```
 
-- `deny` on an axis — the field can **never** be granted for it. It cannot be
-  requested, cannot be approved, and is never selected. Changing that requires
-  editing this file.
-- `allow` on an axis — the field is *grantable* for it. It is still denied for
-  every user until a manager approves a grant covering it.
+- `deny` on an axis — the field can **never** be granted for it. It cannot be requested, cannot be approved, and is never selected. Changing that requires editing this file.
+- `allow` on an axis — the field is *grantable* for it. It is still denied for every user until a manager approves a grant covering it.
 - A field with no posture is denied on every axis.
-- **A bare `allow` or `deny` sets the read axis and leaves write denied.** That
-  is what keeps every configuration written before the write path existed valid,
-  and stops any field becoming writable by accident.
-- `view_join` fields are always write-deny. Asking for `write: allow` on one is a
-  config error, not a silent override.
+- **A bare `allow` or `deny` sets the read axis and leaves write denied.** That is what keeps every configuration written before the write path existed valid, and stops any field becoming writable by accident.
+- `view_join` fields are always write-deny. Asking for `write: allow` on one is a config error, not a silent override.
 
-Denied fields are still useful: a denied `path` on a file collection can gate
-which documents a grant reaches without ever being readable.
+Denied fields are still useful: a denied `path` on a file collection can gate which documents a grant reaches without ever being readable.
 
 ### Masking
 
-`read: mask` is the third setting on the read axis. The field is grantable, and
-what a grant gets back is a **transformed** value rather than the stored one:
+`read: mask` is the third setting on the read axis. The field is grantable, and what a grant gets back is a **transformed** value rather than the stored one:
 
 ```yaml
 bank_account:
@@ -312,15 +209,9 @@ pay_band:
   mask: { transform: bucket, width: 25000 }
 ```
 
-The transform is computed **in SQL**, so the raw value is never fetched — it
-cannot appear in a response, an error body or a log line, which is the same
-standard `deny` sets. Masking applied after the rows came back would fail all
-four and look identical in a passing test.
+The transform is computed **in SQL**, so the raw value is never fetched — it cannot appear in a response, an error body or a log line, which is the same standard `deny` sets. Masking applied after the rows came back would fail all four and look identical in a passing test.
 
-`unmask: allow` is the second tier, and it works exactly like `read: allow`: it
-makes the raw value **grantable**, not readable. A manager still has to tick it
-per grant, and the audit row records which fields a decision returned unmasked.
-Omit it and nobody sees the raw value without editing this file.
+`unmask: allow` is the second tier, and it works exactly like `read: allow`: it makes the raw value **grantable**, not readable. A manager still has to tick it per grant, and the audit row records which fields a decision returned unmasked. Omit it and nobody sees the raw value without editing this file.
 
 | transform | types | result |
 | --- | --- | --- |
@@ -332,28 +223,13 @@ Omit it and nobody sees the raw value without editing this file.
 | `year` | date, timestamptz | the year alone |
 | `domain` | text | whatever follows the `@` |
 
-`hash` needs `WAREHOUSD_MASK_KEY`. `warehousd start` and `warehousd deploy`
-generate one per project into `.warehousd/state.json` and ship it with the other
-secrets; set it by hand only when running the image without the CLI. There is
-deliberately no baked-in default: a default key is a public key, and the point
-of `hash` is a pseudonym only this deployment can correlate.
+`hash` needs `WAREHOUSD_MASK_KEY`. `warehousd start` and `warehousd deploy` generate one per project into `.warehousd/state.json` and ship it with the other secrets; set it by hand only when running the image without the CLI. There is deliberately no baked-in default: a default key is a public key, and the point of `hash` is a pseudonym only this deployment can correlate.
 
-**A masked field can be projected and nothing else.** It cannot appear in
-`filters`, `orderBy`, `groupBy` or `aggregate` — those refuse with
-`field_denied`. This is not a limitation to work around; it is what makes the
-mask real. A banded salary you can still compare against falls to bisection in
-about ten queries, `like` walks a redacted string one character at a time, and
-`min`/`max` return the raw extremes outright.
+**A masked field can be projected and nothing else.** It cannot appear in `filters`, `orderBy`, `groupBy` or `aggregate` — those refuse with `field_denied`. This is not a limitation to work around; it is what makes the mask real. A banded salary you can still compare against falls to bisection in about ten queries, `like` walks a redacted string one character at a time, and `min`/`max` return the raw extremes outright.
 
-A grant's own `document_filter` is the deliberate exception and may still
-reference a masked column — it is written by a human manager rather than by the
-model, the same reason a denied `path` can gate documents.
+A grant's own `document_filter` is the deliberate exception and may still reference a masked column — it is written by a human manager rather than by the model, the same reason a denied `path` can gate documents.
 
-Refused at config load, because each one is a way for a mask to look applied and
-not be: masking a `pk` (identity has to round-trip), masking a `searchable: true`
-field (the generated `<field>_tsv` column indexes the raw value), masking a file
-collection's `content` or `path`, a transform its column type cannot compute, and
-`unmask: allow` on a field that is not masked.
+Refused at config load, because each one is a way for a mask to look applied and not be: masking a `pk` (identity has to round-trip), masking a `searchable: true` field (the generated `<field>_tsv` column indexes the raw value), masking a file collection's `content` or `path`, a transform its column type cannot compute, and `unmask: allow` on a field that is not masked.
 
 ### Writable collections
 
@@ -375,9 +251,7 @@ Which verbs the flag unlocks is **structural**, decided by the collection's type
 | Verbs | `create` only | `create`, `update`, `delete` |
 | Editing an existing document | Never — it would falsify the ingestion record | Yes, as a new revision |
 
-A collection without `writable: true` is physically untouched — no extra columns,
-no extra view predicate, no read cost. `writable: true` with no `write: allow`
-field is a config error.
+A collection without `writable: true` is physically untouched — no extra columns, no extra view predicate, no read cost. `writable: true` with no `write: allow` field is a config error.
 
 ### Per-document ACLs
 
@@ -391,35 +265,19 @@ collections:
       title: { type: text, posture: allow }
 ```
 
-A grant scopes to a *set* of documents. `acl: true` adds the orthogonal rule that
-lets you exempt an individual one:
+A grant scopes to a *set* of documents. `acl: true` adds the orthogonal rule that lets you exempt an individual one:
 
-> A document with **no ACL** is readable by anyone the grant covers. A document
-> **with an ACL** is readable only by the principals listed on it.
+> A document with **no ACL** is readable by anyone the grant covers. A document **with an ACL** is readable only by the principals listed on it.
 
-An ACL never widens a grant — it only takes one document out of one — and it
-applies to every verb and to every aggregate: a `count` over the collection counts
-what the caller may see.
+An ACL never widens a grant — it only takes one document out of one — and it applies to every verb and to every aggregate: a `count` over the collection counts what the caller may see.
 
-Principals are namespaced, `user:<id>` and `group:<name>`. Groups are warehousd's
-own record (`app.user_groups`), synced from an IdP's group claim on login or
-pinned in the console; they are never read from a token.
+Principals are namespaced, `user:<id>` and `group:<name>`. Groups are warehousd's own record (`app.user_groups`), synced from an IdP's group claim on login or pinned in the console; they are never read from a token.
 
-ACLs are edited through `PUT /v1/collections/{c}/documents/{id}/acl` or the
-console's **Access** tab, not through MCP — an untrusted proposer must not be able
-to widen access. A REST caller needs `can_manage_acl` on its client policy, which
-an admin grants per client in **Admin → Clients**; a console user needs the
-`manager` or `admin` role. An empty principal list removes the restriction.
+ACLs are edited through `PUT /v1/collections/{c}/documents/{id}/acl` or the console's **Access** tab, not through MCP — an untrusted proposer must not be able to widen access. A REST caller needs `can_manage_acl` on its client policy, which an admin grants per client in **Admin → Clients**; a console user needs the `manager` or `admin` role. An empty principal list removes the restriction.
 
-Group membership is managed by the IdP — its group claim is persisted on every
-SSO login, see [configure-sso.md](configure-sso.md#5-map-idp-groups-to-warehousd-roles-optional)
-— or by an admin through `PUT /api/admin/users/{id}/groups`, which owns the
-`manual` source. Neither source overwrites the other, so a deployment with no SSO
-at all still gets working groups.
+Group membership is managed by the IdP — its group claim is persisted on every SSO login, see [configure-sso.md](configure-sso.md#5-map-idp-groups-to-warehousd-roles-optional) — or by an admin through `PUT /api/admin/users/{id}/groups`, which owns the `manual` source. Neither source overwrites the other, so a deployment with no SSO at all still gets working groups.
 
-**A file collection is addressed by `path`.** Its documents are chunks of a file,
-so the policy attaches to the file and every chunk of it shares one — and the id
-you pass to the ACL endpoint is the path, not the `file_id`:
+**A file collection is addressed by `path`.** Its documents are chunks of a file, so the policy attaches to the file and every chunk of it shares one — and the id you pass to the ACL endpoint is the path, not the `file_id`:
 
 ```yaml
 collections:
@@ -439,11 +297,7 @@ PUT /v1/collections/policies/documents/hr%2Fpto.md/acl
 { "principals": ["group:legal"] }
 ```
 
-The restriction survives the file's own lifecycle: a re-index that changes the
-content keeps it, and so does the file leaving the source directory and coming
-back. The second is why `path` is the key rather than the `file_id` — the sweep
-removes the row, so a returning file gets a new id, and an ACL keyed on that id
-would leave the document readable by everyone the grant covers.
+The restriction survives the file's own lifecycle: a re-index that changes the content keeps it, and so does the file leaving the source directory and coming back. The second is why `path` is the key rather than the `file_id` — the sweep removes the row, so a returning file gets a new id, and an ACL keyed on that id would leave the document readable by everyone the grant covers.
 
 Requirements and current limits, all enforced at config load:
 
@@ -453,9 +307,7 @@ Requirements and current limits, all enforced at config load:
 | Refused with `source_ref` | warehousd does not own those rows |
 | `_acl` is a reserved field name | It is the ACL column on the collection's view |
 
-A collection without `acl: true` gets no join and no predicate, so it pays
-nothing. A collection with it pays one left join, and a document with no ACL row
-costs nothing beyond that.
+A collection without `acl: true` gets no join and no predicate, so it pays nothing. A collection with it pays one left join, and a document with no ACL row costs nothing beyond that.
 
 ## File collections
 
@@ -477,16 +329,9 @@ collections:
       filed_date:      { type: date, posture: allow }
 ```
 
-The file collection schema includes five fixed fields (`title`, `content`, `path`,
-`owner`, `updated_at`) plus any additional metadata fields you declare. `.md` and
-`.txt` are parsed; the title comes from the first heading or the filename, `owner`
-from frontmatter, `updated_at` from the file mtime. Additional metadata fields are
-populated from frontmatter (YAML at the top of the file).
+The file collection schema includes five fixed fields (`title`, `content`, `path`, `owner`, `updated_at`) plus any additional metadata fields you declare. `.md` and `.txt` are parsed; the title comes from the first heading or the filename, `owner` from frontmatter, `updated_at` from the file mtime. Additional metadata fields are populated from frontmatter (YAML at the top of the file).
 
-**`source` is dev content by definition.** Point it at committed sample files,
-never at real corporate documents. Live content is indexed only by an explicit
-`warehousd index <collection> --env live`, which requires `source_live` or an
-explicit `--source`.
+**`source` is dev content by definition.** Point it at committed sample files, never at real corporate documents. Live content is indexed only by an explicit `warehousd index <collection> --env live`, which requires `source_live` or an explicit `--source`.
 
 ## Semantic search
 
@@ -497,18 +342,11 @@ embedding:
   dimensions: 384
 ```
 
-Absent, and semantic search is simply off: `search_documents` behaves exactly as
-it always has and the embedding column stays empty. That is the honest default —
-embedding a corpus costs something, and for a remote provider it is a disclosure.
+Absent, and semantic search is simply off: `search_documents` behaves exactly as it always has and the embedding column stays empty. That is the honest default — embedding a corpus costs something, and for a remote provider it is a disclosure.
 
-`dimensions` has no default because it has to match the model. Get it wrong and
-Postgres reports a cast error on insert that names neither the model nor this
-key, so warehousd checks it at construction instead.
+`dimensions` has no default because it has to match the model. Get it wrong and Postgres reports a cast error on insert that names neither the model nor this key, so warehousd checks it at construction instead.
 
-`provider: local` is the default deliberately. An embedding request is the whole
-document text, and warehousd's argument is that governed content does not leave
-the deployment. Sending it to an API is a legitimate trade — a better model is a
-better search — but it is one someone states in writing:
+`provider: local` is the default deliberately. An embedding request is the whole document text, and warehousd's argument is that governed content does not leave the deployment. Sending it to an API is a legitimate trade — a better model is a better search — but it is one someone states in writing:
 
 ```yaml
 embedding:
@@ -518,10 +356,7 @@ embedding:
   api_key: ${env:OPENAI_API_KEY}
 ```
 
-Fill the column with `warehousd embed`, which is resumable — it only ever touches
-chunks that have none, so an interrupted run costs nothing already done.
-`warehousd index` and `warehousd seed` embed new chunks as they go when
-`embedding:` is configured; `--no-embed` skips that.
+Fill the column with `warehousd embed`, which is resumable — it only ever touches chunks that have none, so an interrupted run costs nothing already done. `warehousd index` and `warehousd seed` embed new chunks as they go when `embedding:` is configured; `--no-embed` skips that.
 
 The `search_documents` tool then takes a `mode`:
 
@@ -531,18 +366,13 @@ The `search_documents` tool then takes a `mode`:
 | `semantic` | cosine distance over the embedding — matches meaning, and will find a document that shares no words with the query |
 | `hybrid` | Reciprocal Rank Fusion over both |
 
-Semantic and hybrid apply to file collections only, and refuse rather than
-silently falling back to a text search: a caller who asked for one and got the
-other has no way to tell.
+Semantic and hybrid apply to file collections only, and refuse rather than silently falling back to a text search: a caller who asked for one and got the other has no way to tell.
 
 ## PDF and DOCX
 
-`.pdf` and `.docx` are indexed alongside `.md` and `.txt`, from the same `source`
-directory, with the original bytes stored so the console can hand the document
-back.
+`.pdf` and `.docx` are indexed alongside `.md` and `.txt`, from the same `source` directory, with the original bytes stored so the console can hand the document back.
 
-A binary has no frontmatter, so its owner, terms and typed metadata come from a
-**sidecar** beside it — `contract.pdf` is described by `contract.pdf.yml`:
+A binary has no frontmatter, so its owner, terms and typed metadata come from a **sidecar** beside it — `contract.pdf` is described by `contract.pdf.yml`:
 
 ```yaml
 owner: legal@acme.example
@@ -551,43 +381,24 @@ tags: [urgent, confidential]
 review_date: 2026-06-01
 ```
 
-The rule that a bound vocabulary is *required* still holds: a binary with no
-sidecar term fails the index rather than becoming a document no grant can scope.
-A scanned PDF with no extractable text is refused too — OCR is out of scope, and
-storing an empty document is the failure that looks like success.
+The rule that a bound vocabulary is *required* still holds: a binary with no sidecar term fails the index rather than becoming a document no grant can scope. A scanned PDF with no extractable text is refused too — OCR is out of scope, and storing an empty document is the failure that looks like success.
 
 ## Uploading documents from the console
 
-Copying files into `source` and running `warehousd index <collection>` is one way
-in. **Admin → Documents** is the other: pick files or a whole folder, fill in the
-owner, terms and metadata the form derives from the collection's own
-configuration, and upload. Both paths run the same ingestion code, so a document
-is indistinguishable downstream from one indexed off disk — same chunking, same
-checksum, same required-term rule.
+Copying files into `source` and running `warehousd index <collection>` is one way in. **Admin → Documents** is the other: pick files or a whole folder, fill in the owner, terms and metadata the form derives from the collection's own configuration, and upload. Both paths run the same ingestion code, so a document is indistinguishable downstream from one indexed off disk — same chunking, same checksum, same required-term rule.
 
-Uploads are **resumable, and the resume is answered by the database**. Each file
-is hashed in the browser, the console asks which of those hashes the collection
-already holds, and only the rest are sent — four at a time, each retried on a
-transport failure. So an interrupted upload of three thousand documents is
-resumed by picking the same folder again: everything that landed is skipped,
-from any browser, on any machine, with nothing remembered locally.
+Uploads are **resumable, and the resume is answered by the database**. Each file is hashed in the browser, the console asks which of those hashes the collection already holds, and only the rest are sent — four at a time, each retried on a transport failure. So an interrupted upload of three thousand documents is resumed by picking the same folder again: everything that landed is skipped, from any browser, on any machine, with nothing remembered locally.
 
 Two differences from a directory index are worth knowing:
 
-- **An upload is not a mirror.** `warehousd index` deletes a document whose file
-  has left the source directory; an uploaded document was never in one, so it is
-  left alone. The `origin` column is what tells them apart.
-- **The form fills in what the file does not say.** A `.md` or `.txt` carries its
-  own frontmatter and that always wins; the form's owner, terms and metadata fill
-  gaps, and are the only source for a PDF or DOCX.
+- **An upload is not a mirror.** `warehousd index` deletes a document whose file has left the source directory; an uploaded document was never in one, so it is left alone. The `origin` column is what tells them apart.
+- **The form fills in what the file does not say.** A `.md` or `.txt` carries its own frontmatter and that always wins; the form's owner, terms and metadata fill gaps, and are the only source for a PDF or DOCX.
 
-`WAREHOUSD_MAX_UPLOAD_BYTES` caps a single file (default 25 MB). Deleting a
-document and downloading its original are both admin-only and both audited.
+`WAREHOUSD_MAX_UPLOAD_BYTES` caps a single file (default 25 MB). Deleting a document and downloading its original are both admin-only and both audited.
 
 ## Connect-in-place
 
-A collection can read from an external Postgres instead of storing rows in
-warehousd:
+A collection can read from an external Postgres instead of storing rows in warehousd:
 
 ```yaml
 sources:
@@ -606,30 +417,17 @@ collections:
       tier: { type: text, posture: allow }
 ```
 
-The connection is made by `postgres_fdw` — by **Postgres**, not by warehousd. A
-foreign table lives inside `data_live`, so the collection's view, its grant, its
-field postures and the broker's SQL builder all work on it completely unchanged.
+The connection is made by `postgres_fdw` — by **Postgres**, not by warehousd. A foreign table lives inside `data_live`, so the collection's view, its grant, its field postures and the broker's SQL builder all work on it completely unchanged.
 
 Three consequences worth knowing before you point one at production:
 
-- **`url` is dialled by the database server**, so the host and port have to be
-  reachable *from Postgres*, which is not always the address your client uses. A
-  warehousd running its own Postgres in a container cannot reach a source
-  published on that container's host port.
-- **Columns are declared, never imported.** A column added upstream is invisible
-  to warehousd until someone writes it into the YAML. `warehousd apply` verifies
-  the remote actually matches and fails naming the collection if it does not.
-- **Read-only, and not by convention.** The server and the foreign table are both
-  `updatable 'false'`, and no role is granted anything but `SELECT` on the
-  wrapping view. `writable: true` is a config error on these collections.
+- **`url` is dialled by the database server**, so the host and port have to be reachable *from Postgres*, which is not always the address your client uses. A warehousd running its own Postgres in a container cannot reach a source published on that container's host port.
+- **Columns are declared, never imported.** A column added upstream is invisible to warehousd until someone writes it into the YAML. `warehousd apply` verifies the remote actually matches and fails naming the collection if it does not.
+- **Read-only, and not by convention.** The server and the foreign table are both `updatable 'false'`, and no role is granted anything but `SELECT` on the wrapping view. `writable: true` is a config error on these collections.
 
-`dev` is unaffected: an external collection gets an ordinary synthetic table in
-`data_synth`, so developers never touch the remote system and env parity holds.
+`dev` is unaffected: an external collection gets an ordinary synthetic table in `data_synth`, so developers never touch the remote system and env parity holds.
 
-The one genuine narrowing is tenant isolation. A foreign table cannot carry an
-RLS policy and has no `org_id` column, so the view compares the request's org
-against the `org:` the source declares — one wall instead of two. See
-[architecture.md](architecture.md).
+The one genuine narrowing is tenant isolation. A foreign table cannot carry an RLS policy and has no `org_id` column, so the view compares the request's org against the `org:` the source declares — one wall instead of two. See [architecture.md](architecture.md).
 
 ## Taxonomies
 
@@ -662,55 +460,17 @@ collections:
       tags:        { posture: allow }
 ```
 
-- Vocabulary slugs match `[a-z][a-z0-9_]*`, may not contain `__`, and may not
-  collide with a reserved column name (`title`, `content`, `path`, `owner`,
-  `updated_at`, `id`, `checksum`, `file_id`, `document_seq`, `tsv`, `_rank`).
-  A `searchable` field also generates a sibling `<field>_tsv` column, so a
-  declared field by that name is rejected at config load rather than colliding
-  at DDL time.
+- Vocabulary slugs match `[a-z][a-z0-9_]*`, may not contain `__`, and may not collide with a reserved column name (`title`, `content`, `path`, `owner`, `updated_at`, `id`, `checksum`, `file_id`, `document_seq`, `tsv`, `_rank`). A `searchable` field also generates a sibling `<field>_tsv` column, so a declared field by that name is rejected at config load rather than colliding at DDL time.
 - Term slugs are lowercase kebab-case.
 - A vocabulary has **either** `terms` (inline YAML) **or** `source` (dataset), not both.
-- `multiple: true` makes the column `text[]` (with a GIN index) so a document can
-  carry several terms. A grant scoped to such a field uses Postgres array
-  **overlap**: the document matches if it carries **at least one** of the granted
-  terms. `describe_collection` reports the field as `text[]`, and only `eq` and
-  `in` are accepted against it — `gt`, `like` and friends are refused as
-  `invalid_intent`.
-- **Dataset sourcing** (`source:`) pulls vocabulary terms from a dataset collection —
-  the only way to bind a document to a row, since file collections have no foreign
-  keys. The `source` object names the collection, the field to use as the term slug,
-  and the field to use as the human-readable label. Slugs are slugified and
-  lowercased (`C-0042` becomes `c-0042`), so frontmatter must use the lowercase
-  form. Two source values that slugify identically are an error rather than a
-  silent merge, since merging would widen every grant scoped to that term.
-- **Dataset-sourced terms are scoped per environment.** `data_synth` and `data_live`
-  hold different rows, so they yield different term sets. `syncDatasetTerms()` must
-  run **after** the data exists and **before** any file collection bound to that
-  vocabulary is indexed, or indexing fails on an unknown term. The bootstrap order
-  is: `applyConfig` → generate/seed → `syncDatasetTerms(dev)` → `seedLive` →
-  `syncDatasetTerms(live)` → `indexCollection`. It is also re-run after an admin
-  import, so a newly imported client becomes available as a term.
-- **A dataset collection may bind one too.** The generator cannot fill such a column
-  on the first pass — the terms are distinct values of rows it is still writing — so
-  it syncs the dev terms and back-fills the column afterwards, from the same seeded
-  RNG. `matters` scoped by `client` therefore generates with real client slugs, not
-  NULLs.
-- **Import validates against the live term set.** An import naming a
-  dataset-sourced term is checked against `app.terms` for `live`, resolved before
-  validation runs; an unrecognised value is `unknown_term`. A vocabulary that was
-  never applied is `unvalidatable_term` and refuses the file — the default is
-  closed, because a term no grant can match is worse than a rejected import. If
-  the term store cannot be read at all, the refusal is `taxonomy_unavailable`
-  (HTTP 503), kept distinct so an outage never reads as a broken config.
-- The bound field is added automatically as `text`/`allow` if you don't declare it.
-  Declaring it lets you override the posture; it may not set `pk`, `fk`, or `view_join`.
+- `multiple: true` makes the column `text[]` (with a GIN index) so a document can carry several terms. A grant scoped to such a field uses Postgres array **overlap**: the document matches if it carries **at least one** of the granted terms. `describe_collection` reports the field as `text[]`, and only `eq` and `in` are accepted against it — `gt`, `like` and friends are refused as `invalid_intent`.
+- **Dataset sourcing** (`source:`) pulls vocabulary terms from a dataset collection — the only way to bind a document to a row, since file collections have no foreign keys. The `source` object names the collection, the field to use as the term slug, and the field to use as the human-readable label. Slugs are slugified and lowercased (`C-0042` becomes `c-0042`), so frontmatter must use the lowercase form. Two source values that slugify identically are an error rather than a silent merge, since merging would widen every grant scoped to that term.
+- **Dataset-sourced terms are scoped per environment.** `data_synth` and `data_live` hold different rows, so they yield different term sets. `syncDatasetTerms()` must run **after** the data exists and **before** any file collection bound to that vocabulary is indexed, or indexing fails on an unknown term. The bootstrap order is: `applyConfig` → generate/seed → `syncDatasetTerms(dev)` → `seedLive` → `syncDatasetTerms(live)` → `indexCollection`. It is also re-run after an admin import, so a newly imported client becomes available as a term.
+- **A dataset collection may bind one too.** The generator cannot fill such a column on the first pass — the terms are distinct values of rows it is still writing — so it syncs the dev terms and back-fills the column afterwards, from the same seeded RNG. `matters` scoped by `client` therefore generates with real client slugs, not NULLs.
+- **Import validates against the live term set.** An import naming a dataset-sourced term is checked against `app.terms` for `live`, resolved before validation runs; an unrecognised value is `unknown_term`. A vocabulary that was never applied is `unvalidatable_term` and refuses the file — the default is closed, because a term no grant can match is worse than a rejected import. If the term store cannot be read at all, the refusal is `taxonomy_unavailable` (HTTP 503), kept distinct so an outage never reads as a broken config.
+- The bound field is added automatically as `text`/`allow` if you don't declare it. Declaring it lets you override the posture; it may not set `pk`, `fk`, or `view_join`.
 
-A grant can be scoped to terms. One limited to `hr` silently excludes `finance`
-documents — the user never learns they exist. Grants may carry several predicates,
-ANDed together, and they may name any field on the collection — including a
-`posture: deny` one, and including a plain metadata field. So a grant can be
-scoped to `client = c-0042 AND tags overlapping {litigation, discovery}`, or gated
-on a `confidentiality` metadata field that the user can never read.
+A grant can be scoped to terms. One limited to `hr` silently excludes `finance` documents — the user never learns they exist. Grants may carry several predicates, ANDed together, and they may name any field on the collection — including a `posture: deny` one, and including a plain metadata field. So a grant can be scoped to `client = c-0042 AND tags overlapping {litigation, discovery}`, or gated on a `confidentiality` metadata field that the user can never read.
 
 ## Synthetic data
 
@@ -719,10 +479,7 @@ synthetic:
   documents_per_collection: { people: 40, salaries: 200, metrics: 730 }
 ```
 
-How many documents to generate per dataset collection. Generation is
-deterministic under `--seed` (default `42`), derived from this schema only, and
-honors `fk` and `min`/`max`. It never reads `data_live` — the role it uses has no
-privileges there.
+How many documents to generate per dataset collection. Generation is deterministic under `--seed` (default `42`), derived from this schema only, and honors `fk` and `min`/`max`. It never reads `data_live` — the role it uses has no privileges there.
 
 ## Server environment variables
 
@@ -745,11 +502,7 @@ Set on the container or the dev process, not in YAML:
 
 ### Statement bounds
 
-Every pool carries a `statement_timeout`, so one slow scan cannot hold a
-connection indefinitely and exhaust the pool. Two budgets, because the pools do
-different work: the query and write pools serve single documents and pages of a
-view, while the app and import pools carry real batch work at request time —
-`regenerateSynthetic` behind `POST /api/admin/regen-synth`, and file imports.
+Every pool carries a `statement_timeout`, so one slow scan cannot hold a connection indefinitely and exhaust the pool. Two budgets, because the pools do different work: the query and write pools serve single documents and pages of a view, while the app and import pools carry real batch work at request time — `regenerateSynthetic` behind `POST /api/admin/regen-synth`, and file imports.
 
 | Variable | Default | Applies to |
 |---|---|---|
@@ -757,21 +510,10 @@ view, while the app and import pools carry real batch work at request time —
 | `WAREHOUSD_BULK_STATEMENT_TIMEOUT_MS` | `600000` | The `app` and import pools. |
 | `WAREHOUSD_CONNECT_TIMEOUT_MS` | `10000` | Acquiring a connection, on every pool. |
 
-`idle_in_transaction_session_timeout` is set to twice the statement bound and is
-not separately configurable. It covers the case a statement timeout cannot: every
-data-plane call runs inside a transaction, and if the broker stalls between
-`begin` and `commit` no statement is running, so the transaction would hold its
-locks — and hold back vacuum — indefinitely.
+`idle_in_transaction_session_timeout` is set to twice the statement bound and is not separately configurable. It covers the case a statement timeout cannot: every data-plane call runs inside a transaction, and if the broker stalls between `begin` and `commit` no statement is running, so the transaction would hold its locks — and hold back vacuum — indefinitely.
 
-`0` is Postgres's spelling of "no limit" and is accepted, for an operator who has
-decided to opt out. A value that is not a number is **ignored** rather than
-treated as zero, so a typo cannot silently remove the ceiling it meant to raise.
+`0` is Postgres's spelling of "no limit" and is accepted, for an operator who has decided to opt out. A value that is not a number is **ignored** rather than treated as zero, so a typo cannot silently remove the ceiling it meant to raise.
 
 ## A complete example
 
-[`examples/harbor/warehousd.yml`](../examples/harbor/warehousd.yml) is a
-working configuration for the demo company: 20 collections including
-relational data, sensitive compensation records, a time series, three file
-collections with bound taxonomies, dataset-sourced vocabulary terms, one
-writable collection behind the proposal path, and one (`announcements`) with
-per-document ACLs turned on.
+[`examples/harbor/warehousd.yml`](../examples/harbor/warehousd.yml) is a working configuration for the demo company: 20 collections including relational data, sensitive compensation records, a time series, three file collections with bound taxonomies, dataset-sourced vocabulary terms, one writable collection behind the proposal path, and one (`announcements`) with per-document ACLs turned on.

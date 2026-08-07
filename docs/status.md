@@ -1,9 +1,6 @@
 # Component status
 
-Per component, what is fully implemented versus deliberately narrowed or not yet
-built. This table is the authoritative answer to "is that real?" — it is checked
-against the code rather than against intentions, and
-[README.md](../README.md#component-status) points here.
+Per component, what is fully implemented versus deliberately narrowed or not yet built. This table is the authoritative answer to "is that real?" — it is checked against the code rather than against intentions, and [README.md](../README.md#component-status) points here.
 
 For what is *planned* rather than built, see [roadmap.md](roadmap.md).
 
