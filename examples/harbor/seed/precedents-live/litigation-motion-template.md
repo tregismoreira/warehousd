@@ -1,5 +1,5 @@
 ---
-owner: Priya Raghavan
+owner: Lanna Raghavan
 department: litigation
 tags: [litigation]
 jurisdiction: Federal — General

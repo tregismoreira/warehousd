@@ -60,7 +60,7 @@ async function seedDemoPersonas(db: Pool, cfg: WarehousdConfig): Promise<void> {
     { id: "ana", email: "ana@demo.local", name: "Ana", role: "admin" },
     { id: "marcus", email: "marcus@demo.local", name: "Marcus", role: "manager" },
     { id: "mia", email: "mia@demo.local", name: "Mia", role: "member" },
-    { id: "priya", email: "priya@demo.local", name: "Priya Raghavan", role: "manager" },
+    { id: "lanna", email: "lanna@demo.local", name: "Lanna Raghavan", role: "manager" },
     { id: "dan", email: "dan@demo.local", name: "Dan Okafor", role: "member" },
     { id: "elena", email: "elena@demo.local", name: "Elena Vasquez", role: "member" },
     { id: "omar", email: "omar@demo.local", name: "Omar Haddad", role: "member" },

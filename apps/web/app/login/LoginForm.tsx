@@ -16,7 +16,7 @@ const DEMO_CREDS = [
 // Behind a disclosure so the three buttons above keep a stable position for existing e2e
 // selectors (apps/web/e2e/login.spec.ts clicks "ana@demo.local" directly).
 const MORE_DEMO_CREDS = [
-  { email: "priya@demo.local", role: "manager — partner" },
+  { email: "lanna@demo.local", role: "manager — partner" },
   { email: "dan@demo.local", role: "member — paralegal" },
   { email: "elena@demo.local", role: "member — finance" },
   { email: "omar@demo.local", role: "member — HR" },

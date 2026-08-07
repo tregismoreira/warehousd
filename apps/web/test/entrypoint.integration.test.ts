@@ -232,7 +232,7 @@ collections:
     expect(ids).toContain("ana");
     expect(ids).toContain("marcus");
     expect(ids).toContain("mia");
-    expect(ids).toContain("priya");
+    expect(ids).toContain("lanna");
     expect(ids).toContain("dan");
     expect(ids).toContain("elena");
     expect(ids).toContain("omar");
@@ -241,13 +241,13 @@ collections:
     const anaRole = await db.query(`select role from app."user" where id='ana'`);
     const marcusRole = await db.query(`select role from app."user" where id='marcus'`);
     const miaRole = await db.query(`select role from app."user" where id='mia'`);
-    const priyaRole = await db.query(`select role from app."user" where id='priya'`);
+    const lannaRole = await db.query(`select role from app."user" where id='lanna'`);
     const danRole = await db.query(`select role from app."user" where id='dan'`);
 
     expect(anaRole.rows[0].role).toBe("admin");
     expect(marcusRole.rows[0].role).toBe("manager");
     expect(miaRole.rows[0].role).toBe("member");
-    expect(priyaRole.rows[0].role).toBe("manager");
+    expect(lannaRole.rows[0].role).toBe("manager");
     expect(danRole.rows[0].role).toBe("member");
 
     // Verify grants are created (at least for ana and marcus)

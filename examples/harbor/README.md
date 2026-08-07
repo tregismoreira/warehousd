@@ -57,7 +57,7 @@ warehousd stop --destroy --yes # also drops the volume — irreversible
 | `ana@demo.local` | admin | Every collection, dev |
 | `marcus@demo.local` | manager | Every collection, dev |
 | `mia@demo.local` | member | **None** |
-| `priya@demo.local` | manager | None |
+| `lanna@demo.local` | manager | None |
 | `dan@demo.local` · `elena@demo.local` · `omar@demo.local` | member | None |
 
 There is also `admin@warehousd.local`, whose password `start` generates and prints. Mia starting with nothing is what makes the grant flow demonstrable on a fresh install.
@@ -87,7 +87,7 @@ There is also `admin@warehousd.local`, whose password `start` generates and prin
 
 ```markdown
 ---
-owner: Priya Raghavan
+owner: Lanna Raghavan
 client: c-0042
 tags: [litigation, discovery, motion]
 matter_number: M-2025-0184

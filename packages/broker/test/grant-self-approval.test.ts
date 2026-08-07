@@ -64,8 +64,8 @@ describe("approveGrant — self-approval", () => {
   });
 
   it("leaves that grant pending, so another approver can still decide it", async () => {
-    const id = await ask("priya", "live");
-    await approveGrant(admin, cfg, id, "priya");
+    const id = await ask("lanna", "live");
+    await approveGrant(admin, cfg, id, "lanna");
     expect(await statusOf(id)).toBe("pending");
 
     expect((await approveGrant(admin, cfg, id, "marcus")).ok).toBe(true);
