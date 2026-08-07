@@ -14,7 +14,7 @@ A thin HTTP adapter for programmatic access to collections, governed by the same
 | PUT | `/v1/collections/{c}/documents/{id}` | `mutate` (update) | Update a document; `If-Match: "{rev}"` for optimistic concurrency | 200 (direct), 202 (pending), 409/412 (conflict) |
 | DELETE | `/v1/collections/{c}/documents/{id}` | `mutate` (delete) | Delete a document | 204 (direct), 202 (pending) |
 | GET | `/v1/collections/{c}/documents/{id}/revisions` | `listRevisions` | Revision history of one document | 200 |
-| GET | `/v1/collections/{c}/documents/{id}/acl` | `getDocumentAcl` | The document's ACL; empty principals means public within the grant | 200 |
+| GET | `/v1/collections/{c}/documents/{id}/acl` | `getDocumentAcl` | The document's ACL; empty principals means public within the grant. `{id}` is the primary key on a dataset and the url-encoded `path` on a file collection | 200 |
 | PUT | `/v1/collections/{c}/documents/{id}/acl` | `setDocumentAcl` | Replace the ACL (`{"principals":["user:…","group:…"]}`); an empty list removes it | 200 |
 | DELETE | `/v1/collections/{c}/documents/{id}/acl` | `setDocumentAcl` | Remove the ACL — the document is public within the grant again | 200 |
 | POST | `/v1/collections/{c}/query` | `query` | Structured query: filters, ordering, aggregation, grouping | 200 |

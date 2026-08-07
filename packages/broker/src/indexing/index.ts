@@ -1,4 +1,4 @@
-export { indexCollection } from "./sync";
+export { indexCollection, type IndexProgress } from "./sync";
 export { extractFile, type MetadataField } from "./extract";
 export { chunkText } from "./chunk";
 export {

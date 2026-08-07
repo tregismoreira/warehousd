@@ -9,9 +9,11 @@ import {
   supportedVerbs,
 } from "../config/load";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
+import { isPrincipal, userPrincipal, GROUP_PREFIX, USER_PREFIX } from "../acl/principals";
 import { validateGrantFilters } from "./filters";
 
-export type GrantRequestError = "unknown_collection" | "purpose_required" | "field_not_grantable";
+export type GrantRequestError =
+  "unknown_collection" | "purpose_required" | "field_not_grantable" | "invalid_principal";
 
 export const GRANT_VERBS = ["read", "create", "update", "delete", "approve"] as const;
 export type GrantVerb = (typeof GRANT_VERBS)[number];
@@ -106,11 +108,29 @@ export async function requestGrant(
     purposeLabel: string;
     purposeDetail?: string | undefined;
     allowedFields: string[];
+    /**
+     * WHO the grant is for — `user:<id>` or `group:<name>`. Defaults to the requester, which is
+     * every grant that existed before groups could hold one.
+     *
+     * `userId` stays what it always was: who ASKED. On a group grant the two differ, and both are
+     * needed — the manager inbox shows the requester, the loader matches the principal.
+     */
+    principal?: string | undefined;
   },
 ): Promise<string> {
+  const principal = i.principal ?? userPrincipal(i.userId);
+  // Namespaced or refused. A bare `legal` is ambiguous between a user id and a group name, and
+  // guessing which an approver meant is how a grant widens by accident — the same rule
+  // acl/manage.ts already applies to an ACL entry.
+  // Read back off the input rather than the narrowed local: `isPrincipal` is a type guard, so in
+  // the false branch the local has narrowed to `never` and cannot be interpolated.
+  if (!isPrincipal(principal))
+    throw new Error(
+      `invalid grant principal "${i.principal ?? ""}" — spell it user:<id> or group:<name>`,
+    );
   const r = await app.query(
-    `insert into app.grants (user_id,collection,env,org_id,purpose_label,purpose_detail,allowed_fields,status)
-     values ($1,$2,$3,$4,$5,$6,$7,'pending') returning id`,
+    `insert into app.grants (user_id,collection,env,org_id,purpose_label,purpose_detail,allowed_fields,principal,status)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,'pending') returning id`,
     [
       i.userId,
       i.collection,
@@ -119,9 +139,52 @@ export async function requestGrant(
       i.purposeLabel,
       i.purposeDetail ?? null,
       i.allowedFields,
+      principal,
     ],
   );
   return r.rows[0].id;
+}
+
+/**
+ * Would approving this grant NARROW what its subject can already do?
+ *
+ * The honest cost of specificity ordering: a personal grant narrower than the group grant the
+ * user inherits *reduces* their access, because `user:` wins. That surprises people, so approval
+ * warns — it does not refuse. Refusing would make the narrower personal grant, which is exactly
+ * the purpose-bound decision the product is for, impossible to express.
+ *
+ * Returns the fields the subject would lose, and the group grant they would lose them from.
+ */
+export async function narrowerThanInherited(
+  app: Pool,
+  i: {
+    userId: string;
+    collection: string;
+    env: "dev" | "live";
+    orgId?: string | undefined;
+    principal: string;
+    allowedFields: string[];
+  },
+): Promise<{ principal: string; losing: string[] } | null> {
+  // Only a PERSONAL grant can shadow anything: a group grant loses to a personal one, so it never
+  // takes access away.
+  if (!i.principal.startsWith(USER_PREFIX)) return null;
+
+  const groups = await app.query<{ principal: string; allowed_fields: string[] | null }>(
+    `select principal, allowed_fields from app.grants
+     where collection=$1 and env=$2 and org_id=$3 and status='approved'
+       and (expires_at is null or expires_at > now())
+       and principal like $4
+       and principal in (
+         select $5 || group_name from app.user_groups where org_id=$3 and user_id=$6
+       )
+     order by requested_at desc limit 1`,
+    [i.collection, i.env, i.orgId ?? DEFAULT_ORG_ID, `${GROUP_PREFIX}%`, GROUP_PREFIX, i.userId],
+  );
+  const inherited = groups.rows[0];
+  if (!inherited) return null;
+  const losing = (inherited.allowed_fields ?? []).filter((f) => !i.allowedFields.includes(f));
+  return losing.length ? { principal: inherited.principal, losing } : null;
 }
 
 export type ApproveGrantError =
@@ -158,10 +221,13 @@ export async function approveGrant(
     unmaskedFields?: string[];
     orgId?: string;
   } = {},
-): Promise<{ ok: true } | { ok: false; error: ApproveGrantError; detail?: string }> {
+): Promise<
+  | { ok: true; warning?: { principal: string; losing: string[] } }
+  | { ok: false; error: ApproveGrantError; detail?: string }
+> {
   const orgId = opts.orgId ?? DEFAULT_ORG_ID;
   const grantRes = await app.query(
-    `select collection, allowed_fields, verbs, mode, user_id, env from app.grants
+    `select collection, allowed_fields, verbs, mode, user_id, env, principal from app.grants
      where id=$1 and org_id=$2`,
     [id, orgId],
   );
@@ -231,6 +297,17 @@ export async function approveGrant(
       };
   }
 
+  // The warning, computed before the write so the caller gets it alongside the outcome rather
+  // than having to ask a second question afterwards. It never blocks — see narrowerThanInherited.
+  const narrowing = await narrowerThanInherited(app, {
+    userId: grant.user_id,
+    collection,
+    env: grant.env,
+    orgId,
+    principal: grant.principal ?? userPrincipal(grant.user_id),
+    allowedFields,
+  });
+
   const result = await app.query(
     `update app.grants set status='approved', decided_by=$2, decided_at=now(),
        allowed_fields=coalesce($3, allowed_fields), expires_at=$4, document_filter=$5,
@@ -240,7 +317,7 @@ export async function approveGrant(
       id,
       by,
       opts.allowedFields ?? null,
-      opts.expiresAt ?? null,
+      resolveExpiry(cfg, collection, opts.expiresAt),
       opts.documentFilters && opts.documentFilters.length
         ? JSON.stringify(opts.documentFilters)
         : null,
@@ -251,7 +328,127 @@ export async function approveGrant(
     ],
   );
   // Zero rows means the grant was not pending — already decided, or raced.
-  return (result.rowCount ?? 0) > 0 ? { ok: true } : { ok: false, error: "unknown_grant" };
+  if ((result.rowCount ?? 0) === 0) return { ok: false, error: "unknown_grant" };
+  return narrowing ? { ok: true, warning: narrowing } : { ok: true };
+}
+
+/**
+ * When an approved grant should lapse.
+ *
+ * An approver's own choice always wins — including "never", by passing an explicit value. What
+ * this adds is the collection's default for the case that used to mean permanent: an approver who
+ * named nothing. `expires_at` was enforced at query time and rendered in two tables, and that was
+ * the whole of the lifecycle; access granted for a one-off purpose outlived the purpose unless
+ * somebody remembered it.
+ *
+ * Null, still, where neither the approver nor the config names one — a public collection has no
+ * reason to expire.
+ */
+export function resolveExpiry(
+  cfg: WarehousdConfig,
+  collection: string,
+  explicit: string | undefined,
+): string | null {
+  if (explicit) return explicit;
+  const days = cfg.collections[collection]?.grant_expiry_days;
+  if (!days) return null;
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * Grants that are approved, live, and about to lapse — the manager inbox's other half.
+ *
+ * `within` is a window in days. The point is not the list but its timing: renewing access before
+ * it lapses is a decision somebody makes deliberately, and finding out because a query started
+ * refusing is not.
+ */
+export async function expiringGrants(
+  app: Pool,
+  opts: { orgId?: string; within?: number } = {},
+): Promise<
+  {
+    id: string;
+    userId: string;
+    collection: string;
+    env: string;
+    principal: string;
+    expiresAt: string;
+  }[]
+> {
+  const r = await app.query(
+    `select id, user_id, collection, env, principal, expires_at from app.grants
+     where org_id = $1 and status = 'approved'
+       and expires_at is not null
+       and expires_at > now()
+       and expires_at < now() + ($2 || ' days')::interval
+     order by expires_at asc`,
+    [opts.orgId ?? DEFAULT_ORG_ID, String(opts.within ?? 7)],
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    collection: row.collection,
+    env: row.env,
+    principal: row.principal,
+    expiresAt: row.expires_at,
+  }));
+}
+
+/**
+ * Access recertification: every approved grant older than N days, with when it was last used.
+ *
+ * "Last used" comes from `app.audit_events` — the data was already there, and the grant id has
+ * been on every audit row since audit/decision.ts started passing the grant rather than its id.
+ * A grant nobody has exercised in ninety days is the easiest revoke a reviewer will ever make,
+ * and until now there was no way to find one.
+ *
+ * Deliberately a QUERY and not a sweep. Expiring access automatically on a schedule would make the
+ * console's answer depend on when a job last ran; this makes the state of the world legible and
+ * leaves the decision with a person.
+ */
+export async function accessReview(
+  app: Pool,
+  opts: { orgId?: string; olderThanDays?: number } = {},
+): Promise<
+  {
+    id: string;
+    userId: string;
+    collection: string;
+    env: string;
+    principal: string;
+    allowedFields: string[];
+    approvedAt: string;
+    expiresAt: string | null;
+    lastUsedAt: string | null;
+    /** Decisions recorded under this grant. Zero is the interesting number. */
+    uses: number;
+  }[]
+> {
+  const r = await app.query(
+    `select g.id, g.user_id, g.collection, g.env, g.principal, g.allowed_fields,
+            g.decided_at, g.expires_at,
+            max(a.at) as last_used_at,
+            count(a.id)::int as uses
+     from app.grants g
+     left join app.audit_events a on a.grant_id = g.id
+     where g.org_id = $1 and g.status = 'approved'
+       and g.decided_at < now() - ($2 || ' days')::interval
+     group by g.id
+     order by last_used_at asc nulls first, g.decided_at asc`,
+    [opts.orgId ?? DEFAULT_ORG_ID, String(opts.olderThanDays ?? 90)],
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    collection: row.collection,
+    env: row.env,
+    principal: row.principal,
+    allowedFields: row.allowed_fields ?? [],
+    approvedAt: row.decided_at,
+    expiresAt: row.expires_at,
+    lastUsedAt: row.last_used_at,
+    uses: row.uses,
+  }));
 }
 
 export async function denyGrant(

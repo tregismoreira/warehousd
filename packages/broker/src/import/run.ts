@@ -6,11 +6,18 @@ import { insertRevision, currentRevision, reviseDocument } from "../db/revisions
 import { pkOf, dataColsOf } from "../config/collection";
 import { ident } from "../sql/ident";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
-import { writeAudit } from "../audit/write";
+import { makeAuditWriter, auditDestination } from "../audit/decision";
+import type { BrokerContext } from "../types";
 import { writeChangeLog } from "../verbs/history";
 import { auditEnabled, findCollection } from "../config/load";
-import { parseImportPayload } from "./csv";
-import { validateImportRows, type ImportError } from "./validate";
+import { parseImport, type ImportPayload } from "./csv";
+import type { SheetReader } from "./sheet";
+import {
+  validateImportRows,
+  summarizeImportErrors,
+  type ImportError,
+  type ImportErrorSummary,
+} from "./validate";
 import { loadTaxonomyBindings, syncDatasetTerms, type TaxonomyBinding } from "../taxonomy";
 
 // The three things an admin can do to real data. All three are APPENDS at the storage layer:
@@ -23,6 +30,13 @@ export type ImportMode = (typeof IMPORT_MODES)[number];
 
 export type ImportCounts = { inserted: number; updated: number; deleted: number };
 
+// How far through the file an import is, in the shape EmbedProgress already had. `total` is always
+// known — validation has already counted the rows — so the CLI can render a rate and an ETA.
+//
+// Reported from inside the transaction, which is where the work happens. A dry run reports the
+// same numbers and then rolls the whole thing back; that is the point of a dry run.
+export type ImportProgress = { done: number; total: number; phase: "check" | "write" };
+
 export type ImportResult =
   // `auditId` is nullable on the success arm too: a deployment with `audit.enabled: false`
   // writes no row, and fabricating an id for one that does not exist would be worse than saying
@@ -34,7 +48,16 @@ export type ImportResult =
       columns: string[];
       auditId: string | null;
     } & ImportCounts)
-  | { ok: false; reason: string; errors?: ImportError[]; auditId: string | null };
+  | {
+      ok: false;
+      reason: string;
+      errors?: ImportError[];
+      // The aggregation both the CLI and /admin/import render from. Present wherever `errors` is:
+      // fifty row numbers out of ten thousand is not a diagnosis, and the two surfaces must not
+      // each invent their own way of saying so. See summarizeImportErrors.
+      summary?: ImportErrorSummary;
+      auditId: string | null;
+    };
 
 // Thrown to unwind the import transaction on a dry run. withOrg rolls back on any throw, which
 // is the whole mechanism: a preview runs the real statements against the real table and then
@@ -68,37 +91,69 @@ export async function importCollection(
   cfg: WarehousdConfig,
   actor: string,
   collection: string,
-  payload: { text: string; format: "csv" | "json" },
-  opts: { mode?: ImportMode; dryRun?: boolean; orgId?: string } = {},
+  payload: ImportPayload,
+  opts: {
+    mode?: ImportMode;
+    dryRun?: boolean;
+    orgId?: string;
+    onProgress?: ((p: ImportProgress) => void) | undefined;
+    // Which credential drove this, for the audit row — `session` from the console, `cli` from
+    // `warehousd import run`. Defaults to `session`, which is where imports came from first.
+    via?: string;
+    // Injected for `format: "xlsx"`, never constructed here — see import/csv.ts.
+    sheets?: SheetReader | undefined;
+  } = {},
 ): Promise<ImportResult> {
   const mode: ImportMode = opts.mode ?? "append";
   const dryRun = opts.dryRun ?? false;
   const orgId = opts.orgId ?? DEFAULT_ORG_ID;
 
-  // Import writes its own row rather than going through audit/decision.ts, so it has to honour
-  // `audit.enabled` itself — an environment configured as unaudited must not still collect a row
-  // per import.
-  const audit = (
+  // Through `makeAuditWriter` like every broker decision, not through a direct insert.
+  //
+  // An import is not a grant decision, but it is the single write path into data_live and it goes
+  // in the same trail — so it has to reach the same DESTINATION. While this called `writeAudit`
+  // directly it always landed in `app.audit_events`, which meant a deployment forwarding its trail
+  // to a SIEM (`audit.sink: webhook`) silently lost the highest-volume event it has. Going through
+  // the writer also brings the rest of it for free: `audit.enabled` honoured in one place, the
+  // redacted operator log line on a failed write, and `org_id`/`via`/`principals` filled from the
+  // context rather than from a hand-written column list.
+  //
+  // `env` is the literal 'live'. An import cannot touch data_synth, so there is no caller
+  // environment to read here.
+  const auditCtx: BrokerContext = {
+    userId: actor,
+    orgId,
+    env: "live",
+    allowedCollections: null,
+    via: opts.via ?? "session",
+  };
+  const writer = makeAuditWriter(pools.app, auditCtx, auditEnabled(cfg), auditDestination(cfg));
+
+  // Column names and counts only — never a cell value. An import file may carry real personal
+  // data and the audit log is queryable by every admin.
+  const intentFor = (extra: Record<string, unknown>) => ({
+    op: `import:${mode}`,
+    format: payload.format,
+    dryRun,
+    ...extra,
+  });
+
+  const audit = async (
     outcome: "allowed" | "refused",
     reason: string | null,
     extra: Record<string, unknown>,
-  ): Promise<string | null> =>
-    !auditEnabled(cfg)
-      ? Promise.resolve(null)
-      : writeAudit(pools.app, {
-          userId: actor,
-          env: "live",
-          collection,
-          orgId,
-          // Column names and counts only — never a cell value. An import file may carry real
-          // personal data and the audit log is queryable by every admin.
-          intent: { op: `import:${mode}`, format: payload.format, dryRun, ...extra },
-          fieldsReturned: [],
-          grantId: null,
-          outcome,
-          reason,
-          via: "session",
-        });
+  ): Promise<string | null> => {
+    const detail = { intent: intentFor(extra) };
+    if (outcome === "refused")
+      return (await writer.refuse(collection, reason ?? "refused", detail)).auditId;
+    // Deliberately NOT downgraded to a refusal the way a read is. The rows are already committed
+    // by the time this runs — the audit row goes through the app pool, which the import role
+    // cannot reach, so it cannot join the import's transaction and cannot be rolled back with it.
+    // Telling the caller the import failed when the data is in the table would be a worse lie than
+    // a null id, and the writer has already logged the failure loudly for the operator.
+    const rec = await writer.allow(collection, detail);
+    return rec.ok ? rec.auditId : null;
+  };
 
   if (!IMPORT_MODES.includes(mode)) {
     return { ok: false, reason: "unknown_mode", auditId: null };
@@ -122,7 +177,7 @@ export async function importCollection(
 
   let rows: Record<string, unknown>[];
   try {
-    rows = parseImportPayload(payload.text, payload.format);
+    rows = parseImport(payload, { sheets: opts.sheets });
   } catch {
     const auditId = await audit("refused", "parse_failed", { rows: 0 });
     return { ok: false, reason: "parse_failed", auditId };
@@ -157,7 +212,13 @@ export async function importCollection(
   const v = validateImportRows(cfg, collection, rows, { taxonomies, mode });
   if (!v.ok) {
     const auditId = await audit("refused", "validation_failed", { rows: rows.length });
-    return { ok: false, reason: "validation_failed", errors: v.errors, auditId };
+    return {
+      ok: false,
+      reason: "validation_failed",
+      errors: v.errors,
+      summary: v.summary,
+      auditId,
+    };
   }
 
   // `collection` and every column name were validated against the loaded config above, so these
@@ -211,13 +272,15 @@ export async function importCollection(
         for (const [idx, row] of v.values.entries()) {
           const doc = docOf(row);
           if (!(await currentRevision(client, table, pk!, doc[pk!], "")))
-            missing.push({ row: idx, column: pk, reason: "not_found" });
+            missing.push({ row: idx, column: pk, reason: "not_found", scope: "row" });
+          opts.onProgress?.({ done: idx + 1, total: v.values.length, phase: "check" });
         }
         if (missing.length) throw new RowErrors(missing);
       }
 
       for (const [idx, row] of v.values.entries()) {
         const doc = docOf(row);
+        opts.onProgress?.({ done: idx, total: v.values.length, phase: "write" });
 
         if (mode === "append") {
           const rev = await insertRevision(client, table, dataCols, create(v.columns), doc);
@@ -279,13 +342,19 @@ export async function importCollection(
         const missing = requiredCols.filter((col) => doc[col] === undefined || doc[col] === null);
         if (missing.length)
           throw new RowErrors(
-            missing.map((col) => ({ row: idx, column: col, reason: "missing_required" })),
+            missing.map((col) => ({
+              row: idx,
+              column: col,
+              reason: "missing_required",
+              scope: "row" as const,
+            })),
           );
         const rev = await insertRevision(client, table, dataCols, create(v.columns), doc);
         n.inserted++;
         feed.push({ documentId: idOf(doc), rev, op: "create" });
       }
 
+      opts.onProgress?.({ done: v.values.length, total: v.values.length, phase: "write" });
       if (dryRun) throw new DryRunRollback(n);
       return n;
     });
@@ -307,7 +376,15 @@ export async function importCollection(
     }
     if (e instanceof RowErrors) {
       const auditId = await audit("refused", "validation_failed", { rows: v.values.length });
-      return { ok: false, reason: "validation_failed", errors: e.errors, auditId };
+      // Discovered inside the transaction, so there is no validation summary to carry — these are
+      // built from the array, which is complete here because the loop throws on the first batch.
+      return {
+        ok: false,
+        reason: "validation_failed",
+        errors: e.errors,
+        summary: summarizeImportErrors(e.errors, v.values.length),
+        auditId,
+      };
     }
     const code = (e as { code?: string }).code;
     // 23xxx = integrity constraint violation (unique, FK, not-null, check). On append that is

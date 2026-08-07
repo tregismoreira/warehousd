@@ -14,9 +14,48 @@ import { plainTheme } from "./theme";
 // spinner writing escape codes into that pipe would be both useless and unassertable.
 
 export type StepHandle = {
+  /**
+   * Move a live step forward. Draws into the spinner line; never emits a line of its own.
+   *
+   * Three rules, all of them consequences of the two above:
+   *
+   *   - **Off a TTY it does nothing at all.** The e2e suite drives this binary through
+   *     `execFileSync` with `stdio: "pipe"`, and a step emitting ten thousand progress lines into
+   *     that pipe would break every assertion in it. The completed step still prints its one
+   *     plain line.
+   *   - **Throttled by wall clock, not by item.** One write per row would make an import slower
+   *     than the import; ~10/second is past the eye's ability to read anyway.
+   *   - **stderr.** It must never reach stdout, or `warehousd start --json | jq` stops being
+   *     machine-readable.
+   */
+  update(detail: string): void;
   done(detail?: string): void;
   fail(detail?: string): void;
 };
+
+/**
+ * How far along a long operation is, in the shape `EmbedProgress` already had.
+ *
+ * One convention rather than five: every broker operation that can report progress reports it
+ * like this, so `progressDetail` below is the only thing that has to know how to phrase it.
+ * `total` is optional because two of the five genuinely cannot know it up front — an indexer is
+ * walking a directory, an apply is working through a list it builds as it goes.
+ */
+export type Progress = { done: number; total?: number | undefined; label?: string | undefined };
+
+// "1,240 / 6,351 · 38s · ~2m left". The ETA is linear from the rate so far, which is the honest
+// estimate for work that is uniform per item — and every one of these is.
+export function progressDetail(p: Progress, elapsedMs: number): string {
+  const n = (x: number) => x.toLocaleString("en-US");
+  const head = p.total === undefined || p.total <= 0 ? n(p.done) : `${n(p.done)} / ${n(p.total)}`;
+  const parts = [head, formatElapsed(elapsedMs)];
+  if (p.total !== undefined && p.total > 0 && p.done > 0 && p.done < p.total) {
+    const remaining = ((p.total - p.done) * elapsedMs) / p.done;
+    parts.push(`~${formatElapsed(remaining)} left`);
+  }
+  if (p.label) parts.push(p.label);
+  return parts.join(" · ");
+}
 
 export type Reporter = {
   step(verb: string, label: string): StepHandle;
@@ -38,6 +77,9 @@ export type ReporterOptions = {
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 80;
+// The floor between two `update()` writes. One write per row would make the import slower than the
+// import; ten a second is already past what anyone reads.
+const UPDATE_INTERVAL_MS = 100;
 // A fixed gutter, borrowed from cargo: the verb is right-aligned in its own column so the eye
 // tracks a single edge down the page instead of re-finding the text on every line.
 const GUTTER = 10;
@@ -81,12 +123,19 @@ export function createReporter(opts: ReporterOptions): Reporter {
     step(verb: string, label: string): StepHandle {
       const started = now();
       let settled = false;
+      // What `update()` last said, redrawn by every spinner frame so the detail does not blink
+      // out between updates.
+      let detail = "";
+      let lastUpdate = 0;
 
       if (!quiet && isTTY) {
         let frame = 0;
         const paint = () => {
           const glyph = theme.unicode ? (FRAMES[frame % FRAMES.length] ?? "") : "";
-          opts.writeErr(`\r\x1b[2K${theme.c.cyan(glyph)}${theme.c.dim(gutter(verb))}  ${label}`);
+          const tail = detail ? `  ${theme.c.dim(detail)}` : "";
+          opts.writeErr(
+            `\r\x1b[2K${theme.c.cyan(glyph)}${theme.c.dim(gutter(verb))}  ${label}${tail}`,
+          );
           frame += 1;
         };
         paint();
@@ -107,8 +156,21 @@ export function createReporter(opts: ReporterOptions): Reporter {
       };
 
       return {
-        done: (detail?: string) => settle(true, detail),
-        fail: (detail?: string) => settle(false, detail),
+        update: (next: string) => {
+          // Nothing to draw into off a TTY, and nothing that should be written instead: see the
+          // rules on StepHandle.update.
+          if (settled || quiet || !isTTY) return;
+          const t = now();
+          if (t - lastUpdate < UPDATE_INTERVAL_MS) return;
+          lastUpdate = t;
+          detail = next;
+          const glyph = theme.unicode ? (FRAMES[0] ?? "") : "";
+          opts.writeErr(
+            `\r\x1b[2K${theme.c.cyan(glyph)}${theme.c.dim(gutter(verb))}  ${label}  ${theme.c.dim(detail)}`,
+          );
+        },
+        done: (d?: string) => settle(true, d),
+        fail: (d?: string) => settle(false, d),
       };
     },
 
@@ -136,7 +198,7 @@ export function createReporter(opts: ReporterOptions): Reporter {
 // The default for every `runX` signature, so adding progress to an orchestration function does
 // not change what its existing callers or tests have to pass.
 export const silentReporter: Reporter = {
-  step: () => ({ done: () => {}, fail: () => {} }),
+  step: () => ({ update: () => {}, done: () => {}, fail: () => {} }),
   note: () => {},
   warn: () => {},
   fail: () => {},

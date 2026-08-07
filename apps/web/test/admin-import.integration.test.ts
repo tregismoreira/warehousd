@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { reportImportSummary, summarizeImportErrors } from "@warehousd/broker";
 import { setupWebDbWithData, signIn } from "./helpers/web-db";
 import { getAppPool } from "../app/lib/broker";
 
@@ -82,11 +83,22 @@ describe("POST /api/admin/import", () => {
     expect((await res.json()).error).toBe("no_file");
   });
 
+  // `xlsx` used to be the example here and is now a supported format (§P3c). `xls` is the
+  // genuinely unsupported one — an old Excel file is a different format, not a compressed one.
   it("rejects an unsupported format", async () => {
     const { POST } = await import("../app/api/admin/import/route");
-    const res = await POST(upload(anaCookie, "departments", "x", "xlsx") as any);
+    const res = await POST(upload(anaCookie, "departments", "x", "xls") as any);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("unsupported_format");
+  });
+
+  it("accepts xlsx as a format, and refuses a file that is not one", async () => {
+    const { POST } = await import("../app/api/admin/import/route");
+    // The format is accepted; the payload is not a workbook, so it fails at the parser instead —
+    // which is the difference between "warehousd cannot read Excel" and "this is not Excel".
+    const res = await POST(upload(anaCookie, "departments", "not a zip", "xlsx") as any);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("parse_failed");
   });
 
   it("rejects an oversized upload before parsing it", async () => {
@@ -134,5 +146,37 @@ describe("POST /api/admin/import", () => {
     ]);
     expect(live.rowCount).toBe(1);
     expect(synth.rowCount).toBe(0);
+  });
+});
+
+// §P11. The aggregation helper is called by BOTH the CLI and this route, and both render identical
+// counts from the same ImportError[]. Asserted here rather than trusted, because "we share a
+// function" is the sort of claim that stays true right up until somebody inlines one of them.
+describe("the route and the CLI report a failure identically", () => {
+  it("returns the same summary the CLI's report layer builds from the same errors", async () => {
+    const { POST } = await import("../app/api/admin/import/route");
+    const bad = ["id,name", "not-a-uuid,A", "also-not-a-uuid,B", `${U(3)},`].join("\n");
+    const res = await POST(upload(anaCookie, "departments", bad) as any);
+    const body = await res.json();
+
+    expect(body.error).toBe("validation_failed");
+    // The route carries the aggregation, not just the row list.
+    expect(body.summary).toBeDefined();
+    const fromRoute = reportImportSummary(body.summary);
+    // …and it is the same thing the CLI would compute from the errors alone.
+    const fromErrors = reportImportSummary(
+      summarizeImportErrors(body.errors, body.summary.rowsTotal, body.summary.columnsTotal),
+    );
+    expect(fromRoute.lines.map((l) => [l.column, l.reason, l.extent])).toEqual(
+      fromErrors.lines.map((l) => [l.column, l.reason, l.extent]),
+    );
+    expect(fromRoute.headline).toBe(fromErrors.headline);
+
+    // Grouped, with a count — not a list of row numbers.
+    const uuids = fromRoute.lines.find((l) => l.reason === "invalid_uuid");
+    expect(uuids).toMatchObject({ column: "id", extent: "2 rows", firstRow: 1 });
+
+    // Invariant 4 holds across the whole response, aggregation included.
+    expect(JSON.stringify(body)).not.toContain("not-a-uuid");
   });
 });

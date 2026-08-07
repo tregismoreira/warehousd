@@ -90,7 +90,8 @@ tests in the suite.
    tables. Enforced with Postgres role privileges: the app's role has none on
    `data_live` / `data_synth`; the broker holds separate role-scoped pools.
 2. **Deny by default.** No posture means denied. No grant means the user sees
-   nothing beyond a collection's name and description in `list_collections`.
+   nothing beyond a collection's name, description and — about their own access
+   and nobody else's — whether they hold a grant on it, in `list_collections`.
 3. **The client is untrusted.** Query intents are proposals. The broker
    re-validates every one against the grant before constructing SQL, which it
    builds server-side from named views and a fixed operator whitelist. No
@@ -132,7 +133,10 @@ tests in the suite.
    returned unrecorded. A deployment can turn the trail off with
    `audit.enabled: false` for lower environments; then nothing is recorded and
    every `auditId` is null. Nothing ever invents an id to stand in for a row
-   that is not there.
+   that is not there. `audit.sink` chooses the destination — `postgres`,
+   `stdout-json` or `webhook` — and the downgrade rule is what every one of them
+   is held to: a sink that cannot accept an event throws, and the allow it was
+   recording becomes a refusal.
 8. **Tenants are separated by the database, not by a predicate the broker
    remembers.** See [Organizations](#organizations-and-tenant-isolation).
 
@@ -801,6 +805,42 @@ the view.
 > authenticated human surface — the warehousd web UI, or the integrating app's
 > own UI over REST.
 
+## Who a grant is for, and how long it lasts
+
+A grant carries a **principal**, not a user id: `user:<id>` or `group:<name>`.
+Both are resolved on every call from `app.user_groups`, which is warehousd's own
+fact — never a token claim, for the reason `acl/principals.ts` gives about
+per-document ACLs.
+
+**One grant decides, and it is the most specific one.** `loadActiveGrant` orders
+`user:` above `group:` and then by `requested_at desc`, and takes one row. Not a
+union of everything that matches: a union has no id, so `AuditGrant` could not
+say what a decision was made under, and revoking a personal grant would not
+remove access — the opposite of what the revoke button promises. One row wins,
+one id lands on the audit row, revoke means revoke.
+
+The honest cost is that a personal grant *narrower* than one the user inherits
+reduces their access, which surprises people. Two mitigations, both cheap:
+`approveGrant` warns (never refuses) when the grant being approved is narrower
+than one the requester already inherits, and the console shows effective access
+per field.
+
+**`explainAccess`** is the console-only verb behind that: per field, the posture
+from config, whether it is grantable, whether this grant carries it, whether the
+value comes back raw or transformed, and the first rule that said no. Authorised
+against the caller's console role — like `setDocumentAcl`, not against a grant —
+so it is not reachable from MCP at all, and a member may ask about themselves and
+nobody else. It returns the shape of a policy and never a stored value.
+
+Expiry has a lifecycle rather than a column: `grant_expiry_days` on a collection
+supplies the default an approver who names nothing gets, grants lapsing within a
+week surface in the manager inbox, and **Access review** lists every approved
+grant older than a chosen window with when it was last exercised — derived from
+`app.audit_events`, which has carried the deciding grant's id all along. It is a
+query and not a sweep on purpose: expiring access on a schedule would make the
+console's answer depend on when a job last ran, and the decision belongs to a
+person.
+
 ## The change feed
 
 Without a feed, every review UI polls the data. The revision history is already
@@ -995,11 +1035,25 @@ tokens. Membership arrives from an SSO login (`source: 'sso'`) or from the conso
 
 **Storage is one table per env data schema**, `data_synth."_acl"` /
 `data_live."_acl"`, shared by every collection and keyed
-`(org_id, collection, document_id)`. No row means public — which is the whole
+`(org_id, collection, document_id)`. What `document_id` matches is the KIND's
+answer, not a fixed column: a dataset's declared primary key, a file collection's
+`path` (`CollectionKind.aclKeyField`). No row means public — which is the whole
 design: 1,000 pages with one restricted page is one row, and the other 999 cost
 nothing. It lives in the data schema rather than in `app` because the app pool has
 no data-schema privileges and the read pools have none on `app`, so an
 `app`-schema ACL could not be joined into a collection's view at all.
+
+**A file collection is keyed on `path`, never on `file_id`.** Its documents are
+chunks, so the policy attaches to the file row and every chunk of one document
+shares it — and `path` is what `ingestFile` treats as a file's identity within a
+collection. `file_id` is stable across a re-index, which updates the row in place,
+but the delete sweep in `indexing/sync.ts` removes the row when a file leaves the
+source directory, so a file that comes back gets a fresh uuid. An ACL keyed on the
+surrogate would be orphaned and the returning document would be readable by
+everyone the grant covers — a silent widening, with nothing in the trail to say
+so. For the same reason the sweep deliberately **leaves the ACL row behind**: the
+restriction survives the round trip. The cost is one row that may outlive its
+file, invisible to every read path, removed when the collection is dropped.
 
 **The view carries it as a structural column.** `viewDDL` left-joins `_acl` and
 exposes `acl.principals as "_acl"`, exactly the way it already exposes `tsv`,
@@ -1059,11 +1113,11 @@ ACL is not content, it has no revision model, and removing the row is the only w
 to make a restricted document public again — a tombstone would force "no
 principals" and "no row" to mean different things, and they do not.
 
-Not in v1: **file collections** (an ACL keyed on `file_id` rather than a pk, a
-second join in the file branch of `viewDDL`, and a decision about the indexer's
-write path — config refuses `acl: true` there), **connect-in-place collections**
-(warehousd does not own those rows), a **default-private** mode, **inheritance**
-down a tree, and **deny entries**. Positive principals only.
+Not supported: **connect-in-place collections** — warehousd does not own those
+rows, there is no local base table to join an ACL against, and the view has no
+`org_id` column to carry the tenant half of the predicate; config refuses
+`acl: true` there. Also absent by design: a **default-private** mode,
+**inheritance** down a tree, and **deny entries**. Positive principals only.
 
 ## Semantic search
 
@@ -1257,10 +1311,10 @@ One OAuth-protected endpoint at `/mcp`, streamable HTTP.
 
 | Tool                  | Behavior                                                              |
 | --------------------- | --------------------------------------------------------------------- |
-| `list_collections`    | Names and descriptions only — no schema, no counts.                   |
+| `list_collections`    | Names, descriptions, and whether the CALLER holds a read grant (plus how many fields it carries). No schema, no counts, no other caller's access. |
 | `describe_collection` | Only the fields visible under the caller's grants.                    |
 | `query_collection`    | Filters, ordering, limits, aggregation — re-validated, then executed. |
-| `search_documents`    | Ranked full-text search over a file collection, grant-filtered.       |
+| `search_documents`    | Ranked search, grant-filtered. Naming a collection searches it; omitting one fans out across every collection the caller may read and merges by reciprocal-rank fusion — one audit row per collection, refusals included. |
 | `request_access`      | Opens a pending grant request for a manager to approve.               |
 
 Refusals return a reason code plus a request-access hint — never a denied value,

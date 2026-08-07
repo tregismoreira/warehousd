@@ -24,14 +24,29 @@ async function pick(page: import("@playwright/test").Page, csv: string) {
 }
 
 /**
+ * Pick a file, then walk the mapping step to the preview.
+ *
+ * The mapping step sits between file selection and preview because a real spreadsheet's headers
+ * are not field names. It is not skippable: a header the admin leaves unmapped would be refused
+ * as `unknown_column`, and that is a decision to make before running the import, not after.
+ */
+async function pickAndMap(page: import("@playwright/test").Page, csv: string) {
+  await pick(page, csv);
+  await button(page, "Map columns").click();
+  // `CardTitle` renders a div, not a heading — unlike `AlertDialogTitle` below, which
+  // Radix does give role=heading. Matched by text for that reason.
+  await expect(page.getByText("Map the columns")).toBeVisible();
+  await button(page, "Preview import").click();
+}
+
+/**
  * Preview, then apply.
  *
  * The preview is a real import that is rolled back, so a file that cannot be imported never
  * reaches the confirm dialog at all — which is why the invalid-CSV test below does not use this.
  */
 async function pickAndUpload(page: import("@playwright/test").Page, csv: string) {
-  await pick(page, csv);
-  await button(page, "Preview import").click();
+  await pickAndMap(page, csv);
   await expect(page.getByRole("heading", { name: "Confirm import" })).toBeVisible();
   await button(page, "Apply").click();
 }
@@ -48,10 +63,10 @@ test.describe("import", () => {
     await expect(page.getByText("id (required)")).toBeVisible();
   });
 
-  test("preview is blocked until a collection and a file are chosen", async ({ page }) => {
-    await expect(button(page, "Preview import")).toBeDisabled();
+  test("the flow is blocked until a collection and a file are chosen", async ({ page }) => {
+    await expect(button(page, "Map columns")).toBeDisabled();
     await selectOption(page, "Collection", new RegExp(`^${COLLECTION}$`));
-    await expect(button(page, "Preview import")).toBeDisabled();
+    await expect(button(page, "Map columns")).toBeDisabled();
   });
 
   test("a valid CSV is imported into data_live", async ({ page }) => {
@@ -72,8 +87,7 @@ test.describe("import", () => {
   test("the preview says what will happen before anything is applied", async ({ page }) => {
     // The counts come from running the import for real and rolling it back, so this is the one
     // place an admin can see "4 new, 96 revised" before deciding.
-    await pick(page, `id,name\n${randomUUID()},E2E Previewed\n`);
-    await button(page, "Preview import").click();
+    await pickAndMap(page, `id,name\n${randomUUID()},E2E Previewed\n`);
 
     const dialog = page.getByRole("alertdialog");
     await expect(dialog.getByText("1 added")).toBeVisible();
@@ -82,20 +96,58 @@ test.describe("import", () => {
 
   test("an invalid CSV is rejected by the preview — nothing is applied", async ({ page }) => {
     // No confirm dialog: the dry run refuses the file, so there is nothing to confirm and the
-    // per-row errors are what the admin needs instead.
-    await pick(page, `id,name\nnot-a-uuid,E2E Broken\n`);
-    await button(page, "Preview import").click();
+    // grouped failure is what the admin needs instead.
+    await pickAndMap(page, `id,name\nnot-a-uuid,E2E Broken\n`);
 
     await expect(page.getByRole("heading", { name: "Confirm import" })).toHaveCount(0);
     await expect(page.getByText("Import failed")).toBeVisible();
     await expect(page.getByText("Nothing was imported.")).toBeVisible();
-    // Rows are reported zero-indexed, excluding the header.
-    await expect(page.getByText(/Row 0 · id · not a UUID/)).toBeVisible();
+    // Grouped by (column, reason) with a complete count and one example row, not a list of the
+    // first fifty row numbers — the same summary `warehousd import validate` prints.
+    const panel = page.locator("table").filter({ hasText: "not a UUID" });
+    await expect(panel.getByRole("cell", { name: "id", exact: true })).toBeVisible();
+    await expect(panel.getByRole("cell", { name: "not a UUID" })).toBeVisible();
+    await expect(panel.getByRole("cell", { name: "1 row", exact: true })).toBeVisible();
+    // Shown 1-based, because nobody counts their spreadsheet from zero.
+    await expect(panel.getByRole("cell", { name: "row 1" })).toBeVisible();
+  });
+
+  // Invariant 4 through the browser. `ImportError` carries {row, column, reason} and never the
+  // value on purpose — an import file holds real personal data, and a rendered error panel is as
+  // much a place a value can leak as a response body.
+  test("no cell value reaches the error panel", async ({ page }) => {
+    const canary = "CANARY-7f3a9b";
+    await pickAndMap(page, `id,name\n${canary},E2E Canary\n`);
+
+    await expect(page.getByText("Import failed")).toBeVisible();
+    // Not scoped to the panel: the whole page, including any toast, must be free of it.
+    await expect(page.locator("body")).not.toContainText(canary);
+    const shown = await page.content();
+    expect(shown).not.toContain(canary);
+  });
+
+  test("the mapping step proposes a config patch and never writes one", async ({ page }) => {
+    // A real spreadsheet's headers are not field names. The step between file and preview is
+    // where an admin corrects the guess — and "Save this mapping" produces YAML to review, not a
+    // write to warehousd.yml.
+    await pick(page, `ID,Name\n${randomUUID()},E2E Mapped\n`);
+    await button(page, "Map columns").click();
+
+    await expect(page.getByText("Map the columns")).toBeVisible();
+    await expect(page.getByRole("cell", { name: "ID", exact: true })).toBeVisible();
+    await button(page, "Save this mapping").click();
+    await expect(page.getByText(/import:/)).toBeVisible();
+    await expect(page.getByText(/columns:/)).toBeVisible();
+  });
+
+  test("Excel is a selectable format", async ({ page }) => {
+    await selectOption(page, "Collection", new RegExp(`^${COLLECTION}$`));
+    await selectOption(page, "Format", "Excel (.xlsx)");
+    await expect(page.getByLabel("File")).toBeVisible();
   });
 
   test("cancelling the confirm dialog returns to the picker", async ({ page }) => {
-    await pick(page, `id,name\n${randomUUID()},E2E Cancelled\n`);
-    await button(page, "Preview import").click();
+    await pickAndMap(page, `id,name\n${randomUUID()},E2E Cancelled\n`);
     await button(page, "Cancel").click();
     await expect(page.getByRole("heading", { name: "Confirm import" })).toHaveCount(0);
     await expect(page.getByText("Select dataset and file")).toBeVisible();

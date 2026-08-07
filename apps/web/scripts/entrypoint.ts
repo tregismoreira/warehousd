@@ -18,6 +18,7 @@ import {
   dataRoleUrl,
   grantableFields,
   type WarehousdConfig,
+  kindOf,
 } from "@warehousd/broker";
 import { auth } from "../lib/auth.js";
 import { waitForPostgres } from "./wait-for-postgres.js";
@@ -189,7 +190,9 @@ export async function bootstrap(): Promise<void> {
 
     // 8. Synthetic data. Truncate-then-generate so a restart is idempotent
     for (const [name, c] of Object.entries(cfg.collections)) {
-      if (c.type === "file") continue; // file collections are indexed, not generated
+      // A kind the generator cannot produce is populated another way — a file collection by
+      // indexCollection, below.
+      if (!kindOf(c).synthesisable) continue;
       await db.query(`truncate data_synth.${name} cascade`);
     }
     await generateSynthetic(db, cfg, Number(process.env.WAREHOUSD_SEED ?? 42));
@@ -202,7 +205,7 @@ export async function bootstrap(): Promise<void> {
 
     // 9. Index file collections
     for (const [name, c] of Object.entries(cfg.collections)) {
-      if (c.type !== "file") continue;
+      if (!kindOf(c).chunked) continue;
       const metadata = fileMetadataFields(c);
       const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
       await indexCollection(db, "dev", name, resolve(dir, c.source!), {

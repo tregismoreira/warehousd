@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createReporter, silentReporter } from "../src/ui/reporter";
+import { createReporter, silentReporter, progressDetail } from "../src/ui/reporter";
 import { plainTheme } from "../src/ui/theme";
 
 // A fake clock, so elapsed times are asserted rather than tolerated.
@@ -133,5 +133,97 @@ describe("silentReporter", () => {
       silentReporter.fail("f");
       silentReporter.out("o");
     }).not.toThrow();
+  });
+});
+
+// §P10. Three rules govern `update()`, and each one is a way the CLI could break something that
+// already works: the e2e suite reading a pipe, the import that becomes slower than the import,
+// and `--json | jq`.
+describe("StepHandle.update", () => {
+  it("emits nothing at all off a TTY", () => {
+    const h = harness({ isTTY: false });
+    const step = h.reporter.step("Importing", "people");
+    const before = h.err();
+    for (let i = 0; i < 10_000; i++) {
+      h.advance(10);
+      step.update(`${i} / 10000`);
+    }
+    expect(h.err()).toBe(before);
+    step.done();
+    // The completed step still prints its one plain line.
+    expect(h.err()).toContain("Importing");
+    expect(h.err()).toContain("people");
+  });
+
+  it("never writes to stdout", () => {
+    const h = harness({ isTTY: true });
+    const step = h.reporter.step("Importing", "people");
+    h.advance(1000);
+    step.update("1 / 10");
+    step.done();
+    expect(h.out()).toBe("");
+  });
+
+  it("throttles by wall clock, not by item", () => {
+    const h = harness({ isTTY: true });
+    const step = h.reporter.step("Importing", "people");
+    const writesBefore = h.err().length;
+    // 10,000 items across 10 simulated seconds. At ~10 writes/second that is about a hundred
+    // lines, not ten thousand.
+    let updates = 0;
+    for (let i = 0; i < 10_000; i++) {
+      h.advance(1);
+      const before = h.err().length;
+      step.update(`${i} / 10000`);
+      if (h.err().length !== before) updates++;
+    }
+    expect(writesBefore).toBeGreaterThanOrEqual(0);
+    expect(updates).toBeLessThanOrEqual(101);
+    expect(updates).toBeGreaterThan(50);
+    step.done();
+  });
+
+  it("shows the detail it was given, on stderr", () => {
+    const h = harness({ isTTY: true });
+    const step = h.reporter.step("Importing", "people");
+    h.advance(1000);
+    step.update("1,240 / 6,351 · 38s");
+    expect(h.err()).toContain("1,240 / 6,351 · 38s");
+    step.done();
+  });
+
+  it("is inert once the step has settled", () => {
+    const h = harness({ isTTY: true });
+    const step = h.reporter.step("Importing", "people");
+    step.done();
+    const after = h.err();
+    h.advance(1000);
+    step.update("late");
+    expect(h.err()).toBe(after);
+  });
+
+  it("silentReporter has one too", () => {
+    expect(() => silentReporter.step("x", "y").update("z")).not.toThrow();
+  });
+});
+
+describe("progressDetail", () => {
+  it("renders count, total, elapsed and an ETA", () => {
+    // 5,111 items left at 1,240 per 38s → about 157 seconds.
+    expect(progressDetail({ done: 1240, total: 6351 }, 38_000)).toBe(
+      "1,240 / 6,351 · 38.0s · ~156.6s left",
+    );
+  });
+
+  it("omits the total where there is none", () => {
+    expect(progressDetail({ done: 12 }, 500)).toBe("12 · 500ms");
+  });
+
+  it("omits the ETA once the work is done", () => {
+    expect(progressDetail({ done: 10, total: 10 }, 1000)).toBe("10 / 10 · 1.0s");
+  });
+
+  it("carries a label", () => {
+    expect(progressDetail({ done: 3, total: 20, label: "matters" }, 1000)).toContain("matters");
   });
 });

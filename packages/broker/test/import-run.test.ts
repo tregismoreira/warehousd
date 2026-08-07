@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, type Pools } from "../src/index";
 import { importCollection } from "../src/import/run";
 import { syncDatasetTerms } from "../src/taxonomy";
 import { loadConfig } from "../src/config/load";
-import { ConfigSchema } from "../src/config/schema";
+import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
 
 let p: Provisioned, admin: Pool, pools: Pools;
 const cfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).pathname);
@@ -181,7 +181,7 @@ describe("importCollection", () => {
     );
     const r = await importCollection(
       pools,
-      { ...cfg, audit: { enabled: false } },
+      { ...cfg, audit: { ...cfg.audit, enabled: false } },
       "ana",
       "departments",
       { format: "csv", text: `id,name\n${U(19)},Unaudited` },
@@ -686,5 +686,102 @@ describe("importCollection: dataset-sourced vocabulary", () => {
     } finally {
       await dAdmin.query(`alter table app.terms_hidden rename to terms`);
     }
+  });
+});
+
+// §P8. An import is not a grant decision, but it is the single write path into data_live and it
+// belongs in the same trail — so it has to reach the same DESTINATION. While this path called
+// `writeAudit` directly it always landed in `app.audit_events`, which meant a deployment
+// forwarding its trail to a SIEM silently lost the highest-volume event it has.
+describe("the import audit row goes to the configured sink", () => {
+  // The parsed harbor config with one field changed. Re-parsing the YAML would only re-prove
+  // that the schema works; what is under test is where the row goes.
+  const sunk: WarehousdConfig = { ...cfg, audit: { enabled: true, sink: "stdout-json" } };
+
+  it("writes the decision to the sink and not to app.audit_events", async () => {
+    const before = await admin.query<{ n: string }>(
+      `select count(*)::text as n from app.audit_events where user_id='sunk_importer'`,
+    );
+
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(((s: string) => {
+      written.push(String(s));
+      return true;
+    }) as typeof process.stdout.write);
+    let r: Awaited<ReturnType<typeof importCollection>>;
+    try {
+      r = await importCollection(pools, sunk, "sunk_importer", "departments", {
+        format: "csv",
+        text: `id,name\n${U(40)},Sunk`,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    assertImported(r);
+
+    const line = written.find((l) => l.includes("warehousd.audit"));
+    expect(line).toBeDefined();
+    const event = JSON.parse(line!) as {
+      id: string;
+      outcome: string;
+      collection: string;
+      intent: { op: string };
+    };
+    expect(event.id).toBe(r.auditId);
+    expect(event).toMatchObject({ outcome: "allowed", collection: "departments" });
+    expect(event.intent.op).toBe("import:append");
+
+    const after = await admin.query<{ n: string }>(
+      `select count(*)::text as n from app.audit_events where user_id='sunk_importer'`,
+    );
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
+  });
+
+  it("carries no cell value into the sink's payload", async () => {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(((s: string) => {
+      written.push(String(s));
+      return true;
+    }) as typeof process.stdout.write);
+    try {
+      await importCollection(pools, sunk, "sunk_importer", "departments", {
+        format: "csv",
+        text: `id,name\n${U(41)},CANARY-7f3a9b`,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    // A forwarded event travels further than a table does — the whole point of a webhook sink —
+    // so "column names and counts only" has to hold on this path too.
+    expect(written.join("")).not.toContain("CANARY-7f3a9b");
+  });
+});
+
+// Where the import came from. A console import and one from CI are the same write path and a
+// different governance question, and only the audit row can tell them apart.
+describe("via", () => {
+  it("defaults to session and records what the caller names", async () => {
+    const fromConsole = await importCollection(pools, cfg, "ana", "departments", {
+      format: "csv",
+      text: `id,name\n${U(42)},Console`,
+    });
+    assertImported(fromConsole);
+    const fromCli = await importCollection(
+      pools,
+      cfg,
+      "ana",
+      "departments",
+      { format: "csv", text: `id,name\n${U(43)},Robot` },
+      { via: "cli" },
+    );
+    assertImported(fromCli);
+
+    const rows = await admin.query<{ id: string; via: string }>(
+      `select id, via from app.audit_events where id = any($1)`,
+      [[fromConsole.auditId, fromCli.auditId]],
+    );
+    const byId = Object.fromEntries(rows.rows.map((r) => [r.id, r.via]));
+    expect(byId[fromConsole.auditId!]).toBe("session");
+    expect(byId[fromCli.auditId!]).toBe("cli");
   });
 });

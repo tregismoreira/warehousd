@@ -43,7 +43,10 @@ export type QueryIntent = {
 export type SearchMode = "text" | "semantic" | "hybrid";
 
 export type DocSearchIntent = {
-  collection: string;
+  // Absent means "every collection this caller holds a read grant on". A required collection made
+  // search unusable for the question people actually ask: someone asking Claude "what's our
+  // parental leave policy" has to already know it lives in `policies`.
+  collection?: string | undefined;
   q: string;
   fields?: string[] | undefined;
   // Absent means "text", which is what every caller written before semantic search sends.
@@ -79,8 +82,34 @@ export type BrokerResult =
       documents: Document[];
       fieldsReturned: string[];
       auditId: AuditId;
+      // Present only on a fan-out search: which collections were reached, and which refused.
+      // A single-collection call is byte-identical to what it always was.
+      collections?: SearchedCollection[] | undefined;
     }
   | { ok: false; reason: RefusalReason; auditId: AuditId };
+
+/**
+ * One row of the catalogue, as `list_collections` returns it.
+ *
+ * `access` is about the CALLER and nobody else: "granted" means this caller holds a read grant,
+ * "none" means it does not. Against twenty collections it is the difference between a model
+ * finding its three immediately and burning twenty describe calls to find them.
+ */
+export type CollectionListing = {
+  name: string;
+  description: string;
+  access: "granted" | "none";
+  /** How many of the collection's fields the grant carries. Absent when access is "none". */
+  grantedFields?: number | undefined;
+};
+
+/** One collection's part in a fan-out search. A refusal is reported, never silently dropped. */
+export type SearchedCollection = {
+  collection: string;
+  matched: number;
+  reason: RefusalReason | null;
+  auditId: AuditId;
+};
 
 export type GetDocumentResult =
   | {

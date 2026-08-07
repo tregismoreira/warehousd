@@ -43,7 +43,7 @@ export function makeHistoryVerbs(d: VerbDeps) {
     | { ok: true; entries: ChangeEntry[]; auditId: AuditId }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     const since = opts.since ?? 0;
     const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
 
@@ -117,7 +117,7 @@ export function makeHistoryVerbs(d: VerbDeps) {
     | { ok: true; revisions: RevisionMetadata[]; auditId: AuditId }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     const name = opts.collection;
     const c = findCollection(cfg, name);
     if (!c) return audit.refuse(name, "unknown_collection");

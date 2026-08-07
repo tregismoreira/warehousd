@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { Mono } from "@/components/common/Mono";
 import { requestJson } from "@/lib/client-api";
+import { AccessExplainer } from "@/app/components/AccessExplainer";
 
 export type PendingGrant = {
   id: string;
@@ -280,6 +281,16 @@ export function ApproveSheet({
               ? "This grant will be restricted to the selection above. Everything else is silently absent."
               : "No document restriction — this grant reaches the whole collection."}
           </p>
+
+          {/* §P5. An approver used to pick fields with no preview: no statement of what the
+              requester already inherits, and no way to tell a document filter that scopes access
+              from one that matches nothing. */}
+          <div className="space-y-2 border-t pt-4">
+            <p className="text-xs font-semibold text-muted-foreground">
+              What {grant.user_id} can see today
+            </p>
+            <AccessExplainer collection={grant.collection} subject={grant.user_id} />
+          </div>
         </div>
 
         <SheetFooter>

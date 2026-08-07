@@ -37,6 +37,14 @@ function readSidecar(absPath: string): Record<string, unknown> {
   return {};
 }
 
+// How far through the two passes an index run is. `phase` because they measure different things
+// and a bar that reset from 200/200 to 3 would look like a fault.
+export type IndexProgress = {
+  done: number;
+  total?: number | undefined;
+  phase: "index" | "prune";
+};
+
 // Bindings are resolved by the caller via `loadTaxonomyBindings(db, cfg, collection, env)`,
 // because a dataset-sourced vocabulary's term set lives in env-scoped `app.terms`, not in
 // the YAML. Omitting them indexes the collection as unbound.
@@ -55,6 +63,10 @@ export async function indexCollection(
     // Absent means chunks are stored with a null embedding, and `warehousd embed` can fill them
     // in later. Present means they are embedded in the same pass.
     embedder?: Embedder | undefined;
+    // Same shape as EmbedProgress, so there is one convention rather than five. The total is
+    // known here — the directory walk happens up front — but the deletion sweep afterwards is
+    // counted separately, because a file leaving the source directory is not indexing work.
+    onProgress?: ((p: IndexProgress) => void) | undefined;
   } = {},
 ): Promise<{ indexed: number; skipped: number; deleted: number }> {
   const schema = env === "dev" ? "data_synth" : "data_live";
@@ -80,7 +92,12 @@ export async function indexCollection(
     embedder: opts.embedder,
   };
 
-  for (const rel of walk(sourceDir, opts.extractor?.extensions ?? []).sort()) {
+  // Materialised before the loop rather than iterated lazily, so `total` is a real number from
+  // the first callback instead of climbing as the walk proceeds.
+  const files = walk(sourceDir, opts.extractor?.extensions ?? []).sort();
+  opts.onProgress?.({ done: 0, total: files.length, phase: "index" });
+
+  for (const rel of files) {
     seen.add(rel);
     const abs = join(sourceDir, rel);
     const r = await ingestFile(
@@ -98,14 +115,27 @@ export async function indexCollection(
     );
     if (r.status === "skipped") skipped++;
     else indexed++;
+    opts.onProgress?.({ done: indexed + skipped, total: files.length, phase: "index" });
   }
   // Directory indexing is a mirror: a file that left the source directory leaves the collection.
   // Scoped to `origin = 'index'` above, because an uploaded document was never in that directory
   // and must not be deleted by the first `warehousd index` that runs after it lands.
+  //
+  // The file's per-document ACL is deliberately LEFT BEHIND. An ACL is keyed on `path`, which is a
+  // file's identity within a collection, so a document that leaves the directory and comes back
+  // returns with the restriction it had — the row it lands in is new, but the policy is addressed
+  // to the path and not to the row. Deleting the ACL here would make that round trip a silent
+  // widening: a document restricted to Legal would come back readable by everyone the grant
+  // covers, and nothing in the trail would say so.
+  //
+  // The cost is a row per restricted document that may outlive its file. That is one row, it is
+  // invisible to every read path (the join finds no file to attach it to), and it is removed with
+  // the rest when the collection is dropped — see resolveDestructiveChanges.
   for (const [path, id] of existing)
     if (!seen.has(path)) {
       await db.query(`delete from ${filesT} where id=$1`, [id]);
       deleted++;
+      opts.onProgress?.({ done: deleted, phase: "prune" });
     }
   return { indexed, skipped, deleted };
 }

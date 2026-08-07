@@ -1,4 +1,5 @@
 import type { WarehousdConfig } from "../config/schema";
+import { kindOf } from "../config/kinds";
 import { findCollection } from "../config/load";
 import { dataPool, type Pools, withOrg } from "../db/pools";
 import type { Scope } from "./inventory";
@@ -23,7 +24,7 @@ export async function listDocumentPaths(
 ): Promise<string[]> {
   const c = findCollection(cfg, collection);
   if (!c) throw new Error(`Unknown collection: ${collection}`);
-  if (c.type !== "file") throw new Error(`Collection ${collection} is not a file collection`);
+  if (!kindOf(c).chunked) throw new Error(`Collection ${collection} is not a file collection`);
   const schema = scope.env === "dev" ? "data_synth" : "data_live";
   // `collection` is validated against the loaded config above, so this identifier
   // interpolation is safe — SQL identifiers cannot be parameterized.

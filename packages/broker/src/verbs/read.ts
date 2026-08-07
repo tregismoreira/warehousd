@@ -3,6 +3,7 @@ import type {
   BrokerContext,
   QueryIntent,
   DocSearchIntent,
+  SearchedCollection,
   BrokerResult,
   VisibleSchema,
   Refusal,
@@ -12,13 +13,13 @@ import type {
   Filter,
 } from "../types";
 import { MAX_LIMIT } from "../types";
-import { loadActiveGrant } from "../grants/eval";
-import { validateDocumentFilters } from "../grants/filters";
+import type { CollectionListing } from "../types";
 import { buildSelect, UnsupportedFilter } from "../sql/build";
 import { ident } from "../sql/ident";
 import { dataPool, withOrg, writePool } from "../db/pools";
-import { findCollection, maskedFieldsFor } from "../config/load";
-import type { MaskConfig, CollectionConfig } from "../config/schema";
+import { findCollection } from "../config/load";
+import { kindOf } from "../config/kinds";
+import type { CollectionConfig } from "../config/schema";
 import { pkOf, dataSchema } from "../config/collection";
 import { reassembleChunks } from "../indexing/chunk";
 import { makeAuditWriter } from "../audit/decision";
@@ -28,13 +29,15 @@ import {
   GetDocumentIntentSchema,
   checkIntent,
 } from "../intents/schema";
+import { resolveGranted } from "./guard";
+import { loadActiveGrants } from "../grants/eval";
 import type { VerbDeps } from "./deps";
 
 export function makeReadVerbs(d: VerbDeps) {
   const { app, cfg, pools, isMultiValueField } = d;
 
   async function query(ctx: BrokerContext, raw: QueryIntent): Promise<BrokerResult> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     // 0. intent shape at runtime, before anything reads it
     const parsed = checkIntent(QueryIntentSchema, raw, "query");
     if (!parsed.ok) return audit.refuse(parsed.collection, "invalid_intent");
@@ -42,35 +45,26 @@ export function makeReadVerbs(d: VerbDeps) {
     // 1. intent shape
     if (intent.aggregate && intent.aggregate.length && intent.fields && intent.fields.length)
       return audit.refuse(intent.collection, "invalid_intent", { intent });
-    // 2. collection exists
-    const c = findCollection(cfg, intent.collection);
-    if (!c) return audit.refuse(intent.collection, "unknown_collection", { intent });
-    const all = Object.keys(c.fields);
-    // every referenced field must exist on the collection at all
+    // 2. every referenced field must exist on the collection at all. Answerable without a grant,
+    // and asked before one is loaded so a typo cannot be mistaken for a denial.
+    const c0 = findCollection(cfg, intent.collection);
+    if (!c0) return audit.refuse(intent.collection, "unknown_collection", { intent });
+    const all = Object.keys(c0.fields);
     const referenced = collectReferenced(intent);
     for (const f of referenced)
       if (!all.includes(f)) return audit.refuse(intent.collection, "unknown_field", { intent });
-    // 3. active grant
-    const grant = await loadActiveGrant(app, ctx, intent.collection);
-    if (!grant) return audit.refuse(intent.collection, "no_grant", { intent });
-    // No read verb → no_grant (not a new code; §4 comment on information leak)
-    if (!grant.verbs.includes("read"))
-      return audit.refuse(intent.collection, "no_grant", { intent });
-    // 4. every referenced field ∈ grant.allowedFields
-    for (const f of referenced)
-      if (!grant.allowedFields.includes(f))
-        return audit.refuse(intent.collection, "field_denied", { intent, grant });
-    // document_filter is grant-author-supplied; each predicate's field is validated against
-    // the collection's full YAML field set (NOT allowedFields) so denied fields like `path` can
-    // gate documents. The same check runs on the write path, so a filter this rejects is rejected
-    // everywhere rather than being evaluated by one path and not the other — see grants/filters.ts.
-    if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuse(intent.collection, "invalid_intent", { intent, grant });
-    // 4b. a masked field may be PROJECTED but never computed over — see collectComputed.
+    // 3. grant, read verb, field coverage, document filters, mask plan, ACL options — all of it,
+    // in one place, already audited on any refusal. See verbs/guard.ts.
+    const g = await resolveGranted(d, audit, ctx, intent.collection, "read", {
+      detail: { intent },
+      fields: referenced,
+    });
+    if (!g.ok) return g;
+    const { grant, plan } = g;
+    // 4. a masked field may be PROJECTED but never computed over — see collectComputed.
     // field_denied, not a new code: the caller does hold the field, just not in a form that
     // answers this question, and inventing a reason would say which fields are masked to
     // someone whose grant does not carry them.
-    const plan = maskPlan(cfg, intent.collection, c, grant.unmaskedFields);
     for (const f of collectComputed(intent))
       if (plan.masked.has(f))
         return audit.refuse(intent.collection, "field_denied", { intent, grant });
@@ -89,7 +83,7 @@ export function makeReadVerbs(d: VerbDeps) {
         // aggregate branch is built too — so the predicate lands in the same WHERE every
         // aggregate reads: a count over an ACL'd collection counts what this caller may see, not
         // what exists and then a shortfall that reports the difference.
-        ...aclOpts(c, grant),
+        ...g.aclOpts,
       });
       const documents = await withOrg(
         dataPool(pools, ctx),
@@ -129,13 +123,13 @@ export function makeReadVerbs(d: VerbDeps) {
     ctx: BrokerContext,
     name: string,
   ): Promise<VisibleSchema | Refusal> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
-    const c = findCollection(cfg, name);
-    if (!c) return audit.refuse(name, "unknown_collection");
-    const grant = await loadActiveGrant(app, ctx, name);
-    if (!grant) return audit.refuse(name, "no_grant");
-    if (!grant.verbs.includes("read")) return audit.refuse(name, "no_grant");
-    const plan = maskPlan(cfg, name, c, grant.unmaskedFields);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
+    // No document filters to check here — describe returns a schema, not documents — but running
+    // the same guard is what keeps "which collections can this caller describe" and "which can it
+    // read" one answer rather than two that drift.
+    const g = await resolveGranted(d, audit, ctx, name, "read", { checkFilters: false });
+    if (!g.ok) return g;
+    const { collection: c, grant, plan } = g;
     const fields = Object.entries(c.fields)
       .filter(([n]) => grant.allowedFields.includes(n))
       // type is guaranteed by CollectionSchema refinement for structured collections; file collections have types filled in by transform
@@ -161,13 +155,21 @@ export function makeReadVerbs(d: VerbDeps) {
     return { collection: name, description: c.description, fields };
   }
 
-  // Returns the listing, or a Refusal on the one path that can fail: the audit write. Discovery
-  // is audited like every other decision, and an unrecorded decision hands back nothing — the
-  // same rule the other verbs follow, which is why this is not a bare array.
-  async function listCollections(
-    ctx: BrokerContext,
-  ): Promise<{ name: string; description: string }[] | Refusal> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+  /**
+   * The catalogue, annotated with the caller's OWN access.
+   *
+   * Without `access`, a model facing twenty collections burns twenty `describe_collection` calls
+   * to find its three — and the refusals it gets back are indistinguishable from a
+   * misconfiguration, so it cannot even learn from them. Saying which ones it holds a grant on is
+   * not a disclosure: the caller learns only about grants it already has.
+   *
+   * `grantedFields` is a COUNT, not a list. The count is what a model needs to decide whether a
+   * collection is worth describing; the names are what `describe_collection` is for, and putting
+   * them here would make discovery a cheaper way to enumerate a grant than the verb that audits
+   * it field by field.
+   */
+  async function listCollections(ctx: BrokerContext): Promise<CollectionListing[] | Refusal> {
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     // The client's collection ceiling applies to discovery too. loadActiveGrant enforces it on
     // every other verb, so without this a restricted client could enumerate names and
     // descriptions for collections no grant it holds can ever reach — a catalogue of what it is
@@ -175,27 +177,79 @@ export function makeReadVerbs(d: VerbDeps) {
     // authenticated caller by design: that is what makes `request_access` usable.
     // `null`/absent means no ceiling, matching grants/eval.ts.
     const ceiling = ctx.allowedCollections;
-    const collections = Object.entries(cfg.collections)
-      .filter(([name]) => ceiling == null || ceiling.includes(name))
-      .map(([name, c]) => ({ name, description: c.description }));
+    const visible = Object.entries(cfg.collections).filter(
+      ([name]) => ceiling == null || ceiling.includes(name),
+    );
+    // The plural loader, which exists for exactly this batch shape: one round trip rather than
+    // one per collection on the page a caller opens first.
+    const grants = await loadActiveGrants(
+      app,
+      ctx,
+      visible.map(([name]) => name),
+    );
+    const collections: CollectionListing[] = visible.map(([name, c]) => {
+      const grant = grants.get(name);
+      const readable = grant?.verbs.includes("read") ?? false;
+      return {
+        name,
+        description: c.description,
+        access: readable ? "granted" : "none",
+        ...(readable
+          ? {
+              grantedFields: grant!.allowedFields.filter((f) => Object.hasOwn(c.fields, f)).length,
+            }
+          : {}),
+      };
+    });
     const rec = await audit.allow("*");
     if (!rec.ok) return rec;
     return collections;
   }
 
+  /**
+   * Search one collection, or every collection the caller holds a read grant on.
+   *
+   * The fan-out exists because a required `collection` made search unusable for the question
+   * people actually ask: somebody asking "what's our parental leave policy" has to already know
+   * it lives in `policies`. Absent means "everything I may read".
+   *
+   * Two rules the fan-out must not break:
+   *
+   *   - **Every per-collection decision is audited individually.** Twenty collections is twenty
+   *     decisions, and collapsing them into one audit row would make "who searched what" a
+   *     question the trail cannot answer. Refusals included — a collection that refused is part
+   *     of what happened.
+   *   - **Ranking is reciprocal-rank fusion, never raw scores.** `ts_rank` over different tsv
+   *     columns and cosine distance over different embedding sets are not comparable numbers;
+   *     averaging them produces a confidently wrong ordering. RRF needs only per-collection rank,
+   *     which is the one thing that IS comparable.
+   */
   async function searchDocuments(ctx: BrokerContext, raw: DocSearchIntent): Promise<BrokerResult> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     const parsed = checkIntent(DocSearchIntentSchema, raw, "searchDocuments");
     if (!parsed.ok) return audit.refuse(parsed.collection, "invalid_intent");
     const intent = parsed.intent;
-    const c = findCollection(cfg, intent.collection);
-    if (!c) return audit.refuse(intent.collection, "unknown_collection", { intent });
     if (typeof intent.q !== "string" || !intent.q.trim())
-      return audit.refuse(intent.collection, "invalid_intent", { intent });
+      return audit.refuse(intent.collection ?? "*", "invalid_intent", { intent });
 
-    // Check if searchable: file collections always support search (via tsv column);
-    // dataset collections need at least one searchable: true field
-    const isFile = c.type === "file";
+    if (intent.collection !== undefined) {
+      return searchOne(ctx, { ...intent, collection: intent.collection });
+    }
+    return searchAll(ctx, intent);
+  }
+
+  /** One collection. The path every caller took before the fan-out existed, unchanged. */
+  async function searchOne(
+    ctx: BrokerContext,
+    intent: DocSearchIntent & { collection: string },
+  ): Promise<BrokerResult> {
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
+    const c0 = findCollection(cfg, intent.collection);
+    if (!c0) return audit.refuse(intent.collection, "unknown_collection", { intent });
+
+    // How this KIND matches: one generated tsv column over chunked content, or a per-field set of
+    // `<name>_tsv` columns. Null means the collection cannot be searched at all.
+    const search = kindOf(c0).searchable(c0);
 
     // Vector modes need three things, and each missing one is the caller's to fix rather than
     // something to paper over by quietly running a text search instead: a caller who asked for
@@ -203,31 +257,24 @@ export function makeReadVerbs(d: VerbDeps) {
     // that is not the one they requested.
     const mode = intent.mode ?? "text";
     if (mode !== "text") {
-      // Only a file collection has an embedding column — a dataset document is a row, and there
-      // is nothing chunked to embed.
-      if (!isFile) return audit.refuse(intent.collection, "invalid_intent", { intent });
+      // Only a chunked kind has an embedding column — a dataset document is a row, and there is
+      // nothing chunked to embed.
+      if (!kindOf(c0).chunked) return audit.refuse(intent.collection, "invalid_intent", { intent });
       if (!d.embedder) return audit.refuse(intent.collection, "invalid_intent", { intent });
     }
-    const searchableFields = isFile
-      ? []
-      : Object.entries(c.fields)
-          .filter(([, f]) => f.searchable === true)
-          .map(([n]) => n);
-    if (!isFile && searchableFields.length === 0)
-      return audit.refuse(intent.collection, "invalid_intent", { intent });
+    if (!search) return audit.refuse(intent.collection, "invalid_intent", { intent });
+    const searchableFields = search.fields;
 
-    const all = Object.keys(c.fields);
+    const all = Object.keys(c0.fields);
     for (const f of intent.fields ?? [])
       if (!all.includes(f)) return audit.refuse(intent.collection, "unknown_field", { intent });
-    const grant = await loadActiveGrant(app, ctx, intent.collection);
-    if (!grant) return audit.refuse(intent.collection, "no_grant", { intent });
-    if (!grant.verbs.includes("read"))
-      return audit.refuse(intent.collection, "no_grant", { intent });
-    for (const f of intent.fields ?? [])
-      if (!grant.allowedFields.includes(f))
-        return audit.refuse(intent.collection, "field_denied", { intent, grant });
-    if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuse(intent.collection, "invalid_intent", { intent, grant });
+
+    const g = await resolveGranted(d, audit, ctx, intent.collection, "read", {
+      detail: { intent },
+      fields: intent.fields ?? [],
+    });
+    if (!g.ok) return g;
+    const { grant, plan } = g;
     const selectFields =
       intent.fields && intent.fields.length
         ? intent.fields
@@ -236,7 +283,6 @@ export function makeReadVerbs(d: VerbDeps) {
     // dataset's searchable fields cannot be masked (CollectionSchema refuses the combination,
     // because the generated <f>_tsv indexes the raw column), and a file collection matches on
     // `content`, which cannot be masked either.
-    const plan = maskPlan(cfg, intent.collection, c, grant.unmaskedFields);
     try {
       // The query vector is derived HERE, from the caller's `q`, after their grant has been
       // loaded and checked. There is no path by which a caller supplies one: that would be an
@@ -259,7 +305,7 @@ export function makeReadVerbs(d: VerbDeps) {
           maskFor: plan.maskFor,
           mode,
           ...(qVector ? { qVector } : {}),
-          ...aclOpts(c, grant),
+          ...g.aclOpts,
         },
       );
       const documents = await withOrg(
@@ -285,54 +331,116 @@ export function makeReadVerbs(d: VerbDeps) {
     }
   }
 
-  // The full-document read. It shares query's prologue deliberately — same grant, same read
-  // verb, same field postures, same document filter — and differs only in how the target is
+  /** Every collection the caller may read, merged by reciprocal-rank fusion. */
+  async function searchAll(ctx: BrokerContext, intent: DocSearchIntent): Promise<BrokerResult> {
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
+    // The ceiling first, then the grants. `loadActiveGrants` applies the ceiling itself, so a
+    // collection outside it is simply absent — the same narrowing every other verb gets.
+    const names = Object.keys(cfg.collections);
+    const grants = await loadActiveGrants(app, ctx, names);
+    const reachable = names.filter((n) => grants.get(n)?.verbs.includes("read"));
+
+    // Nothing to fan out to. Audited as one decision, because there was one: the caller holds no
+    // read grant anywhere, which is not the same as twenty refusals.
+    if (reachable.length === 0) {
+      const rec = await audit.refuse("*", "no_grant", { intent });
+      return rec;
+    }
+
+    const perCollection: SearchedCollection[] = [];
+    const ranked: { doc: Document; collection: string; rank: number }[] = [];
+
+    // Sequential, not parallel. Each hop opens its own transaction on the env-scoped pool, and
+    // twenty at once against a pool sized for a request is how a search takes the whole app down.
+    for (const name of reachable) {
+      // A per-collection call, which means a per-collection audit row — including the refusals.
+      // Collapsing twenty decisions into one is exactly what invariant 3 forbids.
+      const one = await searchOne(ctx, {
+        ...intent,
+        collection: name,
+        // The caller named no fields, so each collection projects what its own grant carries.
+        // Naming fields across a fan-out would refuse every collection that lacks one of them.
+        ...(intent.fields ? { fields: intent.fields } : {}),
+      });
+      if (!one.ok) {
+        perCollection.push({
+          collection: name,
+          matched: 0,
+          reason: one.reason,
+          auditId: one.auditId,
+        });
+        continue;
+      }
+      perCollection.push({
+        collection: name,
+        matched: one.documents.length,
+        reason: null,
+        auditId: one.auditId,
+      });
+      one.documents.forEach((doc, i) => {
+        // The document carries which collection it came from, because a merged result set with no
+        // provenance is a list a caller cannot act on — `get_document` needs the collection.
+        ranked.push({ doc: { ...doc, _collection: name }, collection: name, rank: i + 1 });
+      });
+    }
+
+    const limit = intent.limit ?? DEFAULT_SEARCH_LIMIT;
+    const merged = fuseByRank(ranked).slice(0, limit);
+
+    // One more row for the fan-out itself, so the trail records that a single request reached N
+    // collections rather than leaving N unrelated rows to be correlated by timestamp.
+    const rec = await audit.allow("*", { intent, fieldsReturned: [] });
+    if (!rec.ok) return rec;
+    return {
+      ok: true,
+      documents: merged,
+      // A merged set has no single field list — each document carries its own collection's.
+      fieldsReturned: [],
+      collections: perCollection,
+      auditId: rec.auditId,
+    };
+  }
+
+  // The full-document read. It shares query's prologue through the same guard — same grant, same
+  // read verb, same field postures, same document filter — and differs only in how the target is
   // addressed and, for file collections, in reassembling the chunks back into one document.
   async function getDocument(
     ctx: BrokerContext,
     raw: GetDocumentIntent,
   ): Promise<GetDocumentResult> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     const parsed = checkIntent(GetDocumentIntentSchema, raw, "getDocument");
     if (!parsed.ok) return audit.refuse(parsed.collection, "invalid_intent");
     const intent = parsed.intent;
-    const c = findCollection(cfg, intent.collection);
-    if (!c) return audit.refuse(intent.collection, "unknown_collection");
-    const isFile = c.type === "file";
-    const byPath = "path" in intent;
-    // A path addresses a source file; a dataset has none.
-    if (byPath && !isFile) return audit.refuse(intent.collection, "invalid_intent");
+    const c0 = findCollection(cfg, intent.collection);
+    if (!c0) return audit.refuse(intent.collection, "unknown_collection");
+    const chunked = kindOf(c0).chunked;
+    // A path addresses a source file; a dataset has none. Asked before the grant so a caller that
+    // addressed the wrong kind learns that rather than "no grant".
+    if ("path" in intent && kindOf(c0).documentKey(c0, intent) === null)
+      return audit.refuse(intent.collection, "invalid_intent");
 
-    const grant = await loadActiveGrant(app, ctx, intent.collection);
-    if (!grant) return audit.refuse(intent.collection, "no_grant");
-    if (!grant.verbs.includes("read")) return audit.refuse(intent.collection, "no_grant");
+    const g = await resolveGranted(d, audit, ctx, intent.collection, "read");
+    if (!g.ok) return g;
+    const { collection: c, grant, plan } = g;
 
     const all = Object.keys(c.fields);
-    if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuse(intent.collection, "invalid_intent", { grant });
 
     // How the caller names the document. Like documentFilter this is broker-supplied rather
     // than client-supplied, so it may reference a column outside allowedFields — a file's
     // `path` is commonly posture:deny yet is exactly how you address the file.
-    let key: Filter;
-    if (isFile) {
-      key = byPath
-        ? { field: "path", op: "eq", value: (intent as { path: string }).path }
-        : { field: "file_id", op: "eq", value: (intent as { id: string }).id };
-    } else {
-      const pk = pkOf(c);
-      // Without a declared pk there is no document identity to address by id.
-      if (!pk) return audit.refuse(intent.collection, "invalid_intent", { grant });
-      key = { field: pk, op: "eq", value: (intent as { id: string }).id };
-    }
+    //
+    // Null means this kind cannot address the document the intent describes: a dataset with no
+    // declared pk, or a `path` against a kind that has none.
+    const key: Filter | null = kindOf(c).documentKey(c, intent);
+    if (!key) return audit.refuse(intent.collection, "invalid_intent", { grant });
 
     const selectFields = grant.allowedFields.filter((f) => all.includes(f));
-    const plan = maskPlan(cfg, intent.collection, c, grant.unmaskedFields);
 
     try {
       // One file yields many documents, so the file form fetches every chunk in order and
       // rejoins them. A dataset document is a single row.
-      const shaped: QueryIntent = isFile
+      const shaped: QueryIntent = chunked
         ? {
             collection: intent.collection,
             fields: selectFields,
@@ -346,7 +454,7 @@ export function makeReadVerbs(d: VerbDeps) {
         documentFilters: grant.documentFilter,
         isMultiValueField,
         maskFor: plan.maskFor,
-        ...aclOpts(c, grant),
+        ...g.aclOpts,
       });
       const rows = await withOrg(
         dataPool(pools, ctx),
@@ -359,33 +467,12 @@ export function makeReadVerbs(d: VerbDeps) {
       if (rows.length === 0) return audit.refuse(intent.collection, "not_found", { grant });
 
       const document: Document = { ...rows[0] };
-      if (isFile && selectFields.includes("content"))
+      if (chunked && selectFields.includes("content"))
         document.content = reassembleChunks(rows.map((r) => String(r.content ?? "")));
 
-      // _rev only exists on writable collections (dataset type with revisions tracking).
-      // Fetch it separately because it's a system field, not a granted field, and it's needed
-      // for concurrency control (ETag/If-Match). It identifies the document's current state
-      // for the caller, which is not a field-value disclosure — like MutationResult.rev.
-      // Fetch through writePool (read role cannot see base tables, only views which exclude _rev).
-      // Like listRevisions and listProposals, this gracefully degrades if no write pool exists.
-      let rev: string | undefined;
-      if (c.writable && !isFile) {
-        const pool = writePool(pools, ctx);
-        if (pool) {
-          const pk = pkOf(c);
-          if (pk) {
-            const schema = dataSchema(ctx.env);
-            const revQuery = await withOrg(pool, ctx.orgId, async (client: PoolClient) => {
-              const r = await client.query(
-                `select _rev from ${schema}.${ident(intent.collection)} where ${ident(pk)} = $1 and _current`,
-                [(intent as { id: string }).id],
-              );
-              return r.rows[0]?._rev;
-            });
-            rev = revQuery;
-          }
-        }
-      }
+      const rev = chunked
+        ? undefined
+        : await currentRev(pools, ctx, intent.collection, c, (intent as { id: string }).id);
 
       const rec = await audit.allow(intent.collection, {
         fieldsReturned: selectFields,
@@ -405,18 +492,67 @@ export function makeReadVerbs(d: VerbDeps) {
   return { query, describeCollection, listCollections, searchDocuments, getDocument };
 }
 
-// The per-document ACL half of a read, as the option bag buildSelect takes.
+// The document's current revision id, or undefined where there is none to fetch.
 //
-// Spread rather than passed as a nullable key: under `exactOptionalPropertyTypes` an explicit
-// `aclPrincipals: undefined` is not the same as an absent one, and the difference matters — a
-// collection without ACLs has no `_acl` column for the predicate to compare, so the option must
-// be genuinely absent rather than present and empty. One function, three call sites, so the three
-// read verbs cannot answer this differently.
-function aclOpts(
+// `_rev` only exists on writable dataset collections. It is a system field, not a granted one, and
+// it is needed for concurrency control (ETag/If-Match) — which is not a field-value disclosure, in
+// the same way MutationResult.rev is not. It comes through the WRITE pool because the read roles
+// see views, and a view has no `_rev` column. Like listRevisions and listProposals, it degrades
+// gracefully when no write pool is configured.
+//
+// Extracted rather than inlined: as four levels of nesting inside getDocument's try block it read
+// as part of the read, which it is not — it is a second pool, a second transaction and one column.
+async function currentRev(
+  pools: Parameters<typeof writePool>[0],
+  ctx: BrokerContext,
+  collection: string,
   c: CollectionConfig,
-  grant: { principals: string[] },
-): { aclPrincipals?: string[] } {
-  return c.acl ? { aclPrincipals: grant.principals } : {};
+  id: string,
+): Promise<string | undefined> {
+  if (!c.writable) return undefined;
+  const pool = writePool(pools, ctx);
+  if (!pool) return undefined;
+  const pk = pkOf(c);
+  if (!pk) return undefined;
+  const schema = dataSchema(ctx.env);
+  return withOrg(pool, ctx.orgId, async (client: PoolClient) => {
+    const r = await client.query(
+      `select _rev from ${schema}.${ident(collection)} where ${ident(pk)} = $1 and _current`,
+      [id],
+    );
+    return r.rows[0]?._rev;
+  });
+}
+
+// The default number of merged results a fan-out returns. Same as buildSelect's own default: a
+// caller that named no limit on one collection did not mean "twenty times as many" on twenty.
+const DEFAULT_SEARCH_LIMIT = 100;
+
+/**
+ * Reciprocal-rank fusion.
+ *
+ * The scores coming back from different collections are NOT comparable. `ts_rank` is computed
+ * over that collection's own tsv column with its own document frequencies; a cosine distance is
+ * computed over a different embedding set entirely. Averaging or thresholding them produces an
+ * ordering that looks authoritative and is arbitrary.
+ *
+ * RRF throws the scores away and keeps the only comparable thing — where a document came in its
+ * own collection's list — and sums 1/(k + rank). `k = 60` is the constant from the original
+ * Cormack et al. paper and the one every implementation uses; it damps the top of each list so a
+ * collection that returned one strong hit does not crowd out one that returned five good ones.
+ */
+const RRF_K = 60;
+
+export function fuseByRank(
+  entries: { doc: Document; collection: string; rank: number }[],
+): Document[] {
+  const scored = entries.map((e) => ({ doc: e.doc, score: 1 / (RRF_K + e.rank) }));
+  // Stable: equal scores keep the order the collections were searched in, so a repeated query
+  // returns a repeatable list rather than one that depends on the sort implementation.
+  return scored
+    .map((e, i) => ({ ...e, i }))
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((e) => e.doc);
 }
 
 // Every field named anywhere in the intent (fields, filters, orderBy, aggregate, groupBy).
@@ -450,22 +586,4 @@ export function collectComputed(intent: QueryIntent): string[] {
   (intent.aggregate ?? []).forEach((a) => s.add(a.field));
   (intent.groupBy ?? []).forEach((f) => s.add(f));
   return [...s];
-}
-
-// The masking decision for one caller on one collection, computed once per verb.
-//
-// `maskFor` is what buildSelect calls per column; `masked` is the set the computed-use guard
-// checks against. Both come from the same maskedFieldsFor() so the two questions — "is this
-// transformed?" and "may this be filtered on?" — can never be answered inconsistently.
-function maskPlan(
-  cfg: Parameters<typeof maskedFieldsFor>[0],
-  collection: string,
-  c: CollectionConfig,
-  unmasked: readonly string[],
-): { masked: Set<string>; maskFor: (field: string) => MaskConfig | null } {
-  const masked = new Set(maskedFieldsFor(cfg, collection, unmasked));
-  return {
-    masked,
-    maskFor: (field) => (masked.has(field) ? (c.fields[field]?.mask ?? null) : null),
-  };
 }

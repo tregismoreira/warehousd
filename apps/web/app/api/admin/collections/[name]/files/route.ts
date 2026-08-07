@@ -1,5 +1,11 @@
 import { NextRequest } from "next/server";
-import { findCollection, listFiles, readPosture, type FileSummary } from "@warehousd/broker";
+import {
+  findCollection,
+  listFiles,
+  readPosture,
+  type FileSummary,
+  kindOf,
+} from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../../../../../lib/broker";
 import { requireRole } from "../../../../../../lib/authz";
 import { readEnvCookie, orgOf } from "../../../../../../lib/session";
@@ -28,7 +34,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
   const cfg = getConfig();
   const c = findCollection(cfg, name);
   if (!c) return Response.json({ error: "unknown_collection" }, { status: 404 });
-  if (c.type !== "file") return Response.json({ error: "not_a_file_collection" }, { status: 400 });
+  if (!kindOf(c).chunked) return Response.json({ error: "not_a_file_collection" }, { status: 400 });
 
   const env = readEnvCookie(req);
   const orgId = orgOf(guard.user);

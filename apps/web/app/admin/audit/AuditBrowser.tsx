@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -82,6 +82,13 @@ export function AuditBrowser({
       .catch((e) => console.error("Failed to load collections:", e));
   }, []);
 
+  // The query string this component last asked the router for. See updateParam.
+  const currentParams = searchParams.toString();
+  const pendingParams = useRef<string | null>(null);
+  useEffect(() => {
+    pendingParams.current = null;
+  }, [currentParams]);
+
   useEffect(() => {
     setLoading(true);
     const qs = new URLSearchParams();
@@ -111,7 +118,17 @@ export function AuditBrowser({
   }, [via, user, collection, outcome, env, limit, offset]);
 
   function updateParam(key: string, value: string) {
-    const qs = new URLSearchParams(searchParams);
+    // Build on the last query string this component ASKED for, not on the one the router has
+    // finished applying.
+    //
+    // `router.replace` runs in a transition, so neither `useSearchParams()` nor
+    // `window.location.search` has caught up by the time the next event fires. Choosing a
+    // collection and then typing in the user box rebuilt the URL from a snapshot that never had
+    // the collection in it, and silently dropped that filter — two filters cancelling each other
+    // depending on how fast somebody types, on the page whose whole job is answering "who read
+    // what". The effect above clears the ref as soon as the router lands on ANY new value, so a
+    // Back button (which is also a change to `current`) is not built on a stale intent.
+    const qs = new URLSearchParams(pendingParams.current ?? currentParams);
     // An empty value normally means "no filter", which is spelled by dropping the key. `env` is
     // the exception: dropping it would fall back to the console's environment, so choosing "Any"
     // would do nothing. Keep the key, empty.
@@ -121,6 +138,7 @@ export function AuditBrowser({
       qs.delete(key);
     }
     qs.delete("offset");
+    pendingParams.current = qs.toString();
     router.replace(`?${qs}`);
   }
 

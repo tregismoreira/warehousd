@@ -16,6 +16,13 @@ import { DEPLOY_TARGET_IDS, DB_PROVIDER_IDS } from "@warehousd/broker";
 import { resolveDbUrl, tryResolveDbUrl, runApply, runSeed, runIndex, runEmbed } from "./index";
 import { buildPlan, renderPlan, writeMigration, migrationStatus } from "./migrate";
 import { runInit, initDefaults } from "./init";
+import {
+  runImportMap,
+  runImportRun,
+  runImportValidate,
+  formatMapResult,
+  formatValidateResult,
+} from "./import";
 import { runStart } from "./start";
 import { runStop } from "./stop";
 import { runStatus } from "./status";
@@ -118,6 +125,10 @@ program
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--force", "overwrite an existing warehousd.yml")
   .option("--no-input", "never prompt; write the default template")
+  .option(
+    "--from <dir>",
+    "infer a collection per spreadsheet in this directory instead of the example",
+  )
   .option("--target <id>", `scaffold a deploy block for: ${DEPLOY_TARGET_IDS.join(", ")}`)
   .option("--db-provider <id>", `who hosts deploy.database.url: ${DB_PROVIDER_IDS.join(", ")}`)
   .action(async (o) => {
@@ -141,6 +152,7 @@ program
     const r = await runInit(o.dir, {
       force: o.force,
       ...(answers ? { answers } : {}),
+      ...(o.from ? { from: o.from } : {}),
     });
     if (json) {
       emit(r, "");
@@ -148,6 +160,16 @@ program
     }
     for (const f of r.created) reporter.step("created", f).done();
     for (const f of r.skipped) reporter.step("skipped", `${f} (already exists)`).done();
+    for (const u of r.unreadable ?? []) reporter.warn(`${u.file}: ${u.reason}`);
+    if (r.inferred?.length) {
+      const closed = r.inferred.flatMap((c) => c.fields.filter((f) => f.closedBecause));
+      reporter.note(
+        `inferred ${r.inferred.length} collection(s); ${closed.length} field(s) closed by default`,
+      );
+      // Deny-by-default is a guess about a column NAME, never a reading of the data, and saying so
+      // is the difference between a safe scaffold and a scaffold someone trusts.
+      reporter.note("Every posture in warehousd.yml is a guess — read it before `warehousd apply`");
+    }
     reporter.note("Next: warehousd start");
   });
 program
@@ -182,9 +204,9 @@ program
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .action(async (o) => {
-    ui();
+    const { reporter } = ui();
     const db = resolveDbUrl(o.dir, o.db);
-    const r = await runApply(o.dir, db);
+    const r = await runApply(o.dir, db, { reporter });
     // A rebuilt synth table is empty until the generator runs again. Saying so is the difference
     // between "apply worked" and an operator wondering where their dev data went.
     const notes = [
@@ -256,9 +278,9 @@ program
   .option("-s, --seed <n>", "seed", "42")
   .option("--no-reindex", "leave file collections as they are")
   .action(async (o) => {
-    ui();
+    const { reporter } = ui();
     const db = resolveDbUrl(o.dir, o.db);
-    const r = await runSeed(o.dir, db, Number(o.seed), { reindex: o.reindex });
+    const r = await runSeed(o.dir, db, Number(o.seed), { reindex: o.reindex, reporter });
     emit(
       { seeded: true, seed: r.seed, reindexed: r.reindexed },
       r.reindexed.length ? `seeded, re-indexed ${r.reindexed.join(", ")}` : "seeded",
@@ -273,12 +295,13 @@ program
   .option("--source <dir>", "override source directory")
   .option("--no-embed", "skip embedding the new chunks (see `warehousd embed`)")
   .action(async (collection, o) => {
-    ui();
+    const { reporter } = ui();
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runIndex(o.dir, db, collection, {
       env: o.env,
       source: o.source,
       embed: o.embed,
+      reporter,
     });
     emit(r, `indexed=${r.indexed} skipped=${r.skipped} deleted=${r.deleted}`);
   });
@@ -289,11 +312,113 @@ program
   .option("--db <url>", "database url")
   .option("--env <env>", "dev|live", "dev")
   .action(async (collection, o) => {
-    ui();
+    const { reporter } = ui();
     const db = resolveDbUrl(o.dir, o.db);
-    const r = await runEmbed(o.dir, db, { collection, env: o.env });
+    const r = await runEmbed(o.dir, db, { collection, env: o.env, reporter });
     emit(r, `embedded=${r.embedded} collections=${r.collections.join(",")}`);
   });
+// `import` mirrors `migrate plan|generate|status`: a noun with verbs under it, one project dir
+// option each. Import used to be reachable only from /admin/import, so it could not be scripted,
+// rerun, or put in CI.
+const importCmd = program
+  .command("import")
+  .description("map a spreadsheet onto a collection, validate it, and load it");
+// The .xlsx reader makes three choices a spreadsheet library would make silently, and each one is
+// a way data gets quietly corrupted. They are documented here rather than only in the source
+// because the person who needs to know is the person holding the file.
+importCmd.addHelpText(
+  "after",
+  `
+Reading an .xlsx:
+  formula cells    import their CACHED VALUE — the number Excel last calculated and saved.
+                   A workbook saved without cached values imports those cells as empty.
+  dates            are converted from Excel's serial numbers, not from the displayed text.
+  merged cells     carry their value in the top-left cell only; the rest of the range is empty.
+  text columns     keep leading zeros — "007" imports as "007", never as 7.
+  multiple sheets  must be chosen with --sheet; nothing is guessed.
+`,
+);
+importCmd
+  .command("map <file>")
+  .description("propose a collections block, or a column mapping, from a spreadsheet")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("-c, --collection <name>", "collection name (default: the file's name)")
+  .option("--sheet <name>", "which sheet of an .xlsx to read")
+  .option("--header-row <n>", "1-based row the headers are on", "1")
+  .action((file, o) => {
+    ui();
+    const r = runImportMap(o.dir, file, {
+      collection: o.collection,
+      sheet: o.sheet,
+      headerRow: Number(o.headerRow),
+    });
+    // stdout, and stdout only: this output exists to be piped into an editor or a clipboard.
+    // Nothing is written — see runImportMap.
+    emit(r, formatMapResult(r));
+  });
+importCmd
+  .command("validate <collection> <file>")
+  .description("check a file against a collection — offline, or --live against the database")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url (implies --live)")
+  .option("--live", "also run a dry run against the database", false)
+  .option("-m, --mode <mode>", "append|upsert|delete", "append")
+  .option("--sheet <name>", "which sheet of an .xlsx to read")
+  .option("--header-row <n>", "1-based row the headers are on", "1")
+  .action(async (collection, file, o) => {
+    const { reporter } = ui();
+    // The static layer needs no database at all, which is the point of it: it runs in CI, on a
+    // laptop, against a file somebody just emailed.
+    const live = o.live || o.db ? resolveDbUrl(o.dir, o.db) : undefined;
+    const r = await runImportValidate(o.dir, file, collection, {
+      live,
+      mode: o.mode,
+      sheet: o.sheet,
+      headerRow: Number(o.headerRow),
+      reporter,
+    });
+    emit(r, formatValidateResult(r));
+    process.exit(r.ok ? 0 : 1);
+  });
+importCmd
+  .command("run <collection> <file>")
+  .description("load a file into a collection")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .option("-m, --mode <mode>", "append|upsert|delete", "append")
+  .option("--dry-run", "run every statement and roll back", false)
+  .option("--sheet <name>", "which sheet of an .xlsx to read")
+  .option("--header-row <n>", "1-based row the headers are on", "1")
+  .action(async (collection, file, o) => {
+    const { reporter } = ui();
+    const db = resolveDbUrl(o.dir, o.db);
+    const r = await runImportRun(o.dir, db, collection, file, {
+      mode: o.mode,
+      dryRun: o.dryRun,
+      sheet: o.sheet,
+      headerRow: Number(o.headerRow),
+      reporter,
+    });
+    if (!r.ok) {
+      emit(
+        r,
+        formatValidateResult({
+          ok: false,
+          layer: "live",
+          rows: 0,
+          collection,
+          summary: r.summary,
+          blindSpot: null,
+        }),
+      );
+      process.exit(1);
+    }
+    emit(
+      r,
+      `${r.dryRun ? "would import" : "imported"}: ${r.inserted} added, ${r.updated} revised, ${r.deleted} deleted`,
+    );
+  });
+
 program
   .command("stop")
   .description("stop the containers, keeping data")

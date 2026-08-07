@@ -15,7 +15,21 @@ import {
 import { getClientPolicy } from "@warehousd/broker";
 import { resolveProject, type Project } from "../../src/project";
 
-const WAREHOUSD_IMAGE = process.env.WAREHOUSD_IMAGE ?? "ghcr.io/tregismoreira/warehousd:dev";
+// The tag CI builds before running this suite (.github/workflows/ci.yml). A local run picks it up
+// automatically if it is there, so `docker build -f apps/web/Dockerfile -t warehousd:ci .` once is
+// all a developer needs — and the local run then exercises the same image CI does.
+const LOCAL_TAG = "warehousd:ci";
+// The published image. Reachable only with GHCR credentials, which a contributor does not have:
+// falling back to it is how this suite came to report eleven cryptic failures ("expected '' to
+// contain 'Starting'") for one problem that was `denied` on the first `docker pull`.
+const PUBLISHED_IMAGE = "ghcr.io/tregismoreira/warehousd:dev";
+
+function imagePresentLocally(ref: string): boolean {
+  return spawnSync("docker", ["image", "inspect", ref], { stdio: "pipe" }).status === 0;
+}
+
+const WAREHOUSD_IMAGE =
+  process.env.WAREHOUSD_IMAGE ?? (imagePresentLocally(LOCAL_TAG) ? LOCAL_TAG : PUBLISHED_IMAGE);
 const CLI_DIST = new URL("../../dist/index.cjs", import.meta.url).pathname;
 
 // Ports are probed per run, never hardcoded. A container leaked by an earlier run holds
@@ -81,6 +95,21 @@ describe("CLI Docker Lifecycle E2E", () => {
       throw new Error(
         `CLI dist not found at ${CLI_DIST}. Run: cd mvp && pnpm --filter warehousd build`,
       );
+    }
+
+    // Pre-check: the server image. `warehousd start` pulls it, and a pull that fails surfaces as
+    // eleven unrelated assertion failures rather than as the one thing that went wrong — so the
+    // pull happens here, once, and its failure is the failure.
+    if (!imagePresentLocally(WAREHOUSD_IMAGE)) {
+      const pull = spawnSync("docker", ["pull", WAREHOUSD_IMAGE], { encoding: "utf8" });
+      if (pull.status !== 0)
+        throw new Error(
+          `Could not obtain the server image "${WAREHOUSD_IMAGE}".\n` +
+            `${(pull.stderr ?? "").trim()}\n\n` +
+            `${PUBLISHED_IMAGE} needs GHCR credentials. Build it locally instead — this is what CI does:\n` +
+            `  docker build -f apps/web/Dockerfile -t ${LOCAL_TAG} .\n` +
+            `The suite picks up ${LOCAL_TAG} on its own; WAREHOUSD_IMAGE overrides it.`,
+        );
     }
 
     const serverPort = await freePort();

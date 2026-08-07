@@ -357,3 +357,80 @@ describe("validateImportRows: dataset-sourced vocabularies", () => {
     expect(r.errors[0]).toMatchObject({ column: "client", reason: "unknown_term" });
   });
 });
+
+// §P3 — `import.columns` maps a spreadsheet header onto a field, so a real sheet's
+// `Base Salary (USD)` stops being `unknown_column` without anybody editing the sheet.
+describe("import.columns mapping", () => {
+  const mapped = ConfigSchema.parse({
+    project: "p",
+    collections: {
+      people: {
+        description: "Employee directory",
+        import: { columns: { "Base Salary (USD)": "base_salary", "Start Date": "hire_date" } },
+        fields: {
+          id: { type: "uuid", posture: "allow", pk: true },
+          base_salary: { type: "numeric", posture: "deny", nullable: true },
+          hire_date: { type: "date", posture: "allow", nullable: true },
+        },
+      },
+    },
+  });
+
+  it("translates a header to a field before the field lookup", () => {
+    const r = validateImportRows(mapped, "people", [
+      { id: UUID, "Base Salary (USD)": "97300", "Start Date": "2024-01-15" },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    // The columns handed downstream are FIELD names — run.ts builds SQL from them.
+    expect(r.columns).toEqual(["id", "base_salary", "hire_date"]);
+    expect(r.values[0]![1]).toBe(97300);
+  });
+
+  it("still accepts a header that already matches the field name", () => {
+    const r = validateImportRows(mapped, "people", [{ id: UUID, base_salary: "1" }], {
+      mode: "upsert",
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("still reports an unmapped header as unknown_column, naming the header", () => {
+    const r = validateImportRows(mapped, "people", [{ id: UUID, "Bank Account": "x" }]);
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.errors[0]).toMatchObject({ column: "Bank Account", reason: "unknown_column" });
+  });
+
+  it("reports a per-cell failure against the header, not the field", () => {
+    const r = validateImportRows(mapped, "people", [{ id: UUID, "Start Date": "not-a-date" }], {
+      mode: "upsert",
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.errors[0]).toMatchObject({ column: "Start Date", reason: "invalid_date" });
+  });
+
+  it("refuses a file that supplies both the mapped header and the field's own name", () => {
+    const r = validateImportRows(mapped, "people", [
+      { id: UUID, "Base Salary (USD)": "1", base_salary: "2" },
+    ]);
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.errors.some((e) => e.reason === "duplicate_column")).toBe(true);
+  });
+
+  it("makes a mapping onto a non-existent field a config parse error, not an import one", () => {
+    const r = ConfigSchema.safeParse({
+      project: "p",
+      collections: {
+        people: {
+          description: "d",
+          import: { columns: { "Base Salary (USD)": "salary" } },
+          fields: { id: { type: "uuid", posture: "allow", pk: true } },
+        },
+      },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("import/column-target-exists");
+  });
+});

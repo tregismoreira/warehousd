@@ -1,7 +1,15 @@
-import { existsSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { DB_PROVIDER_IDS, DEPLOY_TARGET_IDS, DEFAULT_DEPLOY_TARGET_ID } from "@warehousd/broker";
+import { existsSync, writeFileSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, extname } from "node:path";
+import {
+  DB_PROVIDER_IDS,
+  DEPLOY_TARGET_IDS,
+  DEFAULT_DEPLOY_TARGET_ID,
+  inferCollection,
+  renderCollectionYaml,
+  type InferredCollection,
+} from "@warehousd/broker";
 import { targets } from "./deploy/targets";
+import { defaultCollectionName, payloadFor, rowsFrom } from "./import";
 import type { InitAnswers } from "./ui/prompt";
 
 /** The port the template ships with, and what the wizard offers. */
@@ -192,47 +200,116 @@ export function applyAnswers(template: string, answers: InitAnswers): string {
   return out.replace(DEPLOY_BLOCK, () => renderDeployBlock(answers));
 }
 
+/** The spreadsheets `init --from` will read. */
+export const SCAFFOLD_EXTENSIONS = [".csv", ".xlsx", ".json"] as const;
+
+/**
+ * Infer one collection per spreadsheet in a directory.
+ *
+ * §P6's whole fix: the shipped template asks somebody with three thousand spreadsheets to
+ * hand-declare every field and posture. This is the same inference `warehousd import map` runs,
+ * called once per file — deliberately the same function, so `init` never grows its own copy and
+ * the two cannot disagree about what a `salary` column is.
+ *
+ * A file that cannot be read is skipped with its reason rather than aborting the scaffold: one
+ * unreadable workbook in a directory of forty should not cost the other thirty-nine.
+ */
+export function scaffoldFrom(dir: string): {
+  collections: InferredCollection[];
+  skipped: { file: string; reason: string }[];
+} {
+  const collections: InferredCollection[] = [];
+  const skipped: { file: string; reason: string }[] = [];
+  const names = new Set<string>();
+
+  const entries = existsSync(dir) ? readdirSync(dir).sort() : [];
+  for (const entry of entries) {
+    const abs = join(dir, entry);
+    if (!statSync(abs).isFile()) continue;
+    if (!(SCAFFOLD_EXTENSIONS as readonly string[]).includes(extname(entry).toLowerCase()))
+      continue;
+    try {
+      const rows = rowsFrom(payloadFor(abs));
+      if (rows.length === 0) {
+        skipped.push({ file: entry, reason: "no data rows" });
+        continue;
+      }
+      let name = defaultCollectionName(entry);
+      let n = 2;
+      while (names.has(name)) name = `${defaultCollectionName(entry)}_${n++}`;
+      names.add(name);
+      collections.push(inferCollection(name, rows));
+    } catch (e) {
+      skipped.push({ file: entry, reason: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { collections, skipped };
+}
+
+/**
+ * The scaffolded template: the header the plain template ships with, then one inferred block per
+ * spreadsheet in place of the `announcements` example.
+ */
+export function applyScaffold(template: string, collections: InferredCollection[]): string {
+  if (collections.length === 0) return template;
+  const header = template.slice(0, template.indexOf("collections:"));
+  const trailer = template.slice(template.indexOf("# ── More examples"));
+  const blocks = collections.map((c) => renderCollectionYaml(c).replace(/^collections:\n/, ""));
+  return [
+    header.trimEnd(),
+    "",
+    "# Inferred from your spreadsheets. Every posture below is a GUESS about a column name, not a",
+    "# reading of the data — read each one before you apply this.",
+    "collections:",
+    blocks.join("\n"),
+    "",
+    trailer,
+  ].join("\n");
+}
+
 // eslint-disable-next-line @typescript-eslint/require-await -- keeps the runX signatures uniform
 export async function runInit(
   dir: string,
-  opts?: { force?: boolean; answers?: InitAnswers },
-): Promise<{ created: string[]; skipped: string[] }> {
+  opts?: { force?: boolean; answers?: InitAnswers; from?: string },
+): Promise<{
+  created: string[];
+  skipped: string[];
+  inferred?: InferredCollection[];
+  unreadable?: { file: string; reason: string }[];
+}> {
   const created: string[] = [];
   const skipped: string[] = [];
+
+  const scaffold = opts?.from ? scaffoldFrom(opts.from) : null;
 
   // Create warehousd.yml
   const ymlPath = join(dir, "warehousd.yml");
   if (!existsSync(ymlPath) || opts?.force) {
-    const content = opts?.answers
+    const base = opts?.answers
       ? applyAnswers(WAREHOUSD_TEMPLATE, opts.answers)
       : WAREHOUSD_TEMPLATE;
+    const content = scaffold ? applyScaffold(base, scaffold.collections) : base;
     writeFileSync(ymlPath, content);
     created.push("warehousd.yml");
   } else {
     skipped.push("warehousd.yml");
   }
 
-  // Ensure .gitignore exists and append entries
+  // Ensure .gitignore exists and carries both entries. `warehousd.local.yml` holds the overrides
+  // for this machine; `.warehousd/` holds generated state and credentials.
   const gitignorePath = join(dir, ".gitignore");
   let gitignoreContent = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
-
-  // Append warehousd.local.yml if not present
-  if (!gitignoreContent.includes("warehousd.local.yml")) {
-    if (gitignoreContent && !gitignoreContent.endsWith("\n")) {
-      gitignoreContent += "\n";
-    }
-    gitignoreContent += "warehousd.local.yml\n";
-  }
-
-  // Append .warehousd/ if not present
-  if (!gitignoreContent.includes(".warehousd/")) {
-    if (gitignoreContent && !gitignoreContent.endsWith("\n")) {
-      gitignoreContent += "\n";
-    }
-    gitignoreContent += ".warehousd/\n";
+  for (const entry of ["warehousd.local.yml", ".warehousd/"]) {
+    if (gitignoreContent.includes(entry)) continue;
+    if (gitignoreContent && !gitignoreContent.endsWith("\n")) gitignoreContent += "\n";
+    gitignoreContent += `${entry}\n`;
   }
 
   writeFileSync(gitignorePath, gitignoreContent);
 
-  return { created, skipped };
+  return {
+    created,
+    skipped,
+    ...(scaffold ? { inferred: scaffold.collections, unreadable: scaffold.skipped } : {}),
+  };
 }

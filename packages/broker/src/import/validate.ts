@@ -1,12 +1,127 @@
 import type { WarehousdConfig, FieldConfig } from "../config/schema";
+import { kindOf } from "../config/kinds";
 import { findCollection } from "../config/load";
 import type { TaxonomyBinding } from "../taxonomy";
 
-export type ImportError = { row: number; column: string | null; reason: string };
+/**
+ * What went wrong, where — and never what the value was. An import file may hold real personal
+ * data, and an error body is still a response body (invariant 4's discipline).
+ *
+ * `scope` says what `row` means, because it has never meant one thing:
+ *
+ *   - `file`   — the whole payload is wrong (`row: -1`). Unknown collection, too many rows.
+ *   - `column` — a column is wrong for every row, so `row` is 0 and carries no information.
+ *                Unknown header, a derived column, a missing required column.
+ *   - `row`    — one cell in one row. `row` is a 0-based index into the payload.
+ *
+ * Aggregation has to tell those apart — "97 rows" and "1 column" are different sentences — and
+ * inferring it from the reason code was guesswork, because `missing_required` is emitted by both
+ * the column pass and the cell pass.
+ */
+export type ImportErrorScope = "file" | "column" | "row";
+export type ImportError = {
+  row: number;
+  column: string | null;
+  reason: string;
+  scope: ImportErrorScope;
+};
+
+/**
+ * One (column, reason) pair and how much of the file it accounts for.
+ *
+ * `MAX_ERRORS` truncates `errors` at 50, which against a 10,000-row sheet tells you almost
+ * nothing: fifty row numbers is not a diagnosis. The counts here are complete — they are tallied
+ * as the file is validated rather than recovered from the truncated list — so a report can say
+ * "97 rows" without the cap being raised and without 10,000 error objects being built.
+ */
+export type ImportErrorGroup = {
+  column: string | null;
+  reason: string;
+  scope: ImportErrorScope;
+  /** Rows affected, for `scope: "row"`. 1 for a column- or file-scoped problem. */
+  count: number;
+  /** 0-based index of the first affected row, or null where the scope is not a row. */
+  firstRow: number | null;
+};
+
+export type ImportErrorSummary = {
+  /** Most-affected first, so the biggest problem is the first line of the report. */
+  groups: ImportErrorGroup[];
+  /** Distinct columns named by at least one group. */
+  columnsAffected: number;
+  /** Distinct rows with at least one problem. */
+  rowsAffected: number;
+  /** Rows in the payload, where the failure got far enough for that to be known. */
+  rowsTotal: number | null;
+  /** Headers in the payload, once they have been read. Null on a whole-file refusal. */
+  columnsTotal: number | null;
+};
+
+/**
+ * The aggregation both surfaces render from — the CLI's report layer and `/admin/import`'s error
+ * panel. It is here, next to `ImportError`, for the reason grants/manage.ts already gives about
+ * validation: "a rule enforced in only one of them is not a rule". An admin who fixes a sheet from
+ * the web panel and a dev who fixes it from CI should be reading the same summary.
+ *
+ * Use it when all you hold is the array — `ImportResult.errors` over HTTP, say. When the
+ * validation result itself is in hand, prefer its `summary`: this one can only count the errors
+ * that survived truncation.
+ */
+export function summarizeImportErrors(
+  errors: readonly ImportError[],
+  rowsTotal: number | null = null,
+  columnsTotal: number | null = null,
+): ImportErrorSummary {
+  const groups = new Map<string, ImportErrorGroup>();
+  const rows = new Set<number>();
+  for (const e of errors) {
+    // A JSON tuple, not a delimiter-joined string: a header may contain whatever a
+    // spreadsheet let somebody type, and two different (column, reason) pairs collapsing
+    // into one group would silently under-report a column.
+    const key = JSON.stringify([e.scope, e.column, e.reason]);
+    const g = groups.get(key);
+    if (g) {
+      g.count += 1;
+      if (e.scope === "row" && (g.firstRow === null || e.row < g.firstRow)) g.firstRow = e.row;
+    } else {
+      groups.set(key, {
+        column: e.column,
+        reason: e.reason,
+        scope: e.scope,
+        count: 1,
+        firstRow: e.scope === "row" ? e.row : null,
+      });
+    }
+    if (e.scope === "row") rows.add(e.row);
+  }
+  return finishSummary([...groups.values()], rows.size, rowsTotal, columnsTotal);
+}
+
+// Sort and count, shared by the truncated-array path above and the complete tally below so the two
+// can never order or total differently.
+function finishSummary(
+  groups: ImportErrorGroup[],
+  rowsAffected: number,
+  rowsTotal: number | null,
+  columnsTotal: number | null,
+): ImportErrorSummary {
+  groups.sort((a, b) => b.count - a.count || (a.column ?? "").localeCompare(b.column ?? ""));
+  const columns = new Set(groups.map((g) => g.column).filter((c): c is string => c !== null));
+  return { groups, columnsAffected: columns.size, rowsAffected, rowsTotal, columnsTotal };
+}
+
+// A refusal about the whole payload rather than about a column or a row: the collection does not
+// exist, it is the wrong kind, the file is empty or too big. `row: -1` is the long-standing
+// convention for "this is not about a row"; `scope` is what makes that legible.
+function fileError(reason: string): ImportValidation {
+  const errors: ImportError[] = [{ row: -1, column: null, reason, scope: "file" }];
+  return { ok: false, errors, summary: summarizeImportErrors(errors) };
+}
 
 export type ImportPlan = { columns: string[]; values: unknown[][] };
 export type ImportValidation =
-  { ok: true; columns: string[]; values: unknown[][] } | { ok: false; errors: ImportError[] };
+  | { ok: true; columns: string[]; values: unknown[][] }
+  | { ok: false; errors: ImportError[]; summary: ImportErrorSummary };
 
 const MAX_ERRORS = 50;
 const DEFAULT_MAX_ROWS = 10_000;
@@ -99,21 +214,52 @@ export function validateImportRows(
   } = {},
 ): ImportValidation {
   const c = findCollection(cfg, collection);
-  if (!c) return { ok: false, errors: [{ row: -1, column: null, reason: "unknown_collection" }] };
-  // Files are ingested by the indexer, which owns chunking, checksums and deletion sync.
-  if (c.type === "file")
-    return { ok: false, errors: [{ row: -1, column: null, reason: "file_collection" }] };
+  if (!c) return fileError("unknown_collection");
+  // A chunked kind is ingested by the indexer, which owns chunking, checksums and deletion sync —
+  // and one chunked blob carries one posture, so a salary column inside it could not be masked.
+  // Per-column postures, filters and aggregates all need the dataset shape.
+  if (kindOf(c).chunked) return fileError("file_collection");
 
   const maxRows = opts.maxRows ?? DEFAULT_MAX_ROWS;
-  if (rows.length > maxRows)
-    return { ok: false, errors: [{ row: -1, column: null, reason: "too_many_rows" }] };
-  if (rows.length === 0)
-    return { ok: false, errors: [{ row: -1, column: null, reason: "no_rows" }] };
+  if (rows.length > maxRows) return fileError("too_many_rows");
+  if (rows.length === 0) return fileError("no_rows");
 
   const errors: ImportError[] = [];
+  // Two collections, on purpose. `errors` is the detail view and stays capped at MAX_ERRORS —
+  // fifty error objects is all anyone reads, and building 10,000 of them costs memory for nothing.
+  // `tally` is one entry per (scope, column, reason) and is never capped, so a report can say
+  // "97 rows" without the cap being raised. See ImportErrorGroup.
+  const tally = new Map<string, ImportErrorGroup>();
+  const affectedRows = new Set<number>();
   const push = (e: ImportError) => {
     if (errors.length < MAX_ERRORS) errors.push(e);
+    // A JSON tuple, not a delimiter-joined string: a header may contain whatever a
+    // spreadsheet let somebody type, and two different (column, reason) pairs collapsing
+    // into one group would silently under-report a column.
+    const key = JSON.stringify([e.scope, e.column, e.reason]);
+    const g = tally.get(key);
+    if (g) {
+      g.count += 1;
+      if (e.scope === "row" && (g.firstRow === null || e.row < g.firstRow)) g.firstRow = e.row;
+    } else {
+      tally.set(key, {
+        column: e.column,
+        reason: e.reason,
+        scope: e.scope,
+        count: 1,
+        firstRow: e.scope === "row" ? e.row : null,
+      });
+    }
+    if (e.scope === "row") affectedRows.add(e.row);
   };
+  // `headerCount` is filled in once the header row has been read; before that a refusal genuinely
+  // does not know how many columns the file has.
+  let headerCount: number | null = null;
+  const refuse = (): ImportValidation => ({
+    ok: false,
+    errors,
+    summary: finishSummary([...tally.values()], affectedRows.size, rows.length, headerCount),
+  });
 
   // Storable columns: everything on the collection EXCEPT view_join fields, which are
   // resolved from a sibling table at view time and have no column on the base table.
@@ -148,17 +294,40 @@ export function validateImportRows(
   }
 
   const first = rows[0]!;
-  const columns = Object.keys(first);
-  for (const col of columns) {
-    const f = c.fields[col];
+  // The payload's headers, and the field each one resolves to.
+  //
+  // `import.columns` is applied HERE, before the `c.fields[col]` lookup, which is the whole point
+  // of it: `Base Salary (USD)` reaches `base_salary` instead of reporting `unknown_column`. A
+  // header with no mapping still resolves to itself, so a file whose headers already match the
+  // field names needs no config at all. Errors keep naming the HEADER, because that is what the
+  // person holding the spreadsheet can find.
+  const mapping = c.import?.columns ?? {};
+  const headers = Object.keys(first);
+  headerCount = headers.length;
+  const resolved = headers.map((header) => ({ header, field: mapping[header] ?? header }));
+  const seenField = new Map<string, string>();
+  for (const { header, field } of resolved) {
+    const f = c.fields[field];
     if (!f) {
-      push({ row: 0, column: col, reason: "unknown_column" });
+      push({ row: 0, column: header, reason: "unknown_column", scope: "column" });
       continue;
     }
-    if (f.view_join) push({ row: 0, column: col, reason: "derived_column" });
-    if (datasetSourcedFields.has(col)) push({ row: 0, column: col, reason: "unvalidatable_term" });
+    // Two headers landing on one field. Config catches a mapping that does it twice
+    // (import/column-target-unique); this catches the file that supplies both the mapped header
+    // and the field's own name, which no config rule can see.
+    const clash = seenField.get(field);
+    if (clash !== undefined && clash !== header)
+      push({ row: 0, column: header, reason: "duplicate_column", scope: "column" });
+    else seenField.set(field, header);
+    if (f.view_join) push({ row: 0, column: header, reason: "derived_column", scope: "column" });
+    if (datasetSourcedFields.has(field))
+      push({ row: 0, column: header, reason: "unvalidatable_term", scope: "column" });
   }
-  if (errors.length) return { ok: false, errors };
+  if (errors.length) return refuse();
+
+  // Downstream — run.ts, insertRevision, the change feed — every one of these is a real column
+  // name, so the payload's headers stop existing at this line.
+  const columns = resolved.map((r) => r.field);
 
   const mode = opts.mode ?? "append";
   if (mode === "append") {
@@ -166,30 +335,37 @@ export function validateImportRows(
     for (const [name, f] of storable) {
       if (columns.includes(name)) continue;
       if (f.nullable) continue;
-      push({ row: 0, column: name, reason: "missing_required" });
+      push({ row: 0, column: name, reason: "missing_required", scope: "column" });
     }
   } else {
     // Addressing existing documents: the pk is what does the addressing, so it is the one
     // column that must be there. A collection with no pk cannot be upserted or deleted into at
     // all, which run.ts refuses before it gets here — this is the belt to that's braces.
-    if (!pk) push({ row: 0, column: null, reason: "no_primary_key" });
-    else if (!columns.includes(pk)) push({ row: 0, column: pk, reason: "missing_required" });
+    if (!pk) push({ row: 0, column: null, reason: "no_primary_key", scope: "column" });
+    else if (!columns.includes(pk))
+      push({ row: 0, column: pk, reason: "missing_required", scope: "column" });
   }
-  if (errors.length) return { ok: false, errors };
+  if (errors.length) return refuse();
 
   const seenPk = new Set<string>();
   const values: unknown[][] = [];
+  // Errors name the HEADER throughout the per-cell pass, so a report points at a column the
+  // person holding the spreadsheet can actually find. Without a mapping the two are the same
+  // string, which is why nothing changed for a file whose headers already match the fields.
+  const pkHeader = pk === null ? null : (resolved.find((r) => r.field === pk)?.header ?? pk);
 
   rows.forEach((r, idx) => {
     const keys = Object.keys(r);
-    if (keys.length !== columns.length || !columns.every((k) => k in r)) {
-      push({ row: idx, column: null, reason: "ragged_rows" });
+    // Compared against the HEADERS: the row still carries the names the file used, and the
+    // mapping is a lens over them rather than a rewrite of the payload.
+    if (keys.length !== headers.length || !headers.every((k) => k in r)) {
+      push({ row: idx, column: null, reason: "ragged_rows", scope: "row" });
       return;
     }
     const out: unknown[] = [];
-    for (const col of columns) {
+    for (const { header, field: col } of resolved) {
       const f = storable.get(col)!;
-      const raw = r[col];
+      const raw = r[header];
       const empty =
         raw === null || raw === undefined || (typeof raw === "string" && raw.trim() === "");
       if (empty) {
@@ -198,7 +374,7 @@ export function validateImportRows(
         // holding its file to the full shape would refuse files that are perfectly valid.
         const enforced = mode === "delete" ? col === pk : !f.nullable;
         if (enforced) {
-          push({ row: idx, column: col, reason: "missing_required" });
+          push({ row: idx, column: header, reason: "missing_required", scope: "row" });
           out.push(null);
           continue;
         }
@@ -221,7 +397,7 @@ export function validateImportRows(
             .map((s) => s.trim())
             .filter((s) => s.length > 0);
           if (!parts.length || parts.some((t) => !vocabTerms.has(t))) {
-            push({ row: idx, column: col, reason: "unknown_term" });
+            push({ row: idx, column: header, reason: "unknown_term", scope: "row" });
             out.push(null);
             continue;
           }
@@ -229,7 +405,7 @@ export function validateImportRows(
           continue;
         }
         if (!vocabTerms.has(cell)) {
-          push({ row: idx, column: col, reason: "unknown_term" });
+          push({ row: idx, column: header, reason: "unknown_term", scope: "row" });
           out.push(null);
           continue;
         }
@@ -238,7 +414,7 @@ export function validateImportRows(
       }
       const co = coerce(raw, f);
       if (!co.ok) {
-        push({ row: idx, column: col, reason: co.reason });
+        push({ row: idx, column: header, reason: co.reason, scope: "row" });
         out.push(null);
         continue;
       }
@@ -250,13 +426,14 @@ export function validateImportRows(
         // Same reasoning as `cell` above: a pk is a scalar, but only `unknown` to the compiler.
         // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const key = String(pkValue);
-        if (seenPk.has(key)) push({ row: idx, column: pk, reason: "duplicate_pk" });
+        if (seenPk.has(key))
+          push({ row: idx, column: pkHeader, reason: "duplicate_pk", scope: "row" });
         seenPk.add(key);
       }
     }
     values.push(out);
   });
 
-  if (errors.length) return { ok: false, errors };
+  if (errors.length) return refuse();
   return { ok: true, columns, values };
 }

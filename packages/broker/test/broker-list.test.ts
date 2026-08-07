@@ -1,4 +1,4 @@
-import { it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
@@ -7,6 +7,7 @@ import { makeBroker } from "../src/broker";
 import type { WarehousdConfig } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
 import { ConfigSchema } from "../src/config/schema";
+import { requestGrant, approveGrant } from "../src/grants/manage";
 
 const cfg: WarehousdConfig = ConfigSchema.parse({
   project: "t",
@@ -33,12 +34,16 @@ afterAll(async () => {
   await p.end();
 });
 
-it("lists names + descriptions only, even with zero grants", async () => {
+// §P2. The listing now carries the caller's OWN access, which is what stops a model burning one
+// describe call per collection to find the three it can read. It is not a disclosure: a caller
+// learns only about grants it already holds — with none, every row says "none" and the payload is
+// otherwise what it always was.
+it("lists names + descriptions, and says the caller holds nothing", async () => {
   const broker = makeBroker(pools, cfg);
   const r = await broker.listCollections(makeCtx({ userId: "nobody" }));
   expect(r).toEqual([
-    { name: "people", description: "Employee directory" },
-    { name: "salaries", description: "Comp" },
+    { name: "people", description: "Employee directory", access: "none" },
+    { name: "salaries", description: "Comp", access: "none" },
   ]);
 });
 
@@ -57,4 +62,46 @@ it("writes an audit row with collection='*' and outcome='allowed'", async () => 
     outcome: "allowed",
     reason: null,
   });
+});
+
+// The other half of the annotation: a caller that DOES hold a grant sees so, and sees how much of
+// the collection it carries. Without the count, "granted" is the same word for a grant carrying
+// one field and one carrying twenty.
+it("annotates the collections the caller holds, with the granted field count", async () => {
+  const broker = makeBroker(pools, cfg);
+  const id = await requestGrant(admin, {
+    userId: "held",
+    collection: "people",
+    env: "dev",
+    orgId: "default",
+    purposeLabel: "t",
+    allowedFields: ["id"],
+  });
+  const approved = await approveGrant(admin, cfg, id, "boss", { allowedFields: ["id"] });
+  expect(approved.ok).toBe(true);
+
+  const r = await broker.listCollections(makeCtx({ userId: "held" }));
+  expect(r).toEqual([
+    { name: "people", description: "Employee directory", access: "granted", grantedFields: 1 },
+    { name: "salaries", description: "Comp", access: "none" },
+  ]);
+});
+
+// One round trip for the whole page, not one per collection. `loadActiveGrants` exists for exactly
+// this shape, and the listing is the first thing a caller opens.
+it("resolves every collection's access in a single grant lookup", async () => {
+  const broker = makeBroker(pools, cfg);
+  const spy = vi.spyOn(pools.app, "query");
+  try {
+    await broker.listCollections(makeCtx({ userId: "held" }));
+    const grantLookups = spy.mock.calls.filter(([q]) =>
+      (typeof q === "string" ? q : ((q as { text?: string }).text ?? "")).includes(
+        "from app.grants",
+      ),
+    );
+    // Two collections in this config; the count must not track that number.
+    expect(grantLookups).toHaveLength(1);
+  } finally {
+    spy.mockRestore();
+  }
 });

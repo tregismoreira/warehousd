@@ -3,6 +3,7 @@ import type { Pools } from "../db/pools";
 import type { WarehousdConfig } from "../config/schema";
 import type { Embedder } from "../providers";
 import { auditEnabled } from "../config/load";
+import { auditDestination, type AuditDestination } from "../audit/decision";
 
 // What every verb family needs, handed over explicitly rather than closed over.
 //
@@ -28,6 +29,9 @@ export type VerbDeps = {
   // Resolved once here rather than read from `cfg` at each verb's audit writer, so that "is this
   // deployment audited" has one answer for the life of the broker rather than one per verb.
   auditEnabled: boolean;
+  // WHERE an audited decision goes — the same reasoning, one step further. `makeAuditWriter` takes
+  // it as its fourth argument; see audit/sinks/.
+  auditTo: AuditDestination;
 };
 
 export function makeVerbDeps(
@@ -44,5 +48,9 @@ export function makeVerbDeps(
     // cast it never get zod's default, so the key is genuinely absent for most of the test suite.
     isMultiValueField: (field: string) => cfg.taxonomies?.[field]?.multiple ?? false,
     auditEnabled: auditEnabled(cfg),
+    // Read through the one helper rather than assembled here: the import path and the console's
+    // regen need the same answer, and a second copy is how one of them keeps writing to Postgres
+    // after the deployment has been pointed elsewhere. See audit/decision.ts.
+    auditTo: auditDestination(cfg),
   };
 }

@@ -1,4 +1,5 @@
 import type { WarehousdConfig } from "../config/schema";
+import { kindOf } from "../config/kinds";
 import { findCollection } from "../config/load";
 import { dataSchema } from "../config/collection";
 import { ident } from "../sql/ident";
@@ -128,7 +129,8 @@ export async function listFiles(
 ): Promise<FileSummary[]> {
   const c = findCollection(cfg, collection);
   if (!c) throw new Error(`Unknown collection: ${collection}`);
-  if (c.type !== "file") throw new Error(`Collection ${collection} is not a file collection`);
+  // A file inventory only means anything for a kind that ingests files.
+  if (!kindOf(c).chunked) throw new Error(`Collection ${collection} is not a file collection`);
   const view = viewOf(cfg, scope.env, collection);
 
   const r = await withOrg(dataPool(pools, scope), scope.orgId, (client) =>

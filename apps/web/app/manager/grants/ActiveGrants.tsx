@@ -22,6 +22,10 @@ import { requestJson } from "@/lib/client-api";
 type ActiveGrant = {
   id: string;
   user_id: string;
+  // WHO the grant is for — `user:<id>` or `group:<name>`. Distinct from `user_id`, which is who
+  // asked for it: on a group grant those are different people, and the column that matters for
+  // "who can read this" is this one.
+  principal: string | null;
   collection: string;
   env: "dev" | "live";
   allowed_fields: string[] | null;
@@ -70,9 +74,22 @@ export function ActiveGrants() {
 
   const columns: ColumnDef<ActiveGrant, unknown>[] = [
     {
-      accessorKey: "user_id",
-      header: "User",
-      cell: ({ row }) => <Mono>{row.original.user_id}</Mono>,
+      accessorKey: "principal",
+      header: "Held by",
+      cell: ({ row }) => {
+        const p = row.original.principal ?? `user:${row.original.user_id}`;
+        const isGroup = p.startsWith("group:");
+        return (
+          <span className="flex items-center gap-2">
+            <Mono>{p.slice(p.indexOf(":") + 1)}</Mono>
+            {isGroup && (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                group
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     {
       accessorKey: "collection",
@@ -144,7 +161,11 @@ export function ActiveGrants() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Revoke {pending?.user_id}&rsquo;s access to {pending?.collection}?
+              Revoke access to {pending?.collection} for{" "}
+              {(pending?.principal ?? `user:${pending?.user_id}`)
+                .replace("group:", "everyone in ")
+                .replace("user:", "")}
+              ?
             </AlertDialogTitle>
             <AlertDialogDescription>
               Revocation is immediate — their very next query is refused, with no token refresh

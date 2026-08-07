@@ -35,7 +35,19 @@ type Acl = {
  * Every read and every write goes through the broker and writes an audit row, exactly as the data
  * browser's queries do. There is no console-only path to an ACL.
  */
-export function AclEditor({ collection }: { collection: string }) {
+export function AclEditor({
+  collection,
+  type = "dataset",
+}: {
+  collection: string;
+  /** Which KIND of collection — it decides what a document is addressed by. */
+  type?: string;
+}) {
+  // A dataset's ACL is keyed on its declared primary key; a file collection's on `path`, because
+  // its documents are chunks of a file and `path` is what identifies one. Saying which in the
+  // label is the difference between pasting the right string and pasting a uuid that matches
+  // nothing — and an ACL that matches nothing looks exactly like one that is working.
+  const addressedBy = type === "file" ? "path" : "primary key";
   const [documentId, setDocumentId] = useState("");
   const [acl, setAcl] = useState<Acl | null>(null);
   const [groups, setGroups] = useState<string[]>([]);
@@ -113,15 +125,16 @@ export function AclEditor({ collection }: { collection: string }) {
         A document with no principals is readable by anyone whose grant covers this collection. A
         document with principals is readable only by those principals — through every verb, and in
         every aggregate: a <Mono>count</Mono> over this collection counts what the caller may see.
-        An ACL never widens a grant; it only takes one document out of it.
+        An ACL never widens a grant; it only takes one document out of it. A document here is
+        addressed by its <Mono>{addressedBy}</Mono>.
       </p>
 
       <div className="flex flex-wrap items-end gap-3 rounded-lg border p-4">
         <div className="space-y-2">
-          <Label htmlFor="acl-doc-id">Document id</Label>
+          <Label htmlFor="acl-doc-id">Document {type === "file" ? "path" : "id"}</Label>
           <Input
             id="acl-doc-id"
-            placeholder="Primary key value"
+            placeholder={type === "file" ? "hr/pto.md" : "Primary key value"}
             value={documentId}
             onChange={(e) => setDocumentId(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void load()}

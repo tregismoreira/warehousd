@@ -39,6 +39,7 @@ export const NAV: Record<Role, NavItem[]> = {
     { href: "/manager", label: "Grant inbox", icon: Inbox },
     { href: "/manager/review", label: "Proposal review", icon: ClipboardCheck },
     { href: "/manager/grants", label: "Active grants", icon: ListChecks },
+    { href: "/manager/review-access", label: "Access review", icon: ShieldCheck },
   ],
   member: [
     { href: "/member", label: "My grants", icon: ListChecks },

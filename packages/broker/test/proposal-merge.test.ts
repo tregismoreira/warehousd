@@ -8,6 +8,7 @@ import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
 import { assertPending } from "./helpers/results";
+import { mergeRevision, checkFourEyes } from "../src/verbs/propose";
 
 let p: Provisioned, app: Pool, pools: any;
 
@@ -640,5 +641,74 @@ describe("approval writes one revision, not two", () => {
     // Both survive: the proposal's field and the concurrent change it did not touch.
     expect(doc.dept).toBe("D2");
     expect(doc.email).toBe("moved@ex.com");
+  });
+});
+
+// §C. The merge rule and the four-eyes rule are the two parts of approval worth checking without
+// a transaction, and extracting them is what makes that possible: as inline blocks inside a
+// 200-line `approveProposal` neither could be reached except by running a full approval.
+describe("mergeRevision", () => {
+  const c = cfg.collections.people!;
+
+  it("lays the proposal's own changed fields over the current revision", () => {
+    const current = {
+      _rev: "r1",
+      _rev_seq: 3,
+      _rev_op: "update",
+      _rev_by: "a",
+      _rev_base: null,
+      id: "doc-1",
+      email: "old@ex.com",
+      name: "Old Name",
+      dept: "Legal",
+    } as unknown as Parameters<typeof mergeRevision>[2];
+    const proposal = {
+      _rev: "r2",
+      _rev_seq: 4,
+      _rev_op: "update",
+      _rev_by: "b",
+      _rev_base: 3,
+      _rev_fields: ["email"],
+      id: "doc-1",
+      email: "new@ex.com",
+      name: "Stale Name",
+      dept: "Stale Dept",
+    } as unknown as Parameters<typeof mergeRevision>[1];
+
+    const { merged, newSeq } = mergeRevision(c, proposal, current);
+    expect(merged.email).toBe("new@ex.com");
+    // Untouched fields keep whatever they acquired while the proposal was pending — the
+    // proposal's stale copy of them is not a change it asked for.
+    expect(merged.name).toBe("Old Name");
+    expect(merged.dept).toBe("Legal");
+    // Contiguous with the revision being replaced, not max(_rev_seq).
+    expect(newSeq).toBe(4);
+  });
+
+  it("takes a create's values wholesale and starts the sequence at 1", () => {
+    const proposal = {
+      _rev: "r1",
+      _rev_op: "create",
+      _rev_by: "b",
+      _rev_base: null,
+      _rev_fields: ["id", "email"],
+      id: "doc-2",
+      email: "new@ex.com",
+      name: null,
+      dept: null,
+    } as unknown as Parameters<typeof mergeRevision>[1];
+    const { merged, newSeq } = mergeRevision(c, proposal, null);
+    expect(merged.id).toBe("doc-2");
+    expect(merged.email).toBe("new@ex.com");
+    expect(newSeq).toBe(1);
+  });
+});
+
+describe("checkFourEyes", () => {
+  it("is true when the approver is the proposer", () => {
+    expect(checkFourEyes({ _rev_by: "alice" }, { userId: "alice" })).toBe(true);
+  });
+  it("is false for anybody else", () => {
+    expect(checkFourEyes({ _rev_by: "alice" }, { userId: "bob" })).toBe(false);
   });
 });

@@ -66,9 +66,13 @@ describe("mcp-tools: query_collection", () => {
 });
 
 describe("mcp-tools: search_documents", () => {
-  it("is registered with collection and q required", () => {
+  // §P2: `collection` is optional. Omitting it searches every collection the caller holds a read
+  // grant on — the shape that answers "what's our parental leave policy" from somebody who does
+  // not already know where it lives.
+  it("is registered with q required and collection optional", () => {
     const tool = toolByName("search_documents")!;
-    expect(tool.inputSchema.required).toEqual(["collection", "q"]);
+    expect(tool.inputSchema.required).toEqual(["q"]);
+    expect(tool.inputSchema.properties).toHaveProperty("collection");
   });
 
   it("rejects unknown collections with a hint", async () => {

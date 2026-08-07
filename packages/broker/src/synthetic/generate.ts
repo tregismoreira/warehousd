@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { kindOf } from "../config/kinds";
 import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
 import { loadTaxonomyBindings, syncDatasetTerms } from "../taxonomy";
@@ -29,11 +30,17 @@ const revInsertValues = (fields: string[]): unknown[] => [
   true,
 ];
 
+// Which collection the generator is on, in the shape EmbedProgress already had. The total is the
+// number of collections rather than of documents: generation runs in FK dependency order, and a
+// document count would jump about as it moved between a 20-row table and a 4,000-row one.
+export type SyntheticProgress = { done: number; total: number; label: string };
+
 // Generates in FK dependency order so parent ids exist before children reference them.
 export async function generateSynthetic(
   db: Pool,
   cfg: WarehousdConfig,
   seed: number,
+  opts: { onProgress?: ((p: SyntheticProgress) => void) | undefined } = {},
 ): Promise<void> {
   const rng = makeRng(seed);
   const idsByCollection: Record<string, string[]> = {};
@@ -41,11 +48,13 @@ export async function generateSynthetic(
   const order = topoSort(cfg);
   const deferred: { collection: string; column: string; parent: string; pk: string }[] = [];
 
-  for (const name of order) {
+  for (const [i, name] of order.entries()) {
+    opts.onProgress?.({ done: i, total: order.length, label: name });
     const c = cfg.collections[name];
     if (!c) throw new Error(`Unknown collection: ${name}`);
-    // Skip file collections — they are populated via indexCollection, not synthetic generation
-    if (c.type === "file") continue;
+    // A kind the generator cannot produce is populated some other way — a file collection by
+    // indexCollection. The kind says so; this loop does not know which kinds those are.
+    if (!kindOf(c).synthesisable) continue;
     // Skip writable collections — their content comes from real writes and proposals, not from
     // synthetic filler, and truncating one would destroy a pending proposal. (Revision columns
     // are no longer the reason: every dataset has them, and the insert below fills them.)
@@ -206,7 +215,9 @@ export async function generateSynthetic(
   const datasetSourced = order.filter((name) => {
     const c = cfg.collections[name];
     return (
-      !!c && c.type !== "file" && (c.taxonomies ?? []).some((slug) => cfg.taxonomies[slug]?.source)
+      !!c &&
+      kindOf(c).synthesisable &&
+      (c.taxonomies ?? []).some((slug) => cfg.taxonomies[slug]?.source)
     );
   });
   if (datasetSourced.length) {
