@@ -499,7 +499,10 @@ describe("acl", () => {
     expect(JSON.stringify(r.error)).toContain("pk: true");
   });
 
-  it("refuses acl: true on a file collection — v1 has no answer for chunked documents", () => {
+  // A file collection declares no primary key — its documents are chunks of a file — so its ACL
+  // is keyed on `path`, which is what identifies a file within a collection. See
+  // CollectionKind.aclKeyField for why that and never `file_id`.
+  it("accepts acl: true on a file collection, keyed on path", () => {
     const r = parse({
       description: "d",
       type: "file",
@@ -507,8 +510,7 @@ describe("acl", () => {
       acl: true,
       fields: { title: { posture: "allow" } },
     });
-    expect(r.success).toBe(false);
-    expect(JSON.stringify(r.error)).toContain("file collection");
+    expect(r.success).toBe(true);
   });
 
   it("refuses acl: true on a source_ref collection — warehousd does not own those rows", () => {
