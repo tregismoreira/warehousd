@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>An MCP-ready governed data layer for enterprises.</strong><br>
-  Your data, safely queryable by AI assistants.
+  All your documents and datasets in one place, safely queryable by AI assistants.
 </p>
 
 <p align="center">
