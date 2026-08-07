@@ -62,13 +62,6 @@ it is in the repository today, it is MIT tomorrow.
   holder and the approver that access lapses on Friday needs an outbound channel
   the deployment does not have yet, which is why it is a separate item.
 
-- **Per-document ACLs on file collections.** An ACL is keyed on the declared
-  primary key, and a file collection declares none — its documents are chunks of
-  a file. Supporting it means keying on `file_id`, a second join in the file
-  branch of `viewDDL`, and a decision about what the indexer's write path does
-  with an existing ACL. Config refuses `acl: true` there today rather than
-  half-supporting it.
-
 ## Undecided
 
 Not planned, not rejected — the shape of the answer is the open question.

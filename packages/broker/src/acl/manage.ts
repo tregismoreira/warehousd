@@ -2,7 +2,8 @@ import type { Pool } from "pg";
 import type { BrokerContext, AuditId, RefusalReason } from "../types";
 import { ACL_TABLE } from "../config/schema";
 import { findCollection } from "../config/load";
-import { pkOf, dataSchema } from "../config/collection";
+import { dataSchema } from "../config/collection";
+import { kindOf } from "../config/kinds";
 import { ident } from "../sql/ident";
 import { withOrg, writePool } from "../db/pools";
 import { makeAuditWriter } from "../audit/decision";
@@ -81,7 +82,7 @@ export function makeAclVerbs(d: VerbDeps) {
     collection: string,
     audit: ReturnType<typeof makeAuditWriter>,
   ): Promise<
-    | { ok: true; schema: string; pk: string }
+    | { ok: true; schema: string; key: string }
     | { ok: false; reason: AclRefusalReason; auditId: AuditId }
   > {
     const c = findCollection(cfg, collection);
@@ -89,13 +90,15 @@ export function makeAclVerbs(d: VerbDeps) {
     // A collection that does not declare `acl: true` has no `_acl` column on its view, so a row
     // written here would be inert — and an inert ACL that reports success is worse than a refusal.
     if (!c.acl) return audit.refuse(collection, "invalid_intent");
-    const pk = pkOf(c);
-    if (!pk) return audit.refuse(collection, "invalid_intent");
+    // Which column a document is addressed by for ACL purposes: the declared pk for a dataset,
+    // `path` for a file collection. The caller passes the VALUE as `id`; this only has to exist.
+    const key = kindOf(c).aclKeyField(c);
+    if (!key) return audit.refuse(collection, "invalid_intent");
     // Authorization last of the three, so that "you may not" cannot be told apart from "there is
     // no such collection" by anyone who is not already authorised — the same information-leak
     // rule the read verbs follow with no_grant.
     if (!(await mayManage(app, ctx, who))) return audit.refuse(collection, "acl_denied");
-    return { ok: true, schema: dataSchema(ctx.env), pk };
+    return { ok: true, schema: dataSchema(ctx.env), key };
   }
 
   async function getDocumentAcl(

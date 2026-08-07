@@ -288,8 +288,10 @@ describe("writable rules", () => {
 });
 
 describe("acl rules", () => {
-  it("acl/preconditions refuses a file collection", () => {
-    fires(aclPreconditions, coll({ acl: true, type: "file", source: "./d" }), "file collection");
+  // A file collection CAN carry ACLs now. It declares no primary key — its documents are chunks of
+  // a file — so it is keyed on `path`, which is what identifies a file within a collection.
+  it("acl/preconditions accepts a file collection", () => {
+    silent(aclPreconditions, coll({ acl: true, type: "file", source: "./d" }));
   });
 
   it("acl/preconditions refuses a source_ref collection", () => {
@@ -297,7 +299,7 @@ describe("acl rules", () => {
     fires(aclPreconditions, c, "source_ref collection");
   });
 
-  it("acl/preconditions requires a pk", () => {
+  it("acl/preconditions requires a pk on a DATASET", () => {
     fires(aclPreconditions, coll({ acl: true, fields: {} }), "requires a field with pk: true");
     silent(
       aclPreconditions,
@@ -305,11 +307,16 @@ describe("acl rules", () => {
     );
   });
 
-  // The branches are an if/else chain on purpose: a file collection has one problem, and naming
-  // the missing pk alongside it would send the author to add a key the file kind cannot carry.
-  it("acl/preconditions reports one reason, not three", () => {
-    const c = coll({ acl: true, type: "file", source: "./d", fields: {} });
+  // The branches are an if/else chain on purpose: an external collection has one problem —
+  // warehousd does not own its rows — and naming a missing key alongside it would send the author
+  // to add one to a table they do not control.
+  it("acl/preconditions reports one reason, not two", () => {
+    const c = coll({ acl: true, source_ref: { source: "hr", table: "people", org: "default" } });
     expect(messagesFrom(aclPreconditions, c)).toHaveLength(1);
+  });
+
+  it("says nothing at all without acl: true", () => {
+    silent(aclPreconditions, coll({ fields: {} }));
   });
 });
 

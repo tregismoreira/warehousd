@@ -409,12 +409,39 @@ SSO login, see [configure-sso.md](configure-sso.md#5-map-idp-groups-to-warehousd
 `manual` source. Neither source overwrites the other, so a deployment with no SSO
 at all still gets working groups.
 
+**A file collection is addressed by `path`.** Its documents are chunks of a file,
+so the policy attaches to the file and every chunk of it shares one — and the id
+you pass to the ACL endpoint is the path, not the `file_id`:
+
+```yaml
+collections:
+  policies:
+    description: Policy documents
+    type: file
+    source: ./policies
+    acl: true
+    fields:
+      title:   { posture: allow }
+      content: { posture: allow }
+      path:    { posture: deny }
+```
+
+```
+PUT /v1/collections/policies/documents/hr%2Fpto.md/acl
+{ "principals": ["group:legal"] }
+```
+
+The restriction survives the file's own lifecycle: a re-index that changes the
+content keeps it, and so does the file leaving the source directory and coming
+back. The second is why `path` is the key rather than the `file_id` — the sweep
+removes the row, so a returning file gets a new id, and an ACL keyed on that id
+would leave the document readable by everyone the grant covers.
+
 Requirements and current limits, all enforced at config load:
 
 | Rule | Why |
 |---|---|
-| Requires a field with `pk: true` | An ACL is keyed on document identity |
-| Refused on `type: file` | An ACL would key on `file_id`, not a pk — not designed yet |
+| A dataset requires a field with `pk: true` | An ACL is keyed on document identity; a file collection uses `path` |
 | Refused with `source_ref` | warehousd does not own those rows |
 | `_acl` is a reserved field name | It is the ACL column on the collection's view |
 

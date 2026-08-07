@@ -120,6 +120,17 @@ export async function indexCollection(
   // Directory indexing is a mirror: a file that left the source directory leaves the collection.
   // Scoped to `origin = 'index'` above, because an uploaded document was never in that directory
   // and must not be deleted by the first `warehousd index` that runs after it lands.
+  //
+  // The file's per-document ACL is deliberately LEFT BEHIND. An ACL is keyed on `path`, which is a
+  // file's identity within a collection, so a document that leaves the directory and comes back
+  // returns with the restriction it had — the row it lands in is new, but the policy is addressed
+  // to the path and not to the row. Deleting the ACL here would make that round trip a silent
+  // widening: a document restricted to Legal would come back readable by everyone the grant
+  // covers, and nothing in the trail would say so.
+  //
+  // The cost is a row per restricted document that may outlive its file. That is one row, it is
+  // invisible to every read path (the join finds no file to attach it to), and it is removed with
+  // the rest when the collection is dropped — see resolveDestructiveChanges.
   for (const [path, id] of existing)
     if (!seen.has(path)) {
       await db.query(`delete from ${filesT} where id=$1`, [id]);

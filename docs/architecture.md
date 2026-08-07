@@ -1035,11 +1035,25 @@ tokens. Membership arrives from an SSO login (`source: 'sso'`) or from the conso
 
 **Storage is one table per env data schema**, `data_synth."_acl"` /
 `data_live."_acl"`, shared by every collection and keyed
-`(org_id, collection, document_id)`. No row means public — which is the whole
+`(org_id, collection, document_id)`. What `document_id` matches is the KIND's
+answer, not a fixed column: a dataset's declared primary key, a file collection's
+`path` (`CollectionKind.aclKeyField`). No row means public — which is the whole
 design: 1,000 pages with one restricted page is one row, and the other 999 cost
 nothing. It lives in the data schema rather than in `app` because the app pool has
 no data-schema privileges and the read pools have none on `app`, so an
 `app`-schema ACL could not be joined into a collection's view at all.
+
+**A file collection is keyed on `path`, never on `file_id`.** Its documents are
+chunks, so the policy attaches to the file row and every chunk of one document
+shares it — and `path` is what `ingestFile` treats as a file's identity within a
+collection. `file_id` is stable across a re-index, which updates the row in place,
+but the delete sweep in `indexing/sync.ts` removes the row when a file leaves the
+source directory, so a file that comes back gets a fresh uuid. An ACL keyed on the
+surrogate would be orphaned and the returning document would be readable by
+everyone the grant covers — a silent widening, with nothing in the trail to say
+so. For the same reason the sweep deliberately **leaves the ACL row behind**: the
+restriction survives the round trip. The cost is one row that may outlive its
+file, invisible to every read path, removed when the collection is dropped.
 
 **The view carries it as a structural column.** `viewDDL` left-joins `_acl` and
 exposes `acl.principals as "_acl"`, exactly the way it already exposes `tsv`,
@@ -1099,11 +1113,11 @@ ACL is not content, it has no revision model, and removing the row is the only w
 to make a restricted document public again — a tombstone would force "no
 principals" and "no row" to mean different things, and they do not.
 
-Not in v1: **file collections** (an ACL keyed on `file_id` rather than a pk, a
-second join in the file branch of `viewDDL`, and a decision about the indexer's
-write path — config refuses `acl: true` there), **connect-in-place collections**
-(warehousd does not own those rows), a **default-private** mode, **inheritance**
-down a tree, and **deny entries**. Positive principals only.
+Not supported: **connect-in-place collections** — warehousd does not own those
+rows, there is no local base table to join an ACL against, and the view has no
+`org_id` column to carry the tenant half of the predicate; config refuses
+`acl: true` there. Also absent by design: a **default-private** mode,
+**inheritance** down a tree, and **deny entries**. Positive principals only.
 
 ## Semantic search
 

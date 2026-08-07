@@ -76,6 +76,23 @@ export type CollectionKind = {
    */
   identityField(c: CollectionConfig): string | null;
 
+  /**
+   * The column an `_acl` row's `document_id` is matched against, or null when the kind cannot
+   * carry a per-document ACL at all.
+   *
+   * Not the same question as `pkField`, and the difference is the whole reason file collections
+   * can have ACLs now. A dataset's ACL is keyed on its declared primary key. A file collection
+   * declares none — its documents are chunks — so it is keyed on `path`, which is what
+   * `ingestFile` treats as a file's identity within a collection.
+   *
+   * **Never `file_id`.** That id is stable across a re-index (the row is updated in place), but
+   * the delete sweep in indexing/sync.ts removes the row when a file leaves the source directory,
+   * so a file that comes back gets a fresh uuid — and an ACL keyed on the old one would be
+   * orphaned while the returning document became readable by everyone the grant covers. Keying on
+   * `path` fails closed: the restriction survives the round trip.
+   */
+  aclKeyField(c: AclKeyable): string | null;
+
   /** The kind's half of every DDL statement. See apply/ddl.ts for the shared halves. */
   ddl: KindDDL;
 };
@@ -91,3 +108,13 @@ export type KindDDL = {
 };
 
 export type Env = "dev" | "live";
+
+/**
+ * The least a kind needs to answer "what addresses a document here".
+ *
+ * Both collection shapes satisfy it structurally — `RawCollection` as the author wrote it, and
+ * `CollectionConfig` after the transform normalises postures — which is what lets a CONFIG RULE
+ * ask the same question the DDL asks. A rule runs before the transform, so it cannot be handed a
+ * `CollectionConfig`.
+ */
+export type AclKeyable = { fields: Record<string, { pk?: boolean | undefined }> };

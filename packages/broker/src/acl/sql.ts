@@ -1,7 +1,7 @@
 import { ACL_COLUMN, ACL_TABLE, type CollectionConfig } from "../config/schema";
 import { dataSchema } from "../config/collection";
 import { ident, literal } from "../sql/ident";
-import { pkOf } from "../config/collection";
+import { kindOf } from "../config/kinds";
 
 // The two SQL forms of one rule, and nothing else.
 //
@@ -52,15 +52,17 @@ export function aclColumnSql(
   alias: string,
 ): string {
   if (!c.acl) return "";
-  const pk = pkOf(c);
-  // CollectionSchema refuses `acl: true` without a pk, so this is unreachable through a parsed
-  // config. It is here because a hand-built config object (most of the test suite) can skip zod,
-  // and emitting a subquery keyed on nothing would be worse than emitting none.
-  if (!pk) return "";
+  // Which column an ACL row is matched against — the declared pk for a dataset, `path` for a
+  // file. Asked of the kind so this and the view's join cannot key on different things.
+  const key = kindOf(c).aclKeyField(c);
+  // CollectionSchema refuses `acl: true` on a kind with no ACL key, so this is unreachable
+  // through a parsed config. It is here because a hand-built config object (most of the test
+  // suite) can skip zod, and emitting a subquery keyed on nothing would be worse than none.
+  if (!key) return "";
   const schema = dataSchema(env);
   return (
     `, (select a.principals from ${schema}.${ident(ACL_TABLE)} a` +
     ` where a.org_id = ${alias}.org_id and a.collection = ${literal(collection)}` +
-    ` and a.document_id = ${alias}.${ident(pk)}::text) as ${ident(ACL_COLUMN)}`
+    ` and a.document_id = ${alias}.${ident(key)}::text) as ${ident(ACL_COLUMN)}`
   );
 }

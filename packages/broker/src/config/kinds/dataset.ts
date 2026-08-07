@@ -43,6 +43,9 @@ export const datasetKind: CollectionKind = {
   synthesisable: true,
   pkField: (c) => Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null,
   identityField: (c) => Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null,
+  // A dataset's ACL is keyed on document identity, which is its declared pk. Without one there is
+  // nothing to key on, and config refuses `acl: true`.
+  aclKeyField: (c) => Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null,
 
   ddl: {
     table: datasetTableDDL,

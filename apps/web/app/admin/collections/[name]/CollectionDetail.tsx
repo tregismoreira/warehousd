@@ -124,7 +124,7 @@ export function CollectionDetail({ name }: { name: string }) {
         </TabsContent>
         {detail.acl && (
           <TabsContent value="acl" className="pt-4">
-            <AclEditor collection={detail.name} />
+            <AclEditor collection={detail.name} type={detail.type} />
           </TabsContent>
         )}
       </Tabs>

@@ -41,6 +41,9 @@ export const fileKind: CollectionKind = {
   pkField: () => null,
   // `path` is unique per collection and is what a create names.
   identityField: () => "path",
+  // And it is what an ACL is keyed on, for the same reason — see CollectionKind.aclKeyField for
+  // why this is `path` and never `file_id`.
+  aclKeyField: () => "path",
 
   ddl: {
     table: fileTableDDL,

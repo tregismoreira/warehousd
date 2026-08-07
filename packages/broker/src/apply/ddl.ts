@@ -1,7 +1,7 @@
 import { kindOf } from "../config/kinds";
 import type { WarehousdConfig } from "../config/schema";
 import { fileMetadataFields, ACL_COLUMN, ACL_TABLE } from "../config/schema";
-import { literal } from "../sql/ident";
+import { ident, literal } from "../sql/ident";
 
 // The width of the embedding column when no `embedding:` block is configured. Matches the
 // default local model (bge-small-en-v1.5), so turning semantic search on later with the default
@@ -438,11 +438,30 @@ export function fileViewDDL(env: "dev" | "live", collection: string, cfg: Wareho
   // field, so no grant can carry it and buildSelect can never project it — its columns come
   // from the YAML field set. It is here because the read role holds SELECT on this view and
   // nothing else, and a semantic search has to be able to rank by it.
+  // The per-document ACL, joined onto the FILE row rather than the chunk — every chunk of a file
+  // is the same document, so they share one policy. Keyed on `path` and not `file_id`: see
+  // CollectionKind.aclKeyField for why the surrogate id fails open across a delete and restore.
+  //
+  // Structural, exactly as `tsv`, `checksum` and `embedding` are: it names no configured field, so
+  // no grant can carry it and buildSelect can never project it. It is here because the read role
+  // holds SELECT on this view and nothing else, and the predicate that enforces the ACL has to
+  // have a column to read.
+  //
+  // LEFT join: no row means public, which is what keeps 999 of 1,000 documents costing nothing.
+  const aclKey = kindOf(c).aclKeyField(c);
+  const aclJoin =
+    c.acl && aclKey
+      ? ` left join ${schema}."${ACL_TABLE}" acl on acl.org_id = d.org_id` +
+        ` and acl.collection = ${literal(collection)}` +
+        ` and acl.document_id = d.${ident(aclKey)}::text`
+      : "";
+  const aclSel = c.acl && aclKey ? `, acl.principals as ${ident(ACL_COLUMN)}` : "";
+
   return `${recreate}
       select c.id as document_id, c.document_seq, c.content, c.tsv, c.embedding,
-             d.id as file_id, d.title, d.path, d.owner, d.updated_at, d.checksum${termSels}${metadataSels}
+             d.id as file_id, d.title, d.path, d.owner, d.updated_at, d.checksum${termSels}${metadataSels}${aclSel}
       from ${schema}."${collection}__documents" c
-      join ${schema}."${collection}__files" d on d.id = c.file_id and d.org_id = c.org_id
+      join ${schema}."${collection}__files" d on d.id = c.file_id and d.org_id = c.org_id${aclJoin}
       where d.org_id = current_setting('warehousd.org_id', true);`;
 }
 
@@ -497,12 +516,12 @@ export function datasetViewDDL(
   //
   // `acl.org_id = base.org_id` is carried explicitly. The base table's own RLS policy is the other
   // wall, and neither is redundant — see rlsDDL.
-  const pkField = declaredPkField(collection, cfg);
-  if (c.acl && pkField) {
+  const aclKey = kindOf(c).aclKeyField(c);
+  if (c.acl && aclKey) {
     joins.push(
       `left join ${schema}."${ACL_TABLE}" acl on acl.org_id = base.org_id` +
         ` and acl.collection = ${literal(collection)}` +
-        ` and acl.document_id = base."${pkField}"::text`,
+        ` and acl.document_id = base.${ident(aclKey)}::text`,
     );
     selects.push(`acl.principals as "${ACL_COLUMN}"`);
   }
