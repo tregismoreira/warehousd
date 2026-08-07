@@ -1,5 +1,5 @@
 ---
-owner: Priya Raghavan
+owner: Lanna Raghavan
 client: c-9001
 tags: [contract]
 matter_number: M-2025-9001

@@ -18,7 +18,7 @@ Open http://localhost:8722. Every persona's password is `demo`.
 | `ana@demo.local` | admin | A read grant on every collection, `env: dev` |
 | `marcus@demo.local` | manager | The same |
 | `mia@demo.local` | member | **Nothing** |
-| `priya@demo.local` | manager | Nothing |
+| `lanna@demo.local` | manager | Nothing |
 | `dan@demo.local` · `elena@demo.local` · `omar@demo.local` | member | Nothing |
 
 Mia holding nothing is what makes the grant flow demonstrable on a fresh install.
@@ -110,7 +110,7 @@ await (
 
 **Do** — As **Marcus** (a manager, so he can both request and approve), switch the console to **live**, request access to any collection, then try to approve your own request.
 
-**Look for** — `self_approval_denied`, 403. Ask **Priya**, the other manager, and it goes through. The same rule blocks a proposal whose author is its approver (scenario 18). `dev` is exempt on purpose — its data is generated and regenerable, so the ceremony would be theatre.
+**Look for** — `self_approval_denied`, 403. Ask **Lanna**, the other manager, and it goes through. The same rule blocks a proposal whose author is its approver (scenario 18). `dev` is exempt on purpose — its data is generated and regenerable, so the ceremony would be theatre.
 
 ---
 
@@ -262,7 +262,7 @@ Set `verbs` without `mode` and the write applies directly. `created_at` is read-
    ```
 
 2. As **Ana**, switch the header to **live** and browse anything.
-3. Request a `policies` grant *while the console is on live*, and have **Priya** approve it (scenario 7).
+3. Request a `policies` grant *while the console is on live*, and have **Lanna** approve it (scenario 7).
 
 **Look for** — At step 2, every collection refuses. Ana holds a grant on all 20 and it is worth nothing here: a grant names its environment, and hers say `dev`. Being an admin is not a live grant either. After step 3 the 2 live policies appear — and the 5 dev ones do not.
 

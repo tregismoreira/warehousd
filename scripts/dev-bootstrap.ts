@@ -29,7 +29,7 @@ async function seedPersonaUsers(db: Pool) {
     { id: "ana", email: "ana@demo.local", name: "Ana", role: "admin" },
     { id: "marcus", email: "marcus@demo.local", name: "Marcus", role: "manager" },
     { id: "mia", email: "mia@demo.local", name: "Mia", role: "member" },
-    { id: "priya", email: "priya@demo.local", name: "Priya Raghavan", role: "manager" },
+    { id: "lanna", email: "lanna@demo.local", name: "Lanna Raghavan", role: "manager" },
     { id: "dan", email: "dan@demo.local", name: "Dan Okafor", role: "member" },
     { id: "elena", email: "elena@demo.local", name: "Elena Vasquez", role: "member" },
     { id: "omar", email: "omar@demo.local", name: "Omar Haddad", role: "member" },
@@ -150,11 +150,11 @@ async function main() {
     }
   }
 
-  // Priya (manager, partner): live-env grants + full-collection access to matters.
-  const priyaExisting = await db.query(`select 1 from app.grants where user_id='priya' limit 1`);
-  if (priyaExisting.rowCount === 0) {
+  // Lanna (manager, partner): live-env grants + full-collection access to matters.
+  const lannaExisting = await db.query(`select 1 from app.grants where user_id='lanna' limit 1`);
+  if (lannaExisting.rowCount === 0) {
     await db.query(`insert into app.grants (user_id,collection,allowed_fields,env,status) values
-      ('priya','matters',
+      ('lanna','matters',
        array['id','matter_number','client_id','client_name','responsible_attorney_id',
              'responsible_attorney_name','originating_attorney_id','originating_attorney_name'],
        'live','approved')`);
