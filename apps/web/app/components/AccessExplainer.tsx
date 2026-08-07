@@ -22,6 +22,9 @@ type FieldExplanation = {
   unmasked: boolean;
   writable: boolean;
   blockedBy: "posture" | "no_grant" | "not_in_grant" | "masked" | null;
+  // The mask, shown over a value the synthetic generator made up. Never a stored one — that is
+  // what lets an approver who holds no grant on the field see what they are approving.
+  maskPreview: { sample: string; masked: string } | null;
 };
 
 export type AccessExplanation = {
@@ -137,6 +140,7 @@ export function AccessExplainer({
               <th className="p-2 font-medium">Field</th>
               <th className="p-2 font-medium">Config</th>
               <th className="p-2 font-medium">Sees</th>
+              <th className="p-2 font-medium">Masked as</th>
               <th className="p-2 font-medium">Why</th>
             </tr>
           </thead>
@@ -159,6 +163,17 @@ export function AccessExplainer({
                   {f.unmaskable && <span className="ml-1 text-muted-foreground">· unmaskable</span>}
                 </td>
                 <td className="p-2">{EFFECT_LABEL[f.effect]}</td>
+                <td className="p-2">
+                  {f.maskPreview ? (
+                    <span title="A made-up value, so this is safe to show — nothing here is stored data.">
+                      <Mono className="text-muted-foreground">{f.maskPreview.sample}</Mono>
+                      <span className="mx-1 text-muted-foreground">→</span>
+                      <Mono>{f.maskPreview.masked}</Mono>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
                 <td className="p-2 text-muted-foreground">
                   {f.blockedBy ? WHY[f.blockedBy] : "granted in full"}
                 </td>
@@ -167,6 +182,12 @@ export function AccessExplainer({
           </tbody>
         </table>
       </div>
+      {data.fields.some((f) => f.maskPreview) && (
+        <p className="text-xs text-muted-foreground">
+          The &ldquo;masked as&rdquo; column is computed over made-up sample data, so it shows the
+          shape of the transform rather than anything stored in this collection.
+        </p>
+      )}
     </div>
   );
 }

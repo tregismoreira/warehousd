@@ -222,3 +222,36 @@ describe("it never returns a field value", () => {
     expect(JSON.stringify(res)).not.toContain("97300");
   });
 });
+
+// The approve sheet's preview. An approver ticking "show the real value" was choosing between two
+// words with no way to see what the masked form gives a grant holder — and the obvious fix, masking
+// a real row, hands them a value the mask exists to withhold.
+describe("the masked-column preview", () => {
+  it("shows the transform on a masked field and nothing on the others", async () => {
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "salaries", "ana");
+    if (!res.ok) throw new Error("unreachable");
+    const byField = Object.fromEntries(res.fields.map((f) => [f.field, f]));
+
+    const band = byField.salary_band?.maskPreview;
+    expect(band).not.toBeNull();
+    // `bucket` with a width of 25,000 — a band, not a number, which is the whole thing an
+    // approver cannot tell from the word "mask".
+    expect(Number(band?.masked) % 25000).toBe(0);
+    expect(Number(band?.masked)).toBeLessThanOrEqual(Number(band?.sample));
+
+    // A field the config does not mask has no transform to preview.
+    expect(byField.person?.maskPreview).toBeNull();
+    expect(byField.bank_account?.maskPreview).toBeNull();
+  });
+
+  it("is computed over generated data, never over a stored row", async () => {
+    const res = await broker.explainAccess(makeCtx({ userId: "boss" }), "salaries", "ana");
+    if (!res.ok) throw new Error("unreachable");
+    const preview = res.fields.find((f) => f.field === "salary_band")?.maskPreview;
+    // Every seeded salary_band is 97300. The sample has never been near the collection, so it is
+    // not that number and the response does not contain it — an approver holding no grant on the
+    // field must not learn a stored value from a preview, transformed or not.
+    expect(preview?.sample).not.toBe("97300");
+    expect(JSON.stringify(res)).not.toContain("97300");
+  });
+});

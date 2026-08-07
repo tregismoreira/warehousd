@@ -63,8 +63,13 @@ test.describe("member surfaces", () => {
   });
 
   test("the connect guide shows the MCP endpoint and the safety boundaries", async ({ page }) => {
+    // The guide renders a skeleton until `/api/connect-info` lands, so every assertion below is
+    // gated on that fetch. Waiting for the response rather than on a 15s assertion budget is the
+    // difference between a test that measures the page and one that measures the machine.
+    const info = page.waitForResponse((r) => r.url().includes("/api/connect-info"));
     await page.getByRole("link", { name: "How to connect" }).click();
     await page.waitForURL(/\/member\/connect$/);
+    expect((await info).ok()).toBe(true);
     await expect(page.getByText("Your MCP endpoint")).toBeVisible();
     await expect(page.getByText(/\/mcp$/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Copy value" }).first()).toBeVisible();

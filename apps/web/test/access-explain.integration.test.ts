@@ -83,7 +83,8 @@ describe("GET /api/access", () => {
     expect(denied.length).toBeGreaterThan(0);
     for (const f of denied) expect(f.blockedBy).toBe("posture");
 
-    // What it must never carry: a stored value. Every field entry is booleans and enums.
+    // What it must never carry: a stored value. Every field entry is booleans, enums, and — for a
+    // masked field — a preview computed over a value the synthetic generator made up.
     for (const f of body.fields)
       expect(Object.keys(f).sort()).toEqual(
         [
@@ -92,12 +93,19 @@ describe("GET /api/access", () => {
           "field",
           "grantable",
           "granted",
+          "maskPreview",
           "posture",
           "unmaskable",
           "unmasked",
           "writable",
         ].sort(),
       );
+
+    // The preview is the one key that carries a string rather than a flag, so it is the one place
+    // a value could reach an approver. `people` declares no mask, so every entry is null here —
+    // and the check that the string is synthetic lives where a masked field exists, in
+    // packages/broker/test/explain-access.test.ts.
+    for (const f of body.fields) expect(f.maskPreview).toBeNull();
   });
 
   it("404s an unknown collection", async () => {

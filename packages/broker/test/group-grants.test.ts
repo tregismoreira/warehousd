@@ -11,6 +11,7 @@ import {
 import { loadActiveGrant, loadActiveGrants } from "../src/grants/eval";
 import { setUserGroups } from "../src/acl/manage";
 import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
+import type { DocumentFilter } from "../src/types";
 import { makeCtx } from "./helpers/ctx";
 import { SEED_REV_COLUMNS, SEED_REV_VALUES } from "../src/index";
 
@@ -67,7 +68,13 @@ afterAll(async () => {
 /** Approve a grant for a principal, and hand back its id. */
 async function grant(
   principal: string,
-  opts: { requestedBy?: string; fields?: string[]; verbs?: string[] } = {},
+  opts: {
+    requestedBy?: string;
+    fields?: string[];
+    verbs?: string[];
+    documentFilters?: DocumentFilter[];
+    expiresAt?: string;
+  } = {},
 ) {
   const id = await requestGrant(app, {
     userId: opts.requestedBy ?? "admin",
@@ -81,6 +88,8 @@ async function grant(
   const r = await approveGrant(app, cfg, id, "approver", {
     verbs: opts.verbs ?? ["read"],
     allowedFields: opts.fields ?? ALL,
+    ...(opts.documentFilters ? { documentFilters: opts.documentFilters } : {}),
+    ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
   });
   if (!r.ok) throw new Error(`approve failed: ${r.error} ${r.detail ?? ""}`);
   return { id, warning: r.warning };
@@ -145,6 +154,37 @@ describe("a personal grant wins over an inherited one", () => {
     expect(active?.id).toBe(personal.id);
     expect(active?.principal).toBe("user:ana");
     expect(active?.allowedFields).toEqual(["person"]);
+  });
+
+  // The same assertion with the rows inserted the other way round. Specificity that only held for
+  // one insertion order would be recency wearing specificity's name, and the suite above cannot
+  // tell the two apart on its own.
+  it("takes the user: grant when the group grant is OLDER and wider", async () => {
+    await setUserGroups(app, {
+      orgId: "default",
+      userId: "dora",
+      groups: ["tax"],
+      source: "manual",
+    });
+    await grant("group:tax", { fields: ALL });
+    const personal = await grant("user:dora", { requestedBy: "dora", fields: ["person"] });
+
+    const active = await loadActiveGrant(app, makeCtx({ userId: "dora" }), "salaries");
+    expect(active?.id).toBe(personal.id);
+    expect(active?.allowedFields).toEqual(["person"]);
+  });
+
+  // The security-critical negative. Merging would silently widen a narrow, purpose-bound personal
+  // grant to whatever the group holds, and would leave the audit row unable to name the authority
+  // the decision was made under.
+  it("does NOT union the two — the wider group grant contributes nothing", async () => {
+    const ctx = makeCtx({ userId: "dora" });
+    const active = await loadActiveGrant(app, ctx, "salaries");
+    expect(active?.allowedFields).not.toContain("base_salary");
+
+    const res = await broker.query(ctx, { collection: "salaries", fields: ["base_salary"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("field_denied");
   });
 
   it("the batch loader orders identically", async () => {
@@ -280,5 +320,118 @@ describe("a principal must be namespaced", () => {
     });
     const r = await app.query(`select principal from app.grants where id=$1`, [id]);
     expect(r.rows[0].principal).toBe("user:defaulted");
+  });
+});
+
+// The client ceiling narrows FIRST, before any principal is looked at. Otherwise a restricted
+// client would inherit, through a group, exactly the collections it was configured not to reach.
+describe("the collection ceiling still narrows first", () => {
+  it("gives nothing outside the ceiling, group grant or not", async () => {
+    await setUserGroups(app, {
+      orgId: "default",
+      userId: "capped",
+      groups: ["litigation"],
+      source: "manual",
+    });
+    // Inside the ceiling the inherited grant resolves as usual...
+    expect((await loadActiveGrant(app, makeCtx({ userId: "capped" }), "salaries"))?.principal).toBe(
+      "group:litigation",
+    );
+    // ...outside it, the same grant resolves to nothing at all.
+    const capped = makeCtx({ userId: "capped", allowedCollections: ["something_else"] });
+    expect(await loadActiveGrant(app, capped, "salaries")).toBeNull();
+    const res = await broker.query(capped, { collection: "salaries", fields: ["person"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("no_grant");
+  });
+});
+
+// Per-grant expiry is a property of the GRANT, not of the principal that holds it. A group grant
+// that outlived its expiry would be the one place the clause did not apply.
+describe("an expired group grant grants nothing", () => {
+  it("stops resolving the moment it lapses, with no restart", async () => {
+    await setUserGroups(app, {
+      orgId: "default",
+      userId: "seconded",
+      groups: ["secondment"],
+      source: "manual",
+    });
+    const g = await grant("group:secondment", {
+      expiresAt: new Date(Date.now() + 1_500).toISOString(),
+    });
+    const ctx = makeCtx({ userId: "seconded" });
+    expect((await loadActiveGrant(app, ctx, "salaries"))?.id).toBe(g.id);
+
+    // Moved into the past rather than waited out: the clause under test is
+    // `expires_at > now()`, and a suite that sleeps for it is a suite that flakes.
+    await app.query(`update app.grants set expires_at = now() - interval '1 minute' where id=$1`, [
+      g.id,
+    ]);
+    expect(await loadActiveGrant(app, ctx, "salaries")).toBeNull();
+    const res = await broker.query(ctx, { collection: "salaries", fields: ["person"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("no_grant");
+  });
+});
+
+// `$self` is bound per CALLER, not per grant. A group grant scoped to "rows you own" has to mean
+// something different for each member of the group, or the sentinel is decorative.
+describe("$self in a group grant binds to the caller", () => {
+  it("scopes each member of the group to their own documents", async () => {
+    await app.query(
+      `insert into data_synth.salaries (${R}, org_id, id, person, base_salary, bank_account)
+       values (${RV}, 'default', gen_random_uuid(), 'owner-a', 1, 'x'),
+              (${RV}, 'default', gen_random_uuid(), 'owner-b', 2, 'y')`,
+    );
+    for (const u of ["owner-a", "owner-b"])
+      await setUserGroups(app, {
+        orgId: "default",
+        userId: u,
+        groups: ["owners"],
+        source: "manual",
+      });
+    await grant("group:owners", {
+      fields: ["id", "person", "base_salary"],
+      documentFilters: [{ field: "person", op: "eq", value: "$self" }],
+    });
+
+    for (const who of ["owner-a", "owner-b"]) {
+      const ctx = makeCtx({ userId: who });
+      const active = await loadActiveGrant(app, ctx, "salaries");
+      // Bound at load time, so the stored filter stays `$self` and two callers get two answers.
+      expect(active?.documentFilter).toEqual([{ field: "person", op: "eq", value: who }]);
+      const res = await broker.query(ctx, { collection: "salaries", fields: ["person"] });
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.documents.map((d) => d.person)).toEqual([who]);
+    }
+  });
+});
+
+// The lookup shape changed — `principal = any($1)` replaced `user_id = $1` — so the index that
+// served the old predicate does not serve this one. A sequential scan over app.grants is a scan
+// on the hot path of every single governed call.
+describe("the resolution query is indexed", () => {
+  it("plans an index scan rather than a sequential one", async () => {
+    // A realistic table: the planner is right to scan fifty rows, so fifty rows prove nothing.
+    // Decided history rather than live access, which is what a mature deployment looks like.
+    await app.query(
+      `insert into app.grants (user_id, collection, env, org_id, purpose_label, allowed_fields,
+                               principal, status, requested_at)
+       select 'bulk-' || i, 'salaries', 'dev', 'default', 'bulk', $1,
+              'user:bulk-' || i, case when i % 20 = 0 then 'approved' else 'revoked' end, now()
+       from generate_series(1, 4000) as i`,
+      [ALL],
+    );
+    await app.query(`analyze app.grants`);
+
+    const plan = await app.query<{ "QUERY PLAN": string }>(
+      `explain select id from app.grants
+       where principal = any($1) and collection=$2 and env=$3 and org_id=$4
+         and status='approved' and (expires_at is null or expires_at > now())`,
+      [["user:ana", "group:corporate"], "salaries", "dev", "default"],
+    );
+    const text = plan.rows.map((r) => r["QUERY PLAN"]).join("\n");
+    expect(text).toMatch(/Index (Only )?Scan|Bitmap Index Scan/);
+    expect(text).not.toMatch(/Seq Scan on grants/);
   });
 });

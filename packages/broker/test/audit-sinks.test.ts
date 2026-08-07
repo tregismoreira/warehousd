@@ -95,6 +95,15 @@ describe("config", () => {
   it("defaults to postgres when the block only turns auditing on", () => {
     expect(ConfigSchema.parse({ ...base, audit: { enabled: true } }).audit.sink).toBe("postgres");
   });
+
+  it("refuses a timeout on a sink that makes no request", () => {
+    const r = ConfigSchema.safeParse({
+      ...base,
+      audit: { sink: "stdout-json", timeout_ms: 1000 },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("configures nothing");
+  });
 });
 
 describe("stdout-json", () => {
@@ -224,5 +233,82 @@ describe("webhook", () => {
       quiet.mockRestore();
       await pools.end();
     }
+  });
+
+  // The sink is synchronous with the decision on purpose, which is only survivable if the wait is
+  // bounded. A collector that accepts the connection and then goes quiet must not be able to hold
+  // the request path open — and giving up must count as a FAILED write, not a silent success.
+  describe("a hung collector", () => {
+    const quick = cfgWith({
+      enabled: true,
+      sink: "webhook",
+      url: "https://collector.example/audit",
+      timeout_ms: 50,
+    });
+
+    it("passes the configured deadline to fetch as an abort signal", async () => {
+      const pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
+      const broker = makeBroker(pools, quick);
+      await grantFor("hook_deadline", quick);
+
+      const signals: (AbortSignal | null | undefined)[] = [];
+      const spy = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+        signals.push(init?.signal);
+        return Promise.resolve(new Response(null, { status: 202 }));
+      });
+      try {
+        expect(
+          (await broker.query(makeCtx({ userId: "hook_deadline" }), { collection: "people" })).ok,
+        ).toBe(true);
+        // Not merely present: an AbortSignal that nothing ever fires is a timeout in name only.
+        expect(signals[0]).toBeInstanceOf(AbortSignal);
+        expect(signals[0]?.aborted).toBe(false);
+      } finally {
+        spy.mockRestore();
+        await pools.end();
+      }
+    });
+
+    it("downgrades an allow to a refusal rather than waiting, and never silently succeeds", async () => {
+      const pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
+      const broker = makeBroker(pools, quick);
+      await grantFor("hook_hung", quick);
+
+      // A collector that answers only when the signal aborts — the shape of a real hang, rather
+      // than a rejection the sink would have caught anyway.
+      const spy = vi.spyOn(globalThis, "fetch").mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              // The real `fetch` rejects with the signal's reason, which is a `TimeoutError`
+              // DOMException — an Error, but not one the lint rule can see through `unknown`.
+              reject(
+                init.signal?.reason instanceof Error
+                  ? init.signal.reason
+                  : new Error("aborted with a non-Error reason"),
+              ),
+            );
+          }),
+      );
+      const logged: unknown[][] = [];
+      const quiet = vi.spyOn(console, "error").mockImplementation((...a) => void logged.push(a));
+      try {
+        const started = Date.now();
+        const res = await broker.query(makeCtx({ userId: "hook_hung" }), { collection: "people" });
+        // Refused, not allowed, and not still running.
+        expect(res.ok).toBe(false);
+        if (!res.ok) expect(res.reason).toBe("internal_error");
+        expect(res.auditId).toBeNull();
+        expect(Date.now() - started).toBeLessThan(5_000);
+        // Loud for the operator — and about the deadline, not about the data.
+        const text = JSON.stringify(logged);
+        expect(text).toContain("timed out");
+        expect(text).not.toContain("seed@ex.com");
+      } finally {
+        spy.mockRestore();
+        quiet.mockRestore();
+        await pools.end();
+      }
+    });
   });
 });

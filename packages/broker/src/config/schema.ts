@@ -513,6 +513,10 @@ export const AuditSchema = z
     // `webhook` only. Interpolated by ${env:VAR} at load time like every other url here.
     url: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    // `webhook` only. How long to wait for the collector before treating the write as failed —
+    // which, under the downgrade rule, refuses the call. Capped at a minute because a longer
+    // deadline is not a slower collector, it is a hung one nobody noticed. See audit/sinks/.
+    timeout_ms: z.number().int().positive().max(60_000).optional(),
   })
   .strict()
   .superRefine((a, ctx) => {
@@ -524,6 +528,11 @@ export const AuditSchema = z
       ctx.addIssue({
         code: "custom",
         message: `audit.sink \`${a.sink}\` takes neither \`url\` nor \`headers\``,
+      });
+    if (a.sink !== "webhook" && a.timeout_ms !== undefined)
+      ctx.addIssue({
+        code: "custom",
+        message: `audit.sink \`${a.sink}\` makes no request, so \`timeout_ms\` configures nothing`,
       });
   });
 export type AuditConfig = z.infer<typeof AuditSchema>;

@@ -24,7 +24,16 @@ export {
   envRefs,
   auditEnabled,
 } from "./config/load";
+// The one audit writer. Exported because the console's regen route records an operational event
+// of its own, and it must reach the configured sink like everything else — see audit/decision.ts.
+export {
+  makeAuditWriter,
+  auditDestination,
+  type AuditDestination,
+  type AuditWriter,
+} from "./audit/decision";
 export { maskExpr, UnsupportedMask, MASK_KEY_ENV } from "./sql/mask";
+export { maskPreview, maskSample, type MaskPreview } from "./sql/mask-preview";
 export {
   ExtractionFailed,
   type Embedder,

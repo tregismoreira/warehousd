@@ -1,5 +1,15 @@
 import type { ImportErrorGroup, ImportErrorSummary } from "./validate";
 
+// Re-exported so a consumer can have the summary type and the renderer from ONE import.
+//
+// That matters because this module is also the package's `@warehousd/broker/import-report`
+// subpath, and the reason the subpath exists is the browser: `/admin/import` renders this report
+// in a `"use client"` component, and reaching it through the package barrel drags `db/pools.ts`
+// and therefore `pg` into the client bundle — which fails the build on `dns`, `fs`, `net` and
+// `tls`. Everything here is pure, and every import above is `import type`, so nothing runtime
+// crosses the boundary.
+export type { ImportError, ImportErrorGroup, ImportErrorSummary } from "./validate";
+
 // How an import failure is EXPLAINED, in one place, for both surfaces that explain it.
 //
 // The CLI prints these as text and `/admin/import` renders them as a panel, but the grouping, the

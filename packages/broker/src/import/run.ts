@@ -6,7 +6,8 @@ import { insertRevision, currentRevision, reviseDocument } from "../db/revisions
 import { pkOf, dataColsOf } from "../config/collection";
 import { ident } from "../sql/ident";
 import { DEFAULT_ORG_ID } from "../db/migrate-app";
-import { writeAudit } from "../audit/write";
+import { makeAuditWriter, auditDestination } from "../audit/decision";
+import type { BrokerContext } from "../types";
 import { writeChangeLog } from "../verbs/history";
 import { auditEnabled, findCollection } from "../config/load";
 import { parseImport, type ImportPayload } from "./csv";
@@ -96,6 +97,9 @@ export async function importCollection(
     dryRun?: boolean;
     orgId?: string;
     onProgress?: ((p: ImportProgress) => void) | undefined;
+    // Which credential drove this, for the audit row — `session` from the console, `cli` from
+    // `warehousd import run`. Defaults to `session`, which is where imports came from first.
+    via?: string;
     // Injected for `format: "xlsx"`, never constructed here — see import/csv.ts.
     sheets?: SheetReader | undefined;
   } = {},
@@ -104,30 +108,52 @@ export async function importCollection(
   const dryRun = opts.dryRun ?? false;
   const orgId = opts.orgId ?? DEFAULT_ORG_ID;
 
-  // Import writes its own row rather than going through audit/decision.ts, so it has to honour
-  // `audit.enabled` itself — an environment configured as unaudited must not still collect a row
-  // per import.
-  const audit = (
+  // Through `makeAuditWriter` like every broker decision, not through a direct insert.
+  //
+  // An import is not a grant decision, but it is the single write path into data_live and it goes
+  // in the same trail — so it has to reach the same DESTINATION. While this called `writeAudit`
+  // directly it always landed in `app.audit_events`, which meant a deployment forwarding its trail
+  // to a SIEM (`audit.sink: webhook`) silently lost the highest-volume event it has. Going through
+  // the writer also brings the rest of it for free: `audit.enabled` honoured in one place, the
+  // redacted operator log line on a failed write, and `org_id`/`via`/`principals` filled from the
+  // context rather than from a hand-written column list.
+  //
+  // `env` is the literal 'live'. An import cannot touch data_synth, so there is no caller
+  // environment to read here.
+  const auditCtx: BrokerContext = {
+    userId: actor,
+    orgId,
+    env: "live",
+    allowedCollections: null,
+    via: opts.via ?? "session",
+  };
+  const writer = makeAuditWriter(pools.app, auditCtx, auditEnabled(cfg), auditDestination(cfg));
+
+  // Column names and counts only — never a cell value. An import file may carry real personal
+  // data and the audit log is queryable by every admin.
+  const intentFor = (extra: Record<string, unknown>) => ({
+    op: `import:${mode}`,
+    format: payload.format,
+    dryRun,
+    ...extra,
+  });
+
+  const audit = async (
     outcome: "allowed" | "refused",
     reason: string | null,
     extra: Record<string, unknown>,
-  ): Promise<string | null> =>
-    !auditEnabled(cfg)
-      ? Promise.resolve(null)
-      : writeAudit(pools.app, {
-          userId: actor,
-          env: "live",
-          collection,
-          orgId,
-          // Column names and counts only — never a cell value. An import file may carry real
-          // personal data and the audit log is queryable by every admin.
-          intent: { op: `import:${mode}`, format: payload.format, dryRun, ...extra },
-          fieldsReturned: [],
-          grantId: null,
-          outcome,
-          reason,
-          via: "session",
-        });
+  ): Promise<string | null> => {
+    const detail = { intent: intentFor(extra) };
+    if (outcome === "refused")
+      return (await writer.refuse(collection, reason ?? "refused", detail)).auditId;
+    // Deliberately NOT downgraded to a refusal the way a read is. The rows are already committed
+    // by the time this runs — the audit row goes through the app pool, which the import role
+    // cannot reach, so it cannot join the import's transaction and cannot be rolled back with it.
+    // Telling the caller the import failed when the data is in the table would be a worse lie than
+    // a null id, and the writer has already logged the failure loudly for the operator.
+    const rec = await writer.allow(collection, detail);
+    return rec.ok ? rec.auditId : null;
+  };
 
   if (!IMPORT_MODES.includes(mode)) {
     return { ok: false, reason: "unknown_mode", auditId: null };

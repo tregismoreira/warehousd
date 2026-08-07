@@ -323,6 +323,21 @@ program
 const importCmd = program
   .command("import")
   .description("map a spreadsheet onto a collection, validate it, and load it");
+// The .xlsx reader makes three choices a spreadsheet library would make silently, and each one is
+// a way data gets quietly corrupted. They are documented here rather than only in the source
+// because the person who needs to know is the person holding the file.
+importCmd.addHelpText(
+  "after",
+  `
+Reading an .xlsx:
+  formula cells    import their CACHED VALUE — the number Excel last calculated and saved.
+                   A workbook saved without cached values imports those cells as empty.
+  dates            are converted from Excel's serial numbers, not from the displayed text.
+  merged cells     carry their value in the top-left cell only; the rest of the range is empty.
+  text columns     keep leading zeros — "007" imports as "007", never as 7.
+  multiple sheets  must be chosen with --sheet; nothing is guessed.
+`,
+);
 importCmd
   .command("map <file>")
   .description("propose a collections block, or a column mapping, from a spreadsheet")

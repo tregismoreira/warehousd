@@ -290,6 +290,25 @@ files have been edited since they were.
 | ------------ | ------------- |
 | `--db <url>` | Database URL. |
 
+All three read `.csv`, `.json` and `.xlsx`, chosen by the file's extension
+rather than a flag. Reading an `.xlsx` makes five choices that a spreadsheet
+library would make silently, and each one is a way data gets quietly corrupted —
+so they are stated here and in `warehousd import --help`:
+
+- **Formula cells import their cached value**, the number Excel last calculated
+  and saved. Nothing is evaluated, and a workbook saved without cached values
+  imports those cells as empty — which is visible, unlike importing the formula
+  text.
+- **Dates come from Excel's serial numbers**, not from the displayed text, so a
+  `date` column never arrives as `45231` or as an ambiguous `03/04`.
+- **Merged cells** carry their value in the top-left cell only; the rest of the
+  range is genuinely empty, as Excel stores it.
+- **Text columns keep leading zeros** — `007` imports as `"007"`, never as `7`.
+  Employee numbers and cost codes are the common case and the classic
+  corruption.
+- **A multi-sheet workbook needs `--sheet`.** Nothing is guessed; the refusal
+  names the sheets available.
+
 ### `import map <file>`
 
 Reads a spreadsheet's headers plus a sample of its values and **prints** a

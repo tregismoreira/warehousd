@@ -160,10 +160,21 @@ this: a cleanup command nobody remembers to run is how it reached 211.
 
 The Keycloak suite is gated behind `WAREHOUSD_E2E_KEYCLOAK`, so a default
 `pnpm test` run never needs a container beyond Postgres. `pnpm test:e2e:cli`
-runs the _built_ CLI against real containers and takes several minutes — run
-`pnpm --filter ./packages/cli build` first (a path filter, not a name filter:
-`warehousd` also matches the private root package), and point it at a locally
-built image with `WAREHOUSD_IMAGE=warehousd:ci`.
+runs the _built_ CLI against real containers and takes several minutes. Two
+prerequisites:
+
+```bash
+# a path filter, not a name filter: `warehousd` also matches the private root package
+pnpm --filter ./packages/cli build
+docker build -f apps/web/Dockerfile -t warehousd:ci .
+```
+
+The suite picks up `warehousd:ci` by itself once it exists — the same tag CI
+builds — and `WAREHOUSD_IMAGE` overrides it. Without a local image it falls back
+to the published `ghcr.io/tregismoreira/warehousd:dev`, which needs GHCR
+credentials a contributor does not have; the run then fails once, in `beforeAll`,
+naming the `docker build` above rather than reporting a dozen unrelated
+assertion failures.
 
 ## What is measured, and what the CLI's split is for
 

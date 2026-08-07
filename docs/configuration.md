@@ -32,6 +32,7 @@ audit:
   sink: postgres       # postgres (default) | stdout-json | webhook
   url: ...             # webhook only. Where to POST each decision
   headers: {...}       # webhook only. Extra request headers
+  timeout_ms: 5000     # webhook only. Default 5000. Giving up is a FAILED write
 server:
   port: 8722           # default 8722
   image: ...           # optional. Override the published server image
@@ -116,6 +117,13 @@ an event — a non-2xx from the collector, a closed pipe — turns the allow it 
 recording into an `internal_error` refusal. `webhook` is therefore synchronous
 with the decision and not queued, and a slow collector slows every governed
 call. That is the cost of the guarantee.
+
+Because it is synchronous, the wait is bounded: `audit.timeout_ms` (default
+5000, maximum 60000) is how long the collector has to answer, and running out
+of time counts as a failed write like any other — so the call is refused rather
+than allowed, and never left hanging. A collector that accepts the connection
+and then goes quiet would otherwise hold every governed call open for as long as
+the platform allows.
 
 The `sso:` block maps an identity provider's groups to warehousd roles at
 JIT provisioning. It lives here rather than alongside the provider registration

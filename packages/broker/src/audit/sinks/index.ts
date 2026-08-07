@@ -27,3 +27,4 @@ export function auditSink(id: AuditSinkId | undefined): AuditSink {
 }
 
 export type { AuditSink, AuditSinkOptions } from "./types";
+export { DEFAULT_SINK_TIMEOUT_MS } from "./types";

@@ -66,8 +66,15 @@ test.describe("governed write path", () => {
     await expect(page.getByText("Proposed task", { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "Approve" }).click();
+    // Wait on the decision itself, not on the toast that announces it. A toast is a render that
+    // follows the POST, so asserting on it under load measures how fast the machine is rather than
+    // whether the proposal was approved — and the two assertions below are the durable proof
+    // anyway. The response has no deadline of its own here, so the test timeout bounds it.
+    const approved = page.waitForResponse(
+      (r) => r.request().method() === "POST" && r.url().includes("/approve"),
+    );
     await page.getByRole("alertdialog").getByRole("button", { name: "Approve" }).click();
-    await expectToast(page, /approved/i);
+    expect((await approved).ok()).toBe(true);
 
     // Queue drains once approved.
     await page.goto("/manager/review");

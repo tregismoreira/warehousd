@@ -6,6 +6,7 @@ import { loadActiveGrant } from "../grants/eval";
 import { loadPrincipals } from "../acl/principals";
 import { makeAuditWriter } from "../audit/decision";
 import { buildSelect, UnsupportedFilter } from "../sql/build";
+import { maskPreview, type MaskPreview } from "../sql/mask-preview";
 import { dataPool, withOrg } from "../db/pools";
 import { validateDocumentFilters } from "../grants/filters";
 import { aclOpts } from "./guard";
@@ -49,6 +50,15 @@ export type FieldExplanation = {
    * different problems with three different people who can fix them.
    */
   blockedBy: "posture" | "no_grant" | "not_in_grant" | "masked" | null;
+  /**
+   * What the mask does, shown over a SYNTHETIC value — null on a field the config does not mask.
+   *
+   * The approve sheet's missing half, and the reason it is safe to put in front of an approver who
+   * holds no grant on the field: the input is generated, not stored. See sql/mask-preview.ts.
+   * Present whenever the config declares a mask, including where this subject is unmasked — an
+   * approver deciding whether to tick "show the real value" needs to see the alternative.
+   */
+  maskPreview: MaskPreview | null;
 };
 
 export type AccessExplanation = {
@@ -170,6 +180,7 @@ export function makeExplainVerb(d: VerbDeps) {
         unmasked,
         writable: writePosture(f) === "allow",
         blockedBy,
+        maskPreview: f.mask ? maskPreview(field, f.type ?? "text", f.mask) : null,
       };
     });
 

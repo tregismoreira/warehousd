@@ -55,9 +55,9 @@ export type AuditEvent = {
 /**
  * Insert into `app.audit_events`. The `postgres` sink's implementation, and nothing else's.
  *
- * Callers go through `makeAuditWriter`, which routes to whichever sink the config names. This is
- * exported for the registry and for the two paths that write their own operational rows (import,
- * regen) against the default destination.
+ * Every caller goes through `makeAuditWriter`, which routes to whichever sink the config names —
+ * the import path and the console's regen included, since a deployment forwarding its trail
+ * elsewhere must not keep some of it here. Exported for the registry alone.
  */
 export async function insertAuditEvent(app: Pool, e: AuditEvent): Promise<string> {
   // Broker query refusals use the fixed RefusalReason set; operational events (import,
@@ -87,8 +87,10 @@ export async function insertAuditEvent(app: Pool, e: AuditEvent): Promise<string
 }
 
 /**
- * @deprecated The direct-to-Postgres write. Kept because two operational paths use it — the admin
- * import and the synthetic regen write their own rows and are not broker decisions — but a VERB
- * must go through `makeAuditWriter`, which honours the configured sink and the downgrade rule.
+ * @deprecated The direct-to-Postgres write. No production path uses it any more: the admin import
+ * and the synthetic regen were the last two, and both now go through `makeAuditWriter` so they
+ * reach the configured sink. Kept as an alias for the suites that assert on the row shape itself —
+ * anything that RECORDS a decision must go through the writer, which owns the destination, the
+ * `audit.enabled` gate and the downgrade rule.
  */
 export const writeAudit = insertAuditEvent;

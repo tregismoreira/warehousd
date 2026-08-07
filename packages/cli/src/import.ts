@@ -161,6 +161,9 @@ export async function runImportValidate(
     const r = await importCollection(pools, cfg, "cli", collection, payload, {
       mode,
       dryRun: true,
+      // The audit row says where the import came from. A console import and a CI one are the same
+      // write path and a different governance question.
+      via: "cli",
       sheets: makeSheetReader(),
       onProgress: t.onProgress,
     });
@@ -231,6 +234,7 @@ export async function runImportRun(
     const r = await importCollection(pools, cfg, "cli", collection, payload, {
       mode: opts.mode ?? "append",
       dryRun: opts.dryRun ?? false,
+      via: "cli",
       sheets: makeSheetReader(),
       onProgress: t.onProgress,
     });

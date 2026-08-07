@@ -6,6 +6,7 @@ import type {
   MutationResult,
 } from "../types";
 import type { AuditIntent } from "./write";
+import type { AuditConfig } from "../config/schema";
 import { auditSink, type AuditSinkId, type AuditSinkOptions } from "./sinks";
 import { redact } from "../log/redact";
 
@@ -130,6 +131,26 @@ function mutationIntent(i: MutationIntent, fields: string[]) {
  * call site, so "where does the trail go" has one answer for the life of the broker.
  */
 export type AuditDestination = { sink?: AuditSinkId | undefined } & AuditSinkOptions;
+
+/**
+ * The destination `audit:` in warehousd.yml names, as the writer takes it.
+ *
+ * One reader for the whole codebase. Three call sites need it — the verb deps, the import path and
+ * the console's regen — and a second hand-written copy is how one of them ends up still writing to
+ * Postgres after the deployment has been pointed at a SIEM.
+ *
+ * Every field is optional-chained: a hand-built config object never went through zod's defaults,
+ * so the whole block can be genuinely absent, and absent means the default sink — which is what
+ * every deployment had before sinks existed.
+ */
+export function auditDestination(cfg: { audit?: AuditConfig | undefined }): AuditDestination {
+  return {
+    sink: cfg.audit?.sink,
+    ...(cfg.audit?.url ? { url: cfg.audit.url } : {}),
+    ...(cfg.audit?.headers ? { headers: cfg.audit.headers } : {}),
+    ...(cfg.audit?.timeout_ms ? { timeoutMs: cfg.audit.timeout_ms } : {}),
+  };
+}
 
 export function makeAuditWriter(
   app: Pool,

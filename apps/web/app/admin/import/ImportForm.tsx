@@ -24,7 +24,11 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mono } from "@/components/common/Mono";
 import { requestJson } from "@/lib/client-api";
-import { reportImportSummary, type ImportErrorSummary } from "@warehousd/broker";
+// The subpath, not the package barrel. This is a client component, and `@warehousd/broker`'s
+// index re-exports `db/pools.ts` — so the barrel pulls `pg` into the browser bundle and the build
+// fails on `dns`, `fs`, `net` and `tls`. `import-report` is the pure rendering half and nothing
+// else. See packages/broker/src/import/report.ts.
+import { reportImportSummary, type ImportErrorSummary } from "@warehousd/broker/import-report";
 
 interface ViewJoin {
   table: string;
