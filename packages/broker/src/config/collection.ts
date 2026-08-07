@@ -1,4 +1,5 @@
 import type { CollectionConfig, WarehousdConfig } from "./schema";
+import { kindOf } from "./kinds";
 
 // Four facts about a collection that the write path derives over and over: its primary key, its
 // storable columns, the bookkeeping columns every revision carries, and which collections have
@@ -13,7 +14,9 @@ import type { CollectionConfig, WarehousdConfig } from "./schema";
 // pk, which is not a configuration error (a read-only lookup table needs none) but does mean
 // nothing can address one of its documents — every caller here refuses rather than guessing.
 export function pkOf(c: CollectionConfig): string | null {
-  return Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null;
+  // Asked of the kind, not derived here: a file collection declares no pk at all — its identity is
+  // `path` — and a fourth kind may key on something else again. See config/kinds/.
+  return kindOf(c).pkField(c);
 }
 
 // The columns a revision actually stores, in a fixed order. A `view_join` field is computed by
@@ -66,9 +69,13 @@ export type RevisionRow = {
 // those without giving the import role UPDATE/DELETE on data columns is to make both a new
 // revision. File collections are append-only ingests and have no revisions.
 export function revisionedCollections(cfg: WarehousdConfig): string[] {
-  return Object.entries(cfg.collections)
-    .filter(([, c]) => c.type !== "file")
-    .map(([name]) => name);
+  return (
+    Object.entries(cfg.collections)
+      // Every kind whose documents are rows carries the `_rev*` bookkeeping. A chunked kind is an
+      // append-only ingest and has no revisions.
+      .filter(([, c]) => !kindOf(c).chunked)
+      .map(([name]) => name)
+  );
 }
 
 // Collections a PROPOSAL can live in — narrower than the above, and deliberately so. Every
@@ -76,9 +83,13 @@ export function revisionedCollections(cfg: WarehousdConfig): string[] {
 // only a writable one can hold a pending revision. Approve/reject scan for a proposal by id
 // across collections; scanning the revisioned set instead would just be slower.
 export function revisableCollections(cfg: WarehousdConfig): string[] {
-  return Object.entries(cfg.collections)
-    .filter(([, c]) => c.writable && c.type !== "file")
-    .map(([name]) => name);
+  return (
+    Object.entries(cfg.collections)
+      // A kind whose documents are chunks of one blob has no revision to propose against: a file
+      // collection is append-only and `update` is not among its supported verbs.
+      .filter(([, c]) => c.writable && kindOf(c).supportedVerbs(c).includes("update"))
+      .map(([name]) => name)
+  );
 }
 
 // The one mapping from a context's env to the schema holding that env's data. dev is synthetic,

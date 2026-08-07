@@ -6,6 +6,8 @@ import { authClient } from "@/lib/auth-client";
 import { requestJson } from "@/lib/client-api";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
+import { Button } from "@/components/ui/button";
+import { AccessExplainer } from "@/app/components/AccessExplainer";
 import {
   Select,
   SelectContent,
@@ -88,6 +90,12 @@ function RoleSelect({ user, isSelf }: { user: User; isSelf: boolean }) {
 export function UsersTable() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  // §P5's effective-access matrix. This is what makes §P1's specificity rule comprehensible: a
+  // grant count says a number, and the matrix says which fields it reaches and why the rest are
+  // out — including when the deciding grant is one the user inherited from a group.
+  const [subject, setSubject] = useState<User | null>(null);
+  const [collections, setCollections] = useState<string[]>([]);
+  const [collection, setCollection] = useState("");
   const session = authClient.useSession();
   const currentUserId = session.data?.user?.id;
 
@@ -103,6 +111,17 @@ export function UsersTable() {
         toast.error("Failed to load users");
         setLoading(false);
       });
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/collections")
+      .then((r) => r.json())
+      .then((data: { collections?: { name: string }[] }) => {
+        const names = (data.collections ?? []).map((c) => c.name);
+        setCollections(names);
+        setCollection((c) => c || (names[0] ?? ""));
+      })
+      .catch(() => setCollections([]));
   }, []);
 
   const columns: ColumnDef<User, unknown>[] = [
@@ -132,6 +151,19 @@ export function UsersTable() {
         </span>
       ),
     },
+    {
+      id: "access",
+      header: "",
+      cell: ({ row }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setSubject((s) => (s?.id === row.original.id ? null : row.original))}
+        >
+          {subject?.id === row.original.id ? "Hide access" : "Access"}
+        </Button>
+      ),
+    },
   ];
 
   return (
@@ -155,6 +187,25 @@ export function UsersTable() {
           />
         }
       />
+      {subject && collection && (
+        <div className="mt-6 space-y-2">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold">Effective access for {subject.email}</p>
+            <select
+              className="rounded border bg-background px-2 py-1 text-xs"
+              value={collection}
+              onChange={(e) => setCollection(e.target.value)}
+            >
+              {collections.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <AccessExplainer collection={collection} subject={subject.id} />
+        </div>
+      )}
     </div>
   );
 }

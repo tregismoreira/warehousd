@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { kindOf } from "../config/kinds";
 import type { WarehousdConfig } from "../config/schema";
 import {
   tableDDL,
@@ -103,16 +104,29 @@ async function resolveDestructiveChanges(db: Queryable, cfg: WarehousdConfig): P
  * It also removes the interleaving question entirely: nothing else can run a statement between
  * `resolveDestructiveChanges` deciding a table is empty and the DDL that acts on that.
  */
-export async function applyConfig(db: Pool, cfg: WarehousdConfig): Promise<void> {
+export async function applyConfig(
+  db: Pool,
+  cfg: WarehousdConfig,
+  opts: { onProgress?: (p: ApplyProgress) => void } = {},
+): Promise<void> {
   const client = await db.connect();
   try {
-    await applyOn(client, cfg);
+    await applyOn(client, cfg, opts.onProgress);
   } finally {
     client.release();
   }
 }
 
-async function applyOn(db: Queryable, cfg: WarehousdConfig): Promise<void> {
+// Which collection an apply is on, in the shape EmbedProgress already had. `label` carries the
+// collection name: an apply that hangs hangs on a specific table, and naming it is the difference
+// between "still going" and "still going, on `matters`".
+export type ApplyProgress = { done: number; total: number; label: string };
+
+async function applyOn(
+  db: Queryable,
+  cfg: WarehousdConfig,
+  onProgress?: (p: ApplyProgress) => void,
+): Promise<void> {
   await db.query(`create extension if not exists vector`);
   // hmac(), for `mask: { transform: hash }`. Created unconditionally rather than only when some
   // collection declares that transform: a later `warehousd apply` adding one must not be the
@@ -167,7 +181,11 @@ async function applyOn(db: Queryable, cfg: WarehousdConfig): Promise<void> {
     // Dataset-sourced vocabularies: terms are synced by syncDatasetTerms, not here
   }
 
-  for (const name of Object.keys(cfg.collections)) {
+  // Two passes over the collections — tables, then views — so the count runs 0..n twice. Reported
+  // with a phase in the label rather than as two totals, which would look like a reset.
+  const names = Object.keys(cfg.collections);
+  for (const [i, name] of names.entries()) {
+    onProgress?.({ done: i, total: names.length, label: `tables · ${name}` });
     const c = cfg.collections[name];
     if (!c) throw new Error(`Unknown collection: ${name}`);
 
@@ -175,7 +193,7 @@ async function applyOn(db: Queryable, cfg: WarehousdConfig): Promise<void> {
     // in place. The stored vectors are derived data — re-derivable by `warehousd embed` — so the
     // column is dropped and recreated rather than the apply refusing. Detected via atttypmod,
     // which is where pgvector keeps the width.
-    if (c.type === "file") {
+    if (kindOf(c).chunked) {
       const want = cfg.embedding?.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
       for (const env of ["dev", "live"] as const) {
         const schema = env === "dev" ? "data_synth" : "data_live";
@@ -243,7 +261,8 @@ async function applyOn(db: Queryable, cfg: WarehousdConfig): Promise<void> {
   if (hasWriteRoles)
     for (const env of ["dev", "live"] as const) await db.query(grantAclWriteDDL(env));
 
-  for (const name of Object.keys(cfg.collections)) {
+  for (const [i, name] of names.entries()) {
+    onProgress?.({ done: i, total: names.length, label: `views · ${name}` });
     for (const env of ["dev", "live"] as const) {
       await db.query(viewDDL(env, name, cfg));
       await db.query(grantViewDDL(env, name));
@@ -270,6 +289,7 @@ async function applyOn(db: Queryable, cfg: WarehousdConfig): Promise<void> {
       [name, c.description, JSON.stringify(c)],
     );
   }
+  onProgress?.({ done: names.length, total: names.length, label: "done" });
 }
 
 /**

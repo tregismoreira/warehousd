@@ -127,7 +127,7 @@ describe("/mcp endpoint", () => {
     expect(metadata.authorization_endpoint).toBeDefined();
   });
 
-  it("list_collections returns names+descriptions only", async () => {
+  it("list_collections returns names, descriptions and the caller's own access", async () => {
     const token = await mintAccessToken("env:dev");
     const { status, body } = await rpc(token, "tools/call", {
       name: "list_collections",
@@ -136,7 +136,14 @@ describe("/mcp endpoint", () => {
     expect(status).toBe(200);
     const out = JSON.parse(body.result.content[0].text);
     expect(Array.isArray(out)).toBe(true);
-    for (const c of out) expect(Object.keys(c).sort()).toEqual(["description", "name"]);
+    // `access` says whether THIS caller holds a read grant — and `grantedFields` a count, never
+    // the names. The names are what describe_collection is for, and it audits them field by field.
+    for (const c of out)
+      expect(Object.keys(c).sort()).toEqual(
+        c.access === "granted"
+          ? ["access", "description", "grantedFields", "name"]
+          : ["access", "description", "name"],
+      );
   });
 
   it("describe_collection is grant-filtered", async () => {

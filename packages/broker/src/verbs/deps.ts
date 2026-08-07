@@ -3,6 +3,7 @@ import type { Pools } from "../db/pools";
 import type { WarehousdConfig } from "../config/schema";
 import type { Embedder } from "../providers";
 import { auditEnabled } from "../config/load";
+import type { AuditDestination } from "../audit/decision";
 
 // What every verb family needs, handed over explicitly rather than closed over.
 //
@@ -28,6 +29,9 @@ export type VerbDeps = {
   // Resolved once here rather than read from `cfg` at each verb's audit writer, so that "is this
   // deployment audited" has one answer for the life of the broker rather than one per verb.
   auditEnabled: boolean;
+  // WHERE an audited decision goes — the same reasoning, one step further. `makeAuditWriter` takes
+  // it as its fourth argument; see audit/sinks/.
+  auditTo: AuditDestination;
 };
 
 export function makeVerbDeps(
@@ -44,5 +48,13 @@ export function makeVerbDeps(
     // cast it never get zod's default, so the key is genuinely absent for most of the test suite.
     isMultiValueField: (field: string) => cfg.taxonomies?.[field]?.multiple ?? false,
     auditEnabled: auditEnabled(cfg),
+    // Optional-chained for the same reason isMultiValueField is: a hand-built config object never
+    // went through zod's defaults, so the whole block can be genuinely absent — and absent means
+    // the default sink, which is what every deployment had before sinks existed.
+    auditTo: {
+      sink: cfg.audit?.sink,
+      ...(cfg.audit?.url ? { url: cfg.audit.url } : {}),
+      ...(cfg.audit?.headers ? { headers: cfg.audit.headers } : {}),
+    },
   };
 }

@@ -90,7 +90,8 @@ tests in the suite.
    tables. Enforced with Postgres role privileges: the app's role has none on
    `data_live` / `data_synth`; the broker holds separate role-scoped pools.
 2. **Deny by default.** No posture means denied. No grant means the user sees
-   nothing beyond a collection's name and description in `list_collections`.
+   nothing beyond a collection's name, description and — about their own access
+   and nobody else's — whether they hold a grant on it, in `list_collections`.
 3. **The client is untrusted.** Query intents are proposals. The broker
    re-validates every one against the grant before constructing SQL, which it
    builds server-side from named views and a fixed operator whitelist. No
@@ -132,7 +133,10 @@ tests in the suite.
    returned unrecorded. A deployment can turn the trail off with
    `audit.enabled: false` for lower environments; then nothing is recorded and
    every `auditId` is null. Nothing ever invents an id to stand in for a row
-   that is not there.
+   that is not there. `audit.sink` chooses the destination — `postgres`,
+   `stdout-json` or `webhook` — and the downgrade rule is what every one of them
+   is held to: a sink that cannot accept an event throws, and the allow it was
+   recording becomes a refusal.
 8. **Tenants are separated by the database, not by a predicate the broker
    remembers.** See [Organizations](#organizations-and-tenant-isolation).
 
@@ -801,6 +805,42 @@ the view.
 > authenticated human surface — the warehousd web UI, or the integrating app's
 > own UI over REST.
 
+## Who a grant is for, and how long it lasts
+
+A grant carries a **principal**, not a user id: `user:<id>` or `group:<name>`.
+Both are resolved on every call from `app.user_groups`, which is warehousd's own
+fact — never a token claim, for the reason `acl/principals.ts` gives about
+per-document ACLs.
+
+**One grant decides, and it is the most specific one.** `loadActiveGrant` orders
+`user:` above `group:` and then by `requested_at desc`, and takes one row. Not a
+union of everything that matches: a union has no id, so `AuditGrant` could not
+say what a decision was made under, and revoking a personal grant would not
+remove access — the opposite of what the revoke button promises. One row wins,
+one id lands on the audit row, revoke means revoke.
+
+The honest cost is that a personal grant *narrower* than one the user inherits
+reduces their access, which surprises people. Two mitigations, both cheap:
+`approveGrant` warns (never refuses) when the grant being approved is narrower
+than one the requester already inherits, and the console shows effective access
+per field.
+
+**`explainAccess`** is the console-only verb behind that: per field, the posture
+from config, whether it is grantable, whether this grant carries it, whether the
+value comes back raw or transformed, and the first rule that said no. Authorised
+against the caller's console role — like `setDocumentAcl`, not against a grant —
+so it is not reachable from MCP at all, and a member may ask about themselves and
+nobody else. It returns the shape of a policy and never a stored value.
+
+Expiry has a lifecycle rather than a column: `grant_expiry_days` on a collection
+supplies the default an approver who names nothing gets, grants lapsing within a
+week surface in the manager inbox, and **Access review** lists every approved
+grant older than a chosen window with when it was last exercised — derived from
+`app.audit_events`, which has carried the deciding grant's id all along. It is a
+query and not a sweep on purpose: expiring access on a schedule would make the
+console's answer depend on when a job last ran, and the decision belongs to a
+person.
+
 ## The change feed
 
 Without a feed, every review UI polls the data. The revision history is already
@@ -1257,10 +1297,10 @@ One OAuth-protected endpoint at `/mcp`, streamable HTTP.
 
 | Tool                  | Behavior                                                              |
 | --------------------- | --------------------------------------------------------------------- |
-| `list_collections`    | Names and descriptions only — no schema, no counts.                   |
+| `list_collections`    | Names, descriptions, and whether the CALLER holds a read grant (plus how many fields it carries). No schema, no counts, no other caller's access. |
 | `describe_collection` | Only the fields visible under the caller's grants.                    |
 | `query_collection`    | Filters, ordering, limits, aggregation — re-validated, then executed. |
-| `search_documents`    | Ranked full-text search over a file collection, grant-filtered.       |
+| `search_documents`    | Ranked search, grant-filtered. Naming a collection searches it; omitting one fans out across every collection the caller may read and merges by reciprocal-rank fusion — one audit row per collection, refusals included. |
 | `request_access`      | Opens a pending grant request for a manager to approve.               |
 
 Refusals return a reason code plus a request-access hint — never a denied value,

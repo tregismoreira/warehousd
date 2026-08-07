@@ -7,6 +7,7 @@ import { makeMutateVerb } from "./verbs/mutate";
 import { makeProposeVerbs } from "./verbs/propose";
 import { makeHistoryVerbs } from "./verbs/history";
 import { makeAclVerbs } from "./acl/manage";
+import { makeExplainVerb } from "./verbs/explain";
 
 // The composition root, and nothing else.
 //
@@ -35,6 +36,10 @@ export function makeBroker(
   // standing (console role, or the client's can_manage_acl flag), never against a grant. See
   // acl/manage.ts.
   const { getDocumentAcl, setDocumentAcl } = makeAclVerbs(deps);
+  // Console-only, and authorised the same way: it answers about a SUBJECT, so asking about
+  // somebody else is a manager's act. There is deliberately no MCP tool — a model that could ask
+  // why a field is denied could map the shape of what it cannot see. See verbs/explain.ts.
+  const { explainAccess } = makeExplainVerb(deps);
 
   return {
     query,
@@ -48,6 +53,7 @@ export function makeBroker(
     listProposals,
     changes,
     listRevisions,
+    explainAccess,
     getProposal,
     getDocumentAcl,
     setDocumentAcl,

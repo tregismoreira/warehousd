@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, accessSync, constants } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { kindOf } from "./kinds";
 import {
   ConfigSchema,
   readPosture,
@@ -162,9 +163,10 @@ export function supportedVerbs(
   collection: string,
 ): ("create" | "update" | "delete")[] {
   const c = findCollection(cfg, collection);
-  if (!c || !c.writable) return [];
-  if (c.type === "file") return ["create"];
-  return ["create", "update", "delete"];
+  if (!c) return [];
+  // Structural: it follows from the KIND, so a fourth kind declares its own answer rather than
+  // this function growing a third branch. See config/kinds/.
+  return kindOf(c).supportedVerbs(c);
 }
 
 // Every `${env:NAME}` referenced by the config, without resolving any of them.

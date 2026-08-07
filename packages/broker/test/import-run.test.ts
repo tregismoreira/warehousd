@@ -181,7 +181,7 @@ describe("importCollection", () => {
     );
     const r = await importCollection(
       pools,
-      { ...cfg, audit: { enabled: false } },
+      { ...cfg, audit: { ...cfg.audit, enabled: false } },
       "ana",
       "departments",
       { format: "csv", text: `id,name\n${U(19)},Unaudited` },

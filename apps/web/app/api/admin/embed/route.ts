@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { embedCollection, auditEnabled } from "@warehousd/broker";
+import { embedCollection, auditEnabled, kindOf } from "@warehousd/broker";
 import { makeEmbedder } from "@warehousd/providers";
 import { getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
@@ -34,12 +34,12 @@ export async function POST(req: NextRequest) {
   const names = collection
     ? [collection]
     : Object.entries(cfg.collections)
-        .filter(([, c]) => c.type === "file")
+        .filter(([, c]) => kindOf(c).chunked)
         .map(([n]) => n);
   for (const n of names) {
     const c = cfg.collections[n];
     if (!c) return Response.json({ error: "unknown_collection" }, { status: 404 });
-    if (c.type !== "file")
+    if (!kindOf(c).chunked)
       return Response.json({ error: "not_a_file_collection" }, { status: 400 });
   }
 

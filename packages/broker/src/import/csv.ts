@@ -73,6 +73,32 @@ export function parseCsv(text: string): Record<string, string>[] {
   });
 }
 
+import { rowsFromSheet, selectSheet, type SheetOptions, type SheetReader } from "./sheet";
+
+/** Everything an import can arrive as. `xlsx` is bytes; the other two are text. */
+export type ImportPayload =
+  { format: "csv" | "json"; text: string } | ({ format: "xlsx"; bytes: Uint8Array } & SheetOptions);
+
+export const IMPORT_FORMATS = ["csv", "json", "xlsx"] as const;
+export type ImportFormat = (typeof IMPORT_FORMATS)[number];
+
+/**
+ * A payload as rows.
+ *
+ * `xlsx` needs a `SheetReader`, which is injected rather than constructed: a workbook parser is a
+ * ZIP reader and an XML reader, and `packages/broker` is meant to stay thin. Without one the
+ * format is refused by name rather than silently falling back to CSV — see import/sheet.ts.
+ */
+export function parseImport(
+  payload: ImportPayload,
+  opts: { sheets?: SheetReader | undefined } = {},
+): Record<string, unknown>[] {
+  if (payload.format !== "xlsx") return parseImportPayload(payload.text, payload.format);
+  if (!opts.sheets) throw new Error("XLSX import needs a sheet reader, and none was configured");
+  const grids = opts.sheets.read(payload.bytes);
+  return rowsFromSheet(selectSheet(grids, payload.sheet), payload);
+}
+
 export function parseImportPayload(
   text: string,
   format: "csv" | "json",

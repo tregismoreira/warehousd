@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
+import { kindOf } from "../config/kinds";
 import type { WarehousdConfig } from "../config/schema";
-import { generateSynthetic } from "./generate";
+import { generateSynthetic, type SyntheticProgress } from "./generate";
 
 // Truncate-then-generate, extracted so the CLI (`warehousd seed`), the bootstrap script and
 // the admin UI share one implementation instead of three copies that can drift.
@@ -11,13 +12,14 @@ export async function regenerateSynthetic(
   db: Pool,
   cfg: WarehousdConfig,
   seed = 42,
+  opts: { onProgress?: ((p: SyntheticProgress) => void) | undefined } = {},
 ): Promise<{ collections: string[] }> {
   const regenerated: string[] = [];
   for (const name of Object.keys(cfg.collections)) {
     const c = cfg.collections[name];
     // File collections are populated by indexCollection, not the generator; writable
     // collections hold real writes/proposals that a synthetic regen must not truncate.
-    if (!c || c.type === "file" || c.writable) continue;
+    if (!c || !kindOf(c).synthesisable || c.writable) continue;
     await db.query(`truncate data_synth.${name} cascade`);
     // The collection's ACL rows go with its documents. `_acl` is a separate table keyed on
     // document id, so a truncate leaves rows behind pointing at documents that no longer exist —
@@ -27,6 +29,6 @@ export async function regenerateSynthetic(
     if (c.acl) await db.query(`delete from data_synth."_acl" where collection = $1`, [name]);
     regenerated.push(name);
   }
-  await generateSynthetic(db, cfg, seed);
+  await generateSynthetic(db, cfg, seed, opts);
   return { collections: regenerated };
 }

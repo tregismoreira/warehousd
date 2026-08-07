@@ -7,6 +7,7 @@ import {
   findCollection,
   loadTaxonomyBindings,
   type TaxonomyBinding,
+  kindOf,
 } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
@@ -126,7 +127,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
     // as `filterOps` below: the upload form needs to render an input per metadata field, and
     // deciding which of `fields` those are means knowing which names are structural — a list the
     // client would otherwise have to keep in step with the broker's by hand.
-    metadataFields: c.type === "file" ? fileMetadataFields(c) : [],
+    metadataFields: kindOf(c).chunked ? fileMetadataFields(c) : [],
     // The operators the broker's intent schema accepts, served rather than restated. The data
     // browser is a client component, and importing the broker into the browser bundle would drag
     // `pg` and `node:fs` in with it — so the one place that knows the list hands it over.

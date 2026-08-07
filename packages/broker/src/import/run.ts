@@ -9,8 +9,14 @@ import { DEFAULT_ORG_ID } from "../db/migrate-app";
 import { writeAudit } from "../audit/write";
 import { writeChangeLog } from "../verbs/history";
 import { auditEnabled, findCollection } from "../config/load";
-import { parseImportPayload } from "./csv";
-import { validateImportRows, type ImportError } from "./validate";
+import { parseImport, type ImportPayload } from "./csv";
+import type { SheetReader } from "./sheet";
+import {
+  validateImportRows,
+  summarizeImportErrors,
+  type ImportError,
+  type ImportErrorSummary,
+} from "./validate";
 import { loadTaxonomyBindings, syncDatasetTerms, type TaxonomyBinding } from "../taxonomy";
 
 // The three things an admin can do to real data. All three are APPENDS at the storage layer:
@@ -23,6 +29,13 @@ export type ImportMode = (typeof IMPORT_MODES)[number];
 
 export type ImportCounts = { inserted: number; updated: number; deleted: number };
 
+// How far through the file an import is, in the shape EmbedProgress already had. `total` is always
+// known — validation has already counted the rows — so the CLI can render a rate and an ETA.
+//
+// Reported from inside the transaction, which is where the work happens. A dry run reports the
+// same numbers and then rolls the whole thing back; that is the point of a dry run.
+export type ImportProgress = { done: number; total: number; phase: "check" | "write" };
+
 export type ImportResult =
   // `auditId` is nullable on the success arm too: a deployment with `audit.enabled: false`
   // writes no row, and fabricating an id for one that does not exist would be worse than saying
@@ -34,7 +47,16 @@ export type ImportResult =
       columns: string[];
       auditId: string | null;
     } & ImportCounts)
-  | { ok: false; reason: string; errors?: ImportError[]; auditId: string | null };
+  | {
+      ok: false;
+      reason: string;
+      errors?: ImportError[];
+      // The aggregation both the CLI and /admin/import render from. Present wherever `errors` is:
+      // fifty row numbers out of ten thousand is not a diagnosis, and the two surfaces must not
+      // each invent their own way of saying so. See summarizeImportErrors.
+      summary?: ImportErrorSummary;
+      auditId: string | null;
+    };
 
 // Thrown to unwind the import transaction on a dry run. withOrg rolls back on any throw, which
 // is the whole mechanism: a preview runs the real statements against the real table and then
@@ -68,8 +90,15 @@ export async function importCollection(
   cfg: WarehousdConfig,
   actor: string,
   collection: string,
-  payload: { text: string; format: "csv" | "json" },
-  opts: { mode?: ImportMode; dryRun?: boolean; orgId?: string } = {},
+  payload: ImportPayload,
+  opts: {
+    mode?: ImportMode;
+    dryRun?: boolean;
+    orgId?: string;
+    onProgress?: ((p: ImportProgress) => void) | undefined;
+    // Injected for `format: "xlsx"`, never constructed here — see import/csv.ts.
+    sheets?: SheetReader | undefined;
+  } = {},
 ): Promise<ImportResult> {
   const mode: ImportMode = opts.mode ?? "append";
   const dryRun = opts.dryRun ?? false;
@@ -122,7 +151,7 @@ export async function importCollection(
 
   let rows: Record<string, unknown>[];
   try {
-    rows = parseImportPayload(payload.text, payload.format);
+    rows = parseImport(payload, { sheets: opts.sheets });
   } catch {
     const auditId = await audit("refused", "parse_failed", { rows: 0 });
     return { ok: false, reason: "parse_failed", auditId };
@@ -157,7 +186,13 @@ export async function importCollection(
   const v = validateImportRows(cfg, collection, rows, { taxonomies, mode });
   if (!v.ok) {
     const auditId = await audit("refused", "validation_failed", { rows: rows.length });
-    return { ok: false, reason: "validation_failed", errors: v.errors, auditId };
+    return {
+      ok: false,
+      reason: "validation_failed",
+      errors: v.errors,
+      summary: v.summary,
+      auditId,
+    };
   }
 
   // `collection` and every column name were validated against the loaded config above, so these
@@ -211,13 +246,15 @@ export async function importCollection(
         for (const [idx, row] of v.values.entries()) {
           const doc = docOf(row);
           if (!(await currentRevision(client, table, pk!, doc[pk!], "")))
-            missing.push({ row: idx, column: pk, reason: "not_found" });
+            missing.push({ row: idx, column: pk, reason: "not_found", scope: "row" });
+          opts.onProgress?.({ done: idx + 1, total: v.values.length, phase: "check" });
         }
         if (missing.length) throw new RowErrors(missing);
       }
 
       for (const [idx, row] of v.values.entries()) {
         const doc = docOf(row);
+        opts.onProgress?.({ done: idx, total: v.values.length, phase: "write" });
 
         if (mode === "append") {
           const rev = await insertRevision(client, table, dataCols, create(v.columns), doc);
@@ -279,13 +316,19 @@ export async function importCollection(
         const missing = requiredCols.filter((col) => doc[col] === undefined || doc[col] === null);
         if (missing.length)
           throw new RowErrors(
-            missing.map((col) => ({ row: idx, column: col, reason: "missing_required" })),
+            missing.map((col) => ({
+              row: idx,
+              column: col,
+              reason: "missing_required",
+              scope: "row" as const,
+            })),
           );
         const rev = await insertRevision(client, table, dataCols, create(v.columns), doc);
         n.inserted++;
         feed.push({ documentId: idOf(doc), rev, op: "create" });
       }
 
+      opts.onProgress?.({ done: v.values.length, total: v.values.length, phase: "write" });
       if (dryRun) throw new DryRunRollback(n);
       return n;
     });
@@ -307,7 +350,15 @@ export async function importCollection(
     }
     if (e instanceof RowErrors) {
       const auditId = await audit("refused", "validation_failed", { rows: v.values.length });
-      return { ok: false, reason: "validation_failed", errors: e.errors, auditId };
+      // Discovered inside the transaction, so there is no validation summary to carry — these are
+      // built from the array, which is complete here because the loop throws on the first batch.
+      return {
+        ok: false,
+        reason: "validation_failed",
+        errors: e.errors,
+        summary: summarizeImportErrors(e.errors, v.values.length),
+        auditId,
+      };
     }
     const code = (e as { code?: string }).code;
     // 23xxx = integrity constraint violation (unique, FK, not-null, check). On append that is

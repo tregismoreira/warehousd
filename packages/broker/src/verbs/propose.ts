@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { kindOf } from "../config/kinds";
 import type { PoolClient } from "pg";
 import type {
   BrokerContext,
@@ -191,12 +192,117 @@ export async function proposeDataset(
   }
 }
 
+// The field names a pending revision claims to change. Stored as `_rev_fields`; read through one
+// accessor so "a proposal with no listed fields" is the same empty list everywhere.
+function proposedFieldsOf(proposal: RevisionRow): string[] {
+  return proposal._rev_fields ?? [];
+}
+
+// Four eyes. A proposal exists so that something other than the proposer decides, and the approve
+// verb alone does not make the approver that something.
+//
+// This was previously left to "approve is not an MCP tool", which held only while the model was the
+// only proposer. The REST adapter exposes approveProposal to any bearer token — including a
+// headless API key — so a single credential holding verbs: ["update", "approve"] could propose and
+// approve in two calls, and the pending state that exists to interpose a person interposed nobody.
+export function checkFourEyes(
+  proposal: Pick<RevisionRow, "_rev_by">,
+  ctx: Pick<BrokerContext, "userId">,
+): boolean {
+  return proposal._rev_by === ctx.userId;
+}
+
+// The state the document will hold once this proposal is applied: the current revision with the
+// proposal's own changed fields laid over it, and the sequence number that state gets.
+//
+// Pure, and separated for that reason — it is the one part of approval that can be reasoned about
+// (and tested) without a transaction, and the merge rule is the part a reader most needs to check.
+export function mergeRevision(
+  c: CollectionConfig,
+  proposal: RevisionRow,
+  currentRev: RevisionRow | null,
+): { merged: Record<string, unknown>; newSeq: number } {
+  const dataCols = dataColsOf(c);
+  const merged: Record<string, unknown> = {};
+  // Start from what the document holds now; a create has nothing to start from, so it starts from
+  // the proposal itself.
+  for (const f of dataCols) merged[f] = (currentRev ?? proposal)[f];
+  // Then the proposal's own changes, and only those: a field the proposal did not touch keeps
+  // whatever value it acquired while the proposal was pending.
+  for (const f of proposedFieldsOf(proposal)) if (dataCols.includes(f)) merged[f] = proposal[f];
+
+  // _rev_seq counts the states the document actually held, so it comes from the revision being
+  // replaced rather than from max(_rev_seq).
+  //
+  // max() counted the pending row too — the proposal being approved is itself in this table — so
+  // every approval skipped a number: a document with two real revisions reported seqs 1 and 3.
+  // Deriving it from the current revision keeps the sequence contiguous, and matches what
+  // mutateDataset does on the direct path (`Number(current._rev_seq) + 1`).
+  const newSeq = proposal._rev_op === "create" ? 1 : Number(currentRev!._rev_seq) + 1;
+  return { merged, newSeq };
+}
+
+// Write the merged state and retire what it replaces. Demote first, then promote: the partial
+// unique index on (org_id, pk) where _current refuses two current rows, so the order is not a
+// preference.
+export async function commitRevision(
+  client: PoolClient,
+  ctx: BrokerContext,
+  args: {
+    table: string;
+    collection: string;
+    c: CollectionConfig;
+    proposal: RevisionRow;
+    currentRev: RevisionRow | null;
+    merged: Record<string, unknown>;
+    newSeq: number;
+    pk: string;
+  },
+): Promise<string> {
+  const { table, c, proposal, currentRev, merged, newSeq } = args;
+
+  if (currentRev) await demoteRevision(client, table, currentRev._rev);
+
+  // `_rev_by` carries the PROPOSER, not the approver: authorship survives the merge, and the
+  // approver's identity is the audit row's job.
+  const newRevId = await insertRevision(
+    client,
+    table,
+    dataColsOf(c),
+    {
+      seq: newSeq,
+      op: proposal._rev_op as "create" | "update" | "delete",
+      status: "approved",
+      fields: proposedFieldsOf(proposal),
+      base: proposal._rev_base === null ? null : Number(proposal._rev_base),
+      current: true,
+      by: proposal._rev_by,
+      orgId: ctx.orgId,
+    },
+    merged,
+  );
+
+  // The pending row was consumed by the merged revision above, so it is marked `superseded`, not
+  // `approved`. Flipping it to `approved` left two approved rows carrying the same `_rev_fields`
+  // and `_rev_by`: the document's history showed every approval twice, and listRevisions could not
+  // tell which of the pair was the state the document held.
+  //
+  // It is kept rather than removed — the write role holds no DELETE, and the row is the record of
+  // what was *proposed*, which the merged row does not preserve when the merge pulled in
+  // concurrent changes.
+  await client.query(`update ${table} set _rev_status = 'superseded' where _rev = $1`, [
+    proposal._rev,
+  ]);
+
+  return newRevId;
+}
+
 export function makeProposeVerbs(d: VerbDeps) {
   const { app, cfg, pools } = d;
 
   // Locate a pending proposal by id. Only revisable collections have a _rev column at all —
   // scanning the rest throws `column "_rev" does not exist`.
-  async function findPending(
+  async function loadPending(
     client: PoolClient,
     env: "dev" | "live",
     schema: string,
@@ -220,193 +326,50 @@ export function makeProposeVerbs(d: VerbDeps) {
   // Approve and reject are deliberately NOT MCP tools — the untrusted model may propose, but not
   // decide. That is a surface restriction, and it is only half of the rule: the REST adapter
   // exposes both verbs to any bearer token, so the other half — that the decider is not the
-  // proposer — is enforced below against `_rev_by`, where no adapter can omit it.
+  // proposer — is enforced in `checkFourEyes`, where no adapter can omit it.
+  //
+  // The body below is the sequence and nothing else: authorise, resolve what is being replaced,
+  // merge, commit. Each of those four is a named function, because as one 200-line block the
+  // security-relevant middle (four eyes, field coverage, the conflict scan) sat between two
+  // stretches of bookkeeping and could only be reviewed by reading all of it.
   async function approveProposal(ctx: BrokerContext, proposalId: string): Promise<DecisionResult> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     const schema = dataSchema(ctx.env);
 
-    // Find the proposal by proposalId
     const pool = writePool(pools, ctx);
     if (!pool) return audit.refuse("*", "not_writable");
 
     try {
       return await withOrg(pool, ctx.orgId, async (client): Promise<DecisionResult> => {
-        const found = await findPending(client, ctx.env, schema, proposalId);
+        const found = await loadPending(client, ctx.env, schema, proposalId);
         if (!found) return audit.refuse("*", "not_found");
-        const { collection: collectionName, row: proposal } = found;
+        const { collection: name, row: proposal } = found;
 
-        const c = findCollection(cfg, collectionName);
-        if (!c) return audit.refuse(collectionName, "unknown_collection");
+        const authorized = await authorizeApproval(ctx, audit, name, proposal);
+        if (!authorized.ok) return authorized;
+        const { collection: c, grant, pk } = authorized;
 
-        // Load the approver's grant
-        const grant = await loadActiveGrant(app, ctx, collectionName);
-        if (!grant) return audit.refuse(collectionName, "no_grant");
+        const table = `${schema}.${ident(name)}`;
+        const base = await resolveBase(client, ctx, audit, { name, c, grant, pk, table }, proposal);
+        if (!base.ok) return base;
+        const currentRev = base.currentRev;
 
-        // Four eyes. A proposal exists so that something other than the proposer decides, and
-        // the approve verb alone does not make the approver that something.
-        //
-        // This was previously left to "approve is not an MCP tool", which held only while the
-        // model was the only proposer. The REST adapter exposes approveProposal to any bearer
-        // token — including a headless API key — so a single credential holding
-        // verbs: ["update", "approve"] could propose and approve in two calls, and the pending
-        // state that exists to interpose a person interposed nobody.
-        //
-        // Checked before the verb, so the answer does not depend on the caller's own grant: a
-        // proposer who lacks `approve` learns they cannot approve their own work either way.
-        if (proposal._rev_by === ctx.userId)
-          return audit.refuse(collectionName, "self_approval_denied", { grant });
-
-        // Require approve verb
-        if (!grant.verbs.includes("approve"))
-          return audit.refuse(collectionName, "verb_denied", { grant });
-
-        // Invariant: approve requires read coverage of every field in the proposal. Without this,
-        // "approve, then read the diff" is a privilege-escalation path around field postures.
-        const proposedFields: string[] = proposal._rev_fields ?? [];
-        for (const f of proposedFields) {
-          if (!grant.allowedFields.includes(f))
-            return audit.refuse(collectionName, "field_denied", { grant });
-        }
-
-        // Get the pk field for this collection
-        const pk = pkOf(c);
-        if (!pk) return audit.refuse(collectionName, "invalid_intent", { grant });
-
-        const table = `${schema}.${ident(collectionName)}`;
-
-        // The filters must be evaluable before either branch below leans on them, and refused
-        // the same way the read path refuses them — see grants/filters.ts.
-        if (validateDocumentFilters(grant.documentFilter, c))
-          return audit.refuse(collectionName, "invalid_intent", { grant });
-
-        // Check document filter and ACL for approver
-        let currentRev: RevisionRow | null = null;
-        if (proposal._rev_op === "create") {
-          // For create proposals, there's no current revision yet. We need to check if the proposed
-          // values would pass the filter. For now, we'll build a temporary object to check.
-          const tempDoc: Record<string, unknown> = {};
-          for (const f of Object.keys(c.fields)) {
-            tempDoc[f] = proposal[f];
-          }
-          // The ACL comes with it. A document that does not exist yet can still have one — an ACL
-          // is keyed on the pk, and nothing stops it being written before the create is approved —
-          // and dropping the column here would make `admits()` fail closed on every create
-          // proposal against an ACL'd collection.
-          if (Object.hasOwn(proposal, ACL_COLUMN)) tempDoc[ACL_COLUMN] = proposal[ACL_COLUMN];
-          if (!admits(tempDoc, grant, c))
-            return audit.refuse(collectionName, "not_found", { grant });
-        } else {
-          // For update/delete, fetch the current revision, with its ACL
-          const currentQ = await client.query(
-            `select t.*${aclColumnSql(ctx.env, collectionName, c, "t")} from ${table} t
-             where t.${ident(pk)} = $1 and t._current`,
-            [proposal[pk]],
-          );
-          if (currentQ.rows.length === 0)
-            return audit.refuse(collectionName, "not_found", { grant });
-          currentRev = currentQ.rows[0] as RevisionRow;
-
-          // Check document filter and ACL
-          if (!admits(currentRev, grant, c))
-            return audit.refuse(collectionName, "not_found", { grant });
-
-          // Conflict check: if any field in proposal._rev_fields was changed after _rev_base,
-          // refuse with conflict. Scan revisions with _rev_seq > _rev_base and _rev_status = 'approved'.
-          if (proposal._rev_base !== null && proposedFields.length > 0) {
-            const conflictQ = await client.query(
-              `select _rev_fields from ${table}
-               where ${ident(pk)} = $1 and _rev_status = 'approved' and _rev_seq > $2
-               order by _rev_seq asc`,
-              [proposal[pk], proposal._rev_base],
-            );
-
-            const changedSince = new Set<string>();
-            for (const row of conflictQ.rows) {
-              const fields: string[] = row._rev_fields ?? [];
-              for (const f of fields) changedSince.add(f);
-            }
-
-            // Check for overlap
-            const overlap = proposedFields.some((f) => changedSince.has(f));
-            if (overlap) return audit.refuse(collectionName, "conflict", { grant });
-          }
-        }
-
-        // Promotion: merge the proposal with the current state
-        const dataCols = dataColsOf(c);
-
-        // Build the merged row: start with current, overwrite with proposal's changes
-        const merged: Record<string, unknown> = {};
-        if (currentRev) {
-          for (const f of dataCols) merged[f] = currentRev[f];
-        } else {
-          // Create case: use proposal values
-          for (const f of dataCols) merged[f] = proposal[f];
-        }
-        // Overwrite with proposed changes
-        for (const f of proposedFields) {
-          if (dataCols.includes(f)) {
-            merged[f] = proposal[f];
-          }
-        }
-
-        // _rev_seq counts the states the document actually held, so it comes from the revision
-        // being replaced rather than from max(_rev_seq).
-        //
-        // max() counted the pending row too — the proposal being approved is itself in this table —
-        // so every approval skipped a number: a document with two real revisions reported seqs 1
-        // and 3. Deriving it from the current revision keeps the sequence contiguous, and matches
-        // what mutateDataset does on the direct path (`Number(current._rev_seq) + 1`).
-        const newSeq = proposal._rev_op === "create" ? 1 : Number(currentRev!._rev_seq) + 1;
-
-        // If there's a current revision, demote it BEFORE promoting the new one
-        if (currentRev) await demoteRevision(client, table, currentRev._rev);
-
-        // Write the new current revision. `_rev_by` carries the PROPOSER, not the approver:
-        // authorship survives the merge, and the approver's identity is the audit row's job.
-        const newRevId = await insertRevision(
-          client,
+        const { merged, newSeq } = mergeRevision(c, proposal, currentRev);
+        const newRevId = await commitRevision(client, ctx, {
           table,
-          dataCols,
-          {
-            seq: newSeq,
-            op: proposal._rev_op as "create" | "update" | "delete",
-            status: "approved",
-            fields: proposal._rev_fields ?? [],
-            base: proposal._rev_base === null ? null : Number(proposal._rev_base),
-            current: true,
-            by: proposal._rev_by,
-            orgId: ctx.orgId,
-          },
+          collection: name,
+          c,
+          proposal,
+          currentRev,
           merged,
-        );
+          newSeq,
+          pk,
+        });
 
-        // The pending row was consumed by the merged revision above, so it is marked `superseded`,
-        // not `approved`. Flipping it to `approved` left two approved rows carrying the same
-        // `_rev_fields` and `_rev_by`: the document's history showed every approval twice, and
-        // listRevisions could not tell which of the pair was the state the document held.
-        //
-        // It is kept rather than removed — the write role holds no DELETE, and the row is the
-        // record of what was *proposed*, which the merged row does not preserve when the merge
-        // pulled in concurrent changes.
-        await client.query(`update ${table} set _rev_status = 'superseded' where _rev = $1`, [
-          proposalId,
-        ]);
-
-        // Get the document ID for the response
         const docId = String(merged[pk] ?? proposal[pk]);
+        await writeChangeLog(client, ctx, name, docId, newRevId, proposal._rev_op, "approved");
 
-        await writeChangeLog(
-          client,
-          ctx,
-          collectionName,
-          docId,
-          newRevId,
-          proposal._rev_op,
-          "approved",
-        );
-
-        const rec = await audit.allow(collectionName, { grant });
+        const rec = await audit.allow(name, { grant });
         assertRecorded(rec);
         return { ok: true as const, documentId: docId, rev: newRevId, auditId: rec.auditId };
       });
@@ -423,13 +386,116 @@ export function makeProposeVerbs(d: VerbDeps) {
     }
   }
 
+  // May THIS caller approve THIS proposal? Everything that can be answered from the proposal row,
+  // the config and the approver's own grant, in the order it has always been asked in.
+  async function authorizeApproval(
+    ctx: BrokerContext,
+    audit: AuditWriter,
+    name: string,
+    proposal: RevisionRow,
+  ): Promise<
+    | { ok: true; collection: CollectionConfig; grant: ActiveGrant; pk: string }
+    | { ok: false; reason: MutationRefusalReason; auditId: AuditId }
+  > {
+    const c = findCollection(cfg, name);
+    if (!c) return audit.refuse(name, "unknown_collection");
+
+    const grant = await loadActiveGrant(app, ctx, name);
+    if (!grant) return audit.refuse(name, "no_grant");
+
+    // Four eyes, checked BEFORE the verb so the answer does not depend on the caller's own grant:
+    // a proposer who lacks `approve` learns they cannot approve their own work either way.
+    if (checkFourEyes(proposal, ctx)) return audit.refuse(name, "self_approval_denied", { grant });
+
+    if (!grant.verbs.includes("approve")) return audit.refuse(name, "verb_denied", { grant });
+
+    // Invariant: approve requires read coverage of every field in the proposal. Without this,
+    // "approve, then read the diff" is a privilege-escalation path around field postures.
+    for (const f of proposedFieldsOf(proposal))
+      if (!grant.allowedFields.includes(f)) return audit.refuse(name, "field_denied", { grant });
+
+    const pk = pkOf(c);
+    if (!pk) return audit.refuse(name, "invalid_intent", { grant });
+
+    // The filters must be evaluable before either branch below leans on them, and refused the
+    // same way the read path refuses them — see grants/filters.ts.
+    if (validateDocumentFilters(grant.documentFilter, c))
+      return audit.refuse(name, "invalid_intent", { grant });
+
+    return { ok: true, collection: c, grant, pk };
+  }
+
+  // What this proposal is being applied ON TOP OF: the document's current revision, or nothing for
+  // a create. Also where the two questions that need the stored state are asked — does the
+  // approver's grant admit this document, and has anything it touches moved since it was proposed.
+  async function resolveBase(
+    client: PoolClient,
+    ctx: BrokerContext,
+    audit: AuditWriter,
+    scope: {
+      name: string;
+      c: CollectionConfig;
+      grant: ActiveGrant;
+      pk: string;
+      table: string;
+    },
+    proposal: RevisionRow,
+  ): Promise<
+    | { ok: true; currentRev: RevisionRow | null }
+    | { ok: false; reason: MutationRefusalReason; auditId: AuditId }
+  > {
+    const { name, c, grant, pk, table } = scope;
+
+    if (proposal._rev_op === "create") {
+      // No current revision yet, so the filter is checked against the proposed values.
+      const tempDoc: Record<string, unknown> = {};
+      for (const f of Object.keys(c.fields)) tempDoc[f] = proposal[f];
+      // The ACL comes with it. A document that does not exist yet can still have one — an ACL is
+      // keyed on the pk, and nothing stops it being written before the create is approved — and
+      // dropping the column here would make `admits()` fail closed on every create proposal
+      // against an ACL'd collection.
+      if (Object.hasOwn(proposal, ACL_COLUMN)) tempDoc[ACL_COLUMN] = proposal[ACL_COLUMN];
+      if (!admits(tempDoc, grant, c)) return audit.refuse(name, "not_found", { grant });
+      return { ok: true, currentRev: null };
+    }
+
+    const currentQ = await client.query(
+      `select t.*${aclColumnSql(ctx.env, name, c, "t")} from ${table} t
+       where t.${ident(pk)} = $1 and t._current`,
+      [proposal[pk]],
+    );
+    if (currentQ.rows.length === 0) return audit.refuse(name, "not_found", { grant });
+    const currentRev = currentQ.rows[0] as RevisionRow;
+
+    if (!admits(currentRev, grant, c)) return audit.refuse(name, "not_found", { grant });
+
+    // If any field in proposal._rev_fields was changed after _rev_base, the proposal was written
+    // against a state that no longer exists.
+    const proposedFields = proposedFieldsOf(proposal);
+    if (proposal._rev_base !== null && proposedFields.length > 0) {
+      const conflictQ = await client.query(
+        `select _rev_fields from ${table}
+         where ${ident(pk)} = $1 and _rev_status = 'approved' and _rev_seq > $2
+         order by _rev_seq asc`,
+        [proposal[pk], proposal._rev_base],
+      );
+      const changedSince = new Set<string>();
+      for (const row of conflictQ.rows)
+        for (const f of (row._rev_fields ?? []) as string[]) changedSince.add(f);
+      if (proposedFields.some((f) => changedSince.has(f)))
+        return audit.refuse(name, "conflict", { grant });
+    }
+
+    return { ok: true, currentRev };
+  }
+
   async function rejectProposal(
     ctx: BrokerContext,
     proposalId: string,
   ): Promise<
     { ok: true; auditId: AuditId } | { ok: false; reason: MutationRefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     const schema = dataSchema(ctx.env);
 
     const pool = writePool(pools, ctx);
@@ -437,7 +503,7 @@ export function makeProposeVerbs(d: VerbDeps) {
 
     try {
       return await withOrg(pool, ctx.orgId, async (client) => {
-        const found = await findPending(client, ctx.env, schema, proposalId);
+        const found = await loadPending(client, ctx.env, schema, proposalId);
         if (!found) return audit.refuse("*", "not_found");
         const { collection: collectionName, row: proposal } = found;
 
@@ -506,7 +572,7 @@ export function makeProposeVerbs(d: VerbDeps) {
     | { ok: true; proposals: ProposalSummary[]; auditId: AuditId }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     const auditCollection = opts.collection ?? "*";
 
     const pool = writePool(pools, ctx);
@@ -537,7 +603,7 @@ export function makeProposeVerbs(d: VerbDeps) {
         for (const name of names) {
           const c = findCollection(cfg, name);
           // Only revisable collections have proposals at all.
-          if (!c || !c.writable || c.type === "file") continue;
+          if (!c || !c.writable || kindOf(c).chunked) continue;
 
           const grant = grants.get(name);
           if (!grant || !grant.verbs.includes("approve")) continue;
@@ -613,7 +679,7 @@ export function makeProposeVerbs(d: VerbDeps) {
       }
     | { ok: false; reason: RefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     const pool = writePool(pools, ctx);
     if (!pool) return audit.refuse("*", "internal_error");
 
@@ -621,7 +687,7 @@ export function makeProposeVerbs(d: VerbDeps) {
 
     try {
       const found = await withOrg(pool, ctx.orgId, (client) =>
-        findPending(client, ctx.env, schema, proposalId),
+        loadPending(client, ctx.env, schema, proposalId),
       );
 
       if (!found) return audit.refuse("*", "not_found");
@@ -641,7 +707,7 @@ export function makeProposeVerbs(d: VerbDeps) {
       if (validateDocumentFilters(grant.documentFilter, c))
         return audit.refuse(coll, "invalid_intent", { grant });
 
-      // `findPending` fetched the row with its ACL, so this is the whole of the question — the
+      // `loadPending` fetched the row with its ACL, so this is the whole of the question — the
       // filters and the per-document policy at once.
       if (!admits(row, grant, c)) return audit.refuse(coll, "not_found", { grant });
 

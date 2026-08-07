@@ -24,6 +24,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mono } from "@/components/common/Mono";
 import { requestJson } from "@/lib/client-api";
+import { reportImportSummary, type ImportErrorSummary } from "@warehousd/broker";
 
 interface ViewJoin {
   table: string;
@@ -51,20 +52,6 @@ interface ImportError {
   column: string;
   reason: string;
 }
-
-const ERROR_LABELS: Record<string, string> = {
-  invalid_uuid: "not a UUID",
-  missing_required: "required value missing",
-  unknown_term: "not a term in the bound vocabulary",
-  // The admin path always resolves bindings before validating, so this now means the
-  // vocabulary was never applied. A term store that is merely unreachable refuses the whole
-  // file as `taxonomy_unavailable` instead, and never reaches this per-column list.
-  unvalidatable_term: "its vocabulary has not been applied to this stack",
-  duplicate_pk: "duplicate primary key in this file",
-  constraint_violation: "conflicts with data already in the collection",
-  not_found: "no document with this primary key",
-  no_primary_key: "this collection declares no primary key to address documents by",
-};
 
 type Mode = "append" | "upsert" | "delete";
 
@@ -95,7 +82,17 @@ const MODES: { value: Mode; label: string; blurb: string; columns: string }[] = 
   },
 ];
 
-type State = "pick" | "confirm" | "result";
+type State = "pick" | "map" | "confirm" | "result";
+
+// What the mapping step holds: the file's headers, the collection's fields, and header → field.
+type MapInfo = {
+  headers: string[];
+  fields: { name: string; type: string | null; nullable: boolean }[];
+  configured: Record<string, string>;
+  proposed: Record<string, string>;
+  unmatchedHeaders: string[];
+  missingRequired: string[];
+};
 
 // "4 added, 96 revised" rather than one number that hides which is which. A count of zero is
 // left out entirely: "0 deleted" on an upsert is noise.
@@ -120,7 +117,51 @@ type ImportResponse = {
   columns?: string[];
   error?: string;
   errors?: ImportError[];
+  // The grouped view. Built by the broker so this panel and `warehousd import validate` count
+  // and word a failure identically — see packages/broker/src/import/report.ts.
+  summary?: ImportErrorSummary;
 };
+
+// Grouped by (column, reason) with complete counts, not a list of the first fifty row numbers.
+// Fifty row numbers out of ten thousand is not a diagnosis — "hire_date, invalid date, 97 rows"
+// is. The grouping and the wording come from the broker, so this panel and the CLI's
+// `import validate` report cannot drift; all that is decided here is the markup.
+function ImportErrorPanel({ summary }: { summary: ImportErrorSummary }) {
+  const report = reportImportSummary(summary);
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-semibold text-deny">Nothing was imported. {report.headline}</p>
+      <div className="overflow-auto rounded border border-deny/20 bg-card">
+        <table className="w-full text-xs">
+          <thead className="border-b border-deny/20 text-left text-muted-foreground">
+            <tr>
+              <th className="p-2 font-medium">Column</th>
+              <th className="p-2 font-medium">Problem</th>
+              <th className="p-2 font-medium">Extent</th>
+              <th className="p-2 font-medium">First</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.lines.map((l, i) => (
+              <tr key={i} className="border-b border-border/40 last:border-0">
+                <td className="p-2 font-mono">{l.column ?? "—"}</td>
+                <td className="p-2 text-deny">
+                  {l.label}
+                  {l.hint && <span className="block text-muted-foreground">→ {l.hint}</span>}
+                </td>
+                <td className="p-2 whitespace-nowrap">{l.extent}</td>
+                <td className="p-2 whitespace-nowrap text-muted-foreground">
+                  {l.firstRow === null ? "—" : `row ${l.firstRow}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {report.footer && <p className="text-xs text-muted-foreground">{report.footer}</p>}
+    </div>
+  );
+}
 
 export function ImportForm() {
   const [state, setState] = useState<State>("pick");
@@ -138,6 +179,15 @@ export function ImportForm() {
   // import where "how many of these are new?" is the question you most want answered BEFORE
   // pressing the button, and the preview runs the real statements to answer it.
   const [preview, setPreview] = useState<ImportResponse | null>(null);
+  // The mapping step, between "pick a file" and "preview". A real spreadsheet's headers do not
+  // match field names — `Base Salary (USD)` against `base_salary` — and until this existed the
+  // only remedy was editing the source file.
+  const [mapInfo, setMapInfo] = useState<MapInfo | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  // The config patch to paste. Rendered, never written: warehousd.yml is governed in git and
+  // `warehousd apply` is the only thing that commits it.
+  const [proposalYaml, setProposalYaml] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   useEffect(() => {
     const loadCollections = async () => {
@@ -153,7 +203,7 @@ export function ImportForm() {
   const currentMode = MODES.find((m) => m.value === mode)!;
   const pkField = currentCollection?.fields.find((f) => f.pk)?.name ?? null;
 
-  async function post(dryRun: boolean): Promise<ImportResponse | null> {
+  function importForm(dryRun: boolean, extra: Record<string, string> = {}): FormData | null {
     if (!file || !selectedCollection) {
       toast.error("Please select a collection and file");
       return null;
@@ -163,9 +213,95 @@ export function ImportForm() {
     fd.set("format", format);
     fd.set("mode", mode);
     if (dryRun) fd.set("dryRun", "1");
+    for (const [k, v] of Object.entries(extra)) fd.set(k, v);
     fd.set("file", file);
+    return fd;
+  }
+
+  /**
+   * Post the import and consume the NDJSON progress stream.
+   *
+   * A long import was one `fetch` and an `uploading` boolean — a frozen button for ten thousand
+   * rows, with no way to tell work from a hang. The progress objects are the broker's own
+   * `ImportProgress`, the same ones `warehousd import run` renders.
+   */
+  async function post(dryRun: boolean): Promise<ImportResponse | null> {
+    const fd = importForm(dryRun, { stream: "1" });
+    if (!fd) return null;
+    setProgress(null);
     const res = await fetch("/api/admin/import", { method: "POST", body: fd });
-    return (await res.json()) as ImportResponse;
+    // A refusal before the stream opened — a bad format, no file — is still plain JSON.
+    if (!res.body || !res.headers.get("content-type")?.includes("ndjson"))
+      return (await res.json()) as ImportResponse;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let final: ImportResponse | null = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line) as {
+          progress?: { done: number; total: number };
+          result?: ImportResponse;
+        };
+        if (msg.progress) setProgress(msg.progress);
+        if (msg.result) final = msg.result;
+      }
+    }
+    setProgress(null);
+    return final;
+  }
+
+  /** Ask the server which field each header lands on, then let the admin correct it. */
+  async function handleMap() {
+    const fd = importForm(false);
+    if (!fd) return;
+    setUploading(true);
+    try {
+      const res = await fetch("/api/admin/import/map", { method: "POST", body: fd });
+      const body = (await res.json()) as ({ ok: true } & MapInfo) | { ok: false; error: string };
+      if (!body.ok) {
+        toast.error(`Could not read the file: ${body.error}`);
+        return;
+      }
+      setMapInfo(body);
+      // Start from what the config already says, then the inference for the rest — a header the
+      // config maps is a decision somebody made, and a guess must not propose undoing it.
+      const start: Record<string, string> = {};
+      for (const h of body.headers)
+        start[h] =
+          body.configured[h] ??
+          body.proposed[h] ??
+          (body.fields.some((f) => f.name === h) ? h : "");
+      setMapping(start);
+      setProposalYaml(null);
+      setState("map");
+    } catch (e) {
+      toast.error(`Could not read the file: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  /** Render the mapping as a config patch to paste. It is never written from here. */
+  async function handleSaveMapping() {
+    const res = await fetch("/api/admin/import/map", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ collection: selectedCollection, columns: mapping }),
+    });
+    const body = (await res.json()) as { ok: boolean; yaml?: string; error?: string };
+    if (!body.ok) {
+      toast.error(`Could not build the patch: ${body.error}`);
+      return;
+    }
+    setProposalYaml(body.yaml ?? "");
   }
 
   // Preview first, then confirm. A dry run that fails validation goes straight to the result
@@ -206,6 +342,105 @@ export function ImportForm() {
     }
   }
 
+  if (state === "map" && mapInfo) {
+    const unmapped = mapInfo.headers.filter((h) => !mapping[h]);
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Map the columns</CardTitle>
+          <CardDescription>
+            Which field each header in your file lands on. A header left unmapped will be refused as{" "}
+            <Mono>unknown_column</Mono>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="overflow-auto rounded border">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="p-2 font-medium">Header in your file</th>
+                  <th className="p-2 font-medium">Field on {selectedCollection}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mapInfo.headers.map((h) => (
+                  <tr key={h} className="border-b last:border-0">
+                    <td className="p-2 font-mono text-xs">{h}</td>
+                    <td className="p-2">
+                      <Select
+                        value={mapping[h] || "__none__"}
+                        onValueChange={(v) =>
+                          setMapping((m) => ({ ...m, [h]: v === "__none__" ? "" : v }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— not imported —</SelectItem>
+                          {mapInfo.fields.map((f) => (
+                            <SelectItem key={f.name} value={f.name}>
+                              {f.name}
+                              {f.type ? ` · ${f.type}` : ""}
+                              {f.nullable ? "" : " · required"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {unmapped.length > 0 && (
+            <p className="text-xs text-deny">
+              {unmapped.length} header(s) are not mapped and will be refused. Map them, or remove
+              the columns from the file.
+            </p>
+          )}
+          {mapInfo.missingRequired.length > 0 && mode === "append" && (
+            <p className="text-xs text-deny">
+              No column for required field(s): {mapInfo.missingRequired.join(", ")}. An append will
+              refuse the file.
+            </p>
+          )}
+
+          {proposalYaml !== null && (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">
+                Paste this into <Mono>warehousd.yml</Mono> and run <Mono>warehousd apply</Mono>.
+                Nothing has been written — the config is governed in git, and this console composes
+                the patch rather than committing it.
+              </p>
+              <pre className="overflow-auto rounded border bg-muted p-3 font-mono text-xs">
+                {proposalYaml || "# every header already matches a field — no mapping needed"}
+              </pre>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setState("pick")}>
+              Back
+            </Button>
+            <Button variant="outline" onClick={() => void handleSaveMapping()}>
+              Save this mapping
+            </Button>
+            <Button
+              onClick={() => void handlePreview()}
+              disabled={uploading || unmapped.length > 0}
+              className="ml-auto"
+            >
+              <Upload size={16} className="mr-2" />
+              {uploading ? "Checking..." : "Preview import"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (state === "result" && result) {
     return (
       <div className="space-y-4">
@@ -235,27 +470,9 @@ export function ImportForm() {
               <CardDescription className="text-deny/80">{result.error}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {result.error === "validation_failed" &&
-                result.errors &&
-                result.errors.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-sm font-semibold text-deny">Nothing was imported.</p>
-                    <div className="overflow-auto rounded border border-deny/20 bg-card">
-                      <div className="space-y-1 p-3 font-mono text-xs">
-                        {result.errors.slice(0, 50).map((err, i) => (
-                          <div key={i} className="text-deny">
-                            Row {err.row} · {err.column} · {ERROR_LABELS[err.reason] || err.reason}
-                          </div>
-                        ))}
-                        {result.errors.length > 50 && (
-                          <div className="pt-2 text-deny/80">
-                            ... and {result.errors.length - 50} more problems (showing the first 50)
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+              {result.error === "validation_failed" && result.summary && (
+                <ImportErrorPanel summary={result.summary} />
+              )}
             </CardContent>
           </Card>
         )}
@@ -362,6 +579,7 @@ export function ImportForm() {
             <SelectContent>
               <SelectItem value="csv">CSV</SelectItem>
               <SelectItem value="json">JSON</SelectItem>
+              <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -374,7 +592,7 @@ export function ImportForm() {
             <Input
               id="file"
               type="file"
-              accept=".csv,.json"
+              accept=".csv,.json,.xlsx"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               disabled={uploading}
             />
@@ -387,13 +605,18 @@ export function ImportForm() {
         </div>
 
         <Button
-          onClick={handlePreview}
+          onClick={() => void handleMap()}
           disabled={!selectedCollection || !file || uploading || (mode !== "append" && !pkField)}
           className="w-full"
         >
           <Upload size={16} className="mr-2" />
-          {uploading ? "Checking..." : "Preview import"}
+          {uploading ? "Reading..." : "Map columns"}
         </Button>
+        {progress && (
+          <p className="text-center text-xs text-muted-foreground">
+            {progress.done.toLocaleString()} / {progress.total.toLocaleString()} rows
+          </p>
+        )}
       </CardContent>
 
       <AlertDialog

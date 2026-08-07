@@ -5,7 +5,8 @@ import type {
   MutationRefusalReason,
   MutationResult,
 } from "../types";
-import { writeAudit, type AuditIntent } from "./write";
+import type { AuditIntent } from "./write";
+import { auditSink, type AuditSinkId, type AuditSinkOptions } from "./sinks";
 import { redact } from "../log/redact";
 
 // One decision, one audit row. Every broker verb ends in exactly one of these two calls.
@@ -25,7 +26,13 @@ import { redact } from "../log/redact";
 // decision unreproducible the moment somebody leaves a group.
 //
 // `ActiveGrant` satisfies this structurally, so verbs pass the grant they already loaded.
-export type AuditGrant = { id: string; principals: readonly string[] };
+//
+// `principal` is WHICH principal the grant itself was approved for — `user:<id>` or
+// `group:<name>` — as distinct from `principals`, the caller's whole membership set. Once a grant
+// can belong to a group the id alone stops answering "on what authority": a revoked group grant
+// leaves an audit row naming a row that no longer exists, and only the principal still says the
+// access came from a membership rather than from a personal decision.
+export type AuditGrant = { id: string; principals: readonly string[]; principal?: string };
 
 export type AuditDetail = {
   // A query or search records its intent verbatim; a mutation records op + field names only (see
@@ -116,7 +123,20 @@ function mutationIntent(i: MutationIntent, fields: string[]) {
 // `enabled` has no default on purpose. A default of `true` would be the safe value, but it would
 // also let a new call site forget the flag and keep auditing in a deployment that asked not to be
 // audited — silently, and only on that one verb. Required means the compiler names every site.
-export function makeAuditWriter(app: Pool, ctx: BrokerContext, enabled: boolean): AuditWriter {
+/**
+ * Where this deployment's decisions go, and any options that destination needs.
+ *
+ * Resolved once per broker from `audit:` in warehousd.yml (verbs/deps.ts) rather than read at each
+ * call site, so "where does the trail go" has one answer for the life of the broker.
+ */
+export type AuditDestination = { sink?: AuditSinkId | undefined } & AuditSinkOptions;
+
+export function makeAuditWriter(
+  app: Pool,
+  ctx: BrokerContext,
+  enabled: boolean,
+  destination: AuditDestination = {},
+): AuditWriter {
   async function record(
     collection: string,
     outcome: "allowed" | "refused",
@@ -125,20 +145,27 @@ export function makeAuditWriter(app: Pool, ctx: BrokerContext, enabled: boolean)
   ): Promise<string | null> {
     if (!enabled) return null;
     try {
-      return await writeAudit(app, {
-        userId: ctx.userId,
-        env: ctx.env,
-        collection,
-        orgId: ctx.orgId,
-        intent: detail.intent ?? null,
-        fieldsReturned: detail.fieldsReturned ?? [],
-        unmaskedFields: detail.unmaskedFields ?? [],
-        principals: detail.grant?.principals ?? [],
-        grantId: detail.grant?.id ?? null,
-        outcome,
-        reason,
-        via: ctx.via,
-      });
+      // Through the registry, never a hard-coded insert: the downgrade below is what makes any
+      // sink trustworthy, and it only works because a sink that cannot record a decision throws.
+      return await auditSink(destination.sink).write(
+        app,
+        {
+          userId: ctx.userId,
+          env: ctx.env,
+          collection,
+          orgId: ctx.orgId,
+          intent: detail.intent ?? null,
+          fieldsReturned: detail.fieldsReturned ?? [],
+          unmaskedFields: detail.unmaskedFields ?? [],
+          principals: detail.grant?.principals ?? [],
+          grantId: detail.grant?.id ?? null,
+          grantPrincipal: detail.grant?.principal ?? null,
+          outcome,
+          reason,
+          via: ctx.via,
+        },
+        destination,
+      );
     } catch (err) {
       // Loud, and with enough to reconstruct the decision that went unrecorded — this line is the
       // only remaining trace of it.

@@ -13,3 +13,4 @@ export {
   EmbeddingFailed,
   type EmbeddingConfig,
 } from "./embedder";
+export { makeSheetReader } from "./sheet";

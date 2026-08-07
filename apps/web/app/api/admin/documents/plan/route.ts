@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { planUpload, findCollection } from "@warehousd/broker";
+import { planUpload, findCollection, kindOf } from "@warehousd/broker";
 import { getAppPool, getConfig } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
 import { isEnv } from "../../../../../lib/documents";
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   const cfg = getConfig();
   const c = findCollection(cfg, collection);
   if (!c) return Response.json({ error: "unknown_collection" }, { status: 404 });
-  if (c.type !== "file") return Response.json({ error: "not_a_file_collection" }, { status: 400 });
+  if (!kindOf(c).chunked) return Response.json({ error: "not_a_file_collection" }, { status: 400 });
 
   const plan = await planUpload(getAppPool(), env, collection, entries);
   return Response.json({ ok: true, plan });

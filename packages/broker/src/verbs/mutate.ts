@@ -1,14 +1,14 @@
 import { randomUUID, createHash } from "node:crypto";
+import { kindOf } from "../config/kinds";
 import type { Pool } from "pg";
 import type { BrokerContext, MutationIntent, MutationResult } from "../types";
 import type { CollectionConfig } from "../config/schema";
 import { writePosture } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
-import { loadActiveGrant } from "../grants/eval";
 import { admits, validateDocumentFilters } from "../grants/filters";
 import { withOrg, writePool } from "../db/pools";
 import { insertRevision, currentRevision, reviseDocument } from "../db/revisions";
-import { findCollection, supportedVerbs } from "../config/load";
+import { supportedVerbs } from "../config/load";
 import { pkOf, dataColsOf, dataSchema } from "../config/collection";
 import { ident } from "../sql/ident";
 import { aclColumnSql } from "../acl/sql";
@@ -17,6 +17,7 @@ import { coerce } from "../import/validate";
 import { makeAuditWriter, assertRecorded, type AuditWriter } from "../audit/decision";
 import { MutationIntentSchema, checkIntent } from "../intents/schema";
 import { writeChangeLog } from "./history";
+import { resolveGranted } from "./guard";
 import { proposeDataset } from "./propose";
 import type { VerbDeps } from "./deps";
 
@@ -24,7 +25,7 @@ export function makeMutateVerb(d: VerbDeps) {
   const { app, cfg, pools } = d;
 
   return async function mutate(ctx: BrokerContext, raw: MutationIntent): Promise<MutationResult> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     // Parsed before `values` is read: refuseMutation reaches into intent.values to record the
     // field names it touched, so an unparsed intent cannot even be refused safely.
     const parsed = checkIntent(MutationIntentSchema, raw, "mutate");
@@ -49,29 +50,29 @@ export function makeMutateVerb(d: VerbDeps) {
     if ((intent.op === "update" || intent.op === "delete") && !intent.id)
       return audit.refuseMutation(intent, null, "invalid_intent");
 
-    // 2. collection exists
-    const c = findCollection(cfg, intent.collection);
-    if (!c) return audit.refuse(intent.collection, "unknown_collection");
-
-    // 3. collection is writable
-    if (!c.writable) return audit.refuse(intent.collection, "not_writable");
-    // An external collection's rows belong to the remote system. The database refuses the write
-    // too — the foreign table is `updatable 'false'` and no role holds INSERT on it — so this is
-    // the readable refusal in front of a privilege wall, not the wall itself.
-    if (c.source_ref) return audit.refuse(intent.collection, "not_writable");
-
-    // 4. op supported for this collection type
-    const supported = supportedVerbs(cfg, intent.collection);
-    if (!supported.includes(intent.op))
-      return audit.refuse(intent.collection, "verb_not_supported");
-
-    // 5. active grant
-    const grant = await loadActiveGrant(app, ctx, intent.collection);
-    if (!grant) return audit.refuse(intent.collection, "no_grant");
-
-    // 6. verb ∈ grant.verbs
-    if (!grant.verbs.includes(intent.op))
-      return audit.refuse(intent.collection, "verb_denied", { grant });
+    // 2-6. collection exists, is writable, supports this op, and the caller holds a grant that
+    // carries the verb. Through the same guard the read verbs use — see verbs/guard.ts.
+    //
+    // `collectionCheck` holds the three structural questions, which are answerable without a
+    // grant and so are asked before one is loaded. `checkFilters: false` keeps the document-filter
+    // check below in this file, because a mutation audits that refusal through `refuseMutation`:
+    // a mutation's audit row records the op and the field NAMES it touched, and routing it through
+    // the query-shaped writer would record `intent: null` for a write.
+    const g = await resolveGranted(d, audit, ctx, intent.collection, intent.op, {
+      checkFilters: false,
+      collectionCheck: (col) => {
+        if (!col.writable) return "not_writable";
+        // An external collection's rows belong to the remote system. The database refuses the
+        // write too — the foreign table is `updatable 'false'` and no role holds INSERT on it —
+        // so this is the readable refusal in front of a privilege wall, not the wall itself.
+        if (col.source_ref) return "not_writable";
+        if (!supportedVerbs(cfg, intent.collection).includes(intent.op))
+          return "verb_not_supported";
+        return null;
+      },
+    });
+    if (!g.ok) return g;
+    const { collection: c, grant } = g;
 
     // 6b. the grant's document filters must be evaluable. matchesFilters below fails closed on a
     // filter it cannot interpret, so this is not what makes the write path safe — it is what makes
@@ -84,7 +85,9 @@ export function makeMutateVerb(d: VerbDeps) {
     // Phase 5: proposal_only mode creates pending revisions for dataset collections.
     // File collections are append-only; they don't support this mode.
     if (grant.mode === "proposal_only") {
-      if (c.type === "file") return audit.refuse(intent.collection, "verb_denied", { grant });
+      // proposal_only parks a write as a PENDING REVISION, and a kind with no revisions has
+      // nowhere to park it.
+      if (kindOf(c).chunked) return audit.refuse(intent.collection, "verb_denied", { grant });
       return proposeDataset(d, ctx, audit, intent, c, grant);
     }
 
@@ -97,7 +100,7 @@ export function makeMutateVerb(d: VerbDeps) {
     // create has to be able to name what it is creating — and requiring `write: allow` on a pk
     // would say the opposite of what is true, namely that identity may later be changed.
     // On update and delete it is not accepted at all: changing identity is not an edit.
-    const identityField = c.type === "file" ? "path" : pkOf(c);
+    const identityField = kindOf(c).identityField(c);
 
     const all = Object.keys(c.fields);
     for (const f of fieldNames) {
@@ -114,8 +117,8 @@ export function makeMutateVerb(d: VerbDeps) {
         return audit.refuseMutation(intent, grant, "field_denied");
     }
 
-    // File collection handling
-    if (c.type === "file") {
+    // A chunked kind stores a file plus its derived chunks; a dataset stores one revision.
+    if (kindOf(c).chunked) {
       return mutateFile(d, ctx, audit, intent, c, grant, pool);
     }
 

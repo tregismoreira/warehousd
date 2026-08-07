@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { deleteUploadedFile, findCollection } from "@warehousd/broker";
+import { deleteUploadedFile, findCollection, kindOf } from "@warehousd/broker";
 import { getAppPool, getConfig } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
 import { isEnv, auditDocument } from "../../../../../lib/documents";
@@ -28,7 +28,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ fileId: 
   const cfg = getConfig();
   const c = findCollection(cfg, collection);
   if (!c) return Response.json({ error: "unknown_collection" }, { status: 404 });
-  if (c.type !== "file") return Response.json({ error: "not_a_file_collection" }, { status: 400 });
+  if (!kindOf(c).chunked) return Response.json({ error: "not_a_file_collection" }, { status: 400 });
 
   const app = getAppPool();
   const { deleted, path } = await deleteUploadedFile(app, env, collection, fileId);

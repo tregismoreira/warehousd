@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { DB_PROVIDER_IDS } from "../db/providers";
 import { DEPLOY_TARGET_IDS } from "./targets";
+// A deliberate import cycle: rules/ states its `check` signature against `RawCollection` and reads
+// this module's constants, and this module walks the registry. Both directions are used only from
+// inside a function body — the rules run when a config is parsed, never at module evaluation — so
+// neither binding is read before it exists.
+import { collectionRules, runCollectionRules } from "./rules";
+import { COLLECTION_KIND_IDS } from "./kinds/ids";
+import { AUDIT_SINK_IDS, DEFAULT_AUDIT_SINK } from "../audit/sinks";
 
 export const FILE_FIELDS = ["title", "content", "path", "owner", "updated_at"] as const;
 
@@ -116,7 +123,9 @@ export type MaskConfig = z.infer<typeof MaskSchema>;
 
 // Which column types each transform can be computed over. `redact` and `hash` are absent because
 // they apply to anything: one replaces the value outright, the other casts to text first.
-const MASK_TYPES: Record<string, readonly string[]> = {
+//
+// Exported for config/rules/mask.ts, which is where the rule that reads it now lives.
+export const MASK_TYPES: Record<string, readonly string[]> = {
   last4: ["text"],
   first: ["text"],
   domain: ["text"],
@@ -263,10 +272,27 @@ export const SourceRefSchema = z
   .strict();
 export type SourceRefConfig = z.infer<typeof SourceRefSchema>;
 
-export const CollectionSchema = z
+// How a spreadsheet's headers map onto this collection's fields, for `warehousd import`.
+//
+// Resolved before the field lookup in `validateImportRows`, so `Base Salary (USD)` reaches
+// `base_salary` rather than reporting `unknown_column`. Governed in git like the rest of the
+// config — see config/rules/import.ts for why this is not `FieldSchema.column`.
+export const ImportSchema = z
+  .object({ columns: z.record(z.string(), z.string()).default({}) })
+  .strict();
+export type ImportConfig = z.infer<typeof ImportSchema>;
+
+// The collection as the author wrote it: parsed and defaulted, but before the rules run and before
+// `.transform` normalises postures and fills types.
+//
+// Split out from CollectionSchema so config/rules/ has a type to state its `check` signature
+// against without reaching into a `.superRefine` chain.
+export const CollectionBaseSchema = z
   .object({
     description: z.string(),
-    type: z.enum(["dataset", "file"]).default("dataset"),
+    // From the registry, not a hand-written list: a fourth kind must not be able to exist in
+    // config/kinds/ and be rejected by the schema. See config/kinds/index.ts.
+    type: z.enum(COLLECTION_KIND_IDS).default("dataset"),
     source: z.string().optional(),
     source_live: z.string().optional(),
     source_ref: SourceRefSchema.optional(),
@@ -279,301 +305,61 @@ export const CollectionSchema = z
     // The rule, once on: a document with no ACL is readable by anyone the grant covers; a document
     // WITH an ACL is readable only by the principals listed on it. See docs/architecture.md.
     acl: z.boolean().default(false),
+    /**
+     * How long an approved grant on this collection lasts, in days, when the approver names no
+     * expiry of their own.
+     *
+     * `expires_at` was enforced at query time and rendered in two tables, and that was all of it:
+     * no default, no notification, no re-attestation, no sweep. Access granted for a one-off
+     * purpose was permanent unless a human remembered — which is the opposite of what a
+     * purpose-bound grant is supposed to mean.
+     *
+     * Absent means no default, which is what every collection had before. It is per collection
+     * because the answer is not uniform: a salaries collection wants thirty days and a public
+     * announcements one wants none.
+     */
+    grant_expiry_days: z.number().int().positive().max(3650).optional(),
+    import: ImportSchema.optional(),
     fields: z.record(z.string(), FieldSchema),
   })
-  .strict()
-  .superRefine((c, ctx) => {
-    const FIELD_NAME = /^[a-z_][a-z0-9_]*$/i;
-    for (const name of Object.keys(c.fields)) {
-      if (!FIELD_NAME.test(name))
-        ctx.addIssue({
-          code: "custom",
-          message: `field name "${name}" invalid (must match [a-z_][a-z0-9_]*)`,
-        });
-      // `_acl` is the view's ACL column. A field of that name would collide with it, and the
-      // collision would arrive as a duplicate-column error from `create view`, a long way from
-      // the line that caused it — and on a collection with `acl: false` it would quietly become
-      // a grantable field that the ACL evaluator then reads as a policy.
-      if (name === ACL_COLUMN)
-        ctx.addIssue({
-          code: "custom",
-          message: `field name "${ACL_COLUMN}" is reserved — it is the per-document ACL column`,
-        });
-    }
+  .strict();
+export type RawCollection = z.infer<typeof CollectionBaseSchema>;
 
-    // Validate each bound taxonomy field
-    for (const taxSlug of c.taxonomies) {
-      const tf = c.fields[taxSlug];
-      if (tf) {
-        if (tf.type && tf.type !== "text" && !tf.type.startsWith("text"))
-          ctx.addIssue({
-            code: "custom",
-            message: `taxonomy field "${taxSlug}" must be type text`,
-          });
-        if (tf.pk || tf.fk || tf.view_join)
-          ctx.addIssue({
-            code: "custom",
-            message: `taxonomy field "${taxSlug}" may not set pk/fk/view_join`,
-          });
-      }
-    }
+// Every rule about a collection lives in config/rules/ and is registered in `collectionRules()`.
+// This callback does nothing but walk that list — see the comment on the registry for why.
+export const CollectionSchema = CollectionBaseSchema.superRefine((c, ctx) => {
+  runCollectionRules(collectionRules(), c, ctx);
+}).transform((c) => {
+  const fields = Object.fromEntries(
+    Object.entries(c.fields).map(([k, f]) => [
+      k,
+      {
+        ...f,
+        // Normalize posture to canonical {read, write, unmask} form
+        posture: normalizePosture(f.posture),
+      },
+    ]),
+  );
 
-    // Validate view_join fields: 'on' must reference a field with fk: <table>.id
-    for (const [name, f] of Object.entries(c.fields)) {
-      if (f.view_join) {
-        const fkFieldName = f.view_join.on;
-        const fkField = c.fields[fkFieldName];
-        if (!fkField)
-          ctx.addIssue({
-            code: "custom",
-            message: `field "${name}" view_join references unknown field "${fkFieldName}"`,
-          });
-        else if (!fkField.fk)
-          ctx.addIssue({
-            code: "custom",
-            message: `field "${name}" view_join references field "${fkFieldName}" which does not have fk`,
-          });
-        else if (!fkField.fk.startsWith(`${f.view_join.table}.`))
-          ctx.addIssue({
-            code: "custom",
-            message: `field "${name}" view_join references table "${f.view_join.table}" but field "${fkFieldName}" has fk: ${fkField.fk}`,
-          });
-      }
-    }
-    if (c.type === "file") {
-      if (!c.source) ctx.addIssue({ code: "custom", message: "file collection requires `source`" });
-      const allowedFileFieldNames = new Set(FILE_FIELDS as readonly string[]);
-      const allowedMetadataFieldTypes = new Set<string>(FILE_METADATA_TYPES);
-      for (const [k, f] of Object.entries(c.fields)) {
-        if (allowedFileFieldNames.has(k)) continue; // fixed FILE_FIELDS are always allowed
-        if (c.taxonomies.includes(k)) continue; // taxonomy fields are allowed
-        // Extra metadata fields: must have a type from the allowed set
-        if (!f.type || !allowedMetadataFieldTypes.has(f.type))
-          ctx.addIssue({
-            code: "custom",
-            message: `file collection field "${k}" must have type text/date/timestamptz/numeric/int/boolean (or be a FILE_FIELD or bound taxonomy)`,
-          });
-        // Metadata fields cannot be pk/fk/view_join
-        if (f.pk || f.fk || f.view_join)
-          ctx.addIssue({
-            code: "custom",
-            message: `file metadata field "${k}" cannot have pk/fk/view_join`,
-          });
-      }
-    } else {
-      const taxonomySet = new Set(c.taxonomies);
-      for (const [k, f] of Object.entries(c.fields))
-        if (!f.type && !taxonomySet.has(k))
-          ctx.addIssue({ code: "custom", message: `field "${k}" requires a type` });
-    }
-
-    // searchable only on dataset text fields
-    for (const [name, f] of Object.entries(c.fields)) {
-      if (!f.searchable) continue;
-      if (c.type === "file")
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}" has searchable: true on a file collection; the {c}__documents.tsv column already exists, so it is redundant`,
-        });
-      if (f.type !== "text")
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}" has searchable: true but is not type text`,
-        });
-      // A searchable field generates a sibling "<name>_tsv" column. A declared field of that
-      // name would collide with it at DDL time, which is a confusing failure a long way from
-      // its cause — refuse it here instead.
-      if (c.fields[`${name}_tsv`])
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}_tsv" collides with the generated search column for "${name}"`,
-        });
-    }
-
-    // writable: true requires at least one writable field
-    if (c.writable) {
-      const hasWritable = Object.values(c.fields).some((f) => writePosture(f) === "allow");
-      if (!hasWritable)
-        ctx.addIssue({
-          code: "custom",
-          message: `collection has writable: true but no field with write:allow`,
-        });
-    }
-
-    // Per-document ACLs. Each refusal here is a shape v1 has no answer for, refused while the
-    // author is looking at the file rather than as a broken join at apply time.
-    if (c.acl) {
-      // A file collection's documents are chunks of a file, so an ACL would have to key on
-      // `file_id` rather than a declared pk, add a second join to the file branch of viewDDL, and
-      // settle what the indexer's write path does with one. Out of scope for v1 — see
-      // docs/architecture.md, "Per-document ACLs".
-      if (c.type === "file")
-        ctx.addIssue({
-          code: "custom",
-          message: `acl: true is not supported on a file collection — an ACL is keyed on the declared primary key, and a file collection declares none`,
-        });
-      // An external collection's rows live in someone else's database. There is no local base
-      // table to join an ACL against, and its view has no org_id column to carry the tenant half
-      // of the join predicate.
-      else if (c.source_ref)
-        ctx.addIssue({
-          code: "custom",
-          message: `acl: true is not supported on a source_ref collection — warehousd does not own those rows`,
-        });
-      else if (!Object.values(c.fields).some((f) => f.pk))
-        ctx.addIssue({
-          code: "custom",
-          message: `acl: true requires a field with pk: true — an ACL is keyed on document identity`,
-        });
-    }
-
-    // view_join fields are structurally write-deny
-    for (const [name, f] of Object.entries(c.fields)) {
-      if (f.view_join) {
-        const wp = writePosture(f);
-        if (wp === "allow")
-          ctx.addIssue({
-            code: "custom",
-            message: `field "${name}" has view_join and write: allow; view_join fields are always write-deny`,
-          });
-      }
-    }
-
-    // Connect-in-place. A collection either stores its rows in warehousd or reads them from
-    // somewhere else; the two are different enough that mixing them is always a mistake.
-    if (c.source_ref) {
-      if (c.type === "file")
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "`source_ref` is for dataset collections; a file collection is indexed from `source`",
-        });
-      if (c.source || c.source_live)
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "a collection with `source_ref` reads from an external database, so it has no `source` directory",
-        });
-      if (c.writable)
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "`writable: true` is not supported on a `source_ref` collection — warehousd reads external data, it does not write it",
-        });
-      for (const [name, f] of Object.entries(c.fields)) {
-        // A join reaches a sibling table in the SAME schema. Resolving one across a foreign
-        // table would silently pull the whole remote relation over the wire per row.
-        if (f.view_join)
-          ctx.addIssue({
-            code: "custom",
-            message: `field "${name}" has view_join on an external collection; joins are not resolved across a source_ref`,
-          });
-        if (f.searchable)
-          ctx.addIssue({
-            code: "custom",
-            message: `field "${name}" has searchable: true on an external collection; the generated tsv column would have to live on the remote table`,
-          });
-      }
-    } else {
-      for (const [name, f] of Object.entries(c.fields))
-        if (f.column)
-          ctx.addIssue({
-            code: "custom",
-            message: `field "${name}" declares \`column\` but the collection has no \`source_ref\`; there is no remote column to rename`,
-          });
-    }
-
-    // Masking. Every rule here closes a way for a mask to be decorative rather than real.
-    for (const [name, f] of Object.entries(c.fields)) {
-      const p = normalizePosture(f.posture);
-      const masked = p.read === "mask";
-
-      if (masked && !f.mask)
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}" has read: mask but no \`mask\` — declare the transform`,
-        });
-      if (!masked && f.mask)
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}" declares \`mask\` but its read posture is "${p.read}"; a transform is only applied under read: mask`,
-        });
-      // Read from the RAW posture, not the normalized one. normalizePosture deliberately pins
-      // unmask closed whenever read is not `mask`, so asking it here would make this branch
-      // unreachable and the typo would parse silently as "no unmask" — which is safe, but
-      // leaves the author believing they granted something they did not.
-      const declared = f.posture;
-      const declaredUnmask =
-        typeof declared === "object" && declared !== null && "unmask" in declared
-          ? (declared as { unmask?: unknown }).unmask
-          : undefined;
-      if (declaredUnmask === "allow" && !masked)
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}" has unmask: allow but is not masked; there is nothing to unmask`,
-        });
-      if (!masked || !f.mask) continue;
-
-      // A pk addresses a document. getDocument round-trips it and every filter compares against
-      // it, so a masked one would return an id nothing can be looked up by.
-      if (f.pk)
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}" is the primary key and cannot be masked — it is how a document is addressed`,
-        });
-      // The generated "<name>_tsv" column is built from the RAW column and is exposed by the
-      // view, so a masked searchable field would be fully recoverable one search at a time.
-      if (f.searchable)
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}" cannot be both searchable and masked — the generated ${name}_tsv column indexes the raw value`,
-        });
-      if (c.type === "file" && (name === "content" || name === "path"))
-        ctx.addIssue({
-          code: "custom",
-          message: `file field "${name}" cannot be masked (content is chunked and indexed; path addresses the file)`,
-        });
-
-      const allowed = MASK_TYPES[f.mask.transform];
-      // `redact` and `hash` are absent from MASK_TYPES because they apply to any type.
-      if (allowed && f.type && !allowed.includes(f.type))
-        ctx.addIssue({
-          code: "custom",
-          message: `field "${name}" has mask transform "${f.mask.transform}", which needs type ${allowed.join(" or ")}, but is type ${f.type}`,
-        });
-    }
-  })
-  .transform((c) => {
-    const fields = Object.fromEntries(
-      Object.entries(c.fields).map(([k, f]) => [
-        k,
-        {
-          ...f,
-          // Normalize posture to canonical {read, write, unmask} form
-          posture: normalizePosture(f.posture),
-        },
-      ]),
-    );
-
-    // Bound term fields: auto-add as text/allow when omitted; fill type text when untyped.
-    for (const taxSlug of c.taxonomies) {
-      const tf = fields[taxSlug];
-      fields[taxSlug] = tf
-        ? {
-            ...tf,
-            type: tf.type ?? "text",
-          }
-        : { posture: { read: "allow", write: "deny", unmask: "deny" }, type: "text" };
-    }
-    if (c.type !== "file") return { ...c, fields };
-    const filled = Object.fromEntries(
-      Object.entries(fields).map(([k, f]) => [
-        k,
-        { ...f, type: f.type ?? FILE_FIELD_TYPES[k as (typeof FILE_FIELDS)[number]] ?? "text" },
-      ]),
-    );
-    return { ...c, fields: filled };
-  });
+  // Bound term fields: auto-add as text/allow when omitted; fill type text when untyped.
+  for (const taxSlug of c.taxonomies) {
+    const tf = fields[taxSlug];
+    fields[taxSlug] = tf
+      ? {
+          ...tf,
+          type: tf.type ?? "text",
+        }
+      : { posture: { read: "allow", write: "deny", unmask: "deny" }, type: "text" };
+  }
+  if (c.type !== "file") return { ...c, fields };
+  const filled = Object.fromEntries(
+    Object.entries(fields).map(([k, f]) => [
+      k,
+      { ...f, type: f.type ?? FILE_FIELD_TYPES[k as (typeof FILE_FIELDS)[number]] ?? "text" },
+    ]),
+  );
+  return { ...c, fields: filled };
+});
 
 // Cloud deploy target. Declared before ConfigSchema because ConfigSchema references it: a `const`
 // sits in the temporal dead zone until its initialiser runs, and both are evaluated at import.
@@ -706,6 +492,42 @@ export const SsoSchema = z
   })
   .strict();
 
+/**
+ * The audit trail: whether it is written at all, and where it goes.
+ *
+ * `enabled: false` is for lower environments — nothing is recorded, allows and refusals alike, and
+ * every result's `auditId` comes back null. Read it through `auditEnabled()` in config/load.ts.
+ *
+ * `sink` decides the destination. `postgres` is the default and the only one the console can
+ * query: the audit browser and the access-review view read `app.audit_events`, so a deployment
+ * that forwards elsewhere keeps the trail and loses the console's view of it. That is a real
+ * trade-off and it belongs in the config, said out loud. See audit/sinks/.
+ *
+ * Whatever the sink, the rule that makes the trail worth having is unchanged: a decision that
+ * could not be recorded is not an allow.
+ */
+export const AuditSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    sink: z.enum(AUDIT_SINK_IDS).default(DEFAULT_AUDIT_SINK),
+    // `webhook` only. Interpolated by ${env:VAR} at load time like every other url here.
+    url: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+  })
+  .strict()
+  .superRefine((a, ctx) => {
+    if (a.sink === "webhook" && !a.url)
+      ctx.addIssue({ code: "custom", message: "audit.sink `webhook` requires `audit.url`" });
+    // A url against a sink that makes no request configures nothing while reading as though it
+    // did — the same rule `embedding.provider local` already states about `base_url`.
+    if (a.sink !== "webhook" && (a.url || a.headers))
+      ctx.addIssue({
+        code: "custom",
+        message: `audit.sink \`${a.sink}\` takes neither \`url\` nor \`headers\``,
+      });
+  });
+export type AuditConfig = z.infer<typeof AuditSchema>;
+
 export const ConfigSchema = z
   .object({
     project: z.string(),
@@ -715,7 +537,7 @@ export const ConfigSchema = z
     // environments: nothing is recorded — allows, refusals and imports alike — and every result's
     // auditId comes back null. Read it through `auditEnabled()` in config/load.ts rather than
     // directly; see the note there.
-    audit: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+    audit: AuditSchema.default({ enabled: true, sink: "postgres" }),
     database: z
       .object({
         managed: z.boolean().optional(),

@@ -1,5 +1,11 @@
 export * from "./types";
 export { makeBroker } from "./broker";
+export type {
+  AccessExplanation,
+  ExplainAsker,
+  ExplainResult,
+  FieldExplanation,
+} from "./verbs/explain";
 // The runtime shapes behind types.ts. Adapters parse with these so a malformed body answers 400
 // before it costs a grant lookup; the broker parses again regardless (see checkIntent).
 export {
@@ -33,6 +39,16 @@ export {
 export { embedCollection, embedChunks, type EmbedProgress } from "./embedding/sync";
 export { DEFAULT_EMBEDDING_DIMENSIONS } from "./apply/ddl";
 export { EmbeddingSchema, type EmbeddingConfig } from "./config/schema";
+export { AuditSchema, type AuditConfig } from "./config/schema";
+export {
+  auditSinks,
+  auditSink,
+  AUDIT_SINK_IDS,
+  DEFAULT_AUDIT_SINK,
+  type AuditSink,
+  type AuditSinkId,
+  type AuditSinkOptions,
+} from "./audit/sinks";
 export {
   ConfigSchema,
   SsoSchema,
@@ -61,7 +77,14 @@ export type {
 export { unmaskPosture, isGrantable, READ_POSTURES, MaskSchema } from "./config/schema";
 // The deploy target ids, for DeploySchema here and for the CLI's target registry there.
 export { DEPLOY_TARGET_IDS, DEFAULT_DEPLOY_TARGET_ID, type DeployTargetId } from "./config/targets";
-export { applyConfig } from "./apply/apply";
+export { applyConfig, type ApplyProgress } from "./apply/apply";
+export {
+  collectionKinds,
+  kindOf,
+  COLLECTION_KIND_IDS,
+  type CollectionKind,
+  type CollectionKindId,
+} from "./config/kinds";
 // Per-document ACLs. The read/write verbs hang off the broker object (broker.ts); what is exported
 // here is what an adapter needs around them — the manager identity type, group membership, and the
 // principal spelling that both sides have to agree on.
@@ -104,7 +127,7 @@ export {
   type ProjectMigration,
   type ProjectMigrationStatus,
 } from "./db/project-migrations";
-export { generateSynthetic } from "./synthetic/generate";
+export { generateSynthetic, type SyntheticProgress } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
 export { migrateApp, createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-app";
 export { MIGRATIONS, type Migration } from "./db/migrations";
@@ -142,6 +165,7 @@ export {
 } from "./db/providers";
 export {
   indexCollection,
+  type IndexProgress,
   planUpload,
   uploadFile,
   deleteUploadedFile,
@@ -172,6 +196,7 @@ export {
   type ImportMode,
   type ImportResult,
   type ImportCounts,
+  type ImportProgress,
 } from "./import/run";
 export {
   insertRevision,
@@ -184,8 +209,51 @@ export {
   type RevisionOp,
   type RevisionStatus,
 } from "./db/revisions";
-export { validateImportRows, type ImportError } from "./import/validate";
-export { parseImportPayload, parseCsv } from "./import/csv";
+export {
+  validateImportRows,
+  summarizeImportErrors,
+  type ImportError,
+  type ImportErrorGroup,
+  type ImportErrorScope,
+  type ImportErrorSummary,
+} from "./import/validate";
+export {
+  reportImportSummary,
+  formatImportReport,
+  importErrorLabel,
+  IMPORT_ERROR_LABELS,
+  type ImportReport,
+  type ImportReportLine,
+} from "./import/report";
+export {
+  parseImport,
+  parseImportPayload,
+  parseCsv,
+  IMPORT_FORMATS,
+  type ImportFormat,
+  type ImportPayload,
+} from "./import/csv";
+export {
+  inferCollection,
+  inferMapping,
+  inferPosture,
+  fieldNameFor,
+  renderCollectionYaml,
+  renderMappingYaml,
+  SENSITIVE_HEADERS,
+  type InferredCollection,
+  type InferredField,
+  type InferredMapping,
+  type InferredPosture,
+} from "./import/infer";
+export {
+  selectSheet,
+  rowsFromSheet,
+  SheetSelectionError,
+  type SheetGrid,
+  type SheetReader,
+  type SheetOptions,
+} from "./import/sheet";
 export * from "./credentials/keys";
 export {
   createTrustedIssuer,

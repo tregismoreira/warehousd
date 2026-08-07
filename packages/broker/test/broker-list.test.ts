@@ -33,12 +33,16 @@ afterAll(async () => {
   await p.end();
 });
 
-it("lists names + descriptions only, even with zero grants", async () => {
+// §P2. The listing now carries the caller's OWN access, which is what stops a model burning one
+// describe call per collection to find the three it can read. It is not a disclosure: a caller
+// learns only about grants it already holds — with none, every row says "none" and the payload is
+// otherwise what it always was.
+it("lists names + descriptions, and says the caller holds nothing", async () => {
   const broker = makeBroker(pools, cfg);
   const r = await broker.listCollections(makeCtx({ userId: "nobody" }));
   expect(r).toEqual([
-    { name: "people", description: "Employee directory" },
-    { name: "salaries", description: "Comp" },
+    { name: "people", description: "Employee directory", access: "none" },
+    { name: "salaries", description: "Comp", access: "none" },
   ]);
 });
 

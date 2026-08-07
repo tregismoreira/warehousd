@@ -103,7 +103,7 @@ export function makeAclVerbs(d: VerbDeps) {
     who: AclManager,
     args: { collection: string; id: string },
   ): Promise<GetAclResult> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     // `gate` is INSIDE the try: it queries app."user" / app.client_policies, and a driver error
     // there must become an audited internal_error like any other, not an exception thrown at an
     // adapter that has no reason code to answer with.
@@ -150,7 +150,7 @@ export function makeAclVerbs(d: VerbDeps) {
     who: AclManager,
     args: { collection: string; id: string; principals: unknown },
   ): Promise<SetAclResult> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled);
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
     // Inside the try for the same reason getDocumentAcl's is — see the note there.
     try {
       const g = await gate(ctx, who, args.collection, audit);

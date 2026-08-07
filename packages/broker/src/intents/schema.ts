@@ -84,8 +84,11 @@ export const SEARCH_MODES = ["text", "semantic", "hybrid"] as const;
 // documents their grant excludes, reading similarity out of a corpus they cannot read. Extra keys
 // are ignored by these schemas by design (see the note above), so a forged `vector` is dropped
 // rather than refused — a caller must not be able to tell the difference.
+// `collection` is OPTIONAL. Absent means "search everything I hold a read grant on", which is the
+// only shape that answers "what's our parental leave policy" from somebody who does not already
+// know it lives in `policies`. See searchDocuments for how the fan-out is merged and audited.
 export const DocSearchIntentSchema = z.object({
-  collection: Ident,
+  collection: Ident.optional(),
   q: z.string(),
   fields: z.array(Ident).optional(),
   mode: z.enum(SEARCH_MODES).optional(),

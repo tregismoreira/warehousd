@@ -50,8 +50,11 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_collections",
     description:
-      "List collections (name + description only). Governance is deny-by-default and " +
-      "purpose-bound: this list does not confer access to any collection's data or schema.",
+      'List collections, each with YOUR OWN access to it: `access` is "granted" when you hold ' +
+      'a read grant and "none" when you do not, and `grantedFields` counts the fields that ' +
+      'grant carries. Start here — a collection marked "none" will refuse every call, so there ' +
+      "is no reason to describe or query it; ask for it with request_access instead. Governance " +
+      "is deny-by-default and purpose-bound: this list confers no access to any data or schema.",
     inputSchema: { type: "object", properties: {} },
     handler: async (ctx) => withHint(await getBroker().broker.listCollections(ctx)),
   },
@@ -137,7 +140,10 @@ export const TOOLS: ToolDef[] = [
   {
     name: "search_documents",
     description:
-      "Search a file collection. Access is deny-by-default and purpose-bound: results contain " +
+      "Search documents. OMIT `collection` to search every collection you hold a read grant on " +
+      "at once — results are merged by reciprocal-rank fusion and each document carries a " +
+      "`_collection` field saying where it came from, which is what get_document needs. Name a " +
+      "collection to search just that one. Access is deny-by-default and purpose-bound: results contain " +
       "only fields covered by your approved grant, restricted to documents your grant allows. " +
       'Three modes: "text" (default) matches words; "semantic" matches meaning and will find a ' +
       'document that shares no words with your query; "hybrid" fuses both rankings and is ' +
@@ -148,7 +154,12 @@ export const TOOLS: ToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        collection: { type: "string" },
+        collection: {
+          type: "string",
+          description:
+            "Optional. Omit to search every collection you hold a read grant on and merge the " +
+            "results.",
+        },
         q: { type: "string" },
         fields: { type: "array", items: { type: "string" } },
         mode: {
@@ -158,7 +169,7 @@ export const TOOLS: ToolDef[] = [
         },
         limit: { type: "number" },
       },
-      required: ["collection", "q"],
+      required: ["q"],
     },
     handler: async (ctx, input) => {
       const parsed = DocSearchIntentSchema.safeParse(input);

@@ -1,10 +1,13 @@
 "use client";
+import { useState } from "react";
 import { KeyRound } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { StatusBadge, type GrantStatus } from "@/components/common/StatusBadge";
 import { Mono } from "@/components/common/Mono";
+import { Button } from "@/components/ui/button";
+import { AccessExplainer } from "@/app/components/AccessExplainer";
 
 export type MeGrant = {
   id: string;
@@ -64,18 +67,52 @@ const columns: ColumnDef<MeGrant, unknown>[] = [
 ];
 
 export function MyGrants({ grants, loading }: { grants: MeGrant[]; loading: boolean }) {
+  // §P5's third surface. A member who cannot see a field has no way to tell "the config denies it"
+  // from "my grant does not carry it" from "it is masked" — and those are three different things
+  // to do about it. Asking about yourself needs no role.
+  const [explaining, setExplaining] = useState<string | null>(null);
+
+  const withExplain: ColumnDef<MeGrant, unknown>[] = [
+    ...columns,
+    {
+      id: "explain",
+      header: "",
+      cell: ({ row }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            setExplaining((c) => (c === row.original.collection ? null : row.original.collection))
+          }
+        >
+          {explaining === row.original.collection ? "Hide" : "Why?"}
+        </Button>
+      ),
+    },
+  ];
+
   return (
-    <DataTable
-      columns={columns}
-      data={grants}
-      loading={loading}
-      empty={
-        <EmptyState
-          icon={KeyRound}
-          title="No grants yet"
-          description="Access is deny-by-default. Request a grant on a collection to start querying it."
-        />
-      }
-    />
+    <div className="space-y-4">
+      <DataTable
+        columns={withExplain}
+        data={grants}
+        loading={loading}
+        empty={
+          <EmptyState
+            icon={KeyRound}
+            title="No grants yet"
+            description="Access is deny-by-default. Request a grant on a collection to start querying it."
+          />
+        }
+      />
+      {explaining && (
+        <div className="space-y-2">
+          <p className="text-sm font-semibold">
+            What you can see of <Mono>{explaining}</Mono>
+          </p>
+          <AccessExplainer collection={explaining} />
+        </div>
+      )}
+    </div>
   );
 }

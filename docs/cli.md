@@ -290,6 +290,67 @@ files have been edited since they were.
 | ------------ | ------------- |
 | `--db <url>` | Database URL. |
 
+### `import map <file>`
+
+Reads a spreadsheet's headers plus a sample of its values and **prints** a
+proposal — a `collections:` block if the collection does not exist yet, or an
+`import.columns` mapping if it does. It never writes `warehousd.yml`: you paste
+it, correct the inferred types and postures by hand, and `warehousd apply`.
+
+| Flag                    |                                                       |
+| ----------------------- | ----------------------------------------------------- |
+| `--collection <name>`   | Propose a mapping onto an existing collection.        |
+| `--sheet <name>`        | XLSX only. Required for a multi-sheet workbook.       |
+| `--header-row <n>`      | 1-based. Default 1.                                   |
+
+Inference is **deny-by-default on anything that looks sensitive**: a header
+containing `ssn`, `salary`, `comp`, `bank`, `iban`, `dob`, `birth`, `address`,
+`phone` or `passport` comes back `posture: deny`, and `email` comes back masked
+to its domain. It prints what it closed and why, and says plainly that it is a
+starting point to review.
+
+`warehousd init --from <dir>` walks a directory and runs the same inference over
+every spreadsheet in it, writing one scaffold that covers all of them.
+
+### `import validate <collection> <file>`
+
+Checks a file against a collection **without importing it**, and reports the
+failures grouped by column with counts rather than as a list of row numbers —
+fifty row numbers out of ten thousand is not a diagnosis.
+
+It has two layers and always says which one it ran:
+
+| Layer                | Catches                                                                                                                                     | Blind to                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Static (no database) | Unknown, missing and derived columns; ragged rows; per-cell type coercion; YAML taxonomy terms; duplicate primary keys within the file        | Dataset-sourced taxonomy terms, reported as `unvalidatable_term`  |
+| Live (`--live`)      | Everything above **plus** dataset-sourced terms, the upsert-vs-create required-column recheck, primary-key conflicts against stored documents, and whether the import role can actually write | —                                                                 |
+
+`unvalidatable_term` is not a failure of your file: those slugs live in
+env-scoped `app.terms`, which the offline pass cannot read. The report names the
+layer and points at `--live`.
+
+| Flag             |                                                  |
+| ---------------- | ------------------------------------------------ |
+| `--live`         | Run the full dry run against the database.       |
+| `--mode <mode>`  | `append` (default), `upsert`, `delete`.          |
+| `--sheet <name>` | XLSX only. Required for a multi-sheet workbook.  |
+| `--header-row <n>` | 1-based. Default 1.                            |
+| `--db <url>`     | Database URL (with `--live`).                    |
+
+### `import run <collection> <file>`
+
+Imports the file. `--dry-run` executes the whole thing against the real table and
+rolls it back, so what it reports is what would happen rather than a second guess
+at it. All three modes append revisions; nothing in `data_live` is rewritten or
+destroyed.
+
+| Flag                                |                                            |
+| ----------------------------------- | ------------------------------------------ |
+| `--mode append\|upsert\|delete`     | Default `append`.                          |
+| `--dry-run`                         | Execute and roll back.                     |
+| `--sheet <name>` / `--header-row <n>` | XLSX only.                               |
+| `--db <url>`                        | Database URL.                              |
+
 ### `seed`
 
 Regenerate synthetic data for every dataset collection, then re-index the file

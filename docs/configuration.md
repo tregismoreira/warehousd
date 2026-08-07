@@ -29,6 +29,9 @@ project: acme          # required. Namespace for containers, volumes, and state
 demo: false            # default false. true seeds the three demo personas
 audit:
   enabled: true        # default true. false records nothing at all
+  sink: postgres       # postgres (default) | stdout-json | webhook
+  url: ...             # webhook only. Where to POST each decision
+  headers: {...}       # webhook only. Extra request headers
 server:
   port: 8722           # default 8722
   image: ...           # optional. Override the published server image
@@ -100,6 +103,20 @@ parsed and so yields a real boolean:
 audit: { enabled: ${env:WAREHOUSD_AUDIT} }   # WAREHOUSD_AUDIT=false
 ```
 
+`audit.sink` decides where a decision goes. `postgres` writes
+`app.audit_events` and is the only sink the console can query — the audit
+browser and the access-review view read that table, so a deployment that
+forwards elsewhere keeps the trail and loses the console's view of it.
+`stdout-json` writes one JSON object per decision on stdout for a log pipeline
+to collect; `webhook` POSTs each decision to `audit.url` and needs it.
+
+Whatever the sink, the rule that makes the trail worth having is unchanged: a
+decision that could not be recorded is not an allow. A sink that cannot accept
+an event — a non-2xx from the collector, a closed pipe — turns the allow it was
+recording into an `internal_error` refusal. `webhook` is therefore synchronous
+with the decision and not queued, and a slow collector slows every governed
+call. That is the cost of the guarantee.
+
 The `sso:` block maps an identity provider's groups to warehousd roles at
 JIT provisioning. It lives here rather than alongside the provider registration
 because a provider is registered at runtime through the admin API, while this
@@ -139,6 +156,11 @@ collections:
     description: Employee directory        # required — this is what `list_collections` returns
     type: dataset                          # dataset (default) | file
     taxonomies: [department]               # optional — bind one or more vocabularies
+    grant_expiry_days: 30                  # optional — default expiry for an approved grant
+    import:                                # optional — spreadsheet header → field
+      columns:
+        "Base Salary (USD)": base_salary
+        "Start Date": hire_date
     fields:
       id:              { type: uuid, posture: allow, pk: true }
       full_name:       { type: text, posture: allow }
@@ -151,6 +173,26 @@ collections:
 Collection and field names must both match `[a-z_][a-z0-9_]*` (case-insensitive),
 and a collection name may not contain `__` — that is reserved for file-collection
 storage tables. Anything else is rejected at config load rather than reaching DDL.
+
+`grant_expiry_days` is the expiry stamped on an approved grant when the approver
+names none of their own; an approver's explicit choice always wins, and a
+collection that declares nothing keeps the old behaviour of no expiry. It is per
+collection because the answer is not uniform — a salaries collection wants thirty
+days and a public announcements one wants none. Grants lapsing within a week
+appear in the manager inbox, and **Access review** lists every approved grant
+older than a chosen window with when it was last exercised.
+
+`import.columns` maps a spreadsheet's HEADER to a field on this collection, and
+is resolved before the field lookup — so `Base Salary (USD)` reaches
+`base_salary` instead of reporting `unknown_column`, without anyone editing the
+sheet. It is deliberately not the `column:` key on a field, which means "the
+column's name on the remote table" and is only valid alongside `source_ref`.
+A mapping naming a field that does not exist is a config parse error, not an
+import-time one: the person holding the spreadsheet cannot fix the config.
+
+`warehousd import map <file>` proposes a block like this from a real
+spreadsheet, and prints it for review rather than writing it — see
+[cli.md](cli.md).
 
 ### Field options
 
