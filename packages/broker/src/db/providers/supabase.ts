@@ -54,4 +54,5 @@ export const supabase: DbProvider = {
     url.hostname.endsWith(".supabase.co") || url.hostname.endsWith(".pooler.supabase.com"),
   roleUsername,
   checks,
+  provisions: true,
 };

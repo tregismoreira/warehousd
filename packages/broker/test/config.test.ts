@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { loadConfig, envRefs } from "../src/config/load";
 import { readPosture, ConfigSchema } from "../src/config/schema";
 import { DEPLOY_TARGET_IDS } from "../src/config/targets";
+import { CONTAINER_RUNTIME_IDS, DEFAULT_CONTAINER_RUNTIME_ID } from "../src/config/runtimes";
+import { PROVISIONABLE_DB_PROVIDER_IDS } from "../src/db/providers";
 import { must } from "./helpers/must";
 
 let dir: string;
@@ -605,6 +607,48 @@ describe("config schema rejects unrecognised keys", () => {
   });
 });
 
+describe("server.runtime", () => {
+  function load(runtimeLine: string): ReturnType<typeof loadConfig> {
+    const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
+    writeFileSync(
+      join(dir, "warehousd.yml"),
+      `
+project: p
+server:
+  port: 8722
+${runtimeLine}
+collections:
+  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
+`,
+    );
+    try {
+      return loadConfig(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // The default is a value, not "whichever engine is on PATH". A config that resolves differently
+  // on two machines is a config that cannot be reviewed in git, which is the property the whole
+  // product rests on.
+  it("defaults to docker rather than to whatever is installed", () => {
+    expect(load("").server.runtime).toBe("docker");
+    expect(load("").server.runtime).toBe(DEFAULT_CONTAINER_RUNTIME_ID);
+  });
+
+  it("takes any id the registry implements", () => {
+    for (const id of CONTAINER_RUNTIME_IDS) {
+      expect(load(`  runtime: ${id}`).server.runtime).toBe(id);
+    }
+  });
+
+  // A typo here would otherwise surface as `execFileSync("nerdctl")` failing with ENOENT deep in a
+  // start, naming a binary the operator never asked for.
+  it("refuses an engine with no module behind it", () => {
+    expect(() => load("  runtime: nerdctl")).toThrow();
+  });
+});
+
 describe("deploy config", () => {
   const baseWithDeploy = {
     project: "t",
@@ -807,18 +851,44 @@ describe("deploy config", () => {
   });
 
   // A provider with no url names where a database that is not there is hosted.
-  it("rejects database.provider without a url", () => {
-    const r = ConfigSchema.safeParse({
+  // `provider` answers two different questions depending on the company it keeps. Alongside a
+  // `url` it says who *hosts* the database you attached; alongside `managed: true` it says who
+  // should *create* it. Both are meaningful, which is why the old "only applies alongside url"
+  // rule had to go.
+  function deployDatabase(database: Record<string, unknown>) {
+    return ConfigSchema.safeParse({
       ...baseWithDeploy,
-      deploy: {
-        target: "fly",
-        app_name: "my-app",
-        region: "gru",
-        database: { managed: true, provider: "supabase" },
-      },
+      deploy: { target: "fly", app_name: "my-app", region: "gru", database },
     });
+  }
+
+  it("accepts a provider that creates the database under `managed`", () => {
+    for (const provider of PROVISIONABLE_DB_PROVIDER_IDS) {
+      const r = deployDatabase({ managed: true, provider, region: "sa-east-1" });
+      expect(r.success).toBe(true);
+    }
+  });
+
+  it("still accepts `managed` alone, which leaves it to the deploy target", () => {
+    expect(deployDatabase({ managed: true }).success).toBe(true);
+  });
+
+  // The one combination that means nothing: `generic` names no CLI to create anything with, and
+  // Railway's database is provisioned by the Railway *target* rather than twice over.
+  it("refuses a provider that cannot create a database", () => {
+    for (const provider of ["generic", "railway"]) {
+      const r = deployDatabase({ managed: true, provider });
+      expect(r.success).toBe(false);
+      if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("cannot provision");
+    }
+  });
+
+  // A region with nothing to build is a key that decides nothing while reading as though it did —
+  // the same objection the old rule made about `provider`.
+  it("refuses a database region with no provider to build in it", () => {
+    const r = deployDatabase({ url: "postgres://h/db", region: "sa-east-1" });
     expect(r.success).toBe(false);
-    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("only applies alongside");
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("only applies with");
   });
 
   it("rejects an unknown database.provider", () => {

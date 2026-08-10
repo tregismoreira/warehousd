@@ -447,7 +447,7 @@ collections:
 
     // Mock docker assertion
     vi.doMock("../src/docker", () => ({
-      assertDocker: vi.fn(),
+      assertRuntime: vi.fn(),
     }));
 
     await runDeploy(projectDir, { yes: true, allowLocalLogin: true, localBuild: true });

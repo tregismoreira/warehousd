@@ -81,6 +81,12 @@ export type {
 export { unmaskPosture, isGrantable, READ_POSTURES, MaskSchema } from "./config/schema";
 // The deploy target ids, for DeploySchema here and for the CLI's target registry there.
 export { DEPLOY_TARGET_IDS, DEFAULT_DEPLOY_TARGET_ID, type DeployTargetId } from "./config/targets";
+// The container runtime ids, on the same terms: ConfigSchema here, the CLI's registry there.
+export {
+  CONTAINER_RUNTIME_IDS,
+  DEFAULT_CONTAINER_RUNTIME_ID,
+  type ContainerRuntimeId,
+} from "./config/runtimes";
 export { applyConfig, type ApplyProgress } from "./apply/apply";
 export {
   collectionKinds,
@@ -163,6 +169,8 @@ export {
   detectProvider,
   resolveProvider,
   DB_PROVIDER_IDS,
+  // Which of those the CLI's `db/hosts` registry must implement — see the note on `provisions`.
+  PROVISIONABLE_DB_PROVIDER_IDS,
   type DbProvider,
   type DbProviderId,
   type ProviderCheck,

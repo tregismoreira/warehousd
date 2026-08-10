@@ -12,7 +12,14 @@
 
 import { Command } from "commander";
 import { resolve, basename } from "node:path";
-import { DEPLOY_TARGET_IDS, DB_PROVIDER_IDS } from "@warehousd/broker";
+import {
+  CONTAINER_RUNTIME_IDS,
+  DEPLOY_TARGET_IDS,
+  DB_PROVIDER_IDS,
+  PROVISIONABLE_DB_PROVIDER_IDS,
+} from "@warehousd/broker";
+import { localHosts } from "./db/hosts";
+import { ensureToolsFor } from "./init-tools";
 import { resolveDbUrl, tryResolveDbUrl, runApply, runSeed, runIndex, runEmbed } from "./index";
 import { buildPlan, renderPlan, writeMigration, migrationStatus } from "./migrate";
 import { runInit, initDefaults } from "./init";
@@ -56,7 +63,7 @@ program
   .option("--json", "machine-readable output on stdout", false)
   .option("-q, --quiet", "only errors and results", false)
   .option("--no-color", "disable colour (also honours NO_COLOR)")
-  .option("--verbose", "echo every docker, flyctl and railway command", false)
+  .option("--verbose", "echo every command warehousd shells out to", false)
   .addHelpText(
     "after",
     `
@@ -130,13 +137,38 @@ program
     "infer a collection per spreadsheet in this directory instead of the example",
   )
   .option("--target <id>", `scaffold a deploy block for: ${DEPLOY_TARGET_IDS.join(", ")}`)
-  .option("--db-provider <id>", `who hosts deploy.database.url: ${DB_PROVIDER_IDS.join(", ")}`)
+  .option(
+    "--db-provider <id>",
+    `production database: ${PROVISIONABLE_DB_PROVIDER_IDS.join(", ")} to have warehousd create ` +
+      `one, or ${DB_PROVIDER_IDS.join(", ")} to say who hosts the url you attach`,
+  )
+  .option("--db-region <code>", "where to create it — the database's region, not the target's")
+  .option("--db-org <id>", "organisation to create it in (Supabase, when you have more than one)")
+  .option("--runtime <id>", `container engine: ${CONTAINER_RUNTIME_IDS.join(", ")}`)
+  .option(
+    "--local-db <id>",
+    `database for local development: docker, url, or one of ${localHosts()
+      .map((h) => h.id)
+      .join(", ")}`,
+  )
+  .option(
+    "--attach-db",
+    "attach a Postgres you already run instead of creating one; --db-provider then says who hosts it",
+  )
+  .option("--manual", "skip guided setup and paste connection details yourself")
+  .option("--install-missing", "install any provider CLI that is missing, without asking")
   .action(async (o) => {
     const { reporter, json } = ui();
     const { defaults, fromFlags } = initDefaults({
       project: basename(resolve(o.dir)) || "my-app",
       target: o.target,
       dbProvider: o.dbProvider,
+      runtime: o.runtime,
+      localDb: o.localDb,
+      dbRegion: o.dbRegion,
+      dbOrg: o.dbOrg,
+      manual: o.manual,
+      attachDb: o.attachDb,
     });
 
     // The wizard only runs where there is somebody to answer it. Piped, in CI, under --json or
@@ -147,6 +179,16 @@ program
     if (interactive && !answers) {
       reporter.fail("Cancelled.");
       process.exit(1);
+    }
+
+    // Before the file is written, so the operator finds out what is missing while the choice that
+    // needs it is still on screen. Never fatal — see ensureToolsFor.
+    if (answers && !json) {
+      await ensureToolsFor(answers, {
+        reporter,
+        installMissing: o.installMissing,
+        interactive,
+      });
     }
 
     const r = await runInit(o.dir, {

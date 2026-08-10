@@ -23,6 +23,17 @@ export type DbProvider = {
   label: string;
   /** Does this url belong to me? Host-pattern match. `generic` is never asked — see detectProvider. */
   matches(url: URL): boolean;
+  /**
+   * Can warehousd create a database here, given the provider's own CLI?
+   *
+   * Declarative on purpose. The thing that actually shells out to `supabase projects create` is a
+   * `DbHost` in `packages/cli/src/db/hosts` — the broker is the trust boundary and runs no child
+   * processes (AGENTS.md, Non-negotiable 1). But `DeploySchema` has to be able to refuse
+   * `managed: true` alongside `provider: generic` without importing the CLI, so the *fact* lives
+   * here and the *capability* lives there. The CLI registry `satisfies` this set, which is what
+   * stops the two drifting: a flag with no host, or a host with no flag, does not compile.
+   */
+  provisions?: boolean;
   /** How this provider spells "the same database, as role R". Default: the plain role name. */
   roleUsername(url: URL, role: string): string;
   /**

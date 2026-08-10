@@ -31,4 +31,5 @@ export const neon: DbProvider = {
   matches: (url) => url.hostname.endsWith(".neon.tech"),
   roleUsername: (_url, role) => role,
   checks,
+  provisions: true,
 };

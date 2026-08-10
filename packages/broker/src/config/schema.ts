@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { DB_PROVIDER_IDS } from "../db/providers";
+import { DB_PROVIDER_IDS, PROVISIONABLE_DB_PROVIDER_IDS } from "../db/providers";
 import { DEPLOY_TARGET_IDS } from "./targets";
+import { CONTAINER_RUNTIME_IDS, DEFAULT_CONTAINER_RUNTIME_ID } from "./runtimes";
 // A deliberate import cycle: rules/ states its `check` signature against `RawCollection` and reads
 // this module's constants, and this module walks the registry. Both directions are used only from
 // inside a function body — the rules run when a config is parsed, never at module evaluation — so
@@ -403,6 +404,13 @@ export const DeploySchema = z
         managed: z.boolean().optional(),
         url: z.string().optional(),
         provider: z.enum(DB_PROVIDER_IDS).optional(),
+        // The *database's* region, which is not the deploy target's. Supabase says `sa-east-1`
+        // and Neon `aws-us-east-1`, neither of which is a Fly `gru` or a Railway `us-west2`;
+        // reusing `region` above would ask a provider to build somewhere it has nothing. Shape
+        // unchecked here for the same reason `region` is — the host refuses its own, by name.
+        region: z.string().min(1, "database region must not be empty").optional(),
+        // Supabase alone needs this, and only when the account has more than one organisation.
+        org: z.string().min(1, "database org must not be empty").optional(),
       })
       .strict(),
   })
@@ -415,14 +423,39 @@ export const DeploySchema = z
         code: "custom",
         message: "deploy.database requires exactly one of `managed: true` or `url`",
       });
-    // A provider with no url names where a database that does not exist here is hosted. Under
-    // `managed: true` the target provisions the database and its own module knows what it built,
-    // so this key would decide nothing while reading as though it did.
-    if (d.database.provider && !hasUrl)
+
+    // `provider` now answers two different questions depending on the company it keeps, and only
+    // one combination is meaningless.
+    //
+    //   url + provider      — who *hosts* the database you attached. An override; the host
+    //                         normally says so itself.
+    //   managed + provider  — who should *create* it, using their own CLI.
+    //   managed alone       — the deploy target creates it, as it always has.
+    //
+    // The meaningless one is `managed` with a provider that cannot create anything: `generic`
+    // names no CLI, and `railway` is provisioned by the Railway *target* rather than twice.
+    if (
+      managed &&
+      d.database.provider &&
+      !PROVISIONABLE_DB_PROVIDER_IDS.includes(d.database.provider)
+    )
       ctx.addIssue({
         code: "custom",
-        message: "deploy.database.provider only applies alongside `url`",
+        message:
+          `deploy.database.provider \`${d.database.provider}\` cannot provision a database — ` +
+          `warehousd has no CLI for it. Use one of ${PROVISIONABLE_DB_PROVIDER_IDS.join(", ")}, ` +
+          `drop the key to let the deploy target provision it, or set a \`url\` instead.`,
       });
+
+    // A region or an org with nothing to build is a key that decides nothing while reading as
+    // though it did — the same objection the old `provider`-without-`url` rule made.
+    for (const key of ["region", "org"] as const) {
+      if (d.database[key] !== undefined && !(managed && d.database.provider))
+        ctx.addIssue({
+          code: "custom",
+          message: `deploy.database.${key} only applies with \`managed: true\` and a \`provider\` that creates the database`,
+        });
+    }
   });
 export type DeployConfig = z.infer<typeof DeploySchema>;
 
@@ -547,6 +580,9 @@ export const ConfigSchema = z
     // auditId comes back null. Read it through `auditEnabled()` in config/load.ts rather than
     // directly; see the note there.
     audit: AuditSchema.default({ enabled: true, sink: "postgres" }),
+    // The database on *this machine*, which is a different question from `deploy.database` and
+    // was once answered by the same flag. `managed: true` runs Postgres for you; `url` points at
+    // one you already have; `provider` picks *whose* local stack does the running.
     database: z
       .object({
         managed: z.boolean().optional(),
@@ -554,15 +590,40 @@ export const ConfigSchema = z
         // Host port for the CLI-managed Postgres. Default (server.port + 1) is applied in the CLI,
         // not here, because it depends on a sibling field.
         port: z.number().optional(),
+        // Whose local stack, when it is not warehousd's own pgvector container.
+        //
+        // `supabase` runs `supabase start`, which is worth the extra weight for one reason: it
+        // installs pgcrypto into an `extensions` schema rather than `public`, exactly as the
+        // hosted product does. That is the difference behind the failure docs/deploy-database.md
+        // calls the bad one — apply succeeds, boot succeeds, and the first masked read fails at
+        // request time. Reproducing it locally is the point.
+        //
+        // Not every provider has a local stack; the CLI refuses one that does not, by name.
+        provider: z.enum(DB_PROVIDER_IDS).optional(),
       })
-      .optional(),
+      .strict()
+      .optional()
+      .superRefine((d, ctx) => {
+        if (!d) return;
+        // A provider decides who runs the database, so it says nothing about one you point at.
+        if (d.provider && typeof d.url === "string" && d.url.length > 0)
+          ctx.addIssue({
+            code: "custom",
+            message:
+              "database.provider names who runs the local database, so it does not apply alongside `url` — drop one of them",
+          });
+      }),
     server: z
       .object({
         port: z.number(),
         // Override the published server image (CI/E2E point this at a locally built tag).
         image: z.string().optional(),
+        // Which container engine `warehousd start` drives. Defaulted here rather than in the CLI
+        // because it depends on nothing else in the config — unlike `database.port`, whose
+        // default is a sibling field away.
+        runtime: z.enum(CONTAINER_RUNTIME_IDS).default(DEFAULT_CONTAINER_RUNTIME_ID),
       })
-      .default({ port: 8722 }),
+      .default({ port: 8722, runtime: DEFAULT_CONTAINER_RUNTIME_ID }),
     taxonomies: z
       .record(z.string(), VocabularySchema)
       .default({})

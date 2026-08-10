@@ -38,24 +38,41 @@ Every command takes `-d, --dir <dir>` to point at the project directory (default
 
 Scaffolds `warehousd.yml` and adds `warehousd.local.yml` and `.warehousd/` to `.gitignore`, creating that file if it does not exist. It does not create seed directories or `.warehousd/` — `start` does that.
 
-In a terminal it asks for the project name, the port, which database to use **for local development**, which deploy target to scaffold a `deploy:` block for, which database to use **in production** on that target, and — only if production is a Postgres you already run — who hosts it. Both lists are read from the target and provider registries, so they never go stale. Piped, in CI, under `--json` or `--no-input` it writes the template without asking.
+The first question is how you want to set up at all:
 
-The two database questions are independent. Docker locally and Supabase in production is the ordinary case, and it is what one shared answer could not express: `--db-provider` decides `deploy.database` only, and never rewrites the top-level `database:` block.
+- **Guided** — warehousd creates and connects everything. It asks for the container engine, which database to run **for local development** (its own container, or a provider's local stack), which deploy target to scaffold a `deploy:` block for, and which database to use **in production**: the target's own, one warehousd creates on Supabase or Neon, or one you already run. Then it checks each CLI those answers need is installed, and offers to install any that is missing.
+- **Manual** — the escape hatch, and it stays first-class. It prompts for connection strings, touches no package manager, and creates nothing remote.
 
-`--target` and `--db-provider` answer the deploy questions from a script, so a non-interactive run can still specify every field the wizard collects:
+Every list is read from the runtime, target and host registries, so none of them goes stale. Piped, in CI, under `--json` or `--no-input` it writes the template without asking.
+
+The install offer is always an explicit confirmation — running a package manager against your machine is not a side effect of picking a menu item — and never happens under `--no-input` unless `--install-missing` said yes in advance. warehousd looks for the package managers this platform actually has (`brew` and `npm` on macOS; `apt-get`, `dnf`, `pacman` or `npm` on Linux) and never invokes `sudo`: an installer that needs root is printed for you to run. Authentication is never automated either — `supabase login` and `neon auth` open a browser, and the check reports the command rather than running it.
+
+The two database questions are independent. A container locally and Supabase in production is the ordinary case, and it is what one shared answer could not express: `--db-provider` decides `deploy.database` only and never rewrites the top-level `database:` block, while `--local-db` decides only that block.
+
+Every wizard answer has a flag, so one command can do the lot:
 
 ```bash
-warehousd init --no-input --target railway --db-provider supabase
+warehousd init --no-input --runtime docker --local-db supabase \
+  --target fly --db-provider neon --db-region aws-sa-east-1 --install-missing
 ```
 
-Without `--target` no `deploy:` block is written and the template's commented one is left in place — the block is optional and only `warehousd deploy` reads it. `--db-provider` alone is refused, since it names where `deploy.database.url` is hosted and there is no block for it to sit in.
+Without `--target` or a `--db-provider` that creates a database, no `deploy:` block is written and the template's commented one is left in place — the block is optional and only `warehousd deploy` reads it.
 
-| Flag                 |                                                                             |
-| -------------------- | --------------------------------------------------------------------------- |
-| `--force`            | Overwrite an existing `warehousd.yml`.                                      |
-| `--no-input`         | Never prompt; write the template.                                           |
-| `--target <id>`      | Scaffold a `deploy:` block for `fly`, `railway` or `compose`.                |
-| `--db-provider <id>` | Who hosts `deploy.database.url`: `supabase`, `neon`, `railway`, `generic`.   |
+| Flag                 |                                                                                                     |
+| -------------------- | --------------------------------------------------------------------------------------------------- |
+| `--force`            | Overwrite an existing `warehousd.yml`.                                                              |
+| `--no-input`         | Never prompt; write the template.                                                                    |
+| `--manual`           | Skip guided setup and paste connection details yourself.                                            |
+| `--runtime <id>`     | Container engine: `docker`, `podman`.                                                                |
+| `--local-db <id>`    | Database for local development: `docker`, `url`, or `supabase`.                                     |
+| `--target <id>`      | Scaffold a `deploy:` block for `fly`, `railway` or `compose`.                                        |
+| `--db-provider <id>` | Create the production database on `supabase` or `neon` — or, with `--attach-db`, who hosts your url. |
+| `--db-region <code>` | Where to create it. The database's region, not the target's.                                        |
+| `--db-org <id>`      | Which organisation to create it in (Supabase, when you have more than one).                         |
+| `--attach-db`        | Attach a Postgres you already run instead of creating one.                                          |
+| `--install-missing`  | Install any missing provider CLI without asking.                                                    |
+
+`--db-provider supabase` means "create one there". `--db-provider supabase --attach-db` means "the url I am about to supply is hosted there", which is what the flag meant on its own before warehousd could create anything — the two readings are worth keeping apart, so the second is spelled out rather than inferred. `--attach-db` with a provider still needs `--target`, because a provider that names where an attached url lives has no block to sit in without one.
 
 The scaffolded `app_name` is the project name as a DNS label (`Acme Data` becomes `acme-data`) and `region` is one the target actually has, so the file it writes passes that target's own pre-flight rather than failing it on first deploy.
 

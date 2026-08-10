@@ -8,6 +8,7 @@ import {
   type WarehousdConfig,
 } from "@warehousd/broker";
 import { targetFor } from "./targets";
+import { hostFor } from "../db/hosts";
 import { readDeployOutputs } from "../state";
 import { existingMigrations } from "../migrate";
 
@@ -253,6 +254,26 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
       env: input.env,
     })),
   );
+
+  // And whatever the database host says, on the same terms, when one is going to create the
+  // database. This is the branch the `db-*` capability checks above cannot cover: under
+  // `managed: true` there is no database yet to connect to, so "is the Supabase CLI installed and
+  // logged in" is the only answerable question — and it is worth answering before an image is
+  // built rather than after.
+  const database = cfg?.deploy?.database;
+  if (database?.managed && database.provider) {
+    const host = hostFor(database.provider);
+    if (host) {
+      checks.push(
+        ...(await host.preflight({
+          projectDir: input.projectDir,
+          env: input.env,
+          region: database.region,
+          org: database.org,
+        })),
+      );
+    }
+  }
 
   // Determine overall result: ok if every check is ok
   const allOk = checks.every((c) => c.ok);

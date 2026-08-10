@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { RailwayError, assertRailway, linkedProject, run, tryRun } from "../../railway";
+import { RailwayError, checkRailway, linkedProject, run, tryRun } from "../../railway";
 import { resolveBaseImage, renderDeployDockerfile } from "../fly-toml";
 import type { PreflightCheck } from "../preflight";
 import type { DeployTarget, TargetContext, TargetPreflightInput } from "./types";
@@ -90,19 +90,10 @@ function variables(ctx: TargetContext, service: string): Record<string, string> 
 function preflight(input: TargetPreflightInput): Promise<PreflightCheck[]> {
   const checks: PreflightCheck[] = [];
 
-  let ready = true;
-  let detail = "railway is ready";
-  try {
-    assertRailway();
-  } catch (err: unknown) {
-    ready = false;
-    if (err instanceof RailwayError) {
-      detail = err.message;
-    } else {
-      detail = err instanceof Error ? err.message : "Unknown error checking railway";
-    }
-  }
-  checks.push({ id: "railway-ready", ok: ready, detail });
+  // `input.env` rather than `process.env` — see the same note in fly.ts.
+  const readyCheck = checkRailway({ platform: process.platform, env: input.env });
+  const ready = readyCheck.ok;
+  checks.push(readyCheck);
 
   // Only when there is a region to judge — a project that has never deployed has none, and a
   // permanent "not evaluated" line on every `warehousd doctor` run stands where a real answer

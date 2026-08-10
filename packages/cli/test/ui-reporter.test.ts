@@ -227,3 +227,53 @@ describe("progressDetail", () => {
     expect(progressDetail({ done: 3, total: 20, label: "matters" }, 1000)).toContain("matters");
   });
 });
+
+// The counter. "Creating supabase project" says what is happening; "[4/9] Creating supabase
+// project" says whether to go and make coffee — which is the question on the two long commands.
+describe("plan", () => {
+  function capture(isTTY: boolean) {
+    const lines: string[] = [];
+    const reporter = createReporter({
+      writeErr: (s) => lines.push(s),
+      writeOut: () => {},
+      isTTY,
+      now: () => 0,
+    });
+    return { reporter, lines };
+  }
+
+  it("numbers each step out of the declared total", () => {
+    const { reporter, lines } = capture(false);
+    reporter.plan(3);
+    reporter.step("Creating", "one").done();
+    reporter.step("Creating", "two").done();
+    const out = lines.join("");
+    expect(out).toContain("[1/3] one");
+    expect(out).toContain("[2/3] two");
+  });
+
+  // Every command that has not opted in must look exactly as it did before.
+  it("adds nothing when no plan was declared", () => {
+    const { reporter, lines } = capture(false);
+    reporter.step("Creating", "one").done();
+    expect(lines.join("")).not.toContain("[");
+  });
+
+  // Padded to the width of the total, so the labels stay on one column — the same reason the verb
+  // sits in a fixed gutter.
+  it("pads the counter so the labels stay aligned", () => {
+    const { reporter, lines } = capture(false);
+    reporter.plan(10);
+    reporter.step("Creating", "one").done();
+    expect(lines.join("")).toContain("[ 1/10] one");
+  });
+
+  it("resets on a second plan, for a command with two phases", () => {
+    const { reporter, lines } = capture(false);
+    reporter.plan(2);
+    reporter.step("Creating", "one").done();
+    reporter.plan(2);
+    reporter.step("Creating", "two").done();
+    expect(lines.join("")).toContain("[1/2] two");
+  });
+});
