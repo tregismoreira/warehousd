@@ -31,7 +31,8 @@ import * as clack from "@clack/prompts";
 import { runLogs } from "../src/commands/logs";
 import { runOpen } from "../src/commands/open";
 import { confirm, promptInit, type InitAnswers } from "../src/ui/prompt";
-import { DEPLOY_TARGET_IDS, DB_PROVIDER_IDS } from "@warehousd/broker";
+import { CONTAINER_RUNTIME_IDS, DEPLOY_TARGET_IDS, DB_PROVIDER_IDS } from "@warehousd/broker";
+import { dbHosts, localHosts } from "../src/db/hosts";
 
 const INIT_DEFAULTS: InitAnswers = {
   project: "my-app",
@@ -40,6 +41,11 @@ const INIT_DEFAULTS: InitAnswers = {
   target: "fly",
   deployManaged: true,
   dbProvider: null,
+  guided: true,
+  runtime: "docker",
+  localDbProvider: null,
+  dbRegion: null,
+  dbOrg: null,
 };
 
 let dir: string;
@@ -158,7 +164,15 @@ describe("prompt wrappers", () => {
     ).resolves.toBe(false);
   });
 
+  // Every select answers "managed" by default, which is not one of the mode question's values —
+  // so `idIn`-style fallbacks aside, a test that cares about the later questions has to answer the
+  // two new leading ones. The order is: mode, runtime, local database, target, deploy database,
+  // and (only when attaching a url) who hosts it.
+  const guided = () =>
+    vi.mocked(clack.select).mockResolvedValueOnce("guided").mockResolvedValueOnce("docker");
+
   it("collects the init answers", async () => {
+    guided();
     const answers = await promptInit(INIT_DEFAULTS);
     expect(answers).toEqual({
       project: "answer",
@@ -167,6 +181,11 @@ describe("prompt wrappers", () => {
       target: "fly",
       deployManaged: true,
       dbProvider: null,
+      guided: true,
+      runtime: "docker",
+      localDbProvider: null,
+      dbRegion: null,
+      dbOrg: null,
     });
   });
 
@@ -176,14 +195,16 @@ describe("prompt wrappers", () => {
   });
 
   it("reads 'external' from the local database question", async () => {
+    guided();
     vi.mocked(clack.select).mockResolvedValueOnce("external");
     const answers = await promptInit(INIT_DEFAULTS);
     expect(answers?.managed).toBe(false);
   });
 
-  // The selects in order: local database, target, deploy database, provider. The provider one is
-  // only reached because the *deploy* answer was "external" — the local one no longer decides it.
+  // The provider question is only reached because the *deploy* answer was "external" — the local
+  // one no longer decides it.
   it("collects the deploy target and the provider behind an external database", async () => {
+    guided();
     vi.mocked(clack.select)
       .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("railway")
@@ -201,6 +222,7 @@ describe("prompt wrappers", () => {
   // The pair that one shared flag could not express: Docker on this machine, somebody else's
   // Postgres in production.
   it("keeps the local answer out of the deploy one", async () => {
+    guided();
     vi.mocked(clack.select)
       .mockResolvedValueOnce("external")
       .mockResolvedValueOnce("fly")
@@ -210,16 +232,19 @@ describe("prompt wrappers", () => {
   });
 
   it("never asks who hosts a database the target will provision", async () => {
+    guided();
     vi.mocked(clack.select)
       .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("compose")
       .mockResolvedValueOnce("managed");
     const answers = await promptInit(INIT_DEFAULTS);
     expect(answers).toMatchObject({ managed: true, target: "compose", dbProvider: null });
-    expect(clack.select).toHaveBeenCalledTimes(3);
+    // mode, runtime, local database, target, deploy database — and no sixth.
+    expect(clack.select).toHaveBeenCalledTimes(5);
   });
 
-  it("offers every registered target and provider, not a hand-written list", async () => {
+  it("offers every registered runtime, target, host and provider, not a hand-written list", async () => {
+    guided();
     vi.mocked(clack.select)
       .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("fly")
@@ -229,11 +254,36 @@ describe("prompt wrappers", () => {
       (vi.mocked(clack.select).mock.calls[i]?.[0] as { options: { value: string }[] }).options.map(
         (o) => o.value,
       );
-    expect(values(1)).toEqual([...DEPLOY_TARGET_IDS]);
-    expect(values(3)).toEqual([...DB_PROVIDER_IDS]);
+    expect(values(1)).toEqual([...CONTAINER_RUNTIME_IDS]);
+    // Local: warehousd's own container, then one entry per host that has a local stack, then a url.
+    expect(values(2)).toEqual(["managed", ...localHosts().map((h) => h.id), "external"]);
+    expect(values(3)).toEqual([...DEPLOY_TARGET_IDS]);
+    // Production: the target, then one entry per host that can create a database, then a url.
+    expect(values(4)).toEqual(["managed", ...Object.keys(dbHosts), "external"]);
+    expect(values(5)).toEqual([...DB_PROVIDER_IDS]);
+  });
+
+  // The escape hatch, and the reason it is the first question: manual must not offer to create
+  // anything, so neither list of provider options appears.
+  it("offers nothing to create when the answer is manual", async () => {
+    vi.mocked(clack.select)
+      .mockResolvedValueOnce("manual")
+      .mockResolvedValueOnce("managed")
+      .mockResolvedValueOnce("fly")
+      .mockResolvedValueOnce("external");
+    const answers = await promptInit(INIT_DEFAULTS);
+    expect(answers?.guided).toBe(false);
+    const values = (i: number) =>
+      (vi.mocked(clack.select).mock.calls[i]?.[0] as { options: { value: string }[] }).options.map(
+        (o) => o.value,
+      );
+    // No runtime question either: manual describes what exists rather than choosing it.
+    expect(values(1)).toEqual(["managed", "external"]);
+    expect(values(3)).toEqual(["managed", "external"]);
   });
 
   it("falls back to the default target when the select hands back something unregistered", async () => {
+    guided();
     vi.mocked(clack.select).mockResolvedValueOnce("managed").mockResolvedValueOnce("nowhere");
     const answers = await promptInit({ ...INIT_DEFAULTS, target: "compose" });
     expect(answers?.target).toBe("compose");

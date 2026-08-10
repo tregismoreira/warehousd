@@ -27,6 +27,8 @@ None of that removes anything from the open-source side. The test is simple: if 
 
 - **Grant expiry notifications.** Expiry now has a lifecycle — a per-collection default, an expiring-soon panel, and an access-review view keyed on last use — but every part of it is something a person has to come and look at. Telling the holder and the approver that access lapses on Friday needs an outbound channel the deployment does not have yet, which is why it is a separate item.
 
+- **Windows support for the CLI.** warehousd is developed and tested on macOS and Linux: every CI job in `.github/workflows` runs on `ubuntu-latest`, and the agent tooling under `scripts/agent/` is POSIX. Nothing structural prevents Windows — the CLI is Node, and every child process is `execFileSync` with an argv array rather than a shell string, so there is no quoting layer to port. What is missing is a CI job and a pass over path handling in the bundle and Compose writers. The package-manager table in `packages/cli/src/cli-tools.ts` already lists `winget`, `scoop` and `choco` because that is the right shape for the table, **not** because the platform is supported.
+
 ## Undecided
 
 Not planned, not rejected — the shape of the answer is the open question.

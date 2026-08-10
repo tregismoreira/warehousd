@@ -6,6 +6,19 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 
 ## [Unreleased]
 
+### Added
+
+- `deploy.database` takes a third shape: `managed: true` alongside `provider: supabase` or `provider: neon` has warehousd create the database through that provider's own CLI, record it in `.warehousd/state.json` so a redeploy reconnects instead of creating a second one, and delete it on `--destroy`. `deploy.database.region` and `deploy.database.org` are the new keys that shape go with. See [docs/deploy-database.md](docs/deploy-database.md).
+- `database.provider` on the top-level block runs a provider's local stack instead of warehousd's own `pgvector` container. Supabase is the one that has one, and it reproduces the hosted product's `extensions` schema — the difference behind a class of masked-read failure that only appeared in production before.
+- `server.runtime` selects the container engine: `docker` (default) or `podman`. Podman is selectable and checkable but unverified.
+- `warehousd init` asks whether to set up guided or manually, and in guided mode checks every CLI the answers need — offering to install any that is missing through `brew`, `npm`, `apt-get`, `dnf`, `pacman`, `winget`, `scoop` or `choco`, whichever this machine actually has. It never installs without an explicit confirmation or `--install-missing`, and never runs `sudo`. New flags: `--runtime`, `--local-db`, `--db-region`, `--db-org`, `--attach-db`, `--manual`, `--install-missing`.
+- Long commands number their steps — `[4/9] Creating …` — so progress has an end in sight.
+
+### Changed
+
+- `--db-provider` now means "create the database there" when the provider has a CLI warehousd can drive. `--attach-db` restores the previous reading, "who hosts the url I am about to supply". The two are worth keeping apart, so the second is spelled out rather than inferred.
+- `deploy.database.provider` is no longer refused without a `url`.
+
 ## [0.1.0] - 2026-08-05
 
 The first published release. Nothing preceded it, so the categories below are not a delta from an earlier version: **Security** is the enforcement this release ships with, and **Changed** and **Fixed** record decisions taken during development that a reader of the code would otherwise have to reconstruct from the history.

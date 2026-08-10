@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
+import { checkTool, type PreflightCheck, type ToolProbe } from "./cli-tools";
+import { docker } from "./containers/runtimes/docker";
+import type { ContainerRuntime } from "./containers/runtimes/types";
 import { traceCommand, traceFailure } from "./verbose";
 
+// The wrapper around whichever container engine is selected. Still named docker.ts, and every
+// subcommand below is still Docker's, because Podman takes the same ones — see
+// containers/runtimes. `DockerError` keeps its name for the same reason: it is the error every
+// caller already catches, and the engine it came from is in the message.
 export class DockerError extends Error {}
 
 // Why every call below passes `stdio` explicitly.
@@ -37,35 +44,58 @@ export type ContainerSpec = {
   env?: Record<string, string>;
   ports?: Record<string | number, string | number>;
   volumes?: Record<string, string>;
+  /** `--add-host` entries, for reaching a database running on the host rather than the network. */
+  extraHosts?: Record<string, string>;
 };
 
-export function dockerVersion(): string {
-  return execFileSync("docker", ["version", "--format", "{{.Server.Version}}"], {
+/**
+ * Which engine every `run` below actually invokes.
+ *
+ * A module-level switch set once at command start, the same shape and for the same reason as
+ * `setVerbose` in verbose.ts: fourteen exported functions here reach `run`, and threading a
+ * binary name through all of them would put a parameter on every call site to express something
+ * that is constant for the life of the process. `program.ts` resolves it from `server.runtime`
+ * before anything is started, exactly where it already calls `setVerbose`.
+ *
+ * Podman is argv-compatible, so this is genuinely only the name — see containers/runtimes.
+ */
+let activeRuntime: ContainerRuntime = docker;
+
+export function setContainerRuntime(runtime: ContainerRuntime): void {
+  activeRuntime = runtime;
+}
+
+export function containerRuntime(): ContainerRuntime {
+  return activeRuntime;
+}
+
+/** The engine's server version, for the line `warehousd start` prints first. */
+export function runtimeVersion(): string {
+  const bin = activeRuntime.cli.bin;
+  // Podman answers `version --format {{.Server.Version}}` too, reporting its own version where
+  // Docker reports the daemon's — which is the right answer in both cases.
+  return execFileSync(bin, ["version", "--format", "{{.Server.Version}}"], {
     encoding: "utf8",
     stdio: CAPTURED,
   }).trim();
 }
 
-export function assertDocker(): void {
-  try {
-    dockerVersion();
-  } catch (err: unknown) {
-    const error = err as { code?: string };
-    if (error.code === "ENOENT") {
-      throw new DockerError(
-        "docker not found on PATH. Install Docker Desktop (https://docs.docker.com/get-docker/) and retry.",
-      );
-    }
-    throw new DockerError(
-      "Docker is installed but the daemon isn't reachable. Start Docker and retry.",
-    );
-  }
+/** Installed, and usable? The pre-flight form for whichever engine is selected — never throws. */
+export function checkRuntime(probe?: ToolProbe): PreflightCheck {
+  return checkTool(activeRuntime.cli, probe);
+}
+
+/** The throwing form, for the code paths that cannot carry on without a working engine. */
+export function assertRuntime(probe?: ToolProbe): void {
+  const check = checkRuntime(probe);
+  if (!check.ok) throw new DockerError(check.detail);
 }
 
 export function run(args: string[], opts?: { inheritStderr?: boolean }): string {
-  traceCommand("docker", args);
+  const bin = activeRuntime.cli.bin;
+  traceCommand(bin, args);
   try {
-    const output = execFileSync("docker", args, {
+    const output = execFileSync(bin, args, {
       encoding: "utf8",
       stdio: opts?.inheritStderr ? INHERIT_STDERR : CAPTURED,
     });
@@ -177,6 +207,16 @@ export function buildRunArgs(spec: ContainerSpec): string[] {
     for (const [container, host] of Object.entries(spec.volumes)) {
       args.push("-v");
       args.push(`${host}:${container}`);
+    }
+  }
+
+  // Reach a service listening on the *host* rather than on this network. Docker Desktop resolves
+  // `host.docker.internal` on its own; Linux does not, and needs it mapped explicitly. Passing it
+  // on both is harmless and is one fewer platform branch.
+  if (spec.extraHosts) {
+    for (const [name, target] of Object.entries(spec.extraHosts)) {
+      args.push("--add-host");
+      args.push(`${name}:${target}`);
     }
   }
 

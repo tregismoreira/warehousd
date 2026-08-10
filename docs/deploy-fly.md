@@ -13,6 +13,8 @@ To deploy to Railway instead, see [deploy-railway.md](deploy-railway.md); to run
   flyctl auth signup  # or flyctl auth login
   ```
 - Docker installed locally (only needed for `--local-build`).
+
+The database does not have to be Fly's. `deploy.database` can name Supabase or Neon and warehousd will create the project itself — see [deploy-database.md](deploy-database.md).
 - An SSO provider configured (OIDC or SAML), or willingness to run with local login enabled. SSO is documented in [configure-sso.md](configure-sso.md).
 
 ## Steps

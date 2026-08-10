@@ -1,7 +1,31 @@
 import { execFileSync } from "node:child_process";
+import { checkTool, type CliTool, type PreflightCheck, type ToolProbe } from "./cli-tools";
 import { traceCommand, traceFailure } from "./verbose";
 
 export class FlyError extends Error {}
+
+/**
+ * flyctl, as cli-tools.ts wants it described.
+ *
+ * `version` rather than `--version`: flyctl accepts both, and the subcommand form works on the
+ * older builds people have lying around. There is no npm route — Fly ships a shell installer,
+ * which is what `docsUrl` is for on a machine with no brew.
+ */
+export const flyTool: CliTool = {
+  bin: "flyctl",
+  label: "flyctl",
+  versionArgs: ["version"],
+  readyArgs: ["auth", "whoami"],
+  readyHint: "Not authenticated with flyctl. Run: flyctl auth login",
+  docsUrl: "https://fly.io/docs/flyctl/install/",
+  installers: [{ manager: "brew", args: ["install", "flyctl"] }],
+  manualInstall: "curl -L https://fly.io/install.sh | sh",
+};
+
+/** Present and logged in? The pre-flight form — never throws. */
+export function checkFly(probe?: ToolProbe): PreflightCheck {
+  return checkTool(flyTool, probe);
+}
 
 // Same reasoning as packages/cli/src/docker.ts: `execFileSync` echoes the child's stderr to the
 // parent unless `stdio` says otherwise, so `tryRun`'s probes — `appExists` calls `status`, which
@@ -18,23 +42,10 @@ const INHERIT_STDERR: ["pipe", "pipe", "inherit"] = ["pipe", "pipe", "inherit"];
 
 const STREAMING = new Set(["deploy", "launch"]);
 
-export function assertFly(): void {
-  try {
-    execFileSync("flyctl", ["version"], { encoding: "utf8", stdio: CAPTURED });
-  } catch (err: unknown) {
-    const error = err as NodeJS.ErrnoException;
-    if (error.code === "ENOENT") {
-      throw new FlyError(
-        "flyctl not found on PATH. Install with one of: brew install flyctl, curl -L https://fly.io/install.sh | sh, or see https://fly.io/docs/flyctl/install/",
-      );
-    }
-  }
-
-  try {
-    execFileSync("flyctl", ["auth", "whoami"], { encoding: "utf8", stdio: CAPTURED });
-  } catch {
-    throw new FlyError("Not authenticated with flyctl. Run: flyctl auth login");
-  }
+/** The throwing form, for the code paths that cannot carry on without flyctl. */
+export function assertFly(probe?: ToolProbe): void {
+  const check = checkFly(probe);
+  if (!check.ok) throw new FlyError(check.detail);
 }
 
 export function run(args: string[], opts?: { input?: string | undefined }): string {

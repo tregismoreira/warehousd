@@ -1,7 +1,8 @@
 import { Pool } from "pg";
 import {
-  assertDocker,
-  dockerVersion,
+  assertRuntime,
+  runtimeVersion,
+  containerRuntime,
   ensureImage,
   ensureNetwork,
   ensureVolume,
@@ -12,7 +13,8 @@ import {
   runContainer,
   logs,
 } from "./docker";
-import { resolveProject } from "./project";
+import { useProject } from "./project";
+import { hostFor } from "./db/hosts";
 import { ensureState, writeOutputs, type Outputs } from "./state";
 import { buildOutputs } from "./outputs";
 import { resolveServerImage } from "./image-resolve";
@@ -42,6 +44,23 @@ async function pollHealth(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`Health check timeout after ${timeoutMs}ms`);
 }
 
+/** The loopback address in a URL, swapped for the name a container reaches the host by. */
+export function toContainerHost(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") {
+      parsed.hostname = HOST_GATEWAY_NAME;
+    }
+    return parsed.toString();
+  } catch {
+    // Not ours to mangle. A URL that will not parse is one the provider printed, and the
+    // connection error it produces names it better than a rewrite would.
+    return url;
+  }
+}
+
+const HOST_GATEWAY_NAME = "host.docker.internal";
+
 export async function runStart(
   dir: string,
   // No `verbose` here: it is a process-wide concern that program.ts hands to setVerbose() before
@@ -50,15 +69,35 @@ export async function runStart(
 ): Promise<Outputs> {
   const report = opts.reporter ?? silentReporter;
 
-  // Step 1: Assert Docker is available
-  assertDocker();
+  // Step 1: Resolve project config.
+  //
+  // Before the engine check, not after: `server.runtime` is what decides *which* engine to assert,
+  // so asking first would check Docker for a project that runs Podman.
+  const p = useProject(dir);
 
-  // Step 2: Resolve project config
-  const p = resolveProject(dir);
+  // Whose local database, when it is not warehousd's own container. Resolved here so that a
+  // provider with no local stack is refused by name rather than by a missing subcommand later.
+  const localDbHost = p.cfg.database?.provider ? hostFor(p.cfg.database.provider) : undefined;
+  if (p.cfg.database?.provider && !localDbHost?.local) {
+    throw new Error(
+      `database.provider \`${p.cfg.database.provider}\` has no local stack, so \`warehousd start\` ` +
+        `cannot run it here. Drop the key to use warehousd's own Postgres container, or set ` +
+        `database.url to point at one you already run.`,
+    );
+  }
+
+  // Step 2: Assert the container engine is available
+  assertRuntime();
+
   const st = ensureState(p.dir);
 
+  // Five steps on the ordinary path — check, server image, database, server, health — and one
+  // more when a second image has to be pulled for warehousd's own Postgres. Counted here rather
+  // than incremented as it goes, so the total is right on the first line rather than the last.
+  report.plan(p.managed && !localDbHost ? 6 : 5);
+
   const check = report.step("Checking", `${p.name}`);
-  check.done(`docker ${dockerVersion()}`);
+  check.done(`${containerRuntime().cli.bin} ${runtimeVersion()}`);
 
   // Step 3: Ensure images exist.
   //
@@ -97,7 +136,7 @@ export async function runStart(
       throw err;
     }
   }
-  if (p.managed) {
+  if (p.managed && !localDbHost) {
     if (!imageExists("pgvector/pgvector:pg16")) {
       const pulling = report.step("Pulling", "pgvector/pgvector:pg16");
       try {
@@ -114,7 +153,21 @@ export async function runStart(
   ensureNetwork(p.ns.net, p.ns.label);
 
   // Step 5: Ensure database (if managed)
-  if (p.managed) {
+  //
+  // Three shapes, and the middle one is new: warehousd's own pgvector container, a provider's
+  // local stack (`supabase start`), or a URL you already have. `localDbUrl` is non-null only in
+  // the middle case, which is what the URL computation below branches on.
+  let localDbUrl: string | null = null;
+  if (p.managed && localDbHost?.local) {
+    const step = report.step("Starting", `${localDbHost.label} locally`);
+    try {
+      localDbUrl = await localDbHost.local.start({ projectDir: p.dir, say: (m) => report.note(m) });
+      step.done(localDbHost.label);
+    } catch (err: unknown) {
+      step.fail();
+      throw err;
+    }
+  } else if (p.managed) {
     ensureVolume(p.ns.volume, p.ns.label);
     const dbState = containerState(p.ns.db);
     if (dbState !== "running") {
@@ -147,7 +200,14 @@ export async function runStart(
   let appUrlHost: string;
   let appUrlContainer: string;
 
-  if (p.managed) {
+  if (localDbUrl) {
+    // A provider's local stack listens on the *host*, not on this project's docker network, so
+    // the server container cannot reach it by the loopback address the CLI uses. `host.docker.internal`
+    // is the name that resolves back out — mapped explicitly below, because Linux does not
+    // provide it the way Docker Desktop does.
+    appUrlHost = localDbUrl;
+    appUrlContainer = toContainerHost(localDbUrl);
+  } else if (p.managed) {
     appUrlHost = `postgres://warehousd:${st.dbPassword}@localhost:${p.ports.db}/warehousd`;
     appUrlContainer = `postgres://warehousd:${st.dbPassword}@${p.ns.db}:5432/warehousd`;
   } else {
@@ -186,6 +246,10 @@ export async function runStart(
     volumes: {
       "/project": p.dir,
     },
+    // Only when the database is on the host rather than on this network. Docker Desktop resolves
+    // this name unaided; Linux needs the mapping, and adding it unconditionally would put a
+    // pointless `--add-host` on every ordinary run.
+    ...(localDbUrl ? { extraHosts: { [HOST_GATEWAY_NAME]: "host-gateway" } } : {}),
   });
 
   serverStep.done();

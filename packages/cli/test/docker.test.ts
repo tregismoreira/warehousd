@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import {
   buildRunArgs,
-  assertDocker,
+  assertRuntime,
   run,
   tryRun,
   removeContainer,
@@ -246,7 +246,7 @@ describe("buildRunArgs", () => {
   });
 });
 
-describe("assertDocker", () => {
+describe("assertRuntime", () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
@@ -259,7 +259,13 @@ describe("assertDocker", () => {
       throw error;
     });
 
-    expect(() => assertDocker()).toThrow(/docker not found on PATH.*Install Docker Desktop/);
+    // An explicit probe rather than the ambient machine: the suggested install line depends on
+    // which package manager is present, so reading process.env would make this assertion true
+    // only on the developer's own laptop. An empty PATH finds none, which is the case that lists
+    // every route we know of.
+    expect(() => assertRuntime({ platform: "darwin", env: { PATH: "" } })).toThrow(
+      /docker not found on PATH.*brew install --cask docker/,
+    );
   });
 
   it("throws daemon message when docker daemon is not reachable", () => {
@@ -270,6 +276,6 @@ describe("assertDocker", () => {
       throw error;
     });
 
-    expect(() => assertDocker()).toThrow(/Docker is installed but the daemon isn't reachable/);
+    expect(() => assertRuntime()).toThrow(/Docker is installed but the daemon isn't reachable/);
   });
 });

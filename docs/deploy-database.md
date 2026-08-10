@@ -1,6 +1,29 @@
 # Deploying against a hosted Postgres
 
-`deploy.database` takes exactly one of two shapes. `managed: true` lets the deploy target provision the database; `url:` attaches one you already run. This page is about the second — pointing warehousd at Supabase, Neon, Railway or any other hosted Postgres.
+`deploy.database` takes one of three shapes.
+
+| Shape | Who creates the database |
+| --- | --- |
+| `managed: true` | The deploy target — `fly postgres create`, `railway add --database postgres`. |
+| `managed: true` + `provider:` | warehousd, through that provider's own CLI. |
+| `url:` | Nobody. You already have one. |
+
+The second is the one to reach for when the database should not live on the platform running the container — Supabase or Neon behind a Fly app, say. warehousd creates the project, records what it made, connects to it, and deletes it again on `--destroy`:
+
+```yaml
+deploy:
+  target: fly
+  app_name: harbor-warehousd
+  region: gru
+  database:
+    managed: true
+    provider: neon             # supabase | neon
+    region: aws-sa-east-1      # the database's region, not the target's
+```
+
+`warehousd init --db-provider neon --db-region aws-sa-east-1` scaffolds exactly that, checks the Neon CLI is installed, and offers to install it if not.
+
+The third shape is the manual path, and it stays first-class — nothing below stops applying to it:
 
 ```yaml
 deploy:
@@ -11,6 +34,26 @@ deploy:
     url: ${env:PROD_DATABASE_URL}
     provider: supabase        # optional; see "The provider key" below
 ```
+
+## Letting warehousd create it
+
+One command, and the rest is the same deploy it always was:
+
+```bash
+warehousd init --no-input --target fly --db-provider neon --db-region aws-sa-east-1
+warehousd doctor --deploy    # is the Neon CLI there, and authenticated?
+warehousd deploy
+```
+
+Three things are worth knowing before the first run.
+
+**It costs money.** A Supabase or Neon project on a paid plan is billed from the moment it exists, and on a free plan it counts against the project limit. warehousd names what it created in the deploy summary.
+
+**The record lives in `.warehousd/state.json`.** That file — mode `0600`, already gitignored — is how a second `warehousd deploy` knows to reconnect rather than create a second project. Fly and Railway get this for free, because the target's own project is the identity; a provider host has none, so losing the state file means the next deploy creates another database. For Supabase it also holds the **only** copy of the database password: `supabase projects create --db-password` is the one place that value can be set, and nothing reads it back.
+
+**Authentication is yours.** `supabase login` and `neon auth` open a browser, and warehousd never runs them for you. The pre-flight reports "not authenticated" with the command that fixes it.
+
+Tearing down deletes the database. `warehousd deploy --destroy` names the project in the confirmation prompt and removes it after the app, in that order.
 
 ## What warehousd needs from a database
 
@@ -58,9 +101,11 @@ That needs the connecting role to either already have the grant or be able to ma
 
 ## The provider key
 
-`provider` names who runs the database. It is only ever an override: the hostname normally says so, and `generic` — plain role names, no provider-specific checks — is the fallback for anything unrecognised, which is exactly how every URL behaved before this key existed.
+`provider` answers one of two questions, depending on the company it keeps.
 
-Set it when the host does not advertise the provider: a CNAME onto your own domain, or a proxy in front. Setting it without a `url` is refused, because it would name where a database that is not there is hosted.
+**Alongside `url`, it names who *hosts* the database you attached.** It is only ever an override there: the hostname normally says so, and `generic` — plain role names, no provider-specific checks — is the fallback for anything unrecognised, which is exactly how every URL behaved before this key existed. Set it when the host does not advertise the provider: a CNAME onto your own domain, or a proxy in front.
+
+**Alongside `managed: true`, it names who should *create* it.** Only `supabase` and `neon` can; `generic` names no CLI, and `railway` is refused because under `deploy.target: railway` the target already provisions one and a second route would be a second database. `region` is required in this shape and is the *database's* region — Supabase's `sa-east-1`, Neon's `aws-sa-east-1` — which is not the deploy target's `gru` or `us-west2`. `org` is Supabase's, and only needed when the account has more than one.
 
 Getting it wrong is not a parse error; it is a role that cannot authenticate. So `db-provider` refuses a value the host contradicts — `provider: supabase` on a `*.neon.tech` url — naming both:
 
@@ -84,6 +129,10 @@ A value set over a host nothing recognises stays valid, and is left alone — th
 
 ## Supabase
 
+`provider: supabase` under `managed: true` has warehousd run `supabase projects create` for you, generate the database password, and build the connection string. It uses the **session pooler on 5432** — `postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres`. That string is assembled rather than read: no Supabase CLI command prints a project's Postgres URL, so the host and port are warehousd's assumption about somebody else's product. `db-reachable` in the pre-flight is what catches it being wrong, before an image is built.
+
+When you paste one yourself, the rule is the same:
+
 **Use the session pooler or the direct connection. Not the transaction pooler.** In the Supabase dashboard, Connect → the string on port `5432`, not the one on `6543`.
 
 `warehousd deploy` refuses `:6543` outright. The reason is that warehousd sets three connection startup parameters — `search_path` for the auth schema, and `statement_timeout` / `idle_in_transaction_session_timeout` as the ceilings on a pathological query — and the transaction pooler does not honour them. Those timeouts are deliberately pool-level rather than per-request `set` statements: a ceiling you can forget to apply is not a ceiling. The transaction-scoped `set_config` the broker uses for org isolation *would* have been pooler-safe, so this is a single blocker rather than a fundamental one, and it may be revisited.
@@ -94,7 +143,9 @@ Connect as the project's `postgres` role. It has `CREATEROLE`, and it owns the `
 
 ## Neon
 
-Add `?sslmode=require` to the URL. Neon's proxy negotiates TLS regardless, so this is about your client refusing a downgrade rather than about today's connection being in the clear; the pre-flight says so rather than refusing.
+`provider: neon` under `managed: true` runs `neon projects create --output json` and takes the connection URI straight out of the response — nothing is derived, which makes this the more predictable of the two. `?sslmode=require` is appended so a warehousd-created project passes the check below on its first run.
+
+When you paste one yourself: add `?sslmode=require` to the URL. Neon's proxy negotiates TLS regardless, so this is about your client refusing a downgrade rather than about today's connection being in the clear; the pre-flight says so rather than refusing.
 
 Connect as `neondb_owner` (or whichever role owns the database). It has no `CREATEROLE` attribute of its own — it is a member of `neon_superuser`, which is where the privilege comes from, and `db-can-create-role` asks the inherited question for exactly this reason. Roles created through SQL are not members of `neon_superuser`, which is fine: the four warehousd roles never need to own anything, only the grants boot hands them.
 
@@ -108,7 +159,11 @@ Use `DATABASE_PUBLIC_URL` (the `*.rlwy.net` proxy) when warehousd runs elsewhere
 
 ## Anything else
 
-`generic` is the fallback and it is not a downgrade — it is what every deployment did before providers existed. The role URLs are derived by swapping the username, and the four capability checks above still run. If your provider needs something different, that is one file in `packages/broker/src/db/providers/`.
+`generic` is the fallback and it is not a downgrade — it is what every deployment did before providers existed. The role URLs are derived by swapping the username, and the four capability checks above still run. Everything in the requirements table at the top applies unchanged: `CREATEROLE` on the connecting role, `vector` and `pgcrypto`, `postgres_fdw` if you declare `sources:`, and **no transaction pooler in front**, because the three connection startup parameters warehousd sets would be dropped.
+
+One caveat that lands here rather than under Neon, where it is discussed: on a stock Postgres `CREATEROLE` is not conferred through role membership, so `db-can-create-role` can pass for a role that still fails at boot. It errs toward not blocking, and the release command catches the real failure.
+
+Adding a provider is one file in `packages/broker/src/db/providers/` for how its role names and checks work. Teaching warehousd to *create* a database there is a second file in `packages/cli/src/db/hosts/` plus a `provisions: true` flag on the first — the two registries are held in step at compile time, so a flag with no host does not build.
 
 ## Verifying the wall
 

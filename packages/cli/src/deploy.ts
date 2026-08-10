@@ -4,7 +4,16 @@ import { join } from "node:path";
 import { loadConfig, envRefs, type DeployConfig, type WarehousdConfig } from "@warehousd/broker";
 import { preflight } from "./deploy/preflight";
 import { databaseCapabilities } from "./deploy/database-checks";
-import { readDeployOutputs, ensureState, writeDeployOutputs, stateDir, type State } from "./state";
+import {
+  readDeployOutputs,
+  readState,
+  ensureState,
+  writeDatabaseState,
+  writeDeployOutputs,
+  stateDir,
+  type State,
+} from "./state";
+import { hostFor, type DbHost, type DbHostContext } from "./db/hosts";
 import { writeBundle } from "./deploy/bundle";
 import { renderConfigDiff } from "./deploy/diff";
 import { confirmDestroy } from "./deploy/destroy";
@@ -90,6 +99,46 @@ function targetContext(args: {
   };
 }
 
+/**
+ * The database this host created, creating it only the first time.
+ *
+ * The whole reason this function exists. Fly and Railway are idempotent for free — the target's
+ * own project *is* the identity, so `ensureApp` can ask "does it exist?" and act accordingly.
+ * A provider host has no such handle: `supabase projects create` and `neon projects create` both
+ * succeed twice and leave two projects behind, one of them orphaned and both of them billed.
+ *
+ * `state.json` is therefore the record that the database exists, and it is written **before** the
+ * URL is used for anything. A deploy that dies between creating the project and finishing the
+ * release must still know, on the next run, that the project is there.
+ */
+async function ensureProvisioned(host: DbHost, ctx: DbHostContext): Promise<string> {
+  const saved = readState(ctx.projectDir)?.database;
+
+  if (saved && saved.provider === host.id) {
+    return host.reconnect(ctx, saved);
+  }
+  if (saved) {
+    // A provider swap with a live database behind the old one. Refusing beats silently leaving it
+    // running and billed, and beats deleting something the operator did not ask us to delete.
+    throw new Error(
+      `warehousd created a ${saved.provider} database for this project (ref ${saved.ref}), but ` +
+        `deploy.database.provider now says ${host.id}. Tear the old one down with ` +
+        `\`warehousd deploy --destroy\`, or delete it yourself and remove the \`database\` block ` +
+        `from .warehousd/state.json.`,
+    );
+  }
+
+  const created = await host.provision(ctx);
+  writeDatabaseState(ctx.projectDir, {
+    provider: host.id,
+    ref: created.ref,
+    ...(created.password ? { password: created.password } : {}),
+    createdAt: new Date().toISOString(),
+  });
+  ctx.say(`Created ${host.label} database ${created.ref} — recorded in .warehousd/state.json`);
+  return created.url;
+}
+
 export async function runDeploy(
   dir: string,
   opts: {
@@ -134,12 +183,25 @@ export async function runDeploy(
       say,
     });
 
+    // A database warehousd created on a provider is about to go too, and the prompt has to say so
+    // by name — "its database" is a fair description of a Fly Postgres app and a poor one of a
+    // Supabase project sitting in the operator's dashboard.
+    //
+    // `readState`, never `ensureState`: this path deliberately does not generate secrets for an
+    // app that is about to stop existing, which is why `targetContext` above is handed
+    // `state: null`.
+    const savedDatabase = readState(dir)?.database;
+    const dbHost = savedDatabase ? hostFor(cfg.deploy.database.provider ?? "generic") : undefined;
+
     // The target's own sentence when it has one. The default names the database because every
     // target that provisions one destroys it here; Compose, which destroys nothing, says so
     // instead of asking for confirmation of something that will not happen.
     const warning =
-      target.destroyWarning?.(ctx) ??
-      `This will destroy ${appName} and its database, which may hold real data.`;
+      (target.destroyWarning?.(ctx) ??
+        `This will destroy ${appName} and its database, which may hold real data.`) +
+      (dbHost && savedDatabase
+        ? ` The ${dbHost.label} project ${savedDatabase.ref} will be deleted as well.`
+        : "");
 
     const rl = createInterface({
       input: process.stdin,
@@ -155,6 +217,24 @@ export async function runDeploy(
     }
 
     await target.destroy(ctx);
+
+    // After the app, not before: the container is what holds connections open, and a database
+    // deleted underneath a running app produces errors nobody is going to read.
+    if (dbHost && savedDatabase) {
+      await dbHost.destroy(
+        {
+          projectDir: dir,
+          appName,
+          region: cfg.deploy.database.region,
+          org: cfg.deploy.database.org,
+          say,
+        },
+        savedDatabase,
+      );
+      // Forgotten only once it is actually gone. Leaving the ref behind would make the next
+      // deploy try to reconnect to something that no longer exists.
+      writeDatabaseState(dir, null);
+    }
 
     return;
   }
@@ -233,18 +313,34 @@ export async function runDeploy(
 
   await target.ensureApp(ctx);
 
-  // Under `managed: true` the target provisions its own Postgres and says what URL, if any, came
-  // back. A target with no `provisionDatabase` cannot honour `managed` at all, and saying so here
+  // Where the database comes from, in three shapes rather than two.
+  //
+  //   managed + provider  — that provider's CLI creates it, and warehousd remembers what it made.
+  //   managed alone       — the deploy target creates it, as it always has.
+  //   url                 — you already have one.
+  //
+  // A target with no `provisionDatabase` cannot honour bare `managed` at all, and saying so here
   // is better than the release command failing with no database and no explanation.
   let databaseUrl: string | null;
   if (deploy.database.managed) {
-    if (!target.provisionDatabase) {
-      throw new Error(
-        `deploy.database.managed is not supported on ${target.label}. ` +
-          `Set deploy.database.url to a Postgres you run instead.`,
-      );
+    const host = deploy.database.provider ? hostFor(deploy.database.provider) : undefined;
+    if (host) {
+      databaseUrl = await ensureProvisioned(host, {
+        projectDir: dir,
+        appName,
+        region: deploy.database.region,
+        org: deploy.database.org,
+        say,
+      });
+    } else {
+      if (!target.provisionDatabase) {
+        throw new Error(
+          `deploy.database.managed is not supported on ${target.label}. ` +
+            `Set deploy.database.url to a Postgres you run instead.`,
+        );
+      }
+      databaseUrl = await target.provisionDatabase(ctx);
     }
-    databaseUrl = await target.provisionDatabase(ctx);
   } else {
     databaseUrl = deploy.database.url ?? null;
   }

@@ -15,6 +15,27 @@ export type State = {
   // HMAC key for `mask: { transform: hash }`. Without it every read of a hash-masked field is an
   // internal_error, so it is provisioned with the rest rather than left to the operator.
   maskKey: string;
+  /**
+   * The hosted database warehousd created, when it created one.
+   *
+   * This is the only record that it exists. Fly and Railway get idempotence for free — the
+   * target's own project *is* the identity, so `ensureApp` can ask "is it there?" — and a
+   * provider host cannot: `supabase projects create` is not idempotent, and without this every
+   * `warehousd deploy` would bill a new project.
+   *
+   * `password` is here because for Supabase it is the only copy in existence: warehousd generates
+   * it, passes it to `projects create`, and nothing can read it back afterwards. state.json is
+   * mode 0600 and `.warehousd/` is gitignored; this must never reach `outputs.deploy.json`, which
+   * is a machine contract rather than a secret store.
+   */
+  database?: {
+    provider: string;
+    /** The provider's own handle: a Supabase project ref, a Neon project id. */
+    ref: string;
+    password?: string;
+    /** Recorded so a later run can say what it is reconnecting to without asking the API. */
+    createdAt: string;
+  };
 };
 
 export type Outputs = {
@@ -92,12 +113,33 @@ export function ensureState(dir: string): State {
     adminPassword: existing.adminPassword ?? randomBytes(24).toString("hex"),
     devClientSecret: existing.devClientSecret ?? randomBytes(32).toString("hex"),
     maskKey: existing.maskKey ?? randomBytes(32).toString("hex"),
+    // Carried through rather than regenerated: unlike the secrets above, this one names something
+    // that exists outside this machine, and inventing a fresh value would orphan a real project.
+    ...(existing.database ? { database: existing.database } : {}),
   };
 
   // Write state with restricted permissions
   writeFileSync(path, JSON.stringify(state, null, 2), { mode: 0o600 });
 
   return state;
+}
+
+/**
+ * Record — or forget — the hosted database warehousd created.
+ *
+ * A read-modify-write over the existing file rather than a fresh `ensureState`, so recording a
+ * project never rotates a secret as a side effect. Passing `null` is what `--destroy` does once
+ * the project is gone: leaving the ref behind would make the next deploy try to reconnect to
+ * something that no longer exists.
+ */
+export function writeDatabaseState(dir: string, database: State["database"] | null): void {
+  const state = ensureState(dir);
+  if (database) {
+    state.database = database;
+  } else {
+    delete state.database;
+  }
+  writeFileSync(statePath(dir), JSON.stringify(state, null, 2), { mode: 0o600 });
 }
 
 export function writeOutputs(dir: string, outputs: Outputs): void {

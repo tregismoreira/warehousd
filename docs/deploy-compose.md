@@ -6,7 +6,7 @@ This is the target to pick when the answer to "where does the data sit" has to b
 
 ## Prerequisites
 
-- Docker Engine 24+ with the Compose plugin (`docker compose version`) on the machine that will run the stack. It is **not** needed on the machine you run `warehousd deploy` from — that one only writes files.
+- Docker Engine 24+ with the Compose plugin (`docker compose version`) on the machine that will run the stack. It is **not** needed on the machine you run `warehousd deploy` from — that one only writes files. `server.runtime: podman` switches the local `warehousd start` stack to Podman; it is selectable but unverified, and it does not change what this runbook renders.
 - A way to terminate TLS in front of the server: Caddy, nginx, Traefik, a load balancer. See [Serving over TLS](#serving-over-tls) — this is not optional.
 - An SSO provider configured (OIDC or SAML), or willingness to run with local login enabled. SSO is documented in [configure-sso.md](configure-sso.md).
 

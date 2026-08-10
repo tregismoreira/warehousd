@@ -1,7 +1,31 @@
 import { execFileSync } from "node:child_process";
+import { checkTool, type CliTool, type PreflightCheck, type ToolProbe } from "./cli-tools";
 import { traceCommand, traceFailure } from "./verbose";
 
 export class RailwayError extends Error {}
+
+/**
+ * The Railway CLI. npm before brew because that is the route Railway's own docs lead with, and
+ * `installers` is consulted in the tool's preference order rather than the platform's.
+ */
+export const railwayTool: CliTool = {
+  bin: "railway",
+  label: "Railway CLI",
+  versionArgs: ["--version"],
+  readyArgs: ["whoami"],
+  readyHint:
+    "Not authenticated with railway. Run: railway login, or set RAILWAY_TOKEN in the environment.",
+  docsUrl: "https://docs.railway.com/guides/cli",
+  installers: [
+    { manager: "npm", args: ["i", "-g", "@railway/cli"] },
+    { manager: "brew", args: ["install", "railway"] },
+  ],
+};
+
+/** Present and logged in? The pre-flight form — never throws. */
+export function checkRailway(probe?: ToolProbe): PreflightCheck {
+  return checkTool(railwayTool, probe);
+}
 
 // Same reasoning as fly.ts and docker.ts: `execFileSync` echoes the child's stderr to the parent
 // unless `stdio` says otherwise, so every probe here — "is a project linked?", "does this service
@@ -48,25 +72,10 @@ function redact(args: string[]): string[] {
   return out;
 }
 
-export function assertRailway(): void {
-  try {
-    execFileSync("railway", ["--version"], { encoding: "utf8", stdio: CAPTURED });
-  } catch (err: unknown) {
-    const error = err as NodeJS.ErrnoException;
-    if (error.code === "ENOENT") {
-      throw new RailwayError(
-        "railway not found on PATH. Install with one of: npm i -g @railway/cli, brew install railway, or see https://docs.railway.com/guides/cli",
-      );
-    }
-  }
-
-  try {
-    execFileSync("railway", ["whoami"], { encoding: "utf8", stdio: CAPTURED });
-  } catch {
-    throw new RailwayError(
-      "Not authenticated with railway. Run: railway login, or set RAILWAY_TOKEN in the environment.",
-    );
-  }
+/** The throwing form, for the code paths that cannot carry on without the CLI. */
+export function assertRailway(probe?: ToolProbe): void {
+  const check = checkRailway(probe);
+  if (!check.ok) throw new RailwayError(check.detail);
 }
 
 /**

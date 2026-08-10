@@ -71,6 +71,11 @@ const DEFAULTS: InitAnswers = {
   target: "fly",
   deployManaged: true,
   dbProvider: null,
+  guided: true,
+  runtime: "docker",
+  localDbProvider: null,
+  dbRegion: null,
+  dbOrg: null,
 };
 
 describe("promptInit validation", () => {
@@ -104,6 +109,9 @@ describe("promptInit validation", () => {
   });
 
   it("falls back to the defaults when the answers come back empty", async () => {
+    // The mode and runtime questions come first now; the default select mock answers "managed",
+    // which is neither question's value.
+    vi.mocked(clack.select).mockResolvedValueOnce("guided").mockResolvedValueOnce("docker");
     vi.mocked(clack.text).mockResolvedValueOnce("").mockResolvedValueOnce("");
     const answers = await promptInit({ ...DEFAULTS, project: "fallback", port: 9999 });
     expect(answers).toEqual({
@@ -113,6 +121,11 @@ describe("promptInit validation", () => {
       target: "fly",
       deployManaged: true,
       dbProvider: null,
+      guided: true,
+      runtime: "docker",
+      localDbProvider: null,
+      dbRegion: null,
+      dbOrg: null,
     });
   });
 });
@@ -123,7 +136,8 @@ describe("applyAnswers", () => {
     "server:",
     "  port: 8722",
     "# database:",
-    "#   managed: true                 # default — the CLI runs Postgres in Docker",
+    "#   managed: true                 # default — the CLI runs Postgres in a container",
+    "#   provider: supabase            # optional — run their local stack instead of ours",
     "#   url: ${env:DATABASE_URL}      # alternative: bring your own Postgres",
     "# deploy:                         # read only by `warehousd deploy`",
     "#   target: fly                   # fly | railway | compose",
@@ -144,6 +158,11 @@ describe("applyAnswers", () => {
     target: "fly",
     deployManaged: true,
     dbProvider: null,
+    guided: true,
+    runtime: "docker",
+    localDbProvider: null,
+    dbRegion: null,
+    dbOrg: null,
   };
   const EXTERNAL: InitAnswers = {
     ...MANAGED,

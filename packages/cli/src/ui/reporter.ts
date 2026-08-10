@@ -58,6 +58,19 @@ export function progressDetail(p: Progress, elapsedMs: number): string {
 }
 
 export type Reporter = {
+  /**
+   * How many steps this command is about to take, so each one can say where it is.
+   *
+   * "Creating supabase project" tells you what is happening; "[4/9] Creating supabase project"
+   * tells you whether to go and make coffee. It matters most on the two long commands — `init`
+   * with a provider to set up, and `deploy` — where the alternative is a page of lines with no
+   * sense of an end.
+   *
+   * A count rather than a list of labels: the labels are already at the call sites, and a second
+   * copy here would be a second thing to keep in step. Calling it again resets the counter, which
+   * is what a command with two phases wants.
+   */
+  plan(total: number): void;
   step(verb: string, label: string): StepHandle;
   note(msg: string): void;
   warn(msg: string): void;
@@ -102,6 +115,11 @@ export function createReporter(opts: ReporterOptions): Reporter {
   // Only one step is ever live, so one timer handle is enough.
   let timer: NodeJS.Timeout | null = null;
 
+  // The step counter. Zero total means "no plan was declared", which is every command that has
+  // not opted in — and those must look exactly as they did before.
+  let plannedTotal = 0;
+  let stepNumber = 0;
+
   const clearLine = () => {
     if (isTTY) opts.writeErr("\r\x1b[2K");
   };
@@ -119,10 +137,31 @@ export function createReporter(opts: ReporterOptions): Reporter {
     return `${mark}${theme.c.dim(gutter(verb))}  ${label}${tail}\n`;
   };
 
+  /**
+   * `[3/9] ` when a plan was declared, nothing otherwise.
+   *
+   * Padded to the width of the total so the labels stay on one column — the same reason the verb
+   * sits in a fixed gutter. It goes in front of the *label*, not the verb, so the gutter alignment
+   * every other command relies on is untouched.
+   */
+  const counter = (n: number): string => {
+    if (plannedTotal <= 0) return "";
+    const width = String(plannedTotal).length;
+    return theme.c.dim(`[${String(n).padStart(width)}/${plannedTotal}] `);
+  };
+
   return {
+    plan(total: number): void {
+      plannedTotal = total;
+      stepNumber = 0;
+    },
+
     step(verb: string, label: string): StepHandle {
       const started = now();
       let settled = false;
+      stepNumber += 1;
+      const prefix = counter(stepNumber);
+      label = `${prefix}${label}`;
       // What `update()` last said, redrawn by every spinner frame so the detail does not blink
       // out between updates.
       let detail = "";
@@ -198,6 +237,7 @@ export function createReporter(opts: ReporterOptions): Reporter {
 // The default for every `runX` signature, so adding progress to an orchestration function does
 // not change what its existing callers or tests have to pass.
 export const silentReporter: Reporter = {
+  plan: () => {},
   step: () => ({ update: () => {}, done: () => {}, fail: () => {} }),
   note: () => {},
   warn: () => {},

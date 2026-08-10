@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { FlyError, assertFly, run, tryRun, appExists } from "../../fly";
+import { checkFly, run, tryRun, appExists } from "../../fly";
 import { resolveBaseImage, renderDeployDockerfile, renderFlyToml } from "../fly-toml";
 import type { PreflightCheck } from "../preflight";
 import type { DeployTarget, TargetContext, TargetPreflightInput } from "./types";
@@ -22,19 +22,10 @@ function dbAppName(appName: string): string {
 function preflight(input: TargetPreflightInput): Promise<PreflightCheck[]> {
   const checks: PreflightCheck[] = [];
 
-  let flyReady = true;
-  let flyDetail = "flyctl is ready";
-  try {
-    assertFly();
-  } catch (err: unknown) {
-    flyReady = false;
-    if (err instanceof FlyError) {
-      flyDetail = err.message;
-    } else {
-      flyDetail = err instanceof Error ? err.message : "Unknown error checking flyctl";
-    }
-  }
-  checks.push({ id: "flyctl-ready", ok: flyReady, detail: flyDetail });
+  // `input.env` rather than `process.env`: the install line this suggests depends on which package
+  // manager the machine has, and a check that reads the ambient environment cannot be tested
+  // against a machine other than the one running the suite.
+  checks.push(checkFly({ platform: process.platform, env: input.env }));
 
   // Only when there is a region to judge. With no `deploy:` block there is nothing to say, and a
   // check that reports "not evaluated" on every `warehousd doctor` run in a project that has never
@@ -118,7 +109,7 @@ async function deploy(ctx: TargetContext): Promise<void> {
     // Local build needs Docker to be available. Imported here rather than at the top so a remote
     // build never loads the Docker probe at all.
     const docker = await import("../../docker");
-    docker.assertDocker();
+    docker.assertRuntime();
     // flyctl defaults to its remote builder even without --remote-only, so a base image that only
     // exists in the local daemon never resolves there. --local-only is what makes this flag real.
     deployArgs.push("--local-only");

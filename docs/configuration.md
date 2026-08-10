@@ -56,10 +56,13 @@ deploy:
                                # or Compose service name, so unique where the target requires it
   region: gru          # whatever the target calls a region; checked at pre-flight, not here
   image: warehousd:local   # optional — override the published base image
-  database:
-    managed: true      # let the target provision Postgres, OR:
-    # url: ${env:PROD_DATABASE_URL}   # attach a Postgres you already run
-    # provider: supabase              # optional — only with url; usually detected from the host
+  database:            # exactly one of the three shapes below
+    managed: true      # 1. let the target provision Postgres
+    # provider: supabase              # 2. or add this, and warehousd creates one there
+    # region: sa-east-1               #    required with a provider — the database's region
+    # org: abcdefgh                   #    Supabase only, when the account has more than one
+    # url: ${env:PROD_DATABASE_URL}   # 3. or attach a Postgres you already run
+    # provider: supabase              #    optional there; usually detected from the host
 taxonomies: {}         # see below
 collections: {}        # required
 synthetic:
@@ -67,6 +70,10 @@ synthetic:
 ```
 
 Setting `database.url` skips the managed Postgres container entirely. The server still runs as a container, and `warehousd stop --destroy` will not touch a database it does not manage.
+
+`database.provider` is the third option for local development: `managed: true` with `provider: supabase` runs `supabase start` instead of warehousd's own `pgvector` container. It is heavier — that stack boots Auth, Storage and Studio alongside Postgres — and it is worth it for one reason: local Supabase installs `pgcrypto` into an `extensions` schema rather than `public`, exactly as the hosted product does. That is the difference behind the failure [deploy-database.md](deploy-database.md) calls the bad one, where `apply` and boot both succeed and the first masked read fails at request time. Only a provider with a local stack is accepted here, so `provider: neon` is refused by name. It does not apply alongside `url` — a provider names who *runs* the database, which says nothing about one you point at.
+
+`server.runtime` chooses the container engine: `docker` (the default) or `podman`. Every subcommand warehousd issues is Docker's and Podman takes the same ones, so this is the binary name and little else. Podman is selectable but **unverified** — rootless networking and volume labelling differ, and nothing in this repo exercises them yet. The default is a value rather than "whichever is installed", because a config that resolves differently on two machines is a config that cannot be reviewed in git.
 
 `demo: true` seeds `ana@demo.local` (admin), `marcus@demo.local` (manager), and `mia@demo.local` (member), all with the password `demo`, and shows them on the login page. **Never enable it on a deployment reachable by anyone else.**
 
@@ -94,7 +101,7 @@ The `sso:` block maps an identity provider's groups to warehousd roles at JIT pr
 
 The `deploy:` block is optional and required only by `warehousd deploy`. It names the target — `fly`, `railway` or `compose` — the app name, the region, and — most critically — **exactly one** of `managed: true` or a `database.url`. An `image:` override is optional; if unset, the published image is used. `warehousd init --target <id>` scaffolds the block. `region` is optional here — Compose has none to name — and everything about it belongs to the target's pre-flight: Fly and Railway refuse its absence there, and what a region *looks* like is theirs too, which is why `us-west2` and `gru` are both valid in this file and only one of them is valid for a given target. The runbooks are [deploy-fly.md](deploy-fly.md), [deploy-railway.md](deploy-railway.md) and [deploy-compose.md](deploy-compose.md).
 
-`database.provider` names who runs the Postgres behind `database.url`: `supabase`, `neon`, `railway` or `generic`. It is normally unnecessary — the host says so on its own — and only matters where it changes how a role is spelled in a connection string, which today means Supabase's pooler. Setting it without a `url` is an error, and so is setting it to a provider the host contradicts: role names are derived per provider, so the wrong one produces a role that cannot authenticate. A value over a host nothing recognises is left alone — that is the CNAME case the key exists for. `warehousd deploy` also runs a set of `db-*` pre-flight checks against that URL, which `warehousd doctor --deploy` runs on their own. See [deploy-database.md](deploy-database.md).
+`deploy.database.provider` answers one of two questions depending on the company it keeps. Alongside `managed: true` it names who should **create** the database — `supabase` or `neon`, the two with a CLI warehousd can drive — and `region` becomes required. Alongside `url` it names who **hosts** the one you attached: `supabase`, `neon`, `railway` or `generic`. In that second reading it is normally unnecessary — the host says so on its own — and only matters where it changes how a role is spelled in a connection string, which today means Supabase's pooler. Setting it without a `url` is an error, and so is setting it to a provider the host contradicts: role names are derived per provider, so the wrong one produces a role that cannot authenticate. A value over a host nothing recognises is left alone — that is the CNAME case the key exists for. `warehousd deploy` also runs a set of `db-*` pre-flight checks against that URL, which `warehousd doctor --deploy` runs on their own. See [deploy-database.md](deploy-database.md).
 
 ## Collections
 

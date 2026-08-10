@@ -31,13 +31,17 @@ describe("assertFly", () => {
       throw enoent();
     });
 
+    // An explicit machine rather than the ambient one: which route gets named depends on which
+    // package manager is present, and an empty PATH is the case that names them all.
+    const nowhere = { platform: "linux" as const, env: { PATH: "" } };
+
     // A missing binary and an unauthenticated session are different problems with different
     // fixes, so they must not collapse into one message.
-    expect(() => assertFly()).toThrow(FlyError);
-    expect(() => assertFly()).toThrow(/brew install flyctl/);
-    expect(() => assertFly()).toThrow(/fly\.io\/install\.sh/);
-    expect(() => assertFly()).toThrow(/fly\.io\/docs\/flyctl\/install/);
-    expect(() => assertFly()).not.toThrow(/auth login/);
+    expect(() => assertFly(nowhere)).toThrow(FlyError);
+    expect(() => assertFly(nowhere)).toThrow(/brew install flyctl/);
+    expect(() => assertFly(nowhere)).toThrow(/fly\.io\/install\.sh/);
+    expect(() => assertFly(nowhere)).toThrow(/fly\.io\/docs\/flyctl\/install/);
+    expect(() => assertFly(nowhere)).not.toThrow(/auth login/);
   });
 
   it("reports how to authenticate when flyctl is installed but not logged in", () => {

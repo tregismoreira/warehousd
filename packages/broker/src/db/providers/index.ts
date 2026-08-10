@@ -24,6 +24,19 @@ export type DbProviderId = keyof typeof dbProviders;
 export const DB_PROVIDER_IDS = Object.keys(dbProviders) as [DbProviderId, ...DbProviderId[]];
 
 /**
+ * The providers warehousd can create a database on, rather than merely connect to one.
+ *
+ * Derived from the `provisions` flags rather than written out again, so "which providers can be
+ * managed" has exactly one answer in the codebase. `railway` is deliberately not among them even
+ * though Railway hosts Postgres: under `deploy.target: railway` the *deploy target* provisions it
+ * (`railway add --database postgres`), and a second route to the same database would be two ways
+ * to end up with two of them.
+ */
+export const PROVISIONABLE_DB_PROVIDER_IDS = Object.entries(dbProviders)
+  .filter(([, provider]) => provider.provisions === true)
+  .map(([id]) => id) as [DbProviderId, ...DbProviderId[]];
+
+/**
  * Which provider hosts this url. Never throws: an unparseable connection string is `generic`,
  * which is byte-for-byte the behaviour every url had before this registry existed.
  *

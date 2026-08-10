@@ -11,6 +11,8 @@ End-to-end walkthrough of provisioning a warehousd stack to Railway. It is the s
   railway login             # or, for CI, export RAILWAY_API_TOKEN=<account token>
   ```
   Mind the variable name: an **account** token goes in `RAILWAY_API_TOKEN`. `RAILWAY_TOKEN` is for project-scoped tokens, and an account token placed there fails `railway whoami` — which is exactly what pre-flight runs.
+
+The database does not have to be Railway's. `deploy.database` can name Supabase or Neon and warehousd will create the project itself — see [deploy-database.md](deploy-database.md).
 - An SSO provider configured (OIDC or SAML), or willingness to run with local login enabled. SSO is documented in [configure-sso.md](configure-sso.md).
 
 Docker is **not** a prerequisite. Railway builds remotely, always — there is no equivalent of `flyctl deploy --remote-only` to opt out of, and `--local-build` does nothing on this target.
