@@ -25,6 +25,9 @@ vi.mock("@clack/prompts", () => ({
   confirm: vi.fn(() => Promise.resolve(true)),
   text: vi.fn(() => Promise.resolve("answer")),
   select: vi.fn(() => Promise.resolve("managed")),
+  // Section headings, not questions — the wizard names its two halves so the local and the
+  // production database do not read as one question asked twice.
+  note: vi.fn(),
   isCancel: vi.fn(() => false),
   cancel: vi.fn(),
 }));
@@ -275,7 +278,8 @@ describe("prompt wrappers", () => {
     expect(values(1)).toEqual([...CONTAINER_RUNTIME_IDS]);
     // Local: warehousd's own container, then one entry per host that has a local stack, then a url.
     expect(values(2)).toEqual(["managed", ...localHosts().map((h) => h.id), "external"]);
-    expect(values(3)).toEqual([...DEPLOY_TARGET_IDS]);
+    // Every registered target, and then the answer none of them is: "not yet".
+    expect(values(3)).toEqual([...DEPLOY_TARGET_IDS, "none"]);
     // Production: the target, then one entry per host that can create a database, then a url.
     expect(values(4)).toEqual(["managed", ...Object.keys(dbHosts), "external"]);
     expect(values(5)).toEqual([...DB_PROVIDER_IDS]);
@@ -298,6 +302,23 @@ describe("prompt wrappers", () => {
     // No runtime question either: manual describes what exists rather than choosing it.
     expect(values(1)).toEqual(["managed", "external"]);
     expect(values(3)).toEqual(["managed", "external"]);
+  });
+
+  /**
+   * "Not yet" ends the wizard early, and that is the point of it.
+   *
+   * Before it existed `init` always scaffolded a `deploy:` block, so somebody trying warehousd for
+   * the first time got an app name, a region and a database shape they had not chosen and now had
+   * to review. Answering `none` must skip the production database, its region and its
+   * organisation, and leave the commented block in the template alone.
+   */
+  it("asks nothing about production when the answer is 'not yet'", async () => {
+    guided();
+    vi.mocked(clack.select).mockResolvedValueOnce("managed").mockResolvedValueOnce("none");
+    const answers = await promptInit(INIT_DEFAULTS);
+    expect(answers).toMatchObject({ target: null, deployManaged: true, dbProvider: null });
+    // mode, runtime, local database, target — and nothing after it.
+    expect(clack.select).toHaveBeenCalledTimes(4);
   });
 
   it("falls back to the default target when the select hands back something unregistered", async () => {

@@ -1,6 +1,7 @@
-import { confirm as clackConfirm, text, select, isCancel, cancel } from "@clack/prompts";
+import { confirm as clackConfirm, text, select, note, isCancel, cancel } from "@clack/prompts";
 import {
   dbProviders,
+  DEFAULT_DEPLOY_TARGET_ID,
   type ContainerRuntimeId,
   type DbProviderId,
   type DeployTargetId,
@@ -11,9 +12,10 @@ import { dbHosts, hostFor, localHosts } from "../db/hosts";
 
 // The only module that talks to @clack/prompts.
 //
-// Pinned to ^0.11 deliberately: 1.x is ESM-only (no `require` condition), and this package builds
-// to a CommonJS bundle (tsup.config.ts, bin dist/index.cjs). Do not widen that range without
-// moving the build to ESM first.
+// @clack/prompts is ESM-only — `"type": "module"`, no `require` condition — and this package
+// builds to a CommonJS bundle (tsup.config.ts, bin dist/index.cjs). The two coexist because
+// `noExternal: [/.*/]` inlines it, so nothing `require`s it at runtime. Adding it to `external`
+// there is what would break the shipped binary; the version range is not the fragile part.
 //
 // Every entry point here is gated on an interactive stdin. clig.dev's rule, and the practical
 // reason behind it: `packages/cli/test/e2e/lifecycle.e2e.test.ts` drives this binary through
@@ -66,7 +68,15 @@ export type InitAnswers = {
   project: string;
   port: number;
   managed: boolean;
-  target: DeployTargetId;
+  /**
+   * Where a deploy would go, or `null` for "not yet".
+   *
+   * Null is a real answer rather than a missing one. `deploy:` is read only by `warehousd deploy`,
+   * and scaffolding a block for somebody who has not chosen a target means writing an app name, a
+   * region and a database shape they now have to review before the file is trustworthy. The wizard
+   * offers it explicitly and a non-interactive run gets it by default.
+   */
+  target: DeployTargetId | null;
   deployManaged: boolean;
   dbProvider: DbProviderId | null;
   /**
@@ -98,12 +108,21 @@ export type InitAnswers = {
 };
 
 /**
- * Both selects below are built by mapping a registry, so a fourth target or provider appears in
- * the wizard with no edit to this file — the same property the registries exist for.
+ * Every select below is built by mapping a registry, so a fourth target or provider appears in the
+ * wizard with no edit to this file — the same property the registries exist for. `blurb` rides
+ * along as the hint, which is where the difference between two similar-sounding options gets said.
  */
-function optionsFrom(registry: Record<string, { id: string; label: string }>) {
-  return Object.values(registry).map((e) => ({ value: e.id, label: e.label }));
+function optionsFrom(registry: Record<string, { id: string; label: string; blurb: string }>) {
+  return Object.values(registry).map((e) => ({ value: e.id, label: e.label, hint: e.blurb }));
 }
+
+/**
+ * The value meaning "no deploy block", which is not a target id and must not collide with one.
+ *
+ * `DEPLOY_TARGET_IDS` is the set it has to stay clear of; `idIn` proves membership against the
+ * registry, so anything else falls through to null on its own.
+ */
+const NO_TARGET = "none";
 
 export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | null> {
   const project = await text({
@@ -132,26 +151,37 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
   // Before anything else, because it decides whether the rest of the wizard is about *choosing*
   // services or about *describing* ones that already exist.
   const mode = await select({
-    message: "How do you want to set this up?",
+    message: "How should warehousd set this up?",
     options: [
       {
         value: "guided",
-        label: "Guided — warehousd creates and connects everything",
-        hint: "recommended",
+        label: "Guided",
+        hint: "create and connect everything for me",
       },
-      { value: "manual", label: "Manual — I'll paste connection details myself" },
+      { value: "manual", label: "Manual", hint: "I'll paste connection details myself" },
     ],
     initialValue: defaults.guided ? "guided" : "manual",
   });
   if (isCancel(mode)) return null;
   const guided = mode === "guided";
 
+  /**
+   * The two halves, said out loud.
+   *
+   * There are two independent database questions here — one about this laptop, one about
+   * production — and the single most common misreading of this wizard was that they were the same
+   * question asked twice. They are not: "a container locally, Supabase in production" is the
+   * ordinary answer. A heading before each group is the cheapest way to make the split visible
+   * instead of something you have to infer from two similar prompts four questions apart.
+   */
+  note("Where warehousd runs while you develop.", "On this machine");
+
   // Which engine runs the containers. Asked before the database, because a local database that is
   // a container needs one — and because "warehousd could not find docker" is a better first
   // sentence than a failure four questions later.
   const runtime = guided
     ? await select({
-        message: "Container engine",
+        message: "Which container engine?",
         options: optionsFrom(runtimes),
         initialValue: String(defaults.runtime),
       })
@@ -159,25 +189,26 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
   if (isCancel(runtime)) return null;
   const runtimeId = idIn(runtime, runtimes, defaults.runtime);
 
-  // Local, and about this machine only — the deploy question comes after the target, below. One
-  // question used to answer both, which made "Docker locally, Supabase in production"
-  // unscaffoldable.
-  //
-  // The provider options are mapped from the registry rather than listed, so a third host with a
-  // local stack appears here with no edit to this file.
+  // Every option opens with *where the data is*, so the list reads as three answers to one
+  // question rather than three sentences about what warehousd will do. The provider options are
+  // mapped from the registry, so a third host with a local stack appears here with no edit.
   const localOptions = [
-    { value: "managed", label: "Let warehousd run Postgres in a container", hint: "recommended" },
+    {
+      value: "managed",
+      label: "In a container warehousd runs",
+      hint: "recommended — nothing to install",
+    },
     ...(guided
       ? localHosts().map((host) => ({
           value: host.id,
-          label: `Run ${host.label} locally`,
+          label: `In my ${host.label} local stack`,
           hint: `${host.cli.bin} start`,
         }))
       : []),
-    { value: "external", label: "Bring my own, via database.url" },
+    { value: "external", label: "In a Postgres I point it at", hint: "you supply database.url" },
   ];
   const database = await select({
-    message: "Database for local development",
+    message: "Where should your development data live?",
     options: localOptions,
     initialValue: defaults.localDbProvider ?? (defaults.managed ? "managed" : "external"),
   });
@@ -187,35 +218,76 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
   const localDbProvider = database in dbProviders ? (database as DbProviderId) : null;
   const managed = database === "managed" || localDbProvider !== null;
 
+  note("Read only by `warehousd deploy`. You can skip this and add it later.", "In production");
+
   const target = await select({
-    message: "Deploy target",
-    options: optionsFrom(targets),
-    initialValue: String(defaults.target),
+    message: "Where will you deploy this?",
+    options: [
+      ...optionsFrom(targets),
+      // Somebody trying warehousd for the first time has not chosen a host yet, and scaffolding a
+      // deploy block for them means an app name, a region and a database shape they now have to
+      // review. Until this option existed there was no way to say so and `init` guessed instead.
+      {
+        value: NO_TARGET,
+        label: "Not yet — I'll set this up later",
+        hint: "leaves the deploy block commented out",
+      },
+    ],
+    initialValue: String(defaults.target ?? NO_TARGET),
   });
   if (isCancel(target)) return null;
-  const targetId = idIn(target, targets, defaults.target);
+  const targetId =
+    target === NO_TARGET
+      ? null
+      : idIn(target, targets, defaults.target ?? DEFAULT_DEPLOY_TARGET_ID);
 
-  // Asked after the target, because it is the target that would provision one by default. The
-  // three answers are the three shapes `deploy.database` takes — see DeploySchema.
+  const answers = {
+    project: String(project) || defaults.project,
+    port: Number(port) || defaults.port,
+    managed,
+    guided,
+    runtime: runtimeId,
+    localDbProvider,
+  };
+
+  // No target, no `deploy.database` to describe: the remaining questions all fill in a block that
+  // is not going to be written.
+  if (targetId === null) {
+    return {
+      ...answers,
+      target: null,
+      deployManaged: true,
+      dbProvider: null,
+      dbRegion: null,
+      dbOrg: null,
+    };
+  }
+
+  // Asked after the target, because it is the target that would provide one by default. The three
+  // answers are the three shapes `deploy.database` takes — see DeploySchema.
   const deployDatabase = await select({
-    message: `Database in production, on ${targets[targetId].label}`,
+    message: "Where should your production data live?",
     options: [
-      { value: "managed", label: `Let ${targets[targetId].label} provision Postgres` },
+      {
+        value: "managed",
+        label: `Alongside the app, on ${targets[targetId].label}`,
+        hint: "the target provides it",
+      },
       ...(guided
         ? Object.values(dbHosts).map((host) => ({
             value: host.id,
-            label: `Let warehousd create one on ${host.label}`,
-            hint: `${host.cli.bin} projects create`,
+            label: `On a new ${host.label} project`,
+            hint: `warehousd runs \`${host.cli.bin} projects create\` for you`,
           }))
         : []),
-      { value: "external", label: "Attach a Postgres I already run" },
+      { value: "external", label: "On a Postgres I already run", hint: "you supply the url" },
     ],
     initialValue: defaults.deployManaged ? "managed" : (defaults.dbProvider ?? "external"),
   });
   if (isCancel(deployDatabase)) return null;
 
-  // `provider` now means one of two things depending on which branch we are in, so both are
-  // resolved here rather than left for the caller to infer.
+  // `provider` means one of two things depending on which branch we are in, so both are resolved
+  // here rather than left for the caller to infer.
   const provisioningHost = hostFor(deployDatabase as DbProviderId);
   const deployManaged = deployDatabase === "managed" || provisioningHost !== undefined;
 
@@ -228,7 +300,7 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
     // add capacity, and a stale hard-coded set would refuse a region that works — the same
     // reasoning that keeps a region regex out of DeploySchema.
     const region = await text({
-      message: `Region for the ${provisioningHost.label} database`,
+      message: `Which region for the ${provisioningHost.label} database?`,
       placeholder: provisioningHost.exampleRegions,
       defaultValue: "",
       validate: (v) => (v ? undefined : `Required — e.g. ${provisioningHost.exampleRegions}`),
@@ -240,8 +312,8 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
     // an account with one org needs no `--org-id`, and the host resolves it silently.
     if (provisioningHost.id === "supabase") {
       const org = await text({
-        message: "Supabase organisation id (leave blank if you have only one)",
-        placeholder: "detected from `supabase orgs list`",
+        message: "Supabase organisation id",
+        placeholder: "leave blank if you only have one",
         defaultValue: "",
       });
       if (isCancel(org)) return null;
@@ -251,27 +323,15 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
     // Attaching one you already run: `provider` is the override it has always been, and only
     // matters where the hostname does not say who hosts it.
     const provider = await select({
-      message: "Who hosts that Postgres",
-      options: optionsFrom(dbProviders),
+      message: "Who hosts that Postgres?",
+      options: Object.values(dbProviders).map((p) => ({ value: p.id, label: p.label })),
       initialValue: String(defaults.dbProvider ?? "generic"),
     });
     if (isCancel(provider)) return null;
     dbProvider = idIn(provider, dbProviders, "generic");
   }
 
-  return {
-    project: String(project) || defaults.project,
-    port: Number(port) || defaults.port,
-    managed,
-    target: targetId,
-    deployManaged,
-    dbProvider,
-    guided,
-    runtime: runtimeId,
-    localDbProvider,
-    dbRegion,
-    dbOrg,
-  };
+  return { ...answers, target: targetId, deployManaged, dbProvider, dbRegion, dbOrg };
 }
 
 /**

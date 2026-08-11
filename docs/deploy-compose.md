@@ -2,6 +2,8 @@
 
 For running **warehousd** on hardware you control — your own server, a VM at any provider, a machine behind a corporate firewall. `warehousd deploy` renders a Compose file and an env file; **you** start the stack, and everything the other targets get from a platform — TLS, restarts across reboots, backups — is yours.
 
+This is the target `warehousd init` calls **Self-hosted (Docker Compose)**, and `deploy.target: compose` in the config. It is worth being clear about what it is not: it does not run anything on this machine, and it is not the local `warehousd start` stack. The Compose file it writes is for a server somewhere else.
+
 This is the target to pick when the answer to "where does the data sit" has to be "here". It is also the least automated one: nothing in this runbook creates an account, and nothing warehousd runs ever touches the machine the stack runs on. For a platform that does all of that for you, see [deploy-fly.md](deploy-fly.md) or [deploy-railway.md](deploy-railway.md).
 
 ## Prerequisites

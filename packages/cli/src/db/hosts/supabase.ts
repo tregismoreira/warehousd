@@ -237,6 +237,7 @@ const local: DbHostLocal = {
 export const supabase: DbHost = {
   id: "supabase",
   label: "Supabase",
+  blurb: "Postgres with a dashboard, and a local stack you can run too",
   cli: supabaseTool,
   exampleRegions: EXAMPLE_REGIONS,
   preflight,

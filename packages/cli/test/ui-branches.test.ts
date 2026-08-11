@@ -7,6 +7,9 @@ vi.mock("@clack/prompts", () => ({
   confirm: vi.fn(() => Promise.resolve(true)),
   text: vi.fn(() => Promise.resolve("answer")),
   select: vi.fn(() => Promise.resolve("managed")),
+  // Section headings, not questions — the wizard names its two halves so the local and the
+  // production database do not read as one question asked twice.
+  note: vi.fn(),
   isCancel: vi.fn(() => false),
   cancel: vi.fn(),
 }));
@@ -315,13 +318,13 @@ describe("render branches", () => {
         env: "dev",
       },
       target: {
-        label: "Docker Compose",
+        label: "Self-hosted (Docker Compose)",
         databaseHint: "the `db` service",
         notes: ["Nothing is running yet", "TLS is yours to terminate"],
       },
       theme: plainTheme,
     });
-    expect(s).toContain("warehousd deployed to Docker Compose");
+    expect(s).toContain("warehousd deployed to Self-hosted (Docker Compose)");
     expect(s).toContain("the `db` service");
     expect(s).not.toMatch(/fly/i);
   });
@@ -337,7 +340,11 @@ describe("render branches", () => {
         databaseUrl: null,
         env: "dev",
       },
-      target: { label: "Docker Compose", databaseHint: "the `db` service", notes: ["first"] },
+      target: {
+        label: "Self-hosted (Docker Compose)",
+        databaseHint: "the `db` service",
+        notes: ["first"],
+      },
       theme: plainTheme,
     });
     const first = s.split("\n").find((l) => l.includes("first"));

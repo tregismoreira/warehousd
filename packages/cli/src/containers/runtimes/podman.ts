@@ -28,6 +28,9 @@ const cli: CliTool = {
 export const podman: ContainerRuntime = {
   id: "podman",
   label: "Podman",
+  // Says "unverified" because it is — see the header. A hint that oversold it would be the one
+  // place somebody reads before choosing.
+  blurb: "rootless, no daemon — compatible but not yet verified here",
   cli,
   hasDaemon: false,
 };

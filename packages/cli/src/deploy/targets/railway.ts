@@ -353,6 +353,7 @@ function logs(ctx: TargetContext): Promise<string> {
 export const railway: DeployTarget = {
   id: "railway",
   label: "Railway",
+  blurb: "warehousd creates the project and runs it for you",
   databaseHint: "managed by Railway Postgres — `railway connect Postgres`",
   exampleRegion: "us-west2",
   preflight,

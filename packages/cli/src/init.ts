@@ -9,6 +9,8 @@ import {
   PROVISIONABLE_DB_PROVIDER_IDS,
   inferCollection,
   renderCollectionYaml,
+  type DbProviderId,
+  type DeployTargetId,
   type InferredCollection,
 } from "@warehousd/broker";
 import { targets } from "./deploy/targets";
@@ -96,6 +98,15 @@ collections:
 /** The commented `deploy:` block, replaced wholesale by the answered one. */
 const DEPLOY_BLOCK = /^# deploy:.*\n(?:# {3,}.*\n)+/m;
 
+/**
+ * What `--prod-db` accepts, and the three shapes `deploy.database` takes.
+ *
+ * `target` and `existing` are not provider ids and never will be — they name *who* provides the
+ * database rather than *which* provider — so the list is built from the registry with those two
+ * around it rather than being a second hand-maintained copy.
+ */
+export const PROD_DB_IDS = ["target", ...PROVISIONABLE_DB_PROVIDER_IDS, "existing"] as const;
+
 /** A flag value that has to be one of a registry's ids, or a refusal that lists them. */
 function oneOf<T extends string>(
   value: string | undefined,
@@ -121,79 +132,83 @@ function oneOf<T extends string>(
 export function initDefaults(opts: {
   project: string;
   target?: string | undefined;
-  dbProvider?: string | undefined;
+  devDb?: string | undefined;
+  prodDb?: string | undefined;
+  prodDbHost?: string | undefined;
+  prodDbRegion?: string | undefined;
+  prodDbOrg?: string | undefined;
   runtime?: string | undefined;
-  localDb?: string | undefined;
-  dbRegion?: string | undefined;
-  dbOrg?: string | undefined;
   manual?: boolean | undefined;
-  attachDb?: boolean | undefined;
 }): { defaults: InitAnswers; fromFlags: boolean } {
-  const dbProvider = oneOf(opts.dbProvider, DB_PROVIDER_IDS, "--db-provider");
   const runtime =
     oneOf(opts.runtime, CONTAINER_RUNTIME_IDS, "--runtime") ?? DEFAULT_CONTAINER_RUNTIME_ID;
 
-  // `--db-provider` now answers two questions, and `--attach-db` is what picks between them.
-  //
-  // It used to mean only "who hosts the url you are about to paste", which decided nothing
-  // without a deploy block to sit in. It now defaults to the more useful reading — "create the
-  // database there" — which is a `deploy:` block's worth of answers on its own. `--attach-db`
-  // restores the original meaning explicitly, because a flag that silently changed sense would be
-  // worse than either.
-  const provisioning = !opts.attachDb && dbProvider !== null && hostFor(dbProvider) !== undefined;
-
-  // Unchanged for the attach case, and for the same reason as before: a provider that names where
-  // an attached url is hosted decides nothing without a block to sit in.
-  if (dbProvider && !provisioning && opts.target === undefined)
-    throw new Error("--db-provider needs --target: it only applies inside a deploy block.");
-
-  // `--local-db` takes a provider id, or `docker` for warehousd's own container, or `url`.
-  const localDb = opts.localDb ?? "docker";
+  // `--dev-db` takes a provider id whose local stack should run it, or `docker` for warehousd's
+  // own container, or `url` to bring your own. It decides the top-level `database:` block and
+  // nothing else: a production answer must never rewrite this one, which is what made "a container
+  // locally, Supabase in production" — the ordinary case — unscaffoldable when one flag meant both.
+  const devDb = opts.devDb ?? "docker";
   const localDbProvider =
-    localDb === "docker" || localDb === "url"
-      ? null
-      : oneOf(localDb, DB_PROVIDER_IDS, "--local-db");
+    devDb === "docker" || devDb === "url" ? null : oneOf(devDb, DB_PROVIDER_IDS, "--dev-db");
   if (localDbProvider && !hostFor(localDbProvider)?.local)
     throw new Error(
-      `--local-db ${localDbProvider} has no local stack. Use \`docker\`, \`url\`, or one of: ` +
+      `--dev-db ${localDbProvider} has no local stack. Use \`docker\`, \`url\`, or one of: ` +
         `${localHosts()
           .map((h) => h.id)
           .join(", ")}`,
     );
-  if (opts.dbRegion !== undefined && !provisioning)
+
+  // `--prod-db` decides `deploy.database`, and it is the only flag that does. It replaced a
+  // `--db-provider` that meant "create one there" or "this is who hosts the url I am attaching"
+  // depending on whether `--attach-db` was also passed — two questions on one flag, disambiguated
+  // by a second flag that existed for no other purpose.
+  const prodDb = oneOf(opts.prodDb, PROD_DB_IDS, "--prod-db");
+  const provisioningHost = prodDb === null ? null : (hostFor(prodDb as DbProviderId) ?? null);
+  const attaching = prodDb === "existing";
+
+  // Who hosts a Postgres you already run. Only ever an override on the hostname, so it decides
+  // nothing unless something is being attached.
+  const prodDbHost = oneOf(opts.prodDbHost, DB_PROVIDER_IDS, "--prod-db-host");
+  if (prodDbHost && !attaching)
     throw new Error(
-      "--db-region needs a --db-provider that creates the database (supabase, neon): it names where to build it.",
+      "--prod-db-host only applies to a database you already run: pass --prod-db existing, or drop it.",
     );
-  // Same rule, same reason: an organisation to create something in decides nothing when nothing
-  // is being created.
-  if (opts.dbOrg !== undefined && !provisioning)
+
+  // A region and an organisation both name where to *build* something, so neither decides anything
+  // when nothing is being built.
+  if (opts.prodDbRegion !== undefined && !provisioningHost)
     throw new Error(
-      "--db-org needs a --db-provider that creates the database: it names which organisation to create it in.",
+      `--prod-db-region needs --prod-db to name a provider that creates the database (${PROVISIONABLE_DB_PROVIDER_IDS.join(", ")}): it says where to build it.`,
     );
+  if (opts.prodDbOrg !== undefined && !provisioningHost)
+    throw new Error(
+      `--prod-db-org needs --prod-db to name a provider that creates the database (${PROVISIONABLE_DB_PROVIDER_IDS.join(", ")}): it says which organisation to build it in.`,
+    );
+
+  // No deploy answers at all means no `deploy:` block, and that is the right default rather than an
+  // omission: the block is read only by `warehousd deploy`, and scaffolding one for somebody who
+  // has not decided where to deploy is a file full of guesses they have to review.
+  const fromFlags = opts.target !== undefined || prodDb !== null;
 
   return {
     defaults: {
       project: opts.project,
       port: DEFAULT_PORT,
-      // `--db-provider` is about production, and says nothing about this machine. It used to set
-      // the one shared flag, so naming a deploy provider rewrote the *local* database block to
-      // `${env:DATABASE_URL}` as well — and "Docker locally, Supabase in production" could not be
-      // scaffolded at all. `--local-db` is the flag for this machine.
-      managed: localDb !== "url",
-      target: oneOf(opts.target, DEPLOY_TARGET_IDS, "--target") ?? DEFAULT_DEPLOY_TARGET_ID,
-      // Two ways to be "managed" now: the target builds it, or a provider CLI does. Only naming a
-      // provider that *cannot* build one still means "attach a Postgres I already run".
-      deployManaged: dbProvider === null || provisioning,
-      dbProvider,
+      managed: devDb !== "url",
+      target: fromFlags
+        ? (oneOf(opts.target, DEPLOY_TARGET_IDS, "--target") ?? DEFAULT_DEPLOY_TARGET_ID)
+        : null,
+      // Two ways to be managed: the target builds the database, or a provider's CLI does. Only
+      // `existing` means "attach a Postgres I already run".
+      deployManaged: !attaching,
+      dbProvider: attaching ? prodDbHost : (provisioningHost?.id ?? null),
       guided: !opts.manual,
       runtime,
       localDbProvider,
-      dbRegion: opts.dbRegion ?? null,
-      dbOrg: opts.dbOrg ?? null,
+      dbRegion: opts.prodDbRegion ?? null,
+      dbOrg: opts.prodDbOrg ?? null,
     },
-    // Any flag that decides a deploy answer is enough to write the block; `--target` is no longer
-    // the only one, because `--db-provider supabase` says as much about production as it does.
-    fromFlags: opts.target !== undefined || provisioning,
+    fromFlags,
   };
 }
 
@@ -222,7 +237,7 @@ export function appNameFor(project: string): string {
  * would mean deleting lines out of the middle of the block either way. The commented copy stays in
  * the template as the documentation of every key, which is what it is worth keeping.
  */
-function renderDeployBlock(answers: InitAnswers): string {
+function renderDeployBlock(answers: InitAnswers & { target: DeployTargetId }): string {
   const lines = [
     "deploy:",
     `  target: ${answers.target}`,
@@ -287,8 +302,13 @@ export function applyAnswers(template: string, answers: InitAnswers): string {
       "database:\n  url: $1",
     );
   }
+  // "Not yet" leaves the commented block exactly as the template ships it, which is the
+  // documentation of every key and the thing somebody uncomments when they do decide.
+  if (answers.target === null) return out;
+
   // A function replacement, so a `$` in the rendered block is never read as a substitution pattern.
-  return out.replace(DEPLOY_BLOCK, () => renderDeployBlock(answers));
+  const answered = { ...answers, target: answers.target };
+  return out.replace(DEPLOY_BLOCK, () => renderDeployBlock(answered));
 }
 
 /** The spreadsheets `init --from` will read. */

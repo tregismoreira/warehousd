@@ -35,6 +35,7 @@ const cli: CliTool = {
 export const docker: ContainerRuntime = {
   id: "docker",
   label: "Docker",
+  blurb: "what most people have, and what this is tested against",
   cli,
   hasDaemon: true,
 };

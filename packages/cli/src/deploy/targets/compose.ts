@@ -269,7 +269,11 @@ function notes(ctx: TargetContext): string[] {
 
 export const compose: DeployTarget = {
   id: "compose",
-  label: "Docker Compose",
+  // "Docker Compose" alone was read as "run it locally on Docker", which is the opposite of what
+  // this does: it renders a compose file for a machine warehousd does not control, and starts
+  // nothing. The label says self-hosted first, and `blurb` says the rest.
+  label: "Self-hosted (Docker Compose)",
+  blurb: "writes a compose file you deploy to your own server — nothing is started for you",
   databaseHint: `the \`${DB_SERVICE}\` service — \`docker compose -f ${COMPOSE_FILE} exec ${DB_SERVICE} psql -U ${DB_USER} ${DB_NAME}\``,
   // Compose has no regions, and `region` is a required key with nothing to say here. "local" is
   // the honest placeholder — a machine the operator runs — and nothing validates it.
