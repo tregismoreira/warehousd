@@ -63,6 +63,37 @@ export function renderPanel(opts: {
   return lines.join("\n");
 }
 
+/**
+ * "This finished, and here is what it did." One shape, for every command that has one.
+ *
+ * A wrapper over `renderPanel` rather than a second renderer, because the only thing a success
+ * differs by is its heading: the accent glyph and the headline. Commands used to end however their
+ * author felt on the day — `init` on a dim `Next: warehousd start` that read like narration,
+ * `apply` on the bare word `applied`, `stop` on a progress line that had already scrolled — so
+ * nothing looked like completion and `init` in particular left people unsure it had run.
+ *
+ * `sections` is optional: a command with nothing to report is a headline on its own, which is
+ * still a great deal clearer than a lowercase verb.
+ */
+export function renderSuccess(opts: {
+  headline: string;
+  subtitle?: string | undefined;
+  sections?: Section[] | undefined;
+  theme: Theme;
+  showSecrets?: boolean | undefined;
+  footer?: string[] | undefined;
+}): string {
+  const { theme } = opts;
+  return renderPanel({
+    title: `${theme.c.accent(theme.s.ok)} ${opts.headline}`,
+    sections: opts.sections ?? [],
+    theme,
+    ...(opts.subtitle === undefined ? {} : { subtitle: opts.subtitle }),
+    ...(opts.showSecrets === undefined ? {} : { showSecrets: opts.showSecrets }),
+    ...(opts.footer === undefined ? {} : { footer: opts.footer }),
+  });
+}
+
 // The `start` summary. `databaseUrl` is passed through the URL masker rather than flagged as a
 // secret outright: the host, port and database name are the useful part and only the password
 // needs hiding.
@@ -122,8 +153,8 @@ export function renderStartSummary(opts: {
   // taught people to skip both.
   const footer = showSecrets ? [] : ["Secrets are masked — reveal with `warehousd secrets --show`"];
 
-  return renderPanel({
-    title: "warehousd is running",
+  return renderSuccess({
+    headline: "warehousd is running",
     subtitle: opts.elapsed,
     sections,
     theme,
@@ -189,8 +220,8 @@ export function renderDeploySummary(opts: {
     ...(showSecrets ? [] : ["Secrets are masked — reveal with `warehousd secrets --show`"]),
   ];
 
-  return renderPanel({
-    title: `warehousd deployed to ${opts.target.label}`,
+  return renderSuccess({
+    headline: `warehousd deployed to ${opts.target.label}`,
     sections,
     theme,
     showSecrets,

@@ -16,6 +16,8 @@ import type { CliTool, PreflightCheck } from "../../cli-tools";
 export type DbHost = {
   id: DbProviderId;
   label: string;
+  /** What this provider is, in one clause, for the wizard's hint line. See `DeployTarget.blurb`. */
+  blurb: string;
   cli: CliTool;
   /** Region codes this provider actually has, for a refusal that points somewhere concrete. */
   exampleRegions: string;

@@ -127,15 +127,15 @@ describe("runInit", () => {
     });
   });
 
-  // `--attach-db` is what still means "who hosts the url I am about to paste". Without it,
-  // `--db-provider supabase` now means "create one there" — see the test below.
-  it("writes a loadable url-and-provider deploy block from --target, --db-provider and --attach-db", async () => {
+  // `--prod-db existing` is "attach the one I already run"; `--prod-db-host` only says who hosts
+  // it. The pair replaced a `--db-provider` that meant either thing depending on `--attach-db`.
+  it("writes a loadable url-and-provider deploy block from --prod-db existing and --prod-db-host", async () => {
     process.env.PROD_DATABASE_URL = "postgres://u:p@db.abc.supabase.co:5432/postgres";
     const { defaults } = initDefaults({
       project: "Harbor Data",
       target: "railway",
-      dbProvider: "supabase",
-      attachDb: true,
+      prodDb: "existing",
+      prodDbHost: "supabase",
     });
     expect(defaults.deployManaged).toBe(false);
     await runInit(projectDir, { force: true, answers: defaults });
@@ -151,18 +151,19 @@ describe("runInit", () => {
   });
 
   /**
-   * The ordinary case, and the one a single shared flag made unscaffoldable: Docker locally,
-   * somebody else's Postgres in production. `--db-provider` used to set one `managed` flag that
-   * both blocks read, so naming a deploy provider rewrote the *local* database to
-   * `${env:DATABASE_URL}` — a dev stack pointed at whatever that variable happened to hold.
+   * The ordinary case, and the one a single shared flag made unscaffoldable: a container locally,
+   * somebody else's Postgres in production. One flag used to set a `managed` that both blocks read,
+   * so naming a deploy provider rewrote the *local* database to `${env:DATABASE_URL}` — a dev stack
+   * pointed at whatever that variable happened to hold. `--dev-db` and `--prod-db` are now the two
+   * axes, and neither touches the other's block.
    */
   it("leaves the local database block alone when only the deploy one is somebody else's", async () => {
     process.env.PROD_DATABASE_URL = "postgres://u:p@db.abc.supabase.co:5432/postgres";
     const { defaults } = initDefaults({
       project: "harbor",
       target: "fly",
-      dbProvider: "supabase",
-      attachDb: true,
+      prodDb: "existing",
+      prodDbHost: "supabase",
     });
     expect(defaults.managed).toBe(true);
     await runInit(projectDir, { force: true, answers: defaults });
@@ -208,22 +209,49 @@ describe("runInit", () => {
     expect(cfg.deploy?.database).toEqual({ managed: true });
   });
 
-  // Only for the attach case. A provider that *creates* the database is a deploy block's worth of
-  // answers by itself, so it no longer needs `--target` to have somewhere to sit.
-  it("refuses an attached provider with no target, since it would have no block to sit in", () => {
-    expect(() => initDefaults({ project: "harbor", dbProvider: "neon", attachDb: true })).toThrow(
-      "--target",
-    );
-    expect(() => initDefaults({ project: "harbor", dbProvider: "generic" })).toThrow("--target");
+  /**
+   * `--prod-db` is about production and nothing else, so it implies a deploy block on its own and
+   * falls back to the default target. The old flag needed a `--target` beside it in one of its two
+   * meanings and not the other, which is the sort of rule nobody can hold in their head.
+   */
+  it("writes a deploy block from --prod-db alone, on the default target", () => {
+    const { defaults, fromFlags } = initDefaults({ project: "harbor", prodDb: "existing" });
+    expect(fromFlags).toBe(true);
+    expect(defaults.target).toBe("fly");
+    expect(defaults.deployManaged).toBe(false);
+  });
+
+  // "Not yet" is the default rather than a flag: with nothing said about deploying, there is
+  // nothing to write, and a block full of guesses is worse than no block.
+  it("writes no deploy block when nothing names a target or a production database", () => {
+    const { defaults, fromFlags } = initDefaults({ project: "harbor" });
+    expect(fromFlags).toBe(false);
+    expect(defaults.target).toBeNull();
+  });
+
+  it("leaves the commented deploy block untouched for a null target", async () => {
+    const { defaults } = initDefaults({ project: "harbor" });
+    await runInit(projectDir, { force: true, answers: defaults });
+
+    const written = readFileSync(join(projectDir, "warehousd.yml"), "utf8");
+    expect(written).toContain("# deploy:");
+    expect(written).not.toMatch(/^deploy:/m);
+    expect(loadConfig(projectDir).deploy).toBeUndefined();
+  });
+
+  it("refuses a --prod-db-host with nothing being attached", () => {
+    expect(() =>
+      initDefaults({ project: "harbor", target: "fly", prodDb: "neon", prodDbHost: "generic" }),
+    ).toThrow(/--prod-db-host only applies to a database you already run/);
   });
 
   // The new shape: one flag pair, and warehousd creates the database itself.
-  it("writes a create-the-database deploy block from --db-provider and --db-region", async () => {
+  it("writes a create-the-database deploy block from --prod-db and --prod-db-region", async () => {
     const { defaults, fromFlags } = initDefaults({
       project: "harbor",
       target: "fly",
-      dbProvider: "neon",
-      dbRegion: "aws-sa-east-1",
+      prodDb: "neon",
+      prodDbRegion: "aws-sa-east-1",
     });
     expect(defaults.deployManaged).toBe(true);
     expect(fromFlags).toBe(true);
@@ -242,7 +270,7 @@ describe("runInit", () => {
     const { defaults } = initDefaults({
       project: "harbor",
       target: "fly",
-      localDb: "supabase",
+      devDb: "supabase",
       runtime: "podman",
     });
     await runInit(projectDir, { force: true, answers: defaults });
@@ -254,9 +282,7 @@ describe("runInit", () => {
   });
 
   it("refuses a local provider that has no local stack", () => {
-    expect(() => initDefaults({ project: "harbor", localDb: "neon" })).toThrow(
-      /has no local stack/,
-    );
+    expect(() => initDefaults({ project: "harbor", devDb: "neon" })).toThrow(/has no local stack/);
   });
 
   // The flag existed and was read by nothing for a while: declared in program.ts, absent from
@@ -266,9 +292,9 @@ describe("runInit", () => {
     const { defaults } = initDefaults({
       project: "harbor",
       target: "fly",
-      dbProvider: "supabase",
-      dbRegion: "sa-east-1",
-      dbOrg: "abcdefgh",
+      prodDb: "supabase",
+      prodDbRegion: "sa-east-1",
+      prodDbOrg: "abcdefgh",
     });
     await runInit(projectDir, { force: true, answers: defaults });
 
@@ -286,32 +312,32 @@ describe("runInit", () => {
     const { defaults } = initDefaults({
       project: "harbor",
       target: "fly",
-      dbProvider: "supabase",
-      dbRegion: "sa-east-1",
+      prodDb: "supabase",
+      prodDbRegion: "sa-east-1",
     });
     await runInit(projectDir, { force: true, answers: defaults });
     expect(loadConfig(projectDir).deploy?.database).not.toHaveProperty("org");
   });
 
   it("refuses an organisation with nothing to create in it", () => {
-    expect(() => initDefaults({ project: "harbor", target: "fly", dbOrg: "abcdefgh" })).toThrow(
-      /--db-org needs a --db-provider/,
+    expect(() => initDefaults({ project: "harbor", target: "fly", prodDbOrg: "abcdefgh" })).toThrow(
+      /--prod-db-org needs --prod-db/,
     );
   });
 
   it("refuses a db region with nothing to build in it", () => {
     expect(() =>
-      initDefaults({ project: "harbor", target: "fly", dbRegion: "aws-sa-east-1" }),
-    ).toThrow(/--db-region needs a --db-provider/);
+      initDefaults({ project: "harbor", target: "fly", prodDbRegion: "aws-sa-east-1" }),
+    ).toThrow(/--prod-db-region needs --prod-db/);
   });
 
   it("refuses an unregistered target or provider, naming the ones that exist", () => {
     expect(() => initDefaults({ project: "harbor", target: "vercel" })).toThrow(
       /--target must be one of: fly, railway, compose/,
     );
-    expect(() =>
-      initDefaults({ project: "harbor", target: "fly", dbProvider: "planetscale" }),
-    ).toThrow(/--db-provider must be one of: supabase, neon, railway, generic/);
+    expect(() => initDefaults({ project: "harbor", target: "fly", prodDb: "planetscale" })).toThrow(
+      /--prod-db must be one of: target, supabase, neon, existing/,
+    );
   });
 
   it("overwrites warehousd.yml with --force", async () => {

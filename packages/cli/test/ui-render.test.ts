@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { renderStartSummary, renderChecks, renderStatus, renderPanel } from "../src/ui/render";
+import {
+  renderStartSummary,
+  renderChecks,
+  renderStatus,
+  renderPanel,
+  renderSuccess,
+} from "../src/ui/render";
 import { plainTheme, resolveTheme } from "../src/ui/theme";
 
 // A CSI sequence: ESC [ ... final byte. Built from a code point so no raw control character ends
@@ -82,6 +88,75 @@ describe("renderStartSummary", () => {
     const theme = resolveTheme({ isTTY: true, env: {} });
     const s = renderStartSummary({ outputs, admin, theme });
     expect(s).toMatch(ANSI);
+  });
+});
+
+// One shape for every command that finishes. Commands used to end however their author felt on the
+// day, so nothing looked like completion — `init` in particular left people unsure it had run.
+describe("renderSuccess", () => {
+  it("marks the headline with the ok glyph, so completion is visible at a glance", () => {
+    const s = renderSuccess({ headline: "Configuration applied", theme: plainTheme });
+    expect(s).toContain(`${plainTheme.s.ok} Configuration applied`);
+  });
+
+  it("needs no sections — a command with nothing to report is still a headline", () => {
+    const s = renderSuccess({ headline: "Stack stopped", theme: plainTheme });
+    expect(s).toContain("Stack stopped");
+    expect(s.trim().split("\n")).toHaveLength(1);
+  });
+
+  it("lays fields out like every other panel", () => {
+    const s = renderSuccess({
+      headline: "Import complete",
+      theme: plainTheme,
+      sections: [
+        {
+          fields: [
+            { label: "Added", value: "12" },
+            { label: "Deleted", value: "3" },
+          ],
+        },
+      ],
+    });
+    // Labels pad to the widest in their section, so the values start on one column.
+    const values = s
+      .split("\n")
+      .filter((l) => /Added|Deleted/.test(l))
+      .map((l) => l.search(/\d/));
+    expect(values).toHaveLength(2);
+    expect(new Set(values).size).toBe(1);
+  });
+
+  it("indents every footer line, not only the first", () => {
+    const s = renderSuccess({
+      headline: "Stack stopped",
+      theme: plainTheme,
+      footer: ["first", "second"],
+    });
+    for (const line of ["  first", "  second"]) expect(s).toContain(line);
+  });
+
+  it("masks a secret field unless told otherwise", () => {
+    const fields = [{ label: "Password", value: ADMIN_PASSWORD, secret: true }];
+    const masked = renderSuccess({ headline: "Done", theme: plainTheme, sections: [{ fields }] });
+    expect(masked).not.toContain(ADMIN_PASSWORD);
+    const shown = renderSuccess({
+      headline: "Done",
+      theme: plainTheme,
+      sections: [{ fields }],
+      showSecrets: true,
+    });
+    expect(shown).toContain(ADMIN_PASSWORD);
+  });
+
+  it("carries no ANSI when there is no terminal behind it", () => {
+    expect(renderSuccess({ headline: "Done", theme: plainTheme })).not.toMatch(ANSI);
+  });
+
+  // The glyph is the brand accent, not the generic green the reporter uses for a step.
+  it("colours the glyph with the brand accent on a capable terminal", () => {
+    const theme = resolveTheme({ isTTY: true, env: { COLORTERM: "truecolor" } });
+    expect(renderSuccess({ headline: "Done", theme })).toContain("38;2;29;158;117");
   });
 });
 

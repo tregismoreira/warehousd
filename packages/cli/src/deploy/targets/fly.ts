@@ -148,6 +148,7 @@ function logs(ctx: TargetContext): Promise<string> {
 export const fly: DeployTarget = {
   id: "fly",
   label: "Fly.io",
+  blurb: "warehousd creates the app and runs it for you",
   databaseHint: "managed by Fly Postgres — `fly postgres connect`",
   exampleRegion: "gru",
   preflight,

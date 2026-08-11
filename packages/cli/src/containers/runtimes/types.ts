@@ -14,6 +14,13 @@ export type ContainerRuntime = {
   id: ContainerRuntimeId;
   /** Human name, for the version line and for a refusal that reads as a sentence. */
   label: string;
+  /**
+   * What choosing this actually means, in one clause, for the wizard's hint line.
+   *
+   * It lives here for the same reason `label` does: nothing outside this directory may branch on a
+   * runtime id, so a sentence about one engine cannot live in the prompt module.
+   */
+  blurb: string;
   /** Presence, readiness and install routes — see cli-tools.ts. */
   cli: CliTool;
   /**

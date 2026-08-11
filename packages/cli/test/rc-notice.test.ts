@@ -54,4 +54,43 @@ describe("rcNotice", () => {
     const theme = resolveTheme({ isTTY: true, env: {} });
     expect(rcNotice("0.1.0-rc.1", theme)).toMatch(ANSI);
   });
+
+  /**
+   * It used to be one flush-left line of 128 characters.
+   *
+   * That put it at column 0 where it collided with the shell prompt and lined up with none of the
+   * output beneath it, and it wrapped wherever the terminal happened to be — so the URL landed in
+   * a different place on every machine. Both are layout, and layout is what these pin.
+   */
+  it("breaks at the sentence, so the link is not at the mercy of the terminal width", () => {
+    const lines = (rcNotice("0.1.0-rc.1", plainTheme) ?? "").split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("not meant to be used in production");
+    expect(lines[1]).toContain("https://github.com/tregismoreira/warehousd");
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(80);
+  });
+
+  it("indents to the same column as every panel and progress line", () => {
+    const lines = (rcNotice("0.1.0-rc.1", plainTheme) ?? "").split("\n");
+    for (const line of lines) expect(line).toMatch(/^ {2}\S|^ {4}\S/);
+  });
+
+  it("carries the warning glyph, so it reads as a warning rather than as noise", () => {
+    expect(rcNotice("0.1.0-rc.1", plainTheme)).toContain(`  ${plainTheme.s.warn} This is`);
+  });
+
+  // The second line aligns under the text, not under the glyph, so the two read as one block.
+  it("aligns the continuation under the first line's text", () => {
+    const lines = (rcNotice("0.1.0-rc.1", plainTheme) ?? "").split("\n");
+    const textStarts = (l: string) => l.length - l.trimStart().length;
+    expect(textStarts(lines[1] ?? "")).toBe(textStarts(lines[0] ?? "") + 2);
+  });
+
+  // Blank lines belong to the caller: what follows is sometimes a wordmark, sometimes a panel that
+  // opens with its own, so a leading or trailing newline here would double up in one of the two.
+  it("brings no blank line of its own", () => {
+    const s = rcNotice("0.1.0-rc.1", plainTheme) ?? "";
+    expect(s.startsWith("\n")).toBe(false);
+    expect(s.endsWith("\n")).toBe(false);
+  });
 });

@@ -56,12 +56,12 @@ Code is formatted by **Prettier** (`.prettierrc.json`), and `pnpm format:check` 
 
 Tests live in a `test/` directory beside the code, not next to the source file.
 
-| Where | Pattern | Run by |
-| --- | --- | --- |
-| `packages/*/test/`, `apps/web/test/` | `*.test.ts`, `*.integration.test.ts` | `pnpm test` (parallel pass) |
-| `packages/broker/test/`, `apps/web/test/` | the files in `SERIAL_TESTS` (`vitest.config.ts`) | `pnpm test` (serial pass) |
-| `packages/cli/test/e2e/` | `*.e2e.test.ts` | `pnpm test:e2e:cli` |
-| `apps/web/e2e/` | `*.spec.ts` | `pnpm e2e` |
+| Where                                     | Pattern                                          | Run by                      |
+| ----------------------------------------- | ------------------------------------------------ | --------------------------- |
+| `packages/*/test/`, `apps/web/test/`      | `*.test.ts`, `*.integration.test.ts`             | `pnpm test` (parallel pass) |
+| `packages/broker/test/`, `apps/web/test/` | the files in `SERIAL_TESTS` (`vitest.config.ts`) | `pnpm test` (serial pass)   |
+| `packages/cli/test/e2e/`                  | `*.e2e.test.ts`                                  | `pnpm test:e2e:cli`         |
+| `apps/web/e2e/`                           | `*.spec.ts`                                      | `pnpm e2e`                  |
 
 - `provision()` in `packages/broker/test/helpers/db.ts` clones a template into a database of that test file's own. Use it. Do not share state between files, and do not reach into another file's database.
 - `pnpm test` is two vitest passes because a few suites mutate cluster-global state (`scripts/run-tests.ts`). Adding a file to `SERIAL_TESTS` costs everyone wall-clock time — do it only when the suite genuinely cannot tolerate a neighbour, and say why in the PR.
@@ -94,5 +94,5 @@ Anything you start, you own until it is stopped: a background process, a contain
 - One focused change per pull request; say which invariant or behaviour it affects.
 - Do not reformat, refactor, or add comments to code your change does not touch. A diff that is hard to review is a diff that hides things.
 - Ask before adding a dependency. `packages/broker` in particular is meant to stay thin.
-- **`@clack/prompts` is pinned to `^0.11` on purpose.** 1.x is ESM-only — no `require` condition — and `packages/cli` builds to a CommonJS bundle (`tsup.config.ts`, bin `dist/index.cjs`). A caret on a `0.x` will not drift there by itself, but do not widen the range or bump it by hand without moving the CLI build to ESM first. `pnpm --filter ./packages/cli build && node packages/cli/dist/index.cjs --help` is the check.
+- **`@clack/prompts` is ESM-only, and `packages/cli` ships CommonJS.** 1.x declares `"type": "module"` with no `require` condition, while the CLI builds to `dist/index.cjs` (`tsup.config.ts`). Those coexist for one reason: `noExternal: [/.*/]` inlines it into the bundle, so nothing ever `require`s it at runtime. **Do not add it to `external` in `tsup.config.ts`** — that is the change that would break the shipped binary, not a version bump. The same applies to any other ESM-only dependency. `pnpm --filter ./packages/cli build && node packages/cli/dist/index.cjs --help` is the check.
 - Do not report a security vulnerability through a PR or issue — see [SECURITY.md](SECURITY.md).

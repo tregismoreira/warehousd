@@ -21,7 +21,7 @@ deploy:
     region: aws-sa-east-1      # the database's region, not the target's
 ```
 
-`warehousd init --db-provider neon --db-region aws-sa-east-1` scaffolds exactly that, checks the Neon CLI is installed, and offers to install it if not.
+`warehousd init --prod-db neon --prod-db-region aws-sa-east-1` scaffolds exactly that, checks the Neon CLI is installed, and offers to install it if not.
 
 The third shape is the manual path, and it stays first-class — nothing below stops applying to it:
 
@@ -40,7 +40,7 @@ deploy:
 One command, and the rest is the same deploy it always was:
 
 ```bash
-warehousd init --no-input --target fly --db-provider neon --db-region aws-sa-east-1
+warehousd init --no-input --target fly --prod-db neon --prod-db-region aws-sa-east-1
 warehousd doctor --deploy    # is the Neon CLI there, and authenticated?
 warehousd deploy
 ```
@@ -118,7 +118,7 @@ Getting it wrong is not a parse error; it is a role that cannot authenticate. So
 
 A value set over a host nothing recognises stays valid, and is left alone — that is the CNAME case the key exists for, and the only one where you know more than the hostname does.
 
-`warehousd init --db-provider <id>` writes the key, alongside the `--target` that gives it a block to sit in. It is worth setting there even when the host would be recognised: at scaffold time the url is still a `${env:…}` reference, so there is no host to read it off yet.
+`warehousd init --prod-db existing --prod-db-host <id>` writes the key, alongside the `--target` that gives it a block to sit in. It is worth setting there even when the host would be recognised: at scaffold time the url is still a `${env:…}` reference, so there is no host to read it off yet.
 
 | Value | Host patterns | What differs |
 | --- | --- | --- |

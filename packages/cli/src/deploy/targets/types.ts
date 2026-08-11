@@ -57,6 +57,15 @@ export type DeployTarget = {
   /** Human name, for checklist details, error messages and the deploy summary's heading. */
   label: string;
   /**
+   * What deploying here actually gets you, in one clause, for the wizard's hint line.
+   *
+   * It exists because a label is not always enough to prevent a wrong reading. "Docker Compose"
+   * was taken to mean "run it locally on Docker" — it means the opposite: a compose file warehousd
+   * renders for a machine it does not control and does not start. A hint is the cheapest place to
+   * say so, and it belongs here rather than in the prompt for the same reason `label` does.
+   */
+  blurb: string;
+  /**
    * Where to find the database when `managed: true` left no URL to print.
    *
    * The summary used to say ``managed by Fly Postgres — `fly postgres connect` `` for every managed

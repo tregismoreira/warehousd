@@ -172,10 +172,14 @@ describe("formatDeployOutputs", () => {
     const compose = formatDeployOutputs(
       outputs,
       { adminEmail: "admin@example.com", adminPassword: "secret123" },
-      { label: "Docker Compose", databaseHint: "the `db` service", notes: ["start it yourself"] },
+      {
+        label: "Self-hosted (Docker Compose)",
+        databaseHint: "the `db` service",
+        notes: ["start it yourself"],
+      },
     );
     expect(compose).toContain("the `db` service");
-    expect(compose).toContain("warehousd deployed to Docker Compose");
+    expect(compose).toContain("warehousd deployed to Self-hosted (Docker Compose)");
     expect(compose).toContain("start it yourself");
     expect(compose).not.toContain("fly postgres connect");
   });

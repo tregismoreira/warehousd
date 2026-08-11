@@ -148,6 +148,7 @@ function destroy(ctx: DbHostContext, saved: SavedDatabase): Promise<void> {
 export const neon: DbHost = {
   id: "neon",
   label: "Neon",
+  blurb: "serverless Postgres that scales to zero — hosted only, no local stack",
   cli: neonTool,
   exampleRegions: EXAMPLE_REGIONS,
   preflight,

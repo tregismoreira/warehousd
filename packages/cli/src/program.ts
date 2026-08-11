@@ -16,13 +16,14 @@ import {
   CONTAINER_RUNTIME_IDS,
   DEPLOY_TARGET_IDS,
   DB_PROVIDER_IDS,
-  PROVISIONABLE_DB_PROVIDER_IDS,
+  dbProviders,
 } from "@warehousd/broker";
-import { localHosts } from "./db/hosts";
+import { dbHosts, hostFor, localHosts } from "./db/hosts";
+import { targets } from "./deploy/targets";
 import { ensureToolsFor } from "./init-tools";
 import { resolveDbUrl, tryResolveDbUrl, runApply, runSeed, runIndex, runEmbed } from "./index";
 import { buildPlan, renderPlan, writeMigration, migrationStatus } from "./migrate";
-import { runInit, initDefaults } from "./init";
+import { runInit, initDefaults, PROD_DB_IDS } from "./init";
 import {
   runImportMap,
   runImportRun,
@@ -41,11 +42,12 @@ import { runDoctor } from "./preflight";
 import { runLogs } from "./commands/logs";
 import { runOpen, type Target } from "./commands/open";
 import { collectSecrets, secretsJson } from "./commands/secrets";
-import { resolveTheme } from "./ui/theme";
+import { resolveTheme, type Theme } from "./ui/theme";
 import { rcNotice } from "./ui/rc-notice";
+import { brandBanner } from "./ui/brand";
 import { createStdReporter } from "./ui/reporter";
-import { renderStatus, renderChecks, renderPanel } from "./ui/render";
-import { isInteractive, promptInit, NonInteractiveError } from "./ui/prompt";
+import { renderStatus, renderChecks, renderPanel, renderSuccess } from "./ui/render";
+import { isInteractive, promptInit, NonInteractiveError, type InitAnswers } from "./ui/prompt";
 import { explain, formatExplained } from "./ui/errors";
 
 // WAREHOUSD_CLI_VERSION is defined by tsup at build time; fallback for source runs.
@@ -73,12 +75,16 @@ program
     "after",
     `
 Examples:
-  $ warehousd init                 scaffold warehousd.yml here
+  $ warehousd init                 set up a project here, with a few questions
   $ warehousd start                bring the stack up and print its URLs
   $ warehousd status --json | jq   machine-readable health
   $ warehousd logs --follow        tail the server container
   $ warehousd doctor               check Docker, image, ports and config
   $ warehousd secrets --show       reveal the masked credentials
+
+  Answering init from flags instead of the wizard:
+  $ warehousd init --no-input --dev-db docker --target fly \\
+      --prod-db neon --prod-db-region aws-sa-east-1
 `,
   );
 
@@ -114,6 +120,34 @@ function ui() {
 }
 
 /**
+ * The greeting, on the three commands where somebody is bringing something up.
+ *
+ * Not on all of them: `logs`, `status` and `secrets` are things you run in a loop, and a banner
+ * above each one would be six rows of decoration between you and the answer. `init`, `start` and
+ * `restart` are the commands with a beginning.
+ *
+ * stderr, like all narration — `warehousd start 2>/dev/null` must still print the summary alone.
+ * `brandBanner` returns null off a TTY and under --quiet/--json, so this is a no-op in a pipe.
+ *
+ * It lands *below* the release-candidate notice, which is written before commander parses argv
+ * (see the bottom of this file) and so cannot know which command is about to run. Putting the
+ * greeting first would mean sniffing argv before parsing, which is worse than the ordering. The
+ * notice retires itself at 1.0 and the greeting becomes the first thing printed then.
+ */
+function banner(g: { theme: Theme; quiet: boolean; json: boolean }): void {
+  const art = brandBanner({
+    theme: g.theme,
+    isTTY: Boolean(process.stderr.isTTY),
+    quiet: g.quiet,
+    json: g.json,
+    columns: process.stderr.columns,
+  });
+  // A blank line above and below. `brandBanner` deliberately carries neither, because whether
+  // there is a release-candidate notice sitting above it is not something it can know.
+  if (art) process.stderr.write(`\n${art}\n\n`);
+}
+
+/**
  * The result of a command, in whichever of the two forms was asked for. Always stdout — this is
  * the product, not the narration.
  *
@@ -133,7 +167,7 @@ function emit(value: unknown, human: string): void {
 
 program
   .command("init")
-  .description("scaffold warehousd.yml in this directory")
+  .description("set up a warehousd project in this directory")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--force", "overwrite an existing warehousd.yml")
   .option("--no-input", "never prompt; write the default template")
@@ -141,39 +175,39 @@ program
     "--from <dir>",
     "infer a collection per spreadsheet in this directory instead of the example",
   )
-  .option("--target <id>", `scaffold a deploy block for: ${DEPLOY_TARGET_IDS.join(", ")}`)
-  .option(
-    "--db-provider <id>",
-    `production database: ${PROVISIONABLE_DB_PROVIDER_IDS.join(", ")} to have warehousd create ` +
-      `one, or ${DB_PROVIDER_IDS.join(", ")} to say who hosts the url you attach`,
-  )
-  .option("--db-region <code>", "where to create it — the database's region, not the target's")
-  .option("--db-org <id>", "organisation to create it in (Supabase, when you have more than one)")
   .option("--runtime <id>", `container engine: ${CONTAINER_RUNTIME_IDS.join(", ")}`)
+  // Every value joined into one list rather than "docker, url, or one of <hosts>", which read as
+  // "or one of supabase" while exactly one host has a local stack.
   .option(
-    "--local-db <id>",
-    `database for local development: docker, url, or one of ${localHosts()
-      .map((h) => h.id)
-      .join(", ")}`,
+    "--dev-db <id>",
+    `database for development on this machine: ${["docker", "url", ...localHosts().map((h) => h.id)].join(", ")}`,
   )
+  .option("--target <id>", `where a deploy would go: ${DEPLOY_TARGET_IDS.join(", ")}`)
+  .option("--prod-db <id>", `database in production: ${PROD_DB_IDS.join(", ")}`)
   .option(
-    "--attach-db",
-    "attach a Postgres you already run instead of creating one; --db-provider then says who hosts it",
+    "--prod-db-host <id>",
+    `who hosts the database you attach, with --prod-db existing: ${DB_PROVIDER_IDS.join(", ")}`,
+  )
+  .option("--prod-db-region <code>", "where to create it — the database's region, not the target's")
+  .option(
+    "--prod-db-org <id>",
+    "organisation to create it in (Supabase, when you have more than one)",
   )
   .option("--manual", "skip guided setup and paste connection details yourself")
   .option("--install-missing", "install any provider CLI that is missing, without asking")
   .action(async (o) => {
-    const { reporter, json } = ui();
+    const { reporter, theme, json, quiet } = ui();
+    banner({ theme, quiet, json });
     const { defaults, fromFlags } = initDefaults({
       project: basename(resolve(o.dir)) || "my-app",
       target: o.target,
-      dbProvider: o.dbProvider,
       runtime: o.runtime,
-      localDb: o.localDb,
-      dbRegion: o.dbRegion,
-      dbOrg: o.dbOrg,
+      devDb: o.devDb,
+      prodDb: o.prodDb,
+      prodDbHost: o.prodDbHost,
+      prodDbRegion: o.prodDbRegion,
+      prodDbOrg: o.prodDbOrg,
       manual: o.manual,
-      attachDb: o.attachDb,
     });
 
     // The wizard only runs where there is somebody to answer it. Piped, in CI, under --json or
@@ -205,20 +239,73 @@ program
       emit(r, "");
       return;
     }
+    // The files still narrate on stderr as they happen; the panel below is the summary, and it is
+    // the product, so it goes to stdout.
     for (const f of r.created) reporter.step("created", f).done();
     for (const f of r.skipped) reporter.step("skipped", `${f} (already exists)`).done();
     for (const u of r.unreadable ?? []) reporter.warn(`${u.file}: ${u.reason}`);
-    if (r.inferred?.length) {
-      const closed = r.inferred.flatMap((c) => c.fields.filter((f) => f.closedBecause));
-      reporter.note(
-        `inferred ${r.inferred.length} collection(s); ${closed.length} field(s) closed by default`,
-      );
-      // Deny-by-default is a guess about a column NAME, never a reading of the data, and saying so
-      // is the difference between a safe scaffold and a scaffold someone trusts.
-      reporter.note("Every posture in warehousd.yml is a guess — read it before `warehousd apply`");
-    }
-    reporter.note("Next: warehousd start");
+
+    const closed = (r.inferred ?? []).flatMap((c) => c.fields.filter((f) => f.closedBecause));
+    reporter.out(
+      renderSuccess({
+        headline: "Project ready",
+        theme,
+        sections: [{ fields: initSummary(answers, r) }],
+        footer: [
+          // Deny-by-default is a guess about a column NAME, never a reading of the data, and
+          // saying so is the difference between a safe scaffold and one somebody trusts.
+          ...(r.inferred?.length
+            ? [
+                `${closed.length} field(s) closed by default — every posture is a guess about a name, not a reading of the data.`,
+                "Read warehousd.yml before `warehousd apply`.",
+              ]
+            : []),
+          "Next: warehousd start",
+        ],
+      }),
+    );
   });
+
+/** What `init` decided, for the summary panel. Omits a row it has no answer for. */
+function initSummary(
+  answers: InitAnswers | null,
+  result: { created: string[]; skipped: string[]; inferred?: { name: string }[] },
+): { label: string; value: string }[] {
+  const files = [...result.created, ...result.skipped.map((f) => `${f} (kept)`)];
+  if (!answers) return [{ label: "Files", value: files.join(", ") }];
+
+  const devDb = answers.localDbProvider
+    ? `${dbHosts[answers.localDbProvider as keyof typeof dbHosts]?.label ?? answers.localDbProvider} locally`
+    : answers.managed
+      ? "Postgres in a container warehousd runs"
+      : "your own, via database.url";
+
+  return [
+    { label: "Project", value: answers.project },
+    { label: "Port", value: String(answers.port) },
+    { label: "Dev data", value: devDb },
+    {
+      label: "Deploy",
+      value: answers.target === null ? "not set up yet" : targets[answers.target].label,
+    },
+    ...(answers.target === null ? [] : [{ label: "Prod data", value: prodDbSummary(answers) }]),
+    ...(result.inferred?.length
+      ? [{ label: "Collections", value: `${result.inferred.length} inferred from your files` }]
+      : []),
+    { label: "Files", value: files.join(", ") },
+  ];
+}
+
+function prodDbSummary(answers: InitAnswers): string {
+  if (!answers.deployManaged) {
+    const host = answers.dbProvider ? dbProviders[answers.dbProvider].label : "one you already run";
+    return `${host}, attached by url`;
+  }
+  const host = answers.dbProvider ? hostFor(answers.dbProvider) : undefined;
+  // The row above already names the target, so repeating it here only made the line long — and
+  // "provided by Self-hosted (Docker Compose)" was the sentence that showed it.
+  return host ? `${host.label} — created on your first deploy` : "Alongside the app";
+}
 program
   .command("start")
   .description("start the server and its database, then print the URLs")
@@ -226,7 +313,8 @@ program
   .option("-s, --seed <n>", "synthetic seed", "42")
   .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
-    const { reporter, theme, json } = ui();
+    const { reporter, theme, json, quiet } = ui();
+    banner({ theme, quiet, json });
     const began = Date.now();
     const outputs = await runStart(o.dir, { seed: Number(o.seed), reporter });
     const st = ensureState(o.dir);
@@ -247,27 +335,37 @@ program
   });
 program
   .command("apply")
-  .description("re-apply warehousd.yml without a restart")
+  .description("apply config changes to a running stack, without a restart")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .action(async (o) => {
-    const { reporter } = ui();
+    const { reporter, theme } = ui();
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runApply(o.dir, db, { reporter });
     // A rebuilt synth table is empty until the generator runs again. Saying so is the difference
     // between "apply worked" and an operator wondering where their dev data went.
-    const notes = [
-      ...(r.migrated.length ? [`migrations: ${r.migrated.join(", ")}`] : []),
-      ...(r.rebuilt.length ? [`rebuilt ${r.rebuilt.join(", ")} — run \`warehousd seed\``] : []),
+    const fields = [
+      ...(r.migrated.length ? [{ label: "Migrations", value: r.migrated.join(", ") }] : []),
+      ...(r.rebuilt.length ? [{ label: "Rebuilt", value: r.rebuilt.join(", ") }] : []),
     ];
-    emit({ applied: true, ...r }, notes.length ? `applied (${notes.join("; ")})` : "applied");
+    emit(
+      { applied: true, ...r },
+      renderSuccess({
+        headline: "Configuration applied",
+        theme,
+        sections: fields.length ? [{ fields }] : [],
+        ...(r.rebuilt.length
+          ? { footer: ["A rebuilt collection is empty until you run `warehousd seed`"] }
+          : {}),
+      }),
+    );
   });
 const migrate = program
   .command("migrate")
   .description("plan and write migrations for changes that would destroy live data");
 migrate
   .command("plan")
-  .description("what a config change would do to existing data")
+  .description("what a config change would do to data you already have")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .action(async (o) => {
@@ -325,12 +423,25 @@ program
   .option("-s, --seed <n>", "seed", "42")
   .option("--no-reindex", "leave file collections as they are")
   .action(async (o) => {
-    const { reporter } = ui();
+    const { reporter, theme } = ui();
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runSeed(o.dir, db, Number(o.seed), { reindex: o.reindex, reporter });
     emit(
       { seeded: true, seed: r.seed, reindexed: r.reindexed },
-      r.reindexed.length ? `seeded, re-indexed ${r.reindexed.join(", ")}` : "seeded",
+      renderSuccess({
+        headline: "Synthetic data regenerated",
+        theme,
+        sections: [
+          {
+            fields: [
+              { label: "Seed", value: String(r.seed) },
+              ...(r.reindexed.length
+                ? [{ label: "Re-indexed", value: r.reindexed.join(", ") }]
+                : []),
+            ],
+          },
+        ],
+      }),
     );
   });
 program
@@ -437,7 +548,7 @@ importCmd
   .option("--sheet <name>", "which sheet of an .xlsx to read")
   .option("--header-row <n>", "1-based row the headers are on", "1")
   .action(async (collection, file, o) => {
-    const { reporter } = ui();
+    const { reporter, theme } = ui();
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runImportRun(o.dir, db, collection, file, {
       mode: o.mode,
@@ -462,26 +573,65 @@ importCmd
     }
     emit(
       r,
-      `${r.dryRun ? "would import" : "imported"}: ${r.inserted} added, ${r.updated} revised, ${r.deleted} deleted`,
+      renderSuccess({
+        // A dry run rolls everything back, so calling it an import would be a lie about the state
+        // of the database — see runImportRun.
+        headline: r.dryRun ? "Import preview complete" : "Import complete",
+        theme,
+        sections: [
+          {
+            fields: [
+              { label: "Collection", value: collection },
+              { label: "Added", value: String(r.inserted) },
+              { label: "Revised", value: String(r.updated) },
+              { label: "Deleted", value: String(r.deleted) },
+            ],
+          },
+        ],
+        ...(r.dryRun ? { footer: ["Nothing was written — every statement was rolled back."] } : {}),
+      }),
     );
   });
 
 program
   .command("stop")
-  .description("stop the containers, keeping data")
+  .description("stop the containers, keeping your data")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--destroy", "remove volume and data (irreversible)")
   .option("-y, --yes", "skip confirmation for --destroy")
   .action(async (o) => {
-    const { reporter, json } = ui();
+    const { theme } = ui();
     await runStop(o.dir, { destroy: o.destroy, yes: o.yes });
-    if (json) emit({ stopped: true, destroyed: Boolean(o.destroy) }, "");
-    else
-      reporter.step("stopped", o.destroy ? "containers, volume and network" : "containers").done();
+    // `emit` branches on --json before it reads the human string, so building the panel
+    // unconditionally costs a machine-readable run nothing.
+    emit(
+      { stopped: true, destroyed: Boolean(o.destroy) },
+      renderSuccess({
+        headline: "Stack stopped",
+        theme,
+        sections: [
+          {
+            fields: [
+              {
+                label: "Removed",
+                value: o.destroy ? "containers, volume and network" : "containers",
+              },
+            ],
+          },
+        ],
+        // Data surviving a `stop` is the difference between the two runs, and the one thing
+        // somebody wants confirmed before they walk away.
+        footer: [
+          o.destroy
+            ? "The volume is gone — every document in it went with it."
+            : "Your data is untouched. `warehousd start` brings it back.",
+        ],
+      }),
+    );
   });
 program
   .command("status")
-  .description("health of this project's stack")
+  .description("is this project's stack up, and on which URLs")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
@@ -492,7 +642,9 @@ program
         `${JSON.stringify({ healthy: result.healthy, project: result.project, containers: result.containers, outputs: result.outputs }, null, 2)}\n`,
       );
     } else if (result.containers.length === 0) {
-      process.stdout.write("No containers for this project. Run `warehousd start`.\n");
+      // Indented and spaced like the panel it stands in for. Flush at column 0 it collided with
+      // the release-candidate notice above it and lined up with nothing.
+      process.stdout.write("\n  No containers for this project. Run `warehousd start`.\n\n");
     } else {
       process.stdout.write(
         `${renderStatus({
@@ -514,7 +666,8 @@ program
   .option("-s, --seed <n>", "synthetic seed", "42")
   .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
-    const { reporter, theme, json } = ui();
+    const { reporter, theme, json, quiet } = ui();
+    banner({ theme, quiet, json });
     const began = Date.now();
     await runStop(o.dir, { yes: true });
     reporter.step("stopped", "containers").done();
@@ -603,7 +756,7 @@ program
   });
 program
   .command("secrets")
-  .description("the generated credentials, masked unless --show")
+  .description("show the generated credentials, masked unless --show")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--show", "print them in full", false)
   .action((o) => {
@@ -629,7 +782,7 @@ program
   });
 program
   .command("deploy")
-  .description("deploy this project to deploy.target, or tear it down with --destroy")
+  .description("deploy this project to the target in warehousd.yml, or tear it down with --destroy")
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--allow-local-login", "permit deploying without SSO configured", false)
   .option("--allow-disabled-audit", "permit deploying with audit.enabled: false", false)
@@ -677,19 +830,30 @@ if (typeof require !== "undefined" && require.main === module) {
       json: process.argv.includes("--json"),
     }),
   );
-  if (notice) process.stderr.write(`${notice}\n`);
+  // Opened by a blank line so it clears the shell prompt rather than colliding with it. What
+  // follows brings its own top spacing — the greeting, or a panel, which already opens with one.
+  if (notice) process.stderr.write(`\n${notice}\n`);
 
   // Rejections have to be handled here or not at all: `parseAsync` is the last statement, so an
   // unhandled one printed a stack trace at a user who wanted a message and an exit code.
   program.parseAsync().catch((err: unknown) => {
+    // The same theme the notice above resolved. Built again rather than hoisted because a failure
+    // during `parseAsync` may come from a command that never reached `ui()`.
+    const theme = resolveTheme({
+      isTTY: Boolean(process.stderr.isTTY),
+      env: process.env,
+      noColor: process.argv.includes("--no-color"),
+      json: process.argv.includes("--json"),
+    });
     // A refusal to prompt is already a finished sentence naming the flag to pass; running it
-    // through the Docker translator would only add a hint that does not apply.
+    // through the Docker translator would only add a hint that does not apply. It still gets the
+    // glyph and the indent — that is presentation, not translation.
     if (err instanceof NonInteractiveError) {
-      process.stderr.write(`${err.message}\n`);
+      process.stderr.write(`\n${formatExplained({ title: err.message }, theme)}\n\n`);
       process.exit(1);
     }
     const explained = explain(err);
-    process.stderr.write(`${formatExplained(explained)}\n`);
+    process.stderr.write(`\n${formatExplained(explained, theme)}\n\n`);
     if (globals().verbose && err instanceof Error && err.stack) {
       process.stderr.write(`\n${err.stack}\n`);
     }

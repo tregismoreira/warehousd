@@ -274,7 +274,7 @@ describe("the compose target", () => {
     expect(outputs.databaseUrl).toBeNull();
 
     const summary = written.join("");
-    expect(summary).toContain("warehousd deployed to Docker Compose");
+    expect(summary).toContain("warehousd deployed to Self-hosted (Docker Compose)");
     expect(summary).toContain("docker compose --env-file");
     expect(summary).toContain("TLS is yours to terminate");
     expect(summary).not.toMatch(/fly/i);
@@ -348,7 +348,7 @@ describe("the compose target", () => {
 
     const payload = JSON.parse(written.join(""));
     expect(payload.target).toBe("compose");
-    expect(payload.label).toBe("Docker Compose");
+    expect(payload.label).toBe("Self-hosted (Docker Compose)");
     expect(payload.databaseHint).toContain("docker compose");
     expect(payload.notes.join("\n")).toContain("Nothing is running yet");
     expect(payload.notes.join("\n")).toContain("TLS is yours to terminate");
