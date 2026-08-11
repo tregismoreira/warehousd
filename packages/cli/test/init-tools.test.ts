@@ -35,6 +35,22 @@ function recording(): { reporter: Reporter; warnings: string[] } {
   };
 }
 
+/**
+ * A machine to answer questions about, so these tests do not ask the one they are running on.
+ *
+ * Docker installs through `brew` or `winget` and through nothing else, so "is there a package
+ * manager that could install it?" is answered differently on macOS than on Linux — and the answer
+ * decides which of two warnings comes out. Pinning it here is what stopped this file passing on a
+ * developer's Mac and failing on every Linux CI runner.
+ */
+function machine(platform: NodeJS.Platform, managers: string[] = []) {
+  return {
+    platform,
+    env: { PATH: "/usr/bin" },
+    exists: (path: string) => managers.some((m) => path.endsWith(`/${m}`)),
+  };
+}
+
 describe("requiredTools", () => {
   it("always needs the container engine, whichever database is chosen", () => {
     expect(requiredTools(ANSWERS).map((t) => t.bin)).toEqual(["docker"]);
@@ -90,10 +106,39 @@ describe("ensureToolsFor", () => {
     const { reporter, warnings } = recording();
 
     await expect(
-      ensureToolsFor(ANSWERS, { reporter, interactive: false }),
+      ensureToolsFor(ANSWERS, {
+        reporter,
+        interactive: false,
+        probe: machine("darwin", ["brew"]),
+      }),
     ).resolves.toBeUndefined();
 
     expect(warnings.join("\n")).toMatch(/--install-missing/);
+  });
+
+  // The other half of the same branch, and the one CI actually runs on: Docker has no `apt-get`
+  // installer, so there is no command to offer and the warning has to carry the manual route
+  // instead. Still a warning — `init` writes the config either way.
+  it("falls back to manual instructions where no package manager can install the tool", async () => {
+    mocked.mockImplementation(() => {
+      const err = new Error("not found") as NodeJS.ErrnoException;
+      err.code = "ENOENT";
+      throw err;
+    });
+    const { reporter, warnings } = recording();
+
+    await expect(
+      ensureToolsFor(ANSWERS, {
+        reporter,
+        interactive: false,
+        probe: machine("linux", ["apt-get"]),
+      }),
+    ).resolves.toBeUndefined();
+
+    const said = warnings.join("\n");
+    expect(said).toMatch(/No package manager warehousd recognises/);
+    expect(said).toContain("https://docs.docker.com/get-docker/");
+    expect(said).not.toMatch(/--install-missing/);
   });
 
   // Installed but logged out is a different problem with a different fix, and neither is fatal to

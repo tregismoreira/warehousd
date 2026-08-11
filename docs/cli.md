@@ -386,7 +386,7 @@ Then it polls `/api/health` and writes `.warehousd/outputs.deploy.json`. A targe
 
 ## The outputs contract
 
-`start` prints and writes `.warehousd/outputs.json` (mode 0644):
+`start` prints and writes `.warehousd/outputs.json` (mode 0600 — it carries the database password):
 
 ```json
 {
@@ -401,7 +401,7 @@ Then it polls `/api/health` and writes `.warehousd/outputs.deploy.json`. A targe
 
 `devClient` is an auto-created OAuth client whose policy allows `env:dev` only, so a host app can obtain dev tokens immediately — the local development experience and the production security model are the same machinery.
 
-`deploy` prints the deployed stack info and writes `.warehousd/outputs.deploy.json` (mode 0600, strictly more limited due to containing production URLs):
+`deploy` prints the deployed stack info and writes `.warehousd/outputs.deploy.json` (mode 0600, like the file above and for the same reason — these are production URLs):
 
 ```json
 {
