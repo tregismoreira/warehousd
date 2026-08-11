@@ -2,7 +2,7 @@
   "name": "warehousd",
   "version": "0.1.0-rc.1",
   "description": "Governed MCP data platform \u2014 CLI",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "Thiago R\u00e9gis",
   "keywords": [
     "mcp",

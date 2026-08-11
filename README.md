@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/warehousd"><img src="https://img.shields.io/npm/v/warehousd.svg" alt="npm version"></a>
   <img src="https://img.shields.io/badge/status-release%20candidate-D97706" alt="Release candidate">
-  <a href="#license"><img src="https://img.shields.io/badge/license-MIT-1D9E75" alt="MIT license"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0-1D9E75" alt="Apache 2.0 license"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A522-1A1A1A" alt="Node 22+">
   <img src="https://img.shields.io/badge/postgres-16-1A1A1A" alt="Postgres 16">
   <img src="https://img.shields.io/badge/MCP-streamable%20HTTP-1A1A1A" alt="MCP">
@@ -249,8 +249,8 @@ Consumers never need this. To work on warehousd itself, [CONTRIBUTING.md](CONTRI
 
 Aggregate-only postures with inference-leak protection · org resolution at the auth boundary · streaming imports · audit retention and export · grant expiry notifications.
 
-[docs/roadmap.md](docs/roadmap.md) has the detail, and states where the open-source line sits: everything shipped is MIT and stays MIT.
+[docs/roadmap.md](docs/roadmap.md) has the detail, and states where the open-source line sits: everything shipped is Apache 2.0 and stays Apache 2.0.
 
 ## License
 
-[MIT](LICENSE).
+[Apache 2.0](LICENSE).
