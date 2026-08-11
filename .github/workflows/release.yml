@@ -250,15 +250,21 @@ jobs:
           DIST_TAG: ${{ needs.verify.outputs.prerelease == 'true' && 'next' || 'latest' }}
         run: pnpm --filter ./packages/cli publish --no-git-checks --access public --provenance --tag "$DIST_TAG"
 
-      # The step above sends a prerelease to `next`, which is right for every prerelease but the
-      # first one: until some version holds `latest`, a bare `npm i warehousd` resolves nothing and
-      # fails with ETARGET. The whole package is then uninstallable by its own name, which is a
-      # worse first impression than an unqualified install of a release candidate.
+      # The step above sends a prerelease to `next`, which is right once a stable release exists
+      # and wrong before one does. `latest` is what a bare `npm i warehousd` resolves: unset, it
+      # fails with ETARGET and the package is uninstallable by its own name; pinned to the first
+      # release candidate, every later RC ships while unqualified installs silently keep handing
+      # out the oldest one. Both are worse than `latest` naming the current release candidate.
       #
-      # So `latest` is pointed at this version when, and only when, nothing else holds it. That is
-      # self-limiting: it can be true at most once in the package's life, and the moment a stable
-      # release exists a later 0.2.0-rc.1 reads a non-empty tag here and goes to `next` alone —
-      # the behaviour above, unchanged, with no flag to remember to unset.
+      # So while *every* published version is still a prerelease, `latest` follows the newest one.
+      # The condition is read off the tag itself — if `latest` is unset, or if what holds it is
+      # itself a prerelease, this version takes it.
+      #
+      # Self-limiting, with nothing to remember to unset. A stable version publishes with
+      # `--tag latest` in the step above, so from that release onward this step reads a
+      # non-prerelease and stands down: a later 0.2.0-rc.1 goes to `next` alone and `latest` keeps
+      # pointing at the newest stable. The two mechanisms never fight — this one only ever acts in
+      # the window before the first stable release.
       #
       # Read back rather than inferred. npm's own handling of a first publish under a non-`latest`
       # tag is not a thing to bet a release on, and asking the registry what it did is correct
@@ -267,7 +273,7 @@ jobs:
       # The image tags deliberately have no equivalent. `warehousd start` pulls
       # `ghcr.io/…/warehousd:<version>` and never `:latest`, so an RC that leaves `:latest` unset
       # breaks nothing; a missing npm `latest` breaks `npx warehousd` outright.
-      - name: Point `latest` at the first release, if nothing holds it yet
+      - name: Point `latest` at this version while no stable release exists
         if: needs.verify.outputs.publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -275,13 +281,17 @@ jobs:
         run: |
           set -euo pipefail
           CURRENT="$(npm view warehousd dist-tags.latest 2>/dev/null || true)"
-          if [ -n "$CURRENT" ]; then
-            echo "::notice::npm dist-tag \`latest\` is $CURRENT; leaving it alone."
-            exit 0
-          fi
-          echo "::notice::No \`latest\` dist-tag exists; pointing it at $VERSION."
+          case "$CURRENT" in
+            "")
+              echo "::notice::No \`latest\` dist-tag exists; pointing it at $VERSION." ;;
+            *-*)
+              echo "::notice::\`latest\` is $CURRENT, itself a prerelease; moving it to $VERSION." ;;
+            *)
+              echo "::notice::\`latest\` is $CURRENT, a stable release; leaving it alone."
+              exit 0 ;;
+          esac
           npm dist-tag add "warehousd@$VERSION" latest
-          echo "npm \`latest\` → \`$VERSION\` (first publish)" >> "$GITHUB_STEP_SUMMARY"
+          echo "npm \`latest\` → \`$VERSION\` (no stable release yet)" >> "$GITHUB_STEP_SUMMARY"
 
   # Last, and only once both registries have the artifacts: the published release is the signal
   # that a version is real, so it must not appear while an image or a tarball is still missing.

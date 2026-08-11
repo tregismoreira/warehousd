@@ -117,13 +117,18 @@ git tag v0.3.0-rc.1 && git push --follow-tags
 
 Installing one is then explicit — `npm i warehousd@next`, or `npx warehousd@0.3.0-rc.1`.
 
-### The one exception: the first release
+### The exception: before the first stable release
 
-A prerelease goes to `next` because `latest` is what a bare `npm i warehousd` resolves, and a release candidate should not be what an unqualified install gets. That reasoning assumes some version already holds `latest`. Before the first publish none does, and npm then answers a bare `npm i warehousd` with `ETARGET` — the package is uninstallable by its own name, which is a worse first impression than an unqualified install of a release candidate.
+A prerelease goes to `next` because `latest` is what a bare `npm i warehousd` resolves, and a release candidate should not be what an unqualified install gets. That reasoning assumes a stable release already holds `latest`. Until one does, both alternatives are worse than the thing the rule avoids:
 
-So the `npm` job points `latest` at the version it just published **when, and only when, nothing else holds it**. It reads the tag back from the registry rather than inferring what npm did with a first publish, so it is correct whichever way npm behaves and a no-op on a re-run.
+- **`latest` unset** — npm answers a bare `npm i warehousd` with `ETARGET`. The package is uninstallable by its own name.
+- **`latest` pinned to the first release candidate** — every later RC publishes while unqualified installs go on silently handing out the oldest one. The failure is worse than `ETARGET` precisely because nothing reports it.
 
-The rule is self-limiting and needs no undoing: it can be true at most once in the package's life. Once a stable release holds `latest`, a later `0.2.0-rc.1` reads a non-empty tag and goes to `next` alone — exactly the behaviour described above.
+So while *every* published version is still a prerelease, the `npm` job points `latest` at the version it just published. The condition is read off the tag itself: if `latest` is unset, or if what holds it is itself a prerelease, this version takes it. It reads back from the registry rather than inferring what npm did with a first publish, so it is correct whichever way npm behaves, and a no-op on a re-run.
+
+The rule is self-limiting and needs no undoing. A stable version publishes with `--tag latest` in the ordinary step, so from that release onward this one reads a non-prerelease and stands down — a later `0.2.0-rc.1` goes to `next` alone while `latest` keeps naming the newest stable. Across a `0.1.0-rc.1 → rc.2 → 0.1.0 → 0.2.0-rc.1` sequence, `latest` reads `rc.1 → rc.2 → 0.1.0 → 0.1.0`.
+
+One wrinkle it does not address: `next` still names the last prerelease after a stable ships, so in the window between `0.1.0` and `0.2.0-rc.1`, `npm i warehousd@next` installs the superseded `0.1.0-rc.2`. It corrects itself at the next prerelease.
 
 The image tags have no equivalent rule, deliberately. `warehousd start` pulls `ghcr.io/tregismoreira/warehousd:<version>` and never `:latest`, so a first release that leaves `:latest` unset breaks nothing; a missing npm `latest` breaks `npx warehousd` outright. The asymmetry is the difference between a tag that is used and a tag that is a convenience.
 
