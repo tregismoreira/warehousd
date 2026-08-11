@@ -27,8 +27,9 @@ Available on every command.
 
 These work on **every** command, `deploy` included. Progress goes to **stderr**; results and `--json` go to **stdout**. So `warehousd start 2>/dev/null` prints the summary alone, `warehousd status --json | jq` works, and a failed `warehousd deploy --json` writes its checklist to stderr while leaving stdout empty rather than unparseable.
 
-Two deliberate exceptions:
+Three deliberate exceptions:
 
+- Every invocation opens with one line on stderr saying this is a release candidate and not meant to be used in production. It is printed before the arguments are read, so `--help`, `--version` and a bare `warehousd` carry it too, and neither `--quiet` nor `--json` suppresses it — it costs stdout nothing, so `warehousd status --json | jq` still parses and `warehousd start 2>/dev/null` still prints the summary alone. It stops printing by itself once the published version is no longer a prerelease.
 - `--json` with `logs --follow` is an error, not a no-op — a stream has no end to serialise.
 - `--verbose` never prints a failing `fly secrets` or `railway variables --set` payload. Both CLIs echo the offending assignment on that path, so it stays redacted — and `railway variables --set` carries the value in argv, so its trace prints `NAME=***` rather than the value. A debug flag that prints secrets is a secret-printing flag.
 

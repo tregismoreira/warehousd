@@ -42,6 +42,7 @@ import { runLogs } from "./commands/logs";
 import { runOpen, type Target } from "./commands/open";
 import { collectSecrets, secretsJson } from "./commands/secrets";
 import { resolveTheme } from "./ui/theme";
+import { rcNotice } from "./ui/rc-notice";
 import { createStdReporter } from "./ui/reporter";
 import { renderStatus, renderChecks, renderPanel } from "./ui/render";
 import { isInteractive, promptInit, NonInteractiveError } from "./ui/prompt";
@@ -50,11 +51,15 @@ import { explain, formatExplained } from "./ui/errors";
 // WAREHOUSD_CLI_VERSION is defined by tsup at build time; fallback for source runs.
 declare const WAREHOUSD_CLI_VERSION: string | undefined;
 
+// Hoisted because two things read it now: `--version`, and the release-candidate notice below,
+// which prints only while this is a prerelease. The fallback is one too, so a source run says it.
+const version = typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "0.0.0-dev";
+
 const program = new Command();
 program
   .name("warehousd")
   .description("warehousd CLI")
-  .version(typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "0.0.0-dev")
+  .version(version)
   // `--help` is on every command already; the `help [command]` subcommand only pads the list.
   .helpCommand(false)
   // clig.dev: suggest, do not correct. Commander gives both for free and neither was switched on.
@@ -212,11 +217,6 @@ program
       // is the difference between a safe scaffold and a scaffold someone trusts.
       reporter.note("Every posture in warehousd.yml is a guess — read it before `warehousd apply`");
     }
-    // Said at the point a project is created rather than only at `start`, because this is where
-    // someone decides what to point it at.
-    reporter.note(
-      "Release candidate — not for production. Unaudited; evaluate before pointing it at real data.",
-    );
     reporter.note("Next: warehousd start");
   });
 program
@@ -660,6 +660,25 @@ program
 // (tsup.config.ts, bin dist/index.cjs), so `require.main` is the only check that can ever be true —
 // an `import.meta.url` fallback is empty under a cjs build and warns at every build.
 if (typeof require !== "undefined" && require.main === module) {
+  // Before argv is parsed, so it covers `--help`, `--version`, a bare `warehousd` and an unknown
+  // command as well as every real one — and so it is genuinely the first thing printed. That means
+  // reading the two flags that affect it straight from argv rather than from program.opts().
+  //
+  // stderr, unconditionally: not suppressed by `--quiet` or `--json`, because it costs stdout
+  // nothing. `status --json | jq` still parses and `start 2>/dev/null` still prints the summary
+  // alone. resolveTheme handles NO_COLOR, TERM=dumb and the absence of a TTY, so a piped run is
+  // plain text.
+  const notice = rcNotice(
+    version,
+    resolveTheme({
+      isTTY: Boolean(process.stderr.isTTY),
+      env: process.env,
+      noColor: process.argv.includes("--no-color"),
+      json: process.argv.includes("--json"),
+    }),
+  );
+  if (notice) process.stderr.write(`${notice}\n`);
+
   // Rejections have to be handled here or not at all: `parseAsync` is the last statement, so an
   // unhandled one printed a stack trace at a user who wanted a message and an exit code.
   program.parseAsync().catch((err: unknown) => {
