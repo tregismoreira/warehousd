@@ -2,6 +2,8 @@
 
 What is planned, and where the open-source line sits. For what is built *today*, [status.md](status.md) is the authoritative list — it marks each component `real`, `partial` or `not built`, and it is checked against the code rather than against intentions.
 
+warehousd is at 0.1.0-rc.1, a release candidate that is not meant to be used in production. That changes nothing below: the open-core commitment holds from the first release, and the planned items are as Apache 2.0 as the shipped ones.
+
 ## The open-core line
 
 **Everything shipped is Apache 2.0, and stays Apache 2.0.** That is the commitment, and it is not conditional on what gets built later. The broker and its enforcement, postures and grants, dev/live isolation, the audit trail, file collections and search, taxonomies, the OAuth provider, the MCP endpoint, the REST API, API keys and token exchange, SSO, the web UI, the CLI, and `warehousd deploy` are all in that set. So is everything listed under [Planned](#planned) below.

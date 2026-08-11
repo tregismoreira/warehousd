@@ -4,6 +4,10 @@ Per component, what is fully implemented versus deliberately narrowed or not yet
 
 For what is *planned* rather than built, see [roadmap.md](roadmap.md).
 
+## Release status
+
+warehousd is at **0.1.0-rc.1** — a release candidate, not meant to be used in production. `real` below means implemented and covered by this repository's own suite. It does not mean audited: there has been no external security review and no production deployment behind any of it. Treat the table as a map of what exists to evaluate, not as an assurance that it holds up under attack.
+
 | Component | Status | Notes |
 |---|---|---|
 | Broker enforcement — postures, grants, field/document/term scoping | **real** | |

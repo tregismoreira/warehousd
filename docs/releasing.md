@@ -85,7 +85,7 @@ What it does **not** cover: the `NPM_TOKEN` secret is bound to the `npm-publish`
 | `draft`   | `verify`                          | Creates the GitHub Release as a **draft**, with generated notes. Idempotent, so a re-run does not trip over its own first attempt. Skipped on a rehearsal.                                        |
 | `gates`   | `verify`                          | Calls `ci.yml` as a reusable workflow: lint, typecheck, format, audit, both vitest passes, the browser suite on three shards, the tarball smoke test and the Docker e2e run — against the tag.    |
 | `image`   | `verify`, `gates`                 | Builds `apps/web/Dockerfile` for amd64 + arm64 and pushes `:<version>` (what the CLI pulls), `:v<version>` (for humans), and `:latest` — the last only when the version has no prerelease suffix. On a rehearsal it builds both platforms and pushes nothing. |
-| `npm`     | `verify`, `gates`, `image`        | Builds the CLI, packs the tarball as a run artifact, and publishes with `--provenance` under the `latest` or `next` dist-tag. Runs in the `npm-publish` environment, which is where `NPM_TOKEN` lives. On a rehearsal it runs `--dry-run` instead. |
+| `npm`     | `verify`, `gates`, `image`        | Builds the CLI, packs the tarball as a run artifact, and publishes with `--provenance` under the `latest` or `next` dist-tag — then points `latest` at this version if nothing holds it yet (see [Prereleases](#prereleases)). Runs in the `npm-publish` environment, which is where `NPM_TOKEN` lives. On a rehearsal it runs `--dry-run` instead. |
 | `publish` | `verify`, `draft`, `image`, `npm` | Attaches the packed tarball to the release and flips the draft to published (as a prerelease where applicable). Skipped on a rehearsal.                                                           |
 
 Ordering matters twice over. The version check used to live in the npm job, so a bad run could move `:latest` before anything validated it. And until `gates` existed, a tag matched neither of `ci.yml`'s triggers — `push: [main]` nor `pull_request` — so `git push --follow-tags` published whatever the tag pointed at with no test having run against it at all. `ci.yml` is *called*, not copied: a second copy of those jobs would drift from the one pull requests run, and the point of the gate is that a release is held to the same bar a branch is.
@@ -117,18 +117,31 @@ git tag v0.3.0-rc.1 && git push --follow-tags
 
 Installing one is then explicit — `npm i warehousd@next`, or `npx warehousd@0.3.0-rc.1`.
 
+### The one exception: the first release
+
+A prerelease goes to `next` because `latest` is what a bare `npm i warehousd` resolves, and a release candidate should not be what an unqualified install gets. That reasoning assumes some version already holds `latest`. Before the first publish none does, and npm then answers a bare `npm i warehousd` with `ETARGET` — the package is uninstallable by its own name, which is a worse first impression than an unqualified install of a release candidate.
+
+So the `npm` job points `latest` at the version it just published **when, and only when, nothing else holds it**. It reads the tag back from the registry rather than inferring what npm did with a first publish, so it is correct whichever way npm behaves and a no-op on a re-run.
+
+The rule is self-limiting and needs no undoing: it can be true at most once in the package's life. Once a stable release holds `latest`, a later `0.2.0-rc.1` reads a non-empty tag and goes to `next` alone — exactly the behaviour described above.
+
+The image tags have no equivalent rule, deliberately. `warehousd start` pulls `ghcr.io/tregismoreira/warehousd:<version>` and never `:latest`, so a first release that leaves `:latest` unset breaks nothing; a missing npm `latest` breaks `npx warehousd` outright. The asymmetry is the difference between a tag that is used and a tag that is a convenience.
+
 ## Verifying a release
 
 ```bash
 # The image must be pullable anonymously — run this somewhere not logged into ghcr.io
-docker pull ghcr.io/tregismoreira/warehousd:0.2.0
+docker pull ghcr.io/tregismoreira/warehousd:0.1.0-rc.1
 
 # The full consumer path, from a clean directory
 mkdir /tmp/wd && cd /tmp/wd
-npx warehousd@0.2.0 init
-npx warehousd@0.2.0 start
-npx warehousd@0.2.0 status
-npx warehousd@0.2.0 stop --destroy --yes
+npx warehousd@0.1.0-rc.1 init
+npx warehousd@0.1.0-rc.1 start
+npx warehousd@0.1.0-rc.1 status
+npx warehousd@0.1.0-rc.1 stop --destroy --yes
+
+# And, on a first release, that the bare name resolves at all
+npm view warehousd dist-tags
 ```
 
 Provenance should show as a "Built and signed on GitHub Actions" badge on

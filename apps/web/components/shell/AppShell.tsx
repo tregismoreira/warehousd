@@ -5,6 +5,7 @@
 // arrive pre-rendered from the server layouts, so nothing else moves to the client.
 import { NAV } from "@/lib/nav";
 import type { Role } from "@/lib/authz";
+import { Badge } from "@/components/ui/badge";
 import { SidebarNav } from "./SidebarNav";
 import { EnvSwitcher } from "./EnvSwitcher";
 import { UserMenu } from "./UserMenu";
@@ -26,9 +27,21 @@ export function AppShell({
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="flex w-60 shrink-0 flex-col border-r">
-        <div className="flex h-14 items-center px-5 text-sm font-semibold">
-          warehousd
-          <span className="ml-2 font-mono text-[10px] font-normal text-muted-foreground">
+        {/* Stacked rather than one row: the release-candidate badge does not fit beside both the
+            name and the subtitle in a 15rem sidebar, and the badge is the part that must not be
+            the one that wraps or truncates. */}
+        <div className="flex h-14 flex-col justify-center px-5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            warehousd
+            <Badge
+              variant="outline"
+              className="px-1.5 py-0 font-mono text-[9px] font-normal text-muted-foreground"
+              title="Release candidate — not for production. Unaudited; evaluate before pointing it at real data."
+            >
+              release candidate
+            </Badge>
+          </div>
+          <span className="font-mono text-[10px] font-normal text-muted-foreground">
             security console
           </span>
         </div>
