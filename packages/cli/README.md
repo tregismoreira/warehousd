@@ -4,7 +4,7 @@ An MCP-ready governed data layer for enterprises. All your documents and dataset
 
 This package is the `warehousd` CLI: it runs the local stack, applies configuration, seeds synthetic data, imports real data, and deploys. The server it starts is a container image published from the same release.
 
-> **0.1.0-rc.1 is a release candidate, and is not meant to be used in production.** warehousd is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](https://github.com/tregismoreira/warehousd/blob/main/SECURITY.md).
+> **0.1.0-rc.1 is a release candidate, and is not meant to be used in production.** The code is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](https://github.com/tregismoreira/warehousd/blob/main/SECURITY.md).
 
 ## Install
 

@@ -1,6 +1,6 @@
 # Architecture
 
-How warehousd is put together and why. If you are evaluating whether to trust it with real data, this is the document to read.
+How **warehousd** is put together and why. If you are evaluating whether to trust it with real data, this is the document to read.
 
 - [Domain model](#domain-model)
 - [Security invariants](#security-invariants)
@@ -176,10 +176,10 @@ Inside `validation_failed`, each entry names a row and column: `unknown_column`,
 
 ## Identity, OAuth, and env-as-scope
 
-Authentication is [Better Auth](https://better-auth.com): sessions, OIDC and SAML SSO with JIT provisioning, and an OAuth 2.1 authorization server for MCP clients. warehousd builds authorization, not authentication.
+Authentication is [Better Auth](https://better-auth.com): sessions, OIDC and SAML SSO with JIT provisioning, and an OAuth 2.1 authorization server for MCP clients. What warehousd builds is authorization, not authentication.
 
 - **SSO from day one.** An admin registers an IdP in the UI or through `/api/sso/providers` — no code change, no redeploy. First SSO login provisions the user as `member`; existing accounts are never demoted by linking an identity. `WAREHOUSD_DISABLE_LOCAL_LOGIN=true` turns local passwords off entirely. See [configure-sso.md](configure-sso.md).
-- **warehousd is the OAuth provider.** When a user authorizes an MCP client, the login step delegates to the configured IdP — connecting Claude is "log in with your company account", never a new password.
+- **The OAuth provider is warehousd itself.** When a user authorizes an MCP client, the login step delegates to the configured IdP — connecting Claude is "log in with your company account", never a new password.
 - **Tokens carry no grant data** — only subject, client id, and one env scope.
 
 Two controls sit on the local-credential path, for the deployments that keep it enabled:
@@ -677,7 +677,7 @@ Nothing. Two failure modes are handled separately.
 
 **Its final text answer is untrusted output too**, and warehousd does not try to police it. Observed in practice: asked for salary data with no grant, a model ignored the `no_grant` tool result and produced a plausible table of invented salaries, admitting they were fabricated only when challenged. Nothing the broker enforces prevents that — no field was disclosed, no grant was bypassed, and the audit log correctly records a refusal. The failure is entirely in the answer the model composed on top of it.
 
-warehousd therefore ships **no LLM-facing surface of its own**. It earlier included a chat console with a fabrication heuristic — a system prompt forbidding invented data, plus a server-side scan for tables or currency figures in turns where no `query_collection` had returned `ok: true`. Both were removed. The heuristic was a demo bench, its state was reconstructed from a client-supplied conversation history and so was forgeable by the client it was meant to check, and it put a live model API key behind an endpoint that every authenticated member could reach. A governance layer should not be the thing that also holds the model credential.
+So warehousd ships **no LLM-facing surface of its own**. It earlier included a chat console with a fabrication heuristic — a system prompt forbidding invented data, plus a server-side scan for tables or currency figures in turns where no `query_collection` had returned `ok: true`. Both were removed. The heuristic was a demo bench, its state was reconstructed from a client-supplied conversation history and so was forgeable by the client it was meant to check, and it put a live model API key behind an endpoint that every authenticated member could reach. A governance layer should not be the thing that also holds the model credential.
 
 Grounding an answer is the adapter's problem, and any adapter that puts an LLM in front of the broker needs its own defence. The broker gives it what it needs to build one: `fieldsReturned` on every allowed result, and a reason code with no data on every refusal.
 

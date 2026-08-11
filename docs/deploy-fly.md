@@ -1,6 +1,6 @@
 # Deploying to Fly.io
 
-End-to-end walkthrough of provisioning a warehousd stack to Fly.io and connecting Claude to it.
+End-to-end walkthrough of provisioning a **warehousd** stack to Fly.io and connecting Claude to it.
 
 To deploy to Railway instead, see [deploy-railway.md](deploy-railway.md); to run the stack on hardware you control, [deploy-compose.md](deploy-compose.md). `deploy.target` is what chooses between the three.
 
