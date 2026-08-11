@@ -9,6 +9,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/warehousd"><img src="https://img.shields.io/npm/v/warehousd.svg" alt="npm version"></a>
+  <img src="https://img.shields.io/badge/status-release%20candidate-D97706" alt="Release candidate">
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-1D9E75" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A522-1A1A1A" alt="Node 22+">
   <img src="https://img.shields.io/badge/postgres-16-1A1A1A" alt="Postgres 16">
@@ -16,6 +17,11 @@
 </p>
 
 ---
+
+> [!WARNING]
+> **0.1.0-rc.1 is a release candidate, and is not meant to be used in production.** warehousd is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](SECURITY.md).
+>
+> [docs/status.md](docs/status.md) gives a per-component verdict checked against the code.
 
 Connecting an LLM to real company data usually means handing it a database connection and hoping the prompt holds. warehousd replaces hope with enforcement: every request from an assistant is a **proposal** that a server-side broker re-validates against deny-by-default field postures and purpose-bound, expiring grants before a single row is read.
 

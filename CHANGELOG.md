@@ -4,15 +4,19 @@ All notable changes to warehousd are recorded here. The format follows [Keep a C
 
 One version number covers both published artifacts — the `warehousd` CLI on npm and the `ghcr.io/tregismoreira/warehousd` server image — because `warehousd start` pulls the image tag matching the CLI's own version. An entry below therefore describes both.
 
+warehousd is pre-1.0 and currently at release-candidate status: it is not meant to be used in production, and the public surface described in [docs/releasing.md](docs/releasing.md#versioning-policy) can still change.
+
 ## [Unreleased]
 
 ## [0.1.0-rc.1] - 2026-08-11
 
 The first release candidate, and the first artifact this repository publishes at all — nothing precedes it on npm or ghcr.io. The categories below are therefore not a delta from an earlier version: **Security** is the enforcement this release ships with, and **Changed** and **Fixed** record decisions taken during development that a reader of the code would otherwise have to reconstruct from the history.
 
+**This is a release candidate, and is not meant to be used in production.** warehousd is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. Interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](SECURITY.md).
+
 Every component is listed with its status in the [README's component table](README.md#component-status), which is checked against the code. Four entries there are not `real` at this release: multi-tenancy is *partial* — every grant, audit event and document carries an org and is isolated by a view predicate and RLS, but a single implicit org is created at bootstrap and there is no UI for creating or switching orgs — database provisioning through a provider CLI is *partial* for Supabase and `real` for Neon, container runtime selection is *partial* because podman is selectable and checkable but unverified, and SCIM and compliance exports are *not built*.
 
-This is a `0.y.z` prerelease, so installing it is explicit: it publishes to npm's `next` dist-tag and does not move the `:latest` image tag. `npm i warehousd@next`, or `npx warehousd@0.1.0-rc.1`. Per [docs/releasing.md](docs/releasing.md#versioning-policy), a minor bump before 1.0.0 may carry a breaking change; each one is recorded under **Changed**.
+This is a `0.y.z` prerelease. It publishes to npm's `next` dist-tag, and — because it is the first release, so no version holds `latest` yet — to `latest` as well, which is what keeps a bare `npx warehousd` resolving instead of failing with `ETARGET`. That is a one-time rule and it does not apply to the next prerelease; see [docs/releasing.md](docs/releasing.md#the-one-exception-the-first-release). It does not move the `:latest` image tag, which nothing pulls. Per the [versioning policy](docs/releasing.md#versioning-policy), a minor bump before 1.0.0 may carry a breaking change; each one is recorded under **Changed**.
 
 ### Security
 

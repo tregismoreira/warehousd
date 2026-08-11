@@ -5,6 +5,7 @@ import { authClient } from "../../lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const DEMO_CREDS = [
@@ -246,7 +247,16 @@ function LoginInner({ demo }: { demo: boolean }) {
     <Centered>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>warehousd security console</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2">
+            warehousd security console
+            <Badge
+              variant="outline"
+              className="px-1.5 py-0 font-mono text-[9px] font-normal text-muted-foreground"
+              title="Release candidate — not for production. Unaudited; evaluate before pointing it at real data."
+            >
+              release candidate
+            </Badge>
+          </CardTitle>
           <CardDescription>Sign in to continue</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

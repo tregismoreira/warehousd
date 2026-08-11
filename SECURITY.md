@@ -23,7 +23,9 @@ Anything that breaks one of the invariants in [docs/architecture.md](docs/archit
 
 ## Deployment expectations
 
-warehousd assumes the operator does these; failures caused by not doing them are not vulnerabilities in warehousd:
+**warehousd is at 0.1.0-rc.1, a release candidate, and is not meant to be used in production.** It has had no external security audit and no production deployment behind it. That is a statement about the *data*, not about the hosting: `warehousd deploy` exists and the runbooks under [docs/](docs/) are meant to be followed, so putting a release candidate on a real host is fine. Putting data behind it whose exposure would cost you something is not — evaluate it against synthetic or non-critical content until a stable release exists.
+
+Everything below applies regardless. warehousd assumes the operator does these; failures caused by not doing them are not vulnerabilities in warehousd:
 
 - **Serve over TLS.** Sessions, OAuth codes, and tokens all cross the wire. `warehousd deploy` enforces this by serving over HTTPS automatically on the platform targets, Fly.io and Railway, which terminate TLS on the domains they issue. Other deployments remain the operator's responsibility — the `compose` target publishes on loopback for a reverse proxy to terminate TLS in front of, and says so in its summary; it cannot do the terminating.
 - **Turn demo mode off** (`demo: false` / no `WAREHOUSD_DEMO`). Demo mode seeds three accounts with the password `demo` and shows them on the login page. `warehousd deploy` refuses the deployment if demo mode is on, whichever target it is deploying to, so the expectation is mechanically enforced for every deployment it makes. Containers you start yourself remain the operator's responsibility.

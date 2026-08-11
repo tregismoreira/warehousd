@@ -212,6 +212,11 @@ program
       // is the difference between a safe scaffold and a scaffold someone trusts.
       reporter.note("Every posture in warehousd.yml is a guess — read it before `warehousd apply`");
     }
+    // Said at the point a project is created rather than only at `start`, because this is where
+    // someone decides what to point it at.
+    reporter.note(
+      "Release candidate — not for production. Unaudited; evaluate before pointing it at real data.",
+    );
     reporter.note("Next: warehousd start");
   });
 program
