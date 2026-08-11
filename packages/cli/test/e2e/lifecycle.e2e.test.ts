@@ -392,6 +392,20 @@ taxonomies:
     expect(proc.stderr).toContain("status");
   });
 
+  // `--version` never reaches a command action, so it is the case a preAction hook would have
+  // missed — and the cheapest proof that the notice never touches stdout.
+  it("Step 3i: every invocation opens with the release-candidate notice, on stderr alone", () => {
+    const proc = spawnSync("node", [CLI_DIST, "--version"], {
+      cwd: stack.projectDir,
+      encoding: "utf8",
+    });
+    expect(proc.status).toBe(0);
+    expect(proc.stderr).toContain("This is a release candidate");
+    expect(proc.stderr).toContain("https://github.com/tregismoreira/warehousd");
+    expect(proc.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    expect(proc.stdout).not.toContain("release candidate");
+  });
+
   it("Step 4: health endpoints respond correctly", async () => {
     const healthRes = await fetch(`${stack.apiUrl}/api/health`);
     expect(healthRes.status).toBe(200);

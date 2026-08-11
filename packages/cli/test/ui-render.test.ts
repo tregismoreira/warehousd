@@ -52,14 +52,13 @@ describe("renderStartSummary", () => {
     expect(s).not.toContain("warehousd secrets --show");
   });
 
-  // The masking hint is conditional; this one is not. `--show-secrets` used to drop the whole
-  // footer, which would have taken the release-candidate line with it — and the operator running
-  // with secrets on screen is not the one who needs it least.
-  it("says it is a release candidate, whether or not secrets are shown", () => {
+  // The release-candidate line moved to the top of every invocation (src/ui/rc-notice.ts). Pinned
+  // here so it does not drift back into the panel, where it would be said twice in one run.
+  it("leaves the release-candidate line to the notice that opens every command", () => {
     for (const showSecrets of [false, true]) {
       const s = renderStartSummary({ outputs, admin, theme: plainTheme, showSecrets });
-      expect(s).toContain("Release candidate");
-      expect(s).toContain("not for production");
+      expect(s).not.toContain("release candidate");
+      expect(s).not.toContain("Release candidate");
     }
   });
 

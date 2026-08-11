@@ -117,13 +117,10 @@ export function renderStartSummary(opts: {
     });
   }
 
-  // The release-candidate line is unconditional: `--show-secrets` used to drop the whole footer,
-  // and the one line an operator most needs on every start is the one saying what they are
-  // running. The masking hint is appended to it rather than replacing it.
-  const footer = [
-    "Release candidate — not for production. Unaudited; evaluate before pointing it at real data.",
-  ];
-  if (!showSecrets) footer.push("Secrets are masked — reveal with `warehousd secrets --show`");
+  // The release-candidate line used to live here too. It is said once now, on stderr, at the top of
+  // every invocation (src/ui/rc-notice.ts) — repeating it in the panel a few lines later only
+  // taught people to skip both.
+  const footer = showSecrets ? [] : ["Secrets are masked — reveal with `warehousd secrets --show`"];
 
   return renderPanel({
     title: "warehousd is running",
