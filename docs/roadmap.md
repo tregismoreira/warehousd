@@ -4,7 +4,7 @@ What is planned, and where the open-source line sits. For what is built *today*,
 
 ## The open-core line
 
-**Everything shipped is MIT, and stays MIT.** That is the commitment, and it is not conditional on what gets built later. The broker and its enforcement, postures and grants, dev/live isolation, the audit trail, file collections and search, taxonomies, the OAuth provider, the MCP endpoint, the REST API, API keys and token exchange, SSO, the web UI, the CLI, and `warehousd deploy` are all in that set. So is everything listed under [Planned](#planned) below.
+**Everything shipped is Apache 2.0, and stays Apache 2.0.** That is the commitment, and it is not conditional on what gets built later. The broker and its enforcement, postures and grants, dev/live isolation, the audit trail, file collections and search, taxonomies, the OAuth provider, the MCP endpoint, the REST API, API keys and token exchange, SSO, the web UI, the CLI, and `warehousd deploy` are all in that set. So is everything listed under [Planned](#planned) below.
 
 If a hosted or paid offering ever exists, these are the shapes it would take — listed here so the boundary is visible now rather than discovered later:
 
@@ -13,7 +13,7 @@ If a hosted or paid offering ever exists, these are the shapes it would take —
 - real multi-tenancy — one deployment serving mutually distrusting organizations
 - a hosted control plane
 
-None of that removes anything from the open-source side. The test is simple: if it is in the repository today, it is MIT tomorrow.
+None of that removes anything from the open-source side. The test is simple: if it is in the repository today, it is Apache 2.0 tomorrow.
 
 ## Planned
 
