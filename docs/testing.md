@@ -87,7 +87,13 @@ Two things bound the sweep, and both matter:
 
 `pnpm test:clean` does the same sweep by hand. It is the least important part of this: a cleanup command nobody remembers to run is how it reached 211.
 
-The Keycloak suite is gated behind `WAREHOUSD_E2E_KEYCLOAK`, so a default `pnpm test` run never needs a container beyond Postgres. `pnpm test:e2e:cli` runs the _built_ CLI against real containers and takes several minutes. Two prerequisites:
+The Keycloak suite is gated behind `WAREHOUSD_E2E_KEYCLOAK`, so a default `pnpm test` run never needs a container beyond Postgres.
+
+`pnpm test:e2e:cli` runs the _built_ CLI as a subprocess, and is two files with very different costs.
+
+`packages/cli/test/e2e/surface.e2e.test.ts` is the **command surface**: what every command prints, on which stream, and what it exits with. It needs no container, no database and no network, so it runs in about ten seconds on any machine — `pnpm test:e2e:cli:surface` runs it alone, and `pnpm --filter ./packages/cli build` is its only prerequisite. It exists because `program.ts` is excluded from coverage (below) and every action callback in it is therefore untested by construction: the frame each command opens, the `└` sentence it closes on, which stream each block lands on, and the exit code are all things only a subprocess can see. It asserts three renderings, because the CLI has three and they are separate code paths — piped (flat, ASCII, no escape byte), a terminal with colour off (the frame and its glyphs), and a terminal with 24-bit colour.
+
+`packages/cli/test/e2e/lifecycle.e2e.test.ts` is the **container lifecycle**, against real Docker, and takes several minutes. Two prerequisites:
 
 ```bash
 # a path filter, not a name filter: `warehousd` also matches the private root package
@@ -99,7 +105,7 @@ The suite picks up `warehousd:ci` by itself once it exists — the same tag CI b
 
 ## What is measured, and what the CLI's split is for
 
-`packages/cli/src/program.ts` holds the commander wiring and is excluded from coverage alongside `docker.ts`, `start.ts`, `stop.ts` and `status.ts`. Every export in it is an argv-driven action callback, and the only thing that runs one is `packages/cli/test/e2e/lifecycle.e2e.test.ts` — a subprocess, so v8 measures the spawner rather than the spawned.
+`packages/cli/src/program.ts` holds the commander wiring and is excluded from coverage alongside `docker.ts`, `start.ts`, `stop.ts` and `status.ts`. Every export in it is an argv-driven action callback, and the only things that run one are the two suites in `packages/cli/test/e2e/` — subprocesses, so v8 measures the spawner rather than the spawned. The exclusion is about what v8 can see, not about what is tested: `surface.e2e.test.ts` covers that file's whole command surface and needs nothing but a build to run.
 
 That file exists so the exclusion can be precise. `packages/cli/src/index.ts` keeps `resolveDbUrl`, `runApply`, `runSeed` and `runIndex`, which the unit suites import directly and which stay measured. Before the split the two lived in one 466-line module, and excluding it would have taken the library functions with it.
 

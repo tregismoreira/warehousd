@@ -6,6 +6,7 @@ import {
   link,
   nextSteps,
   pad,
+  prose,
   rail,
   railDone,
   railFail,
@@ -61,7 +62,8 @@ export function renderFields(opts: {
   footer?: string[] | undefined;
 }): string {
   const lines = fieldLines(opts.sections, opts.theme, opts.showSecrets ?? false);
-  if (opts.footer?.length) lines.push("", ...opts.footer.map((l) => opts.theme.c.dim(l)));
+  if (opts.footer?.length)
+    lines.push("", ...opts.footer.map((l) => prose(l, opts.theme, opts.theme.c.dim)));
   return rail(lines, opts.theme);
 }
 
@@ -92,7 +94,7 @@ export function renderSuccess(opts: {
   const body = fieldLines(opts.sections ?? [], theme, opts.showSecrets ?? false);
   // A footer of several lines used to indent only its first, and the deploy summary now carries
   // what an operator still has to do.
-  if (opts.footer?.length) body.push("", ...opts.footer.map((l) => theme.c.dim(l)));
+  if (opts.footer?.length) body.push("", ...opts.footer.map((l) => prose(l, theme, theme.c.dim)));
   return [railDone([heading], theme), ...(body.length ? [rail(["", ...body], theme)] : [])].join(
     "\n",
   );
@@ -194,7 +196,14 @@ export function renderStartSummary(opts: {
     ...nextSteps("Everyday commands", EVERYDAY_COMMANDS, theme),
     ...(showSecrets
       ? []
-      : ["", theme.c.dim("Secrets are masked — `warehousd secrets --show` reveals them.")]),
+      : [
+          "",
+          prose(
+            "Secrets are masked — `warehousd secrets --show` reveals them.",
+            theme,
+            theme.c.dim,
+          ),
+        ]),
   ];
 
   return [

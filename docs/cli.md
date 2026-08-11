@@ -277,7 +277,7 @@ Opens `admin` (default), `mcp` or `api` in a browser. Where no opener is known f
 Checks Docker, the config, the server image, both ports and the containers, then exits `0` if every check passed and `1` otherwise. Run it when `start` fails and you want to know which part is at fault.
 
 ```
-┌  🩺 warehousd doctor
+┌  warehousd doctor 🩺
 │
 ◇  docker       daemon reachable, server 29.6.2
 ◇  config       warehousd.yml parses, 20 collection(s)

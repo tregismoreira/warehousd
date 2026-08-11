@@ -10,7 +10,7 @@
 // is worse than passing it through: the reader can search for Docker's words, but not for ours.
 
 import { plainTheme, type Theme } from "./theme";
-import { frameClose, railFail } from "./frame";
+import { frameClose, prose, railFail } from "./frame";
 
 export type Explained = {
   title: string;
@@ -120,7 +120,9 @@ export function explain(err: unknown): Explained {
  */
 export function formatExplained(e: Explained, theme: Theme = plainTheme): string {
   const lines = e.title.split("\n");
-  if (e.hint) for (const line of e.hint.split("\n")) lines.push(theme.c.dim(line));
+  // The hint is ours and always names a command; the title may be the driver's own words, so it is
+  // left exactly as it arrived.
+  if (e.hint) for (const line of e.hint.split("\n")) lines.push(prose(line, theme, theme.c.dim));
   return railFail(lines, theme);
 }
 

@@ -18,6 +18,11 @@ Everything here is pre-1.0 and currently at release-candidate status: warehousd 
 - A failure always ends on a `└` line saying what to do about it, and an error that is a bug in warehousd rather than a condition in the world carries the issue-tracker URL.
 - The release-candidate notice is guaranteed a blank line above **and** below it, on every command. It used to rely on whatever followed bringing its own top spacing, which only a panel did.
 - `warehousd import map` prints the proposal on stdout and everything it has to *say* about the proposal on stderr, so `warehousd import map people.csv >> warehousd.yml` no longer appends a page of English to a YAML file.
+- A backticked command in prose is drawn in the type colour instead — `` `warehousd start` `` becomes bold accent green with no punctuation around it. The backticks stay wherever colour is off (a pipe, `NO_COLOR`, `--no-color`, `TERM=dumb`), because there they are the only thing marking the span as something to type rather than something to read.
+
+### Added
+
+- **`packages/cli/test/e2e/surface.e2e.test.ts`, and `pnpm test:e2e:cli:surface`.** The whole command surface, driven as a subprocess against the built bundle, needing no container, no database and no network — about ten seconds on any machine. `program.ts` is excluded from coverage because every export in it is an argv-driven action callback, so the frame each command opens, the `└` it closes on, which stream each block lands on and the exit code were untested by construction. It asserts all three renderings the CLI has: piped (flat, ASCII, no escape byte), a terminal with colour off, and a terminal with 24-bit colour.
 
 ## [0.1.0-rc.1] - 2026-08-11
 

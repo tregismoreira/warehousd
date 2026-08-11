@@ -9,6 +9,7 @@ import {
   link,
   nextSteps,
   pad,
+  prose,
   rail,
   railDone,
   railFail,
@@ -114,6 +115,54 @@ describe("link", () => {
     expect(link("http://localhost:8722", colour)).not.toBe("http://localhost:8722");
     expect(link("postgres://u@h/db", colour)).not.toBe("postgres://u@h/db");
     expect(link("dev", colour)).toBe("dev");
+  });
+});
+
+/**
+ * Markdown punctuation is a workaround for not having colour, and this output has colour.
+ *
+ * The backticks stay wherever colour is off — a pipe, `NO_COLOR`, `--no-color`, `TERM=dumb` —
+ * because there they are the only thing marking a span as something to type rather than read.
+ */
+describe("prose", () => {
+  const colour = resolveTheme({ isTTY: true, env: { COLORTERM: "truecolor" } });
+
+  it("replaces the backticks with the type colour", () => {
+    const s = prose("Run `warehousd start` to bring it up.", colour);
+    expect(s).not.toContain("`");
+    expect(s).toContain("38;2;29;158;117");
+    expect(s).toContain("warehousd start");
+    expect(s).toContain("Run ");
+    expect(s).toContain(" to bring it up.");
+  });
+
+  it("keeps them where there is no colour to replace them with", () => {
+    expect(prose("Run `warehousd start`.", tty)).toBe("Run `warehousd start`.");
+    expect(prose("Run `warehousd start`.", plainTheme)).toBe("Run `warehousd start`.");
+  });
+
+  it("handles a sentence with more than one, and one with none", () => {
+    const two = prose("`a` and `b`", colour);
+    expect(two.match(/38;2;29;158;117/g)).toHaveLength(2);
+    expect(prose("nothing to mark", colour)).toBe("nothing to mark");
+  });
+
+  /**
+   * `rest` styles the words around the command, per segment.
+   *
+   * It cannot be applied to the finished line: `cmd` closes its span with SGR 22, which resets dim
+   * as well as bold, so dimming the whole line first would leave everything after the first
+   * command undimmed.
+   */
+  it("styles the surrounding words without the command cancelling it", () => {
+    const s = prose("before `cmd` after", colour, (x) => `<${x}>`);
+    expect(s.startsWith("<before >")).toBe(true);
+    expect(s.endsWith("< after>")).toBe(true);
+    expect(s).not.toContain("<cmd>");
+  });
+
+  it("still applies rest where there is no colour", () => {
+    expect(prose("plain", plainTheme, (x) => `<${x}>`)).toBe("<plain>");
   });
 });
 

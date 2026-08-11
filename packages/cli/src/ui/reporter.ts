@@ -1,6 +1,6 @@
 import type { Theme } from "./theme";
 import { plainTheme } from "./theme";
-import { railLine, railWarn, railFail } from "./frame";
+import { prose, railLine, railWarn, railFail } from "./frame";
 
 // Progress narration, and the one place in the UI layer that holds state.
 //
@@ -246,17 +246,17 @@ export function createReporter(opts: ReporterOptions): Reporter {
 
     note(msg: string) {
       if (quiet) return;
-      opts.writeErr(`${railLine(theme.c.dim(msg), theme)}\n`);
+      opts.writeErr(`${railLine(prose(msg, theme, theme.c.dim), theme)}\n`);
     },
 
     warn(msg: string) {
       if (quiet) return;
-      opts.writeErr(`${railWarn([msg], theme)}\n`);
+      opts.writeErr(`${railWarn([prose(msg, theme)], theme)}\n`);
     },
 
     fail(msg: string) {
       stopSpinner();
-      opts.writeErr(`${railFail([msg], theme)}\n`);
+      opts.writeErr(`${railFail([prose(msg, theme)], theme)}\n`);
     },
 
     out(msg: string) {

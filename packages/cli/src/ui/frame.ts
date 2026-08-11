@@ -30,7 +30,9 @@ export function frameOpen(title: string, theme: Theme): string | null {
  */
 export function frameClose(outro: string, theme: Theme): string | null {
   if (!theme.unicode) return null;
-  return `${theme.c.dim(theme.s.bottom)}  ${outro}`;
+  // Every outro is prose, and every outro names a command, so this is the one place the backticks
+  // are guaranteed to be worth trading for colour.
+  return `${theme.c.dim(theme.s.bottom)}  ${prose(outro, theme)}`;
 }
 
 /** One line on the rail. An empty string is the bare `│` spacer between blocks. */
@@ -86,6 +88,28 @@ export function link(value: string, theme: Theme): string {
 /** Something you can type, in bold accent. The one colour that means "this is a command". */
 export function cmd(text: string, theme: Theme): string {
   return theme.c.bold(theme.c.accent(text));
+}
+
+/**
+ * A sentence with `backticked` commands in it, drawn with the colour doing the quoting.
+ *
+ * Markdown punctuation is a workaround for not having colour, and this output has colour: a
+ * terminal that can print `warehousd start` in the type colour does not also need two grave
+ * accents around it. They stay wherever colour is off — a pipe, `NO_COLOR`, `--no-color`,
+ * `TERM=dumb` — because there the backtick is the only thing marking the span as something to type
+ * rather than something to read.
+ *
+ * `rest` styles everything that is *not* a command, and it has to be applied per-segment rather
+ * than to the finished line: `cmd` ends its span with SGR 22, which resets dim as well as bold, so
+ * dimming the whole line first would leave every word after the first command undimmed.
+ */
+export function prose(text: string, theme: Theme, rest: (s: string) => string = (s) => s): string {
+  if (!theme.colour) return rest(text);
+  // `split` on a regex with one capture group alternates literal, captured, literal…
+  return text
+    .split(/`([^`]+)`/)
+    .map((part, i) => (i % 2 === 1 ? cmd(part, theme) : rest(part)))
+    .join("");
 }
 
 export type NextStep = { command: string; says: string };

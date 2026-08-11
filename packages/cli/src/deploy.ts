@@ -21,7 +21,7 @@ import { buildDeployOutputs, formatDeployOutputs } from "./deploy/outputs";
 import { targetFor, type TargetContext } from "./deploy/targets";
 import { existingMigrations } from "./migrate";
 import { renderChecks, docsOutro } from "./ui/render";
-import { openFrame, railFail, railLine, type Frame } from "./ui/frame";
+import { openFrame, prose, railFail, railLine, type Frame } from "./ui/frame";
 import { plainTheme, type Theme } from "./ui/theme";
 
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
@@ -284,7 +284,10 @@ export async function runDeploy(
   const cfg = loadConfig(dir);
   if (!cfg.deploy) {
     refusal.block(
-      railFail(["No `deploy:` block in warehousd.yml — there is nowhere to deploy to."], theme),
+      railFail(
+        [prose("No `deploy:` block in warehousd.yml — there is nowhere to deploy to.", theme)],
+        theme,
+      ),
     );
     refusal.close("`warehousd init --target fly` writes one, or add it by hand.");
     process.exit(1);

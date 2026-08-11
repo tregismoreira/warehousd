@@ -68,6 +68,7 @@ import {
   frameOpen,
   labelled,
   openFrame,
+  prose,
   rail,
   railDone,
   railFail,
@@ -411,7 +412,7 @@ program
       frame.block(
         railWarn(
           [
-            "A rebuilt collection is empty until you run `warehousd seed`",
+            prose("A rebuilt collection is empty until you run `warehousd seed`", theme),
             "or import data into it.",
           ],
           theme,
@@ -922,7 +923,10 @@ program
     false,
   )
   .action(async (o) => {
-    const { theme, json, frame } = ui("doctor", (t) => labelled(t.i.doctor, "warehousd doctor"));
+    // The icon trails the name here rather than leading it, unlike a field label: every frame in
+    // the CLI opens on `warehousd <command>`, and putting a glyph in front of one of them breaks
+    // the one column the eye is scanning for.
+    const { theme, json, frame } = ui("doctor", (t) => `warehousd doctor ${t.i.doctor}`.trimEnd());
     const result = await runDoctor(o.dir, { deploy: o.deploy });
     if (json) {
       emitJson(result);
