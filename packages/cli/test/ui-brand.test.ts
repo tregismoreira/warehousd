@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { brandBanner, compactMark, wordmark } from "../src/ui/brand";
+import { brandBanner } from "../src/ui/brand";
 import { plainTheme, resolveTheme } from "../src/ui/theme";
 
 // A CSI sequence: ESC [ ... final byte. Built from a code point so no raw control character ends
@@ -8,53 +8,7 @@ const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;]*m`);
 
 const tty = { theme: plainTheme, isTTY: true, columns: 100 };
-
-describe("wordmark", () => {
-  const rows = wordmark(plainTheme).split("\n");
-
-  it("is seven rows — the mark stands a row taller than the type, as it does in the SVG", () => {
-    expect(rows).toHaveLength(7);
-  });
-
-  // Art is the one thing a diff cannot review. A row that drifted a character would be obvious on
-  // screen and invisible in review, so the grid is asserted rather than eyeballed.
-  it("draws every row to the same width", () => {
-    const full = rows.filter((r) => r.length > 13);
-    expect(new Set(full.map((r) => r.length)).size).toBe(1);
-    for (const row of rows) expect(row.length).toBeLessThanOrEqual(62);
-  });
-
-  /**
-   * The load-bearing one.
-   *
-   * In `banner.svg` columns 0–2 are discrete stacked squares and column 3 is a single unbroken
-   * rect. That contrast is the mark. Rendering the bar as stacked blocks like the rest would erase
-   * it, which is exactly what an edit to MARK_BLOCKS could do by accident.
-   */
-  it("keeps the accent bar unbroken down all seven rows", () => {
-    for (const row of rows) expect(row.slice(11, 13)).toBe("██");
-  });
-
-  it("carries no ANSI when there is no terminal behind it", () => {
-    expect(wordmark(plainTheme)).not.toMatch(ANSI);
-  });
-
-  it("colours the bar and nothing else", () => {
-    const themed = resolveTheme({ isTTY: true, env: { COLORTERM: "truecolor" } });
-    const line = wordmark(themed).split("\n")[6] ?? "";
-    // One opening sequence and one close, wrapping the two bar characters alone.
-    expect(line).toContain(`${ESC}[38;2;29;158;117m██${ESC}[39m`);
-    expect(line.match(new RegExp(`${ESC}\\[38`, "g"))).toHaveLength(1);
-  });
-});
-
-describe("compactMark", () => {
-  it("keeps the name lowercase, which docs/glossary.md makes a rule", () => {
-    expect(compactMark(plainTheme)).toContain("warehousd");
-    expect(compactMark(plainTheme)).not.toContain("Warehousd");
-    expect(compactMark(plainTheme)).not.toContain("WAREHOUSD");
-  });
-});
+const rows = (s: string | null) => (s ?? "").split("\n");
 
 describe("brandBanner", () => {
   /**
@@ -62,8 +16,8 @@ describe("brandBanner", () => {
    *
    * `lifecycle.e2e.test.ts` drives the built bundle through `execFileSync` and asserts no escape
    * byte reaches either stream, and stderr is where narration goes. A plain-text fallback would
-   * satisfy the colour assertion and still put six rows of decoration into everybody's CI log, so
-   * off a TTY this renders nothing at all.
+   * satisfy the colour assertion and still put a greeting into everybody's CI log, so off a TTY
+   * this renders nothing at all.
    */
   it("renders nothing off a terminal", () => {
     expect(brandBanner({ ...tty, isTTY: false })).toBeNull();
@@ -74,13 +28,7 @@ describe("brandBanner", () => {
     expect(brandBanner({ ...tty, json: true })).toBeNull();
   });
 
-  it("falls back to one line rather than wrapping, on a narrow terminal", () => {
-    const narrow = brandBanner({ ...tty, columns: 40 });
-    expect(narrow).not.toBeNull();
-    expect(narrow?.split("\n").filter((l) => l.includes("██"))).toHaveLength(1);
-  });
-
-  it("gives up entirely where even that will not fit", () => {
+  it("gives up entirely where even the greeting will not fit", () => {
     expect(brandBanner({ ...tty, columns: 12 })).toBeNull();
   });
 
@@ -91,35 +39,70 @@ describe("brandBanner", () => {
    * is every run under `script` and some CI runners that allocate a tty. Reading that as "too
    * narrow" suppressed the banner in exactly the places nobody would think to look.
    */
-  it("treats an unsized terminal as a normal one rather than a narrow one", () => {
-    expect(brandBanner({ ...tty, columns: 0 })).not.toBeNull();
-    expect(brandBanner({ ...tty, columns: undefined })).not.toBeNull();
+  it("treats an unsized terminal as a wide one rather than a narrow one", () => {
+    // Both lines, not just the greeting: guessing 80 would drop the second by two characters, in
+    // exactly the environments nobody thinks to check.
+    for (const columns of [0, undefined]) {
+      expect(rows(brandBanner({ ...tty, columns }))).toHaveLength(2);
+    }
   });
 
-  it("shows the full wordmark when there is room", () => {
-    const wide = brandBanner({ ...tty, columns: 100 }) ?? "";
-    expect(wide.split("\n").filter((l) => l.includes("██"))).toHaveLength(7);
+  it("greets, and says what the thing is", () => {
+    const lines = rows(brandBanner(tty));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Welcome to warehousd");
+    expect(lines[1]).toContain(
+      "All your documents and datasets in one place, safely queryable by AI assistants.",
+    );
   });
 
-  // Same contract as rcNotice, for the same reason: the release-candidate notice may or may not be
-  // above this, and only the caller knows. A newline at either end would double up with one of them.
+  /**
+   * docs/glossary.md: the name is lowercase everywhere, including where a sentence would
+   * capitalise it — which is why the greeting puts two words in front of it rather than opening
+   * on it.
+   */
+  it("keeps the name lowercase and does not open a sentence with it", () => {
+    const s = brandBanner(tty) ?? "";
+    expect(s).toContain("warehousd");
+    expect(s).not.toContain("Warehousd");
+    expect(s).not.toMatch(/(^|[.!?]\s+)warehousd/i);
+  });
+
+  it("colours the name with the brand accent, and nothing else on that line", () => {
+    const theme = resolveTheme({ isTTY: true, env: { COLORTERM: "truecolor" } });
+    const line = rows(brandBanner({ ...tty, theme }))[0] ?? "";
+    expect(line).toContain(`${ESC}[38;2;29;158;117mwarehousd${ESC}[39m`);
+    expect(line.match(new RegExp(`${ESC}\\[38`, "g"))).toHaveLength(1);
+    // "Welcome to" is not accented, only emboldened along with the rest of the line.
+    expect(line).not.toContain(`${ESC}[38;2;29;158;117mWelcome`);
+  });
+
+  it("carries no ANSI when there is no terminal behind it", () => {
+    expect(brandBanner(tty)).not.toMatch(ANSI);
+  });
+
+  // Dropped rather than rewrapped: a sentence the terminal rewraps lands differently on every
+  // machine, which is the same reason the release-candidate notice breaks at its own sentence.
+  it("drops the blurb rather than wrapping it on a narrow terminal", () => {
+    const narrow = brandBanner({ ...tty, columns: 40 }) ?? "";
+    expect(rows(narrow)).toHaveLength(1);
+    expect(narrow).toContain("Welcome to warehousd");
+    expect(narrow).not.toContain("documents and datasets");
+  });
+
+  it("indents to the same column as every panel, notice and progress line", () => {
+    for (const line of rows(brandBanner(tty))) expect(line).toMatch(/^ {2}\S/);
+  });
+
+  // Same contract as rcNotice and formatExplained, for the same reason: what sits above this
+  // varies, and only the caller knows. A newline at either end would double up with one of them.
   it("brings no blank line of its own", () => {
     const s = brandBanner(tty) ?? "";
     expect(s.startsWith("\n")).toBe(false);
     expect(s.endsWith("\n")).toBe(false);
   });
 
-  // docs/glossary.md: the name is lowercase everywhere and never opens a sentence.
-  it("does not open the tagline with the name", () => {
-    const banner = brandBanner(tty) ?? "";
-    expect(banner).not.toMatch(/(^|[.!?]\s+)warehousd/i);
-  });
-
-  it("says what the thing is, for a reader who has never seen it", () => {
-    expect(brandBanner(tty)).toContain("governed data layer");
-  });
-
-  it("drops the tagline rather than wrapping it on a narrow terminal", () => {
-    expect(brandBanner({ ...tty, columns: 40 })).not.toContain("governed data layer");
+  it("leaves no trailing whitespace", () => {
+    for (const line of rows(brandBanner(tty))) expect(line).toBe(line.trimEnd());
   });
 });

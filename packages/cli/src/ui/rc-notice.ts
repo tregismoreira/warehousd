@@ -36,7 +36,7 @@ export function isPrerelease(version: string): boolean {
  * warning it is.
  *
  * The blank lines around it are the caller's, not this function's: what follows varies (a
- * wordmark, a panel that opens with its own blank line, a bare result line) and only the caller
+ * greeting, a panel that opens with its own blank line, a bare result line) and only the caller
  * knows which.
  *
  * Written to **stderr**, before commander parses argv. stdout is the product: `status --json | jq`

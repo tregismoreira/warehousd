@@ -120,7 +120,7 @@ function ui() {
 }
 
 /**
- * The wordmark, on the three commands where somebody is bringing something up.
+ * The greeting, on the three commands where somebody is bringing something up.
  *
  * Not on all of them: `logs`, `status` and `secrets` are things you run in a loop, and a banner
  * above each one would be six rows of decoration between you and the answer. `init`, `start` and
@@ -131,8 +131,8 @@ function ui() {
  *
  * It lands *below* the release-candidate notice, which is written before commander parses argv
  * (see the bottom of this file) and so cannot know which command is about to run. Putting the
- * wordmark first would mean sniffing argv before parsing, which is worse than the ordering. The
- * notice retires itself at 1.0 and the wordmark becomes the first thing printed then.
+ * greeting first would mean sniffing argv before parsing, which is worse than the ordering. The
+ * notice retires itself at 1.0 and the greeting becomes the first thing printed then.
  */
 function banner(g: { theme: Theme; quiet: boolean; json: boolean }): void {
   const art = brandBanner({
@@ -831,7 +831,7 @@ if (typeof require !== "undefined" && require.main === module) {
     }),
   );
   // Opened by a blank line so it clears the shell prompt rather than colliding with it. What
-  // follows brings its own top spacing — the wordmark, or a panel, which already opens with one.
+  // follows brings its own top spacing — the greeting, or a panel, which already opens with one.
   if (notice) process.stderr.write(`\n${notice}\n`);
 
   // Rejections have to be handled here or not at all: `parseAsync` is the last statement, so an
