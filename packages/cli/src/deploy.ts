@@ -20,7 +20,8 @@ import { confirmDestroy } from "./deploy/destroy";
 import { buildDeployOutputs, formatDeployOutputs } from "./deploy/outputs";
 import { targetFor, type TargetContext } from "./deploy/targets";
 import { existingMigrations } from "./migrate";
-import { renderChecks } from "./ui/render";
+import { renderChecks, docsOutro } from "./ui/render";
+import { openFrame, railFail, railLine, type Frame } from "./ui/frame";
 import { plainTheme, type Theme } from "./ui/theme";
 
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
@@ -151,19 +152,40 @@ export async function runDeploy(
     showSecrets?: boolean | undefined;
     json?: boolean | undefined;
     quiet?: boolean | undefined;
+    /**
+     * The frame `program.ts` already opened for this run.
+     *
+     * Passed in rather than opened here so a deploy is one frame from `┌ warehousd deploy` to the
+     * docs link, including the pre-flight failures below — which used to be printed loose, after
+     * a frame that never closed.
+     */
+    frame?: Frame | undefined;
   },
 ): Promise<void> {
   // Defaults to the inert theme so a caller that passes nothing still gets plain, colourless
   // output rather than escape codes it did not ask for.
   const theme = opts.theme ?? plainTheme;
   const json = opts.json ?? false;
+  const frame = opts.frame ?? openFrame("", theme, { json });
+  // A refusal is narration, so it goes to **stderr** and leaves stdout empty — which is what makes
+  // a failed `warehousd deploy --json` parseable-as-nothing rather than parseable-as-garbage. It
+  // gets its own frame for the same reason: the one above writes to stdout.
+  const refusal = openFrame("", theme, { stream: "err" });
 
   // Same split as every other command: narration and failures on stderr, the result on stdout, so
   // `warehousd deploy --json | jq` gets JSON and nothing else. All of this used to be console.log.
   const say = (msg: string) => {
-    if (!opts.quiet && !json) process.stderr.write(`${msg}\n`);
+    if (opts.quiet || json) return;
+    // On the rail, like everything else a command says: a deploy is one frame from `┌ warehousd
+    // deploy` to the docs link, and its narration used to be the one part printed loose beside it.
+    process.stderr.write(
+      `${msg
+        .split("\n")
+        .map((l) => railLine(l, theme))
+        .join("\n")}\n`,
+    );
   };
-  const complain = (msg: string) => process.stderr.write(`${msg}\n`);
+  const complain = (msg: string) => process.stderr.write(`${railLine(msg, theme)}\n`);
 
   // Destroy path first: if opts.destroy, prompt and confirm
   if (opts.destroy) {
@@ -253,25 +275,18 @@ export async function runDeploy(
     // Through the shared renderer, so a failed pre-flight degrades to ASCII off a terminal and
     // honours NO_COLOR — the ✗ used to be hardcoded here, which neither did.
     const failed = preflightResult.checks.filter((c) => !c.ok);
-    complain(`\n${renderChecks(failed, theme)}\n`);
+    refusal.block(renderChecks(failed, theme));
+    refusal.close("Fix the checks above, then re-run `warehousd deploy`.");
     process.exit(1);
   }
 
   // Load config and extract deploy section
   const cfg = loadConfig(dir);
   if (!cfg.deploy) {
-    complain(
-      `\n${renderChecks(
-        [
-          {
-            id: "deploy-block-present",
-            ok: false,
-            detail: "add a `deploy:` block to warehousd.yml",
-          },
-        ],
-        theme,
-      )}\n`,
+    refusal.block(
+      railFail(["No `deploy:` block in warehousd.yml — there is nowhere to deploy to."], theme),
     );
+    refusal.close("`warehousd init --target fly` writes one, or add it by hand.");
     process.exit(1);
   }
 
@@ -485,12 +500,11 @@ export async function runDeploy(
     );
     return;
   }
-  process.stdout.write(
-    `${formatDeployOutputs(
-      outputs,
-      { adminEmail, adminPassword: state.adminPassword },
-      targetInfo,
-      { theme, showSecrets: opts.showSecrets ?? false },
-    )}\n`,
+  frame.block(
+    formatDeployOutputs(outputs, { adminEmail, adminPassword: state.adminPassword }, targetInfo, {
+      theme,
+      showSecrets: opts.showSecrets ?? false,
+    }),
   );
+  frame.close(docsOutro(theme));
 }

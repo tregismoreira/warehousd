@@ -35,9 +35,7 @@ export function isPrerelease(version: string): boolean {
  * lined up with none of the output beneath it — it read as terminal noise rather than as the
  * warning it is.
  *
- * The blank lines around it are the caller's, not this function's: what follows varies (a
- * greeting, a panel that opens with its own blank line, a bare result line) and only the caller
- * knows which.
+ * The blank lines around it belong to `rcNoticeBlock` below, which is what a caller should print.
  *
  * Written to **stderr**, before commander parses argv. stdout is the product: `status --json | jq`
  * and `start 2>/dev/null` both have to keep working.
@@ -50,4 +48,17 @@ export function rcNotice(version: string, theme: Theme): string | null {
     `${INDENT}${theme.c.yellow(theme.s.warn)} ${theme.c.dim(WARNING)}`,
     `${continuation}${theme.c.dim(READ_MORE)}`,
   ].join("\n");
+}
+
+/**
+ * The notice as it is actually written, blank lines and all — or `null` on a stable release.
+ *
+ * One above and one below, in **every** case. It used to carry only the one above and rely on
+ * whatever followed bringing its own top spacing, which a panel did and a bare result line did
+ * not: a `status` with nothing running printed its answer hard against the warning. Owning both
+ * here is what makes the rule assertable rather than a convention four call sites have to keep.
+ */
+export function rcNoticeBlock(version: string, theme: Theme): string | null {
+  const notice = rcNotice(version, theme);
+  return notice === null ? null : `\n${notice}\n\n`;
 }

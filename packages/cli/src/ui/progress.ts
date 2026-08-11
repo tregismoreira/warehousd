@@ -25,12 +25,22 @@ export function trackStepWith<P>(
   verb: string,
   label: string,
   map: (p: P) => Progress,
+  settled?: string,
   now: () => number = () => Date.now(),
 ): Tracked<P> {
-  const step = reporter.step(verb, label);
+  const step = reporter.step(verb, label, settled);
   const started = now();
   return {
     step,
-    onProgress: (p: P) => step.update(progressDetail(map(p), now() - started)),
+    // A bar where the total is known, a count where it is not. Both are the same call as far as
+    // the caller is concerned; only the reporter knows which one a terminal can use.
+    onProgress: (p: P) => {
+      const progress = map(p);
+      if (progress.total !== undefined && progress.total > 0) {
+        step.progress(progress.done, progress.total, progress.label);
+        return;
+      }
+      step.update(progressDetail(progress, now() - started));
+    },
   };
 }

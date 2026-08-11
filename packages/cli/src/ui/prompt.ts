@@ -1,4 +1,4 @@
-import { confirm as clackConfirm, text, select, note, isCancel, cancel } from "@clack/prompts";
+import { confirm as clackConfirm, text, select, isCancel, cancel } from "@clack/prompts";
 import {
   dbProviders,
   DEFAULT_DEPLOY_TARGET_ID,
@@ -9,6 +9,8 @@ import {
 import { targets } from "../deploy/targets";
 import { runtimes } from "../containers/runtimes";
 import { dbHosts, hostFor, localHosts } from "../db/hosts";
+import { rail } from "./frame";
+import { resolveTheme, type Theme } from "./theme";
 
 // The only module that talks to @clack/prompts.
 //
@@ -124,7 +126,32 @@ function optionsFrom(registry: Record<string, { id: string; label: string; blurb
  */
 const NO_TARGET = "none";
 
-export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | null> {
+/**
+ * How the wizard says its two halves out loud.
+ *
+ * This was a clack `note()`, which draws its own little box — and a box in the middle of a rail is
+ * the flow visibly breaking in two. It is rail text now, on the same stream clack writes to, so
+ * the wizard reads as one column from `┌ Welcome to warehousd` to the last answer.
+ */
+export type PromptIO = {
+  theme?: Theme | undefined;
+  say?: ((line: string) => void) | undefined;
+};
+
+function sectionWriter(io: PromptIO | undefined): (heading: string, blurb: string) => void {
+  const theme =
+    io?.theme ?? resolveTheme({ isTTY: Boolean(process.stdout.isTTY), env: process.env });
+  const say = io?.say ?? ((line: string) => process.stdout.write(`${line}\n`));
+  return (heading, blurb) => {
+    say(rail(["", theme.c.bold(heading), theme.c.dim(blurb)], theme));
+  };
+}
+
+export async function promptInit(
+  defaults: InitAnswers,
+  io?: PromptIO,
+): Promise<InitAnswers | null> {
+  const section = sectionWriter(io);
   const project = await text({
     message: "Project name",
     placeholder: defaults.project,
@@ -174,7 +201,7 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
    * ordinary answer. A heading before each group is the cheapest way to make the split visible
    * instead of something you have to infer from two similar prompts four questions apart.
    */
-  note("Where warehousd runs while you develop.", "On this machine");
+  section("On this machine", "Where warehousd runs while you develop.");
 
   // Which engine runs the containers. Asked before the database, because a local database that is
   // a container needs one — and because "warehousd could not find docker" is a better first
@@ -218,7 +245,7 @@ export async function promptInit(defaults: InitAnswers): Promise<InitAnswers | n
   const localDbProvider = database in dbProviders ? (database as DbProviderId) : null;
   const managed = database === "managed" || localDbProvider !== null;
 
-  note("Read only by `warehousd deploy`. You can skip this and add it later.", "In production");
+  section("In production", "Read only by `warehousd deploy`. Skippable — you can add it later.");
 
   const target = await select({
     message: "Where will you deploy this?",

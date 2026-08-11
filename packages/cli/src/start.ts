@@ -102,8 +102,12 @@ export async function runStart(
   // the total is right on the first line rather than the last.
   report.plan(p.managed && !localDbHost ? 7 : 5);
 
-  const check = report.step("Checking", `${p.name}`);
-  check.done(`${containerRuntime().cli.bin} ${runtimeVersion()}`);
+  const check = report.step(
+    "Checking",
+    containerRuntime().cli.bin,
+    `Checked ${containerRuntime().cli.bin}`,
+  );
+  check.done(`version ${runtimeVersion()}`);
 
   // Step 3: Ensure images exist.
   //
@@ -133,7 +137,7 @@ export async function runStart(
   if (imageExists(serverImage)) {
     report.step("Image", serverImage).done(`${image.source}, local`);
   } else {
-    const pulling = report.step("Pulling", serverImage);
+    const pulling = report.step("Pulling", serverImage, `Pulled ${serverImage}`);
     try {
       ensureImage(serverImage);
       pulling.done(image.source);
@@ -144,7 +148,11 @@ export async function runStart(
   }
   if (p.managed && !localDbHost) {
     if (!imageExists("pgvector/pgvector:pg16")) {
-      const pulling = report.step("Pulling", "pgvector/pgvector:pg16");
+      const pulling = report.step(
+        "Pulling",
+        "pgvector/pgvector:pg16",
+        "Pulled pgvector/pgvector:pg16",
+      );
       try {
         ensureImage("pgvector/pgvector:pg16");
         pulling.done();
@@ -165,7 +173,11 @@ export async function runStart(
   // the middle case, which is what the URL computation below branches on.
   let localDbUrl: string | null = null;
   if (p.managed && localDbHost?.local) {
-    const step = report.step("Starting", `${localDbHost.label} locally`);
+    const step = report.step(
+      "Starting",
+      `${localDbHost.label} locally`,
+      `${localDbHost.label} started locally`,
+    );
     try {
       localDbUrl = await localDbHost.local.start({ projectDir: p.dir, say: (m) => report.note(m) });
       step.done(localDbHost.label);
@@ -177,7 +189,7 @@ export async function runStart(
     ensureVolume(p.ns.volume, p.ns.label);
     const dbState = containerState(p.ns.db);
     if (dbState !== "running") {
-      const dbStep = report.step("Starting", `${p.ns.db} → :${p.ports.db}`);
+      const dbStep = report.step("Starting", "the database", "Database started");
       removeContainer(p.ns.db);
       runContainer({
         name: p.ns.db,
@@ -196,9 +208,11 @@ export async function runStart(
           "/var/lib/postgresql/data": p.ns.volume,
         },
       });
-      dbStep.done();
+      dbStep.done(`:${p.ports.db}`);
     } else {
-      report.step("Reusing", `${p.ns.db} → :${p.ports.db}`).done("already running");
+      report
+        .step("Reusing", "the database", "Database reused")
+        .done(`already running on :${p.ports.db}`);
     }
   }
 
@@ -229,7 +243,11 @@ export async function runStart(
   // file. A URL the user supplied is theirs to get right, and a provider's local stack manages its
   // own credentials — neither has this failure mode, and probing them would only add a wait.
   if (p.managed && !localDbHost) {
-    const dbCheck = report.step("Checking", "database credentials");
+    const dbCheck = report.step(
+      "Checking",
+      "the database credentials",
+      "Database credentials check out",
+    );
     try {
       await waitForDatabaseAt(appUrlHost, {
         volume: p.ns.volume,
@@ -245,7 +263,7 @@ export async function runStart(
 
   // Step 7: Recreate server container
   const adminEmail = "admin@warehousd.local";
-  const serverStep = report.step("Starting", `${p.ns.server} → :${p.ports.server}`);
+  const serverStep = report.step("Starting", "the server", "Server started");
   removeContainer(p.ns.server);
   runContainer({
     name: p.ns.server,
@@ -279,11 +297,11 @@ export async function runStart(
     ...(localDbUrl ? { extraHosts: { [HOST_GATEWAY_NAME]: "host-gateway" } } : {}),
   });
 
-  serverStep.done();
+  serverStep.done(`:${p.ports.server}`);
 
   // Step 8: Poll health endpoint
   const appUrl = `http://localhost:${p.ports.server}`;
-  const healthStep = report.step("Waiting", "health check");
+  const healthStep = report.step("Waiting", "for the server to answer", "Healthy");
   try {
     await pollHealth(appUrl, HEALTH_CHECK_TIMEOUT_MS);
     healthStep.done();

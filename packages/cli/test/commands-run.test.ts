@@ -170,6 +170,10 @@ describe("runOpen", () => {
   });
 });
 
+// The wizard names its two halves out loud on stdout. Swallowed here so the suite's output stays
+// readable; what those headings say is asserted in ui-render.test.ts, not by reading a test log.
+const SILENT = { say: () => {} };
+
 describe("prompt wrappers", () => {
   it("asks clack when interactive and returns its answer", async () => {
     await expect(
@@ -194,7 +198,7 @@ describe("prompt wrappers", () => {
 
   it("collects the init answers", async () => {
     guided();
-    const answers = await promptInit(INIT_DEFAULTS);
+    const answers = await promptInit(INIT_DEFAULTS, SILENT);
     expect(answers).toEqual({
       project: "answer",
       port: 8722,
@@ -212,13 +216,13 @@ describe("prompt wrappers", () => {
 
   it("returns null when the wizard is cancelled", async () => {
     vi.mocked(clack.isCancel).mockReturnValueOnce(true);
-    await expect(promptInit(INIT_DEFAULTS)).resolves.toBeNull();
+    await expect(promptInit(INIT_DEFAULTS, SILENT)).resolves.toBeNull();
   });
 
   it("reads 'external' from the local database question", async () => {
     guided();
     vi.mocked(clack.select).mockResolvedValueOnce("external");
-    const answers = await promptInit(INIT_DEFAULTS);
+    const answers = await promptInit(INIT_DEFAULTS, SILENT);
     expect(answers?.managed).toBe(false);
   });
 
@@ -231,7 +235,7 @@ describe("prompt wrappers", () => {
       .mockResolvedValueOnce("railway")
       .mockResolvedValueOnce("external")
       .mockResolvedValueOnce("supabase");
-    const answers = await promptInit(INIT_DEFAULTS);
+    const answers = await promptInit(INIT_DEFAULTS, SILENT);
     expect(answers).toMatchObject({
       managed: true,
       target: "railway",
@@ -248,7 +252,7 @@ describe("prompt wrappers", () => {
       .mockResolvedValueOnce("external")
       .mockResolvedValueOnce("fly")
       .mockResolvedValueOnce("managed");
-    const answers = await promptInit(INIT_DEFAULTS);
+    const answers = await promptInit(INIT_DEFAULTS, SILENT);
     expect(answers).toMatchObject({ managed: false, deployManaged: true, dbProvider: null });
   });
 
@@ -258,7 +262,7 @@ describe("prompt wrappers", () => {
       .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("compose")
       .mockResolvedValueOnce("managed");
-    const answers = await promptInit(INIT_DEFAULTS);
+    const answers = await promptInit(INIT_DEFAULTS, SILENT);
     expect(answers).toMatchObject({ managed: true, target: "compose", dbProvider: null });
     // mode, runtime, local database, target, deploy database — and no sixth.
     expect(clack.select).toHaveBeenCalledTimes(5);
@@ -270,7 +274,7 @@ describe("prompt wrappers", () => {
       .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("fly")
       .mockResolvedValueOnce("external");
-    await promptInit(INIT_DEFAULTS);
+    await promptInit(INIT_DEFAULTS, SILENT);
     const values = (i: number) =>
       (vi.mocked(clack.select).mock.calls[i]?.[0] as { options: { value: string }[] }).options.map(
         (o) => o.value,
@@ -293,7 +297,7 @@ describe("prompt wrappers", () => {
       .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("fly")
       .mockResolvedValueOnce("external");
-    const answers = await promptInit(INIT_DEFAULTS);
+    const answers = await promptInit(INIT_DEFAULTS, SILENT);
     expect(answers?.guided).toBe(false);
     const values = (i: number) =>
       (vi.mocked(clack.select).mock.calls[i]?.[0] as { options: { value: string }[] }).options.map(
@@ -315,7 +319,7 @@ describe("prompt wrappers", () => {
   it("asks nothing about production when the answer is 'not yet'", async () => {
     guided();
     vi.mocked(clack.select).mockResolvedValueOnce("managed").mockResolvedValueOnce("none");
-    const answers = await promptInit(INIT_DEFAULTS);
+    const answers = await promptInit(INIT_DEFAULTS, SILENT);
     expect(answers).toMatchObject({ target: null, deployManaged: true, dbProvider: null });
     // mode, runtime, local database, target — and nothing after it.
     expect(clack.select).toHaveBeenCalledTimes(4);
@@ -324,7 +328,7 @@ describe("prompt wrappers", () => {
   it("falls back to the default target when the select hands back something unregistered", async () => {
     guided();
     vi.mocked(clack.select).mockResolvedValueOnce("managed").mockResolvedValueOnce("nowhere");
-    const answers = await promptInit({ ...INIT_DEFAULTS, target: "compose" });
+    const answers = await promptInit({ ...INIT_DEFAULTS, target: "compose" }, SILENT);
     expect(answers?.target).toBe("compose");
   });
 });

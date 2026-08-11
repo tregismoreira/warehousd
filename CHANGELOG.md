@@ -8,6 +8,17 @@ Everything here is pre-1.0 and currently at release-candidate status: warehousd 
 
 ## [Unreleased]
 
+### Changed
+
+- **Every human run of the CLI is one connected frame.** `┌` on the command's own name, a `│` rail down the left of everything it says, and `└` on a sentence saying what to do next — the shape the `init` wizard already had, and that nothing around it shared. The init banner no longer floats above the wizard attached to nothing; `start` no longer ends on a panel of URLs and no second command; `init` no longer ends on a dim `Next: warehousd start` that read like narration. Off a terminal — piped, redirected, in CI, under `--json` — there is no frame and no rail at all, and the stdout/stderr split is untouched: `warehousd start --json | jq` parses and `warehousd start 2>/dev/null` prints the summary alone.
+- `start`, `restart` and `deploy` end on the full onboarding block: what happened, what to run next, the everyday commands, and the docs link. `start`'s headline is now "Your data layer is running".
+- One meaning per glyph and per colour, applied identically in every command: `◇` done, `▲` caution, `■` failure, cyan for somewhere you can go, bold accent for something you can type. Concept icons (🚀 🗄️ 🔑 👤 📚 …) sit beside a label on a terminal and are dropped entirely off one rather than faked in ASCII.
+- Step lines read as sentences — `◇  [1/7]  Checked docker — version 29.6.2` — instead of sitting either side of a ten-character right-aligned gutter, and a step whose total is known draws a `█░` bar and a percentage rather than a spinner that says nothing.
+- A bare `warehousd` and `warehousd --help` print a grouped, example-led screen instead of commander's alphabetical dump of every command and flag, which put `apply` above `init`. The global flags stay on the per-command `--help`.
+- A failure always ends on a `└` line saying what to do about it, and an error that is a bug in warehousd rather than a condition in the world carries the issue-tracker URL.
+- The release-candidate notice is guaranteed a blank line above **and** below it, on every command. It used to rely on whatever followed bringing its own top spacing, which only a panel did.
+- `warehousd import map` prints the proposal on stdout and everything it has to *say* about the proposal on stderr, so `warehousd import map people.csv >> warehousd.yml` no longer appends a page of English to a YAML file.
+
 ## [0.1.0-rc.1] - 2026-08-11
 
 The first release candidate, and the first artifact this repository publishes at all — nothing precedes it on npm or ghcr.io. The categories below are therefore not a delta from an earlier version: **Security** is the enforcement this release ships with, and **Changed** and **Fixed** record decisions taken during development that a reader of the code would otherwise have to reconstruct from the history.

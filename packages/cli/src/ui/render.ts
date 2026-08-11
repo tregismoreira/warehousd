@@ -1,76 +1,78 @@
 import type { Theme } from "./theme";
 import { maskSecret, maskUrlPassword } from "./mask";
+import {
+  displayWidth,
+  labelled,
+  link,
+  nextSteps,
+  pad,
+  rail,
+  railDone,
+  railFail,
+  type NextStep,
+} from "./frame";
 
 // Pure string building. Everything here takes a Theme and returns a string, so the whole visual
 // surface of the CLI can be asserted in a unit test without a terminal, without ANSI, and without
-// spawning anything. The old `═══` walls are gone: sixty box characters above and below cost two
-// lines and told the reader nothing, while the fields themselves were left ragged.
+// spawning anything.
+//
+// Every block hangs from the frame's rail (ui/frame.ts) on a terminal and falls back to the flat
+// two-space indent off one, and **no block carries a blank line of its own at either end** — the
+// same contract ui/brand.ts, ui/rc-notice.ts and ui/errors.ts already keep, and for the same
+// reason: what sits above and below varies, and only the caller knows.
 
 export type Field = { label: string; value: string; secret?: boolean };
 export type Section = { title?: string | undefined; fields: Field[] };
 
-const INDENT = "  ";
-const SUB_INDENT = "    ";
-
-function pad(s: string, width: number): string {
-  return s.length >= width ? s : s + " ".repeat(width - s.length);
-}
+/** A titled section's fields step in under their heading, as they did before the rail. */
+const SUB_INDENT = "   ";
 
 function renderField(f: Field, width: number, theme: Theme, showSecrets: boolean, indent: string) {
   const shown = f.secret && !showSecrets ? maskSecret(f.value, theme.unicode) : f.value;
-  return `${indent}${theme.c.dim(pad(f.label, width))}  ${shown}`;
+  return `${indent}${theme.c.dim(pad(f.label, width))}  ${link(shown, theme)}`;
 }
 
-export function renderPanel(opts: {
-  title: string;
-  subtitle?: string | undefined;
+/**
+ * The label/value lists a panel is made of, as unprefixed lines for `rail` to hang.
+ *
+ * Sections are separated by a blank line, and an empty one is skipped rather than printed as a
+ * bare heading.
+ */
+export function fieldLines(sections: Section[], theme: Theme, showSecrets = false): string[] {
+  const lines: string[] = [];
+  for (const section of sections) {
+    if (section.fields.length === 0) continue;
+    if (lines.length > 0) lines.push("");
+    const indent = section.title ? SUB_INDENT : "";
+    if (section.title) lines.push(section.title);
+    // Labels align within their own section rather than across the whole panel, so one long
+    // label in one group does not push every other group's values off to the right.
+    const width = Math.max(...section.fields.map((f) => displayWidth(f.label)));
+    for (const f of section.fields) lines.push(renderField(f, width, theme, showSecrets, indent));
+  }
+  return lines;
+}
+
+/** A field list on the rail, with no headline of its own — what `secrets` prints. */
+export function renderFields(opts: {
   sections: Section[];
   theme: Theme;
   showSecrets?: boolean | undefined;
-  /** One line each. Wrapped text belongs in the caller, which knows what it is saying. */
   footer?: string[] | undefined;
 }): string {
-  const { theme } = opts;
-  const showSecrets = opts.showSecrets ?? false;
-  const lines: string[] = [""];
-
-  const heading = theme.c.bold(opts.title);
-  lines.push(
-    opts.subtitle ? `${INDENT}${heading}  ${theme.c.dim(opts.subtitle)}` : `${INDENT}${heading}`,
-  );
-
-  for (const section of opts.sections) {
-    if (section.fields.length === 0) continue;
-    lines.push("");
-    const indent = section.title ? SUB_INDENT : INDENT;
-    if (section.title) lines.push(`${INDENT}${section.title}`);
-    // Labels align within their own section rather than across the whole panel, so one long
-    // label in one group does not push every other group's values off to the right.
-    const width = Math.max(...section.fields.map((f) => f.label.length));
-    for (const f of section.fields) {
-      lines.push(renderField(f, width, theme, showSecrets, indent));
-    }
-  }
-
-  // Indented per line rather than as one string: a footer of several lines used to align only its
-  // first, and the deploy summary now carries what an operator still has to do.
-  if (opts.footer && opts.footer.length > 0) {
-    lines.push("");
-    for (const line of opts.footer) lines.push(`${INDENT}${theme.c.dim(line)}`);
-  }
-
-  lines.push("");
-  return lines.join("\n");
+  const lines = fieldLines(opts.sections, opts.theme, opts.showSecrets ?? false);
+  if (opts.footer?.length) lines.push("", ...opts.footer.map((l) => opts.theme.c.dim(l)));
+  return rail(lines, opts.theme);
 }
 
 /**
  * "This finished, and here is what it did." One shape, for every command that has one.
  *
- * A wrapper over `renderPanel` rather than a second renderer, because the only thing a success
- * differs by is its heading: the accent glyph and the headline. Commands used to end however their
- * author felt on the day — `init` on a dim `Next: warehousd start` that read like narration,
- * `apply` on the bare word `applied`, `stop` on a progress line that had already scrolled — so
- * nothing looked like completion and `init` in particular left people unsure it had run.
+ * The headline sits in the glyph column behind a `◇`, and everything under it hangs from the rail.
+ * Commands used to end however their author felt on the day — `init` on a dim `Next: warehousd
+ * start` that read like narration, `apply` on the bare word `applied`, `stop` on a progress line
+ * that had already scrolled — so nothing looked like completion and `init` in particular left
+ * people unsure it had run.
  *
  * `sections` is optional: a command with nothing to report is a headline on its own, which is
  * still a great deal clearer than a lowercase verb.
@@ -84,19 +86,51 @@ export function renderSuccess(opts: {
   footer?: string[] | undefined;
 }): string {
   const { theme } = opts;
-  return renderPanel({
-    title: `${theme.c.accent(theme.s.ok)} ${opts.headline}`,
-    sections: opts.sections ?? [],
-    theme,
-    ...(opts.subtitle === undefined ? {} : { subtitle: opts.subtitle }),
-    ...(opts.showSecrets === undefined ? {} : { showSecrets: opts.showSecrets }),
-    ...(opts.footer === undefined ? {} : { footer: opts.footer }),
-  });
+  const heading = opts.subtitle
+    ? `${theme.c.bold(opts.headline)}   ${theme.c.dim(opts.subtitle)}`
+    : theme.c.bold(opts.headline);
+  const body = fieldLines(opts.sections ?? [], theme, opts.showSecrets ?? false);
+  // A footer of several lines used to indent only its first, and the deploy summary now carries
+  // what an operator still has to do.
+  if (opts.footer?.length) body.push("", ...opts.footer.map((l) => theme.c.dim(l)));
+  return [railDone([heading], theme), ...(body.length ? [rail(["", ...body], theme)] : [])].join(
+    "\n",
+  );
 }
 
-// The `start` summary. `databaseUrl` is passed through the URL masker rather than flagged as a
-// secret outright: the host, port and database name are the useful part and only the password
-// needs hiding.
+/** The docs link, which every big moment ends on. One URL, named in one place. */
+export const DOCS_URL = "https://github.com/tregismoreira/warehousd";
+
+/** The `└` line `start`, `restart` and `deploy` close on. */
+export function docsOutro(theme: Theme): string {
+  return `${labelled(theme.i.docs, "Docs and guides:")} ${theme.c.cyan(DOCS_URL)}`;
+}
+
+const START_NEXT_STEPS: NextStep[] = [
+  { command: "warehousd open", says: "open the admin UI in a browser" },
+  {
+    command: "warehousd import run <collection> <file>",
+    says: "load a spreadsheet into a collection",
+  },
+  { command: "warehousd seed", says: "fill it with synthetic data instead" },
+];
+
+const EVERYDAY_COMMANDS: NextStep[] = [
+  { command: "warehousd status", says: "is it up, and on which URLs" },
+  { command: "warehousd logs -f", says: "follow the server logs" },
+  { command: "warehousd stop", says: "stop the containers, keeping your data" },
+];
+
+/**
+ * The `start` summary — the moment the whole command exists for.
+ *
+ * It used to end on the panel and nothing else, so somebody watching their first stack come up was
+ * given six URLs and no second command. What follows the panel is the onboarding this design is
+ * for: what to do next, what to run every day, and how the credentials get back.
+ *
+ * `databaseUrl` goes through the URL masker rather than being flagged a secret outright: the host,
+ * port and database name are the useful part and only the password needs hiding.
+ */
 export function renderStartSummary(opts: {
   outputs: {
     mcpUrl: string;
@@ -113,34 +147,28 @@ export function renderStartSummary(opts: {
 }): string {
   const { outputs, theme } = opts;
   const showSecrets = opts.showSecrets ?? false;
+  const i = theme.i;
 
   const sections: Section[] = [
     {
       fields: [
-        { label: "MCP", value: outputs.mcpUrl },
-        { label: "API", value: outputs.apiUrl },
-        { label: "Admin", value: outputs.adminUrl },
+        { label: labelled(i.admin, "Admin UI"), value: outputs.adminUrl },
+        { label: labelled(i.api, "API"), value: outputs.apiUrl },
+        { label: labelled(i.mcp, "MCP"), value: outputs.mcpUrl },
         {
-          label: "Database",
+          label: labelled(i.database, "Database"),
           value: showSecrets
             ? outputs.databaseUrl
             : maskUrlPassword(outputs.databaseUrl, theme.unicode),
         },
-        { label: "Env", value: outputs.env },
-      ],
-    },
-    {
-      title: "Dev client",
-      fields: [
-        { label: "ID", value: outputs.devClient.clientId },
-        { label: "Secret", value: outputs.devClient.clientSecret, secret: true },
+        { label: labelled(i.env, "Env"), value: outputs.env },
       ],
     },
   ];
 
   if (opts.admin) {
     sections.push({
-      title: "Admin login",
+      title: labelled(i.login, "Admin login"),
       fields: [
         { label: "Email", value: opts.admin.email },
         { label: "Password", value: opts.admin.password, secret: true },
@@ -148,19 +176,37 @@ export function renderStartSummary(opts: {
     });
   }
 
+  sections.push({
+    title: labelled(i.secrets, "Dev client"),
+    fields: [
+      { label: "ID", value: outputs.devClient.clientId },
+      { label: "Secret", value: outputs.devClient.clientSecret, secret: true },
+    ],
+  });
+
   // The release-candidate line used to live here too. It is said once now, on stderr, at the top of
   // every invocation (src/ui/rc-notice.ts) — repeating it in the panel a few lines later only
   // taught people to skip both.
-  const footer = showSecrets ? [] : ["Secrets are masked — reveal with `warehousd secrets --show`"];
+  const footer = [
+    "",
+    ...nextSteps("Next steps", START_NEXT_STEPS, theme),
+    "",
+    ...nextSteps("Everyday commands", EVERYDAY_COMMANDS, theme),
+    ...(showSecrets
+      ? []
+      : ["", theme.c.dim("Secrets are masked — `warehousd secrets --show` reveals them.")]),
+  ];
 
-  return renderSuccess({
-    headline: "warehousd is running",
-    subtitle: opts.elapsed,
-    sections,
-    theme,
-    showSecrets,
-    footer,
-  });
+  return [
+    renderSuccess({
+      headline: labelled(i.running, "Your data layer is running"),
+      sections,
+      theme,
+      showSecrets,
+      ...(opts.elapsed === undefined ? {} : { subtitle: opts.elapsed }),
+    }),
+    rail(footer, theme),
+  ].join("\n");
 }
 
 /**
@@ -186,26 +232,27 @@ export function renderDeploySummary(opts: {
 }): string {
   const { outputs, theme } = opts;
   const showSecrets = opts.showSecrets ?? false;
+  const i = theme.i;
 
   const fields: Field[] = [
-    { label: "MCP", value: outputs.mcpUrl },
-    { label: "API", value: outputs.apiUrl },
-    { label: "Admin", value: outputs.adminUrl },
+    { label: labelled(i.admin, "Admin UI"), value: outputs.adminUrl },
+    { label: labelled(i.api, "API"), value: outputs.apiUrl },
+    { label: labelled(i.mcp, "MCP"), value: outputs.mcpUrl },
     {
-      label: "Database",
+      label: labelled(i.database, "Database"),
       value: outputs.databaseUrl
         ? showSecrets
           ? outputs.databaseUrl
           : maskUrlPassword(outputs.databaseUrl, theme.unicode)
         : opts.target.databaseHint,
     },
-    { label: "Env", value: outputs.env },
+    { label: labelled(i.env, "Env"), value: outputs.env },
   ];
 
   const sections: Section[] = [{ fields }];
   if (opts.admin) {
     sections.push({
-      title: "Admin login",
+      title: labelled(i.login, "Admin login"),
       fields: [
         { label: "Email", value: opts.admin.email },
         { label: "Password", value: opts.admin.password, secret: true },
@@ -215,17 +262,18 @@ export function renderDeploySummary(opts: {
 
   // The notes come first: they are what is still to be done, and the masking line is a standing
   // remark about the panel above it.
+  const notes = opts.target.notes ?? [];
   const footer = [
-    ...(opts.target.notes ?? []),
-    ...(showSecrets ? [] : ["Secrets are masked — reveal with `warehousd secrets --show`"]),
+    ...(notes.length ? ["Still to do", ...notes] : []),
+    ...(showSecrets ? [] : ["Secrets are masked — `warehousd secrets --show` reveals them."]),
   ];
 
   return renderSuccess({
-    headline: `warehousd deployed to ${opts.target.label}`,
+    headline: labelled(i.running, `warehousd is live on ${opts.target.label}`),
     sections,
     theme,
     showSecrets,
-    footer,
+    ...(footer.length ? { footer } : {}),
   });
 }
 
@@ -235,12 +283,14 @@ export type Check = { id: string; ok: boolean; detail: string };
 
 export function renderChecks(checks: Check[], theme: Theme): string {
   if (checks.length === 0) return "";
-  const width = Math.max(...checks.map((c) => c.id.length));
-  const lines = checks.map((c) => {
-    const mark = c.ok ? theme.c.green(theme.s.ok) : theme.c.red(theme.s.fail);
-    return `${INDENT}${mark}  ${pad(c.id, width)}  ${theme.c.dim(c.detail)}`;
-  });
-  return lines.join("\n");
+  const width = Math.max(...checks.map((c) => displayWidth(c.id)));
+  return checks
+    .map((c) => {
+      const mark = c.ok ? theme.c.accent(theme.s.done) : theme.c.red(theme.s.fail);
+      const body = `${pad(c.id, width)}  ${theme.c.dim(c.detail)}`;
+      return theme.unicode ? `${mark}  ${body}` : `  ${mark} ${body}`;
+    })
+    .join("\n");
 }
 
 export function renderStatus(opts: {
@@ -259,8 +309,10 @@ export function renderStatus(opts: {
   showSecrets?: boolean | undefined;
 }): string {
   const { theme } = opts;
-  const mark = opts.healthy ? theme.c.green(theme.s.ok) : theme.c.red(theme.s.fail);
-  const state = opts.healthy ? "running" : "not responding";
+  const i = theme.i;
+  const headline = theme.c.bold(
+    opts.healthy ? `${opts.project} is running` : `${opts.project} is not responding`,
+  );
 
   const sections: Section[] = [
     {
@@ -272,24 +324,33 @@ export function renderStatus(opts: {
   if (opts.outputs) {
     sections.push({
       fields: [
-        { label: "MCP", value: opts.outputs.mcpUrl },
-        { label: "API", value: opts.outputs.apiUrl },
-        { label: "Admin", value: opts.outputs.adminUrl },
+        { label: labelled(i.admin, "Admin UI"), value: opts.outputs.adminUrl },
+        { label: labelled(i.api, "API"), value: opts.outputs.apiUrl },
+        { label: labelled(i.mcp, "MCP"), value: opts.outputs.mcpUrl },
         {
-          label: "Database",
+          label: labelled(i.database, "Database"),
           value: opts.showSecrets
             ? opts.outputs.databaseUrl
             : maskUrlPassword(opts.outputs.databaseUrl, theme.unicode),
         },
-        { label: "Env", value: opts.outputs.env },
+        { label: labelled(i.env, "Env"), value: opts.outputs.env },
       ],
     });
   }
 
-  return renderPanel({
-    title: `${mark} ${opts.project} — ${state}`,
-    sections,
+  const body = fieldLines(sections, theme, opts.showSecrets ?? false);
+  const head = opts.healthy ? railDone([headline], theme) : railFail([headline], theme);
+  return [head, ...(body.length ? [rail(["", ...body], theme)] : [])].join("\n");
+}
+
+/** The `Next steps` block `init` ends on, before its own outro. */
+export function initNextSteps(theme: Theme): string[] {
+  return nextSteps(
+    "Next steps",
+    [
+      { command: "warehousd start", says: "start the server and database on this machine" },
+      { command: "warehousd open", says: "open the admin UI once it is running" },
+    ],
     theme,
-    showSecrets: opts.showSecrets ?? false,
-  });
+  );
 }

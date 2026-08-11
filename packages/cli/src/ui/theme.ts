@@ -40,6 +40,36 @@ export type Symbols = {
   warn: string;
   pending: string;
   ellipsis: string;
+  /** The frame's opening corner — `┌  warehousd start`. */
+  top: string;
+  /** The rail every line inside a frame hangs from. */
+  bar: string;
+  /** The frame's closing corner, which always carries the what-next sentence. */
+  bottom: string;
+  /** A finished step or a fact that needed nothing done about it. */
+  done: string;
+};
+
+/**
+ * One glyph per concept, reused everywhere that concept appears.
+ *
+ * Content-level, unlike `Symbols`: these sit beside a label rather than in the glyph column, and
+ * they are **dropped entirely** rather than faked in ASCII. A terminal that cannot render an
+ * emoji is one where `[DB]` would be noise, not help — the label already says "Database".
+ */
+export type Icons = {
+  running: string;
+  ready: string;
+  admin: string;
+  api: string;
+  mcp: string;
+  env: string;
+  database: string;
+  secrets: string;
+  login: string;
+  data: string;
+  docs: string;
+  doctor: string;
 };
 
 export type Theme = {
@@ -48,6 +78,7 @@ export type Theme = {
   depth: ColourDepth;
   c: Palette;
   s: Symbols;
+  i: Icons;
 };
 
 export type ThemeInput = {
@@ -119,18 +150,62 @@ function colourPalette(depth: ColourDepth): Palette {
 
 const UNICODE_SYMBOLS: Symbols = {
   ok: "✓",
-  fail: "✗",
-  warn: "!",
+  fail: "■",
+  warn: "▲",
   pending: "·",
   ellipsis: "…",
+  top: "┌",
+  bar: "│",
+  bottom: "└",
+  done: "◇",
 };
 
+// The rail degrades to the pipe and the asterisk rather than disappearing: a piped run draws no
+// frame at all, but a `TERM=dumb` terminal still gets something that lines up.
 const ASCII_SYMBOLS: Symbols = {
   ok: "ok",
   fail: "x",
   warn: "!",
   pending: "-",
   ellipsis: "...",
+  top: "*",
+  bar: "|",
+  bottom: "*",
+  done: "o",
+};
+
+// `🖥` and `🗄` default to *text* presentation in Unicode, so a terminal is free to draw either as
+// a narrow monochrome glyph while every other icon here is two cells wide — and one narrow icon in
+// a column of wide ones takes the values out of line. U+FE0F asks for the emoji presentation, and
+// `displayWidth` in ui/frame.ts counts it as nothing.
+const UNICODE_ICONS: Icons = {
+  running: "🚀",
+  ready: "✨",
+  admin: "🖥️",
+  api: "⚡",
+  mcp: "🤖",
+  env: "🌱",
+  database: "🗄️",
+  secrets: "🔑",
+  login: "👤",
+  data: "📦",
+  docs: "📚",
+  doctor: "🩺",
+};
+
+const NO_ICONS: Icons = {
+  running: "",
+  ready: "",
+  admin: "",
+  api: "",
+  mcp: "",
+  env: "",
+  database: "",
+  secrets: "",
+  login: "",
+  data: "",
+  docs: "",
+  doctor: "",
 };
 
 // https://no-color.org — presence is the signal, whatever the value. FORCE_COLOR is the escape
@@ -158,6 +233,7 @@ export function resolveTheme(input: ThemeInput): Theme {
     depth,
     c: colour ? colourPalette(depth) : PLAIN,
     s: unicode ? UNICODE_SYMBOLS : ASCII_SYMBOLS,
+    i: unicode ? UNICODE_ICONS : NO_ICONS,
   };
 }
 
@@ -186,4 +262,5 @@ export const plainTheme: Theme = {
   depth: 1,
   c: PLAIN,
   s: ASCII_SYMBOLS,
+  i: NO_ICONS,
 };

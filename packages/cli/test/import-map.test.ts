@@ -8,6 +8,8 @@ import {
   runImportValidate,
   formatMapResult,
   formatValidateResult,
+  mapHeadline,
+  mapNotes,
   defaultCollectionName,
   payloadFor,
 } from "../src/import";
@@ -104,11 +106,25 @@ describe("import map proposes a collection", () => {
     }
   });
 
-  it("prints what it closed, and says it is a starting point", () => {
-    const out = formatMapResult(runImportMap(dir, join(dir, "people.csv")));
+  /**
+   * The proposal and the commentary about it go to different places now.
+   *
+   * `formatMapResult` is the product and lands on stdout, because people run
+   * `warehousd import map people.csv >> warehousd.yml`; `mapNotes` is what the run has to *say*
+   * about the proposal and hangs from the frame on stderr. They used to be one string, so that
+   * redirect appended a page of English to a YAML file.
+   */
+  it("proposes YAML alone, and says what it closed separately", () => {
+    const r = runImportMap(dir, join(dir, "people.csv"));
+    const out = formatMapResult(r);
     expect(out).toContain("STARTING POINT");
-    expect(out).toContain("Closed by default");
     expect(out).toContain("base_salary");
+    expect(out).not.toContain("Closed by default");
+
+    const notes = mapNotes(r).join("\n");
+    expect(notes).toContain("Closed by default");
+    expect(notes).toContain("base_salary");
+    expect(mapHeadline(r)).toContain("proposing a collections block");
   });
 });
 
@@ -127,9 +143,10 @@ describe("import map against a collection that already exists", () => {
     // A header with no field, and a required field with no header — different failures, both named.
     expect(r.mapping.unmatchedHeaders).toEqual(["Client"]);
     expect(r.mapping.missingRequired).toEqual(["id"]);
-    const out = formatMapResult(r);
-    expect(out).toContain("Headers with no field");
-    expect(out).toContain("Required fields with no header");
+    const notes = mapNotes(r).join("\n");
+    expect(notes).toContain("Headers with no field");
+    expect(notes).toContain("Required fields with no header");
+    expect(formatMapResult(r)).not.toContain("Headers with no field");
   });
 });
 

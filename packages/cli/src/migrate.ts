@@ -21,6 +21,8 @@ import {
   type ProjectMigrationStatus,
 } from "@warehousd/broker";
 import { readDeployOutputs } from "./state";
+import { railDone, railLine, railWarn } from "./ui/frame";
+import { plainTheme, type Theme } from "./ui/theme";
 
 export type PlanSource = "schema" | "config-snapshot" | "none";
 export type MigratePlan = { source: PlanSource; changes: SchemaChange[] };
@@ -83,26 +85,63 @@ export async function migrationStatus(
 
 // Rendering lives here rather than in program.ts so it can be asserted on directly — every action
 // callback in program.ts is argv-driven and only reachable from the e2e suite.
-export function renderPlan(plan: MigratePlan): string {
-  if (plan.source === "none")
-    return "no database and no previous deploy on this machine — nothing to compare against";
+//
+// Two blocks, and which glyph each gets is the whole message: a `▲` on the changes that would
+// destroy data and a `◇` on the ones that will not. It used to be one flat list under two
+// headings, so the difference between "this drops a column" and "this adds an index" was a word.
+export function renderPlan(plan: MigratePlan, theme: Theme = plainTheme): string {
+  if (plan.source === "none") {
+    return railWarn(
+      ["No database and no previous deploy on this machine — nothing to compare against."],
+      theme,
+    );
+  }
 
   const blocking = plan.changes.filter((c) => c.destructive);
   const additive = plan.changes.filter((c) => !c.destructive);
-  if (blocking.length === 0 && additive.length === 0) return "no schema changes";
+  if (blocking.length === 0 && additive.length === 0) {
+    return railDone(["No schema changes — config matches the database."], theme);
+  }
 
-  const lines: string[] = [];
+  const blocks: string[] = [];
   if (blocking.length > 0) {
-    lines.push(`${blocking.length} change(s) need a migration:`);
-    for (const c of blocking)
-      lines.push(`  ${c.reviewRequired ? "needs review" : "ready      "}  ${c.detail}`);
-    lines.push("");
-    lines.push("Run `warehousd migrate generate` to write them as SQL you can review.");
+    blocks.push(
+      railWarn(
+        [
+          theme.c.bold(`${blocking.length} change(s) need a migration`),
+          ...blocking.map(
+            (c) =>
+              `${theme.c.dim((c.reviewRequired ? "needs review" : "ready").padEnd(12))}   ${c.detail}`,
+          ),
+        ],
+        theme,
+      ),
+    );
   }
   if (additive.length > 0) {
-    if (blocking.length > 0) lines.push("");
-    lines.push(`${additive.length} change(s) apply on their own:`);
-    for (const c of additive) lines.push(`  ${c.detail}`);
+    blocks.push(
+      railDone(
+        [
+          theme.c.bold(`${additive.length} change(s) apply on their own`),
+          ...additive.map((c) => c.detail),
+        ],
+        theme,
+      ),
+    );
   }
-  return lines.join("\n");
+  return blocks.join(`\n${railLine("", theme)}\n`);
+}
+
+/** What to do about the plan just printed — the `└` line, which is never a status repeat. */
+export function planOutro(plan: MigratePlan): string {
+  if (plan.source === "none") {
+    return "Run `warehousd start`, or deploy once, then re-run to see the plan.";
+  }
+  if (plan.changes.some((c) => c.destructive)) {
+    return "`warehousd migrate generate` writes them as SQL you can review.";
+  }
+  if (plan.changes.length > 0) {
+    return "`warehousd apply` applies them to the running stack.";
+  }
+  return "Edit warehousd.yml, then re-run to see the plan.";
 }

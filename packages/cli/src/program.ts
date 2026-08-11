@@ -8,6 +8,12 @@
 // That is the same reason docker.ts, start.ts, stop.ts and status.ts are excluded in
 // vitest.coverage.ts, and this file is excluded there on the same grounds.
 //
+// **Every human run is one frame.** `┌ warehousd <command>` at the top, the rail down the side,
+// and `└ <what to do next>` at the bottom — see ui/frame.ts. The frame and everything hanging from
+// it go to **stdout**, because they are the result; the reporter's step lines go to **stderr**,
+// because they are narration. That split is what keeps `warehousd start --json | jq` parseable and
+// `warehousd start 2>/dev/null` useful, and off a terminal there is no frame at all.
+//
 // tsup's entry is this file, emitted as dist/index.cjs so the bin path is unchanged.
 
 import { Command } from "commander";
@@ -22,7 +28,7 @@ import { dbHosts, hostFor, localHosts } from "./db/hosts";
 import { targets } from "./deploy/targets";
 import { ensureToolsFor } from "./init-tools";
 import { resolveDbUrl, tryResolveDbUrl, runApply, runSeed, runIndex, runEmbed } from "./index";
-import { buildPlan, renderPlan, writeMigration, migrationStatus } from "./migrate";
+import { buildPlan, renderPlan, planOutro, writeMigration, migrationStatus } from "./migrate";
 import { runInit, initDefaults, PROD_DB_IDS } from "./init";
 import {
   runImportMap,
@@ -30,6 +36,9 @@ import {
   runImportValidate,
   formatMapResult,
   formatValidateResult,
+  mapHeadline,
+  mapNotes,
+  validateHeadline,
 } from "./import";
 import { runStart } from "./start";
 import { runStop } from "./stop";
@@ -39,16 +48,35 @@ import { formatOutputs } from "./outputs";
 import { ensureState } from "./state";
 import { setVerbose } from "./verbose";
 import { runDoctor } from "./preflight";
-import { runLogs } from "./commands/logs";
+import { runLogs, resolveLogTarget } from "./commands/logs";
 import { runOpen, type Target } from "./commands/open";
 import { collectSecrets, secretsJson } from "./commands/secrets";
 import { resolveTheme, type Theme } from "./ui/theme";
-import { rcNotice } from "./ui/rc-notice";
-import { brandBanner } from "./ui/brand";
+import { rcNoticeBlock } from "./ui/rc-notice";
+import { initIntro } from "./ui/brand";
 import { createStdReporter } from "./ui/reporter";
-import { renderStatus, renderChecks, renderPanel, renderSuccess } from "./ui/render";
+import {
+  renderStatus,
+  renderChecks,
+  renderFields,
+  renderSuccess,
+  initNextSteps,
+  docsOutro,
+  DOCS_URL,
+} from "./ui/render";
+import {
+  frameOpen,
+  labelled,
+  openFrame,
+  rail,
+  railDone,
+  railFail,
+  railLine,
+  railWarn,
+} from "./ui/frame";
+import { helpScreen } from "./ui/help";
 import { isInteractive, promptInit, NonInteractiveError, type InitAnswers } from "./ui/prompt";
-import { explain, formatExplained } from "./ui/errors";
+import { explain, formatExplained, errorOutro } from "./ui/errors";
 
 // WAREHOUSD_CLI_VERSION is defined by tsup at build time; fallback for source runs.
 declare const WAREHOUSD_CLI_VERSION: string | undefined;
@@ -56,6 +84,23 @@ declare const WAREHOUSD_CLI_VERSION: string | undefined;
 // Hoisted because two things read it now: `--version`, and the release-candidate notice below,
 // which prints only while this is a prerelease. The fallback is one too, so a source run says it.
 const version = typeof WAREHOUSD_CLI_VERSION !== "undefined" ? WAREHOUSD_CLI_VERSION : "0.0.0-dev";
+
+/**
+ * Which command is running, for the error handler's `└` line.
+ *
+ * Set by `ui()`, which every action calls first. A failure before any action reaches it — an
+ * unknown flag, a refusal to prompt — leaves it null and the outro says "try again" instead of
+ * naming a command it cannot know.
+ */
+let currentCommand: string | null = null;
+
+/**
+ * Commander's stock help formatter, kept so the per-command screens can still use it.
+ *
+ * Taken from a throwaway command rather than imported: `Help` is not on commander's public export
+ * surface, and `createHelp()` on a fresh Command is the documented way to reach the default.
+ */
+const DEFAULT_HELP = new Command().createHelp();
 
 const program = new Command();
 program
@@ -71,22 +116,26 @@ program
   .option("-q, --quiet", "only errors and results", false)
   .option("--no-color", "disable colour (also honours NO_COLOR)")
   .option("--verbose", "echo every command warehousd shells out to", false)
-  .addHelpText(
-    "after",
-    `
-Examples:
-  $ warehousd init                 set up a project here, with a few questions
-  $ warehousd start                bring the stack up and print its URLs
-  $ warehousd status --json | jq   machine-readable health
-  $ warehousd logs --follow        tail the server container
-  $ warehousd doctor               check Docker, image, ports and config
-  $ warehousd secrets --show       reveal the masked credentials
+  // Commander's own screen is every command in alphabetical order followed by every global flag,
+  // which answers "what exists" rather than "what do I type first". ui/help.ts answers the second.
+  //
+  // Only for the root. `configureHelp` is inherited by every subcommand, so returning the grouped
+  // screen unconditionally made `warehousd start --help` print the list of commands instead of
+  // start's own flags — and the screen's own last line promises the opposite.
+  .configureHelp({
+    formatHelp: (cmd, helper) =>
+      cmd === program ? `${helpScreen(helpTheme())}\n` : DEFAULT_HELP.formatHelp(cmd, helper),
+  });
 
-  Answering init from flags instead of the wizard:
-  $ warehousd init --no-input --dev-db docker --target fly \\
-      --prod-db neon --prod-db-region aws-sa-east-1
-`,
-  );
+/** The theme the help screen is drawn with. Resolved from stdout, which is where it lands. */
+function helpTheme(): Theme {
+  return resolveTheme({
+    isTTY: Boolean(process.stdout.isTTY),
+    env: process.env,
+    noColor: process.argv.includes("--no-color"),
+    json: process.argv.includes("--json"),
+  });
+}
 
 // Global flags live on the root command, so every action reads them from one place.
 type Globals = { json: boolean; quiet: boolean; color: boolean; verbose: boolean };
@@ -101,7 +150,15 @@ function globals(): Globals {
   };
 }
 
-function ui() {
+/**
+ * Everything an action needs, and the frame it draws in.
+ *
+ * `title` is the frame's opening line and defaults to the command's own name. `init` passes an
+ * empty one: it opens on a welcome instead (ui/brand.ts), because it is the one command whose
+ * reader may never have seen the product.
+ */
+function ui(command: string, title: string | ((t: Theme) => string) = `warehousd ${command}`) {
+  currentCommand = command;
   const g = globals();
   setVerbose(g.verbose);
   const theme = resolveTheme({
@@ -116,53 +173,26 @@ function ui() {
     isTTY: Boolean(process.stderr.isTTY) && !g.json,
     quiet: g.quiet || g.json,
   });
-  return { ...g, theme, reporter };
+  return {
+    ...g,
+    theme,
+    reporter,
+    frame: openFrame(typeof title === "function" ? title(theme) : title, theme, {
+      json: g.json,
+      quiet: g.quiet,
+    }),
+  };
 }
 
 /**
- * The greeting, on the three commands where somebody is bringing something up.
+ * The machine-readable form, when it was asked for. Always stdout — this is the product.
  *
- * Not on all of them: `logs`, `status` and `secrets` are things you run in a loop, and a banner
- * above each one would be six rows of decoration between you and the answer. `init`, `start` and
- * `restart` are the commands with a beginning.
- *
- * stderr, like all narration — `warehousd start 2>/dev/null` must still print the summary alone.
- * `brandBanner` returns null off a TTY and under --quiet/--json, so this is a no-op in a pipe.
- *
- * It lands *below* the release-candidate notice, which is written before commander parses argv
- * (see the bottom of this file) and so cannot know which command is about to run. Putting the
- * greeting first would mean sniffing argv before parsing, which is worse than the ordering. The
- * notice retires itself at 1.0 and the greeting becomes the first thing printed then.
+ * `--quiet` never suppresses it: a caller that asked for a payload and got silence would have no
+ * way to tell success from failure except the exit code, which is the thing `--json` exists to
+ * improve on.
  */
-function banner(g: { theme: Theme; quiet: boolean; json: boolean }): void {
-  const art = brandBanner({
-    theme: g.theme,
-    isTTY: Boolean(process.stderr.isTTY),
-    quiet: g.quiet,
-    json: g.json,
-    columns: process.stderr.columns,
-  });
-  // A blank line above and below. `brandBanner` deliberately carries neither, because whether
-  // there is a release-candidate notice sitting above it is not something it can know.
-  if (art) process.stderr.write(`\n${art}\n\n`);
-}
-
-/**
- * The result of a command, in whichever of the two forms was asked for. Always stdout — this is
- * the product, not the narration.
- *
- * `--quiet` drops the human confirmation but never the JSON: a caller that asked for a payload and
- * got silence would have no way to tell success from failure except the exit code, which is the
- * thing `--json` exists to improve on.
- */
-function emit(value: unknown, human: string): void {
-  const g = globals();
-  if (g.json) {
-    process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-    return;
-  }
-  if (g.quiet) return;
-  process.stdout.write(`${human}\n`);
+function emitJson(value: unknown): void {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 program
@@ -196,8 +226,18 @@ program
   .option("--manual", "skip guided setup and paste connection details yourself")
   .option("--install-missing", "install any provider CLI that is missing, without asking")
   .action(async (o) => {
-    const { reporter, theme, json, quiet } = ui();
-    banner({ theme, quiet, json });
+    // `init` opens on a welcome rather than on its own command name: it is the one command whose
+    // reader may never have seen the product, and the frame is where that gets said.
+    const { reporter, theme, json, quiet, frame } = ui("init", "");
+    const intro = initIntro({
+      theme,
+      isTTY: Boolean(process.stdout.isTTY),
+      quiet,
+      json,
+      columns: process.stdout.columns,
+    });
+    if (intro) process.stdout.write(`${intro}\n`);
+
     const { defaults, fromFlags } = initDefaults({
       project: basename(resolve(o.dir)) || "my-app",
       target: o.target,
@@ -214,7 +254,11 @@ program
     // --no-input, `init` writes the template — with the deploy block filled in when --target
     // named one, so a non-interactive run can still specify every field.
     const interactive = o.input !== false && !json && isInteractive();
-    const answers = interactive ? await promptInit(defaults) : fromFlags ? defaults : null;
+    const answers = interactive
+      ? await promptInit(defaults, { theme })
+      : fromFlags
+        ? defaults
+        : null;
     if (interactive && !answers) {
       reporter.fail("Cancelled.");
       process.exit(1);
@@ -236,34 +280,44 @@ program
       ...(o.from ? { from: o.from } : {}),
     });
     if (json) {
-      emit(r, "");
+      emitJson(r);
       return;
     }
-    // The files still narrate on stderr as they happen; the panel below is the summary, and it is
-    // the product, so it goes to stdout.
-    for (const f of r.created) reporter.step("created", f).done();
-    for (const f of r.skipped) reporter.step("skipped", `${f} (already exists)`).done();
+    // The files still narrate on stderr as they happen; everything below is the summary, and it is
+    // the product, so it goes to stdout. The spacer is what separates them from whatever the
+    // wizard last said — a clack answer, or the intro when there was nobody to ask.
+    process.stderr.write(`${railLine("", theme)}\n`);
+    for (const f of r.created) reporter.step("Writing", f, `created ${f}`).done();
+    for (const f of r.skipped) reporter.step("Keeping", f, `kept ${f}`).done("already exists");
     for (const u of r.unreadable ?? []) reporter.warn(`${u.file}: ${u.reason}`);
 
-    const closed = (r.inferred ?? []).flatMap((c) => c.fields.filter((f) => f.closedBecause));
-    reporter.out(
+    frame.block(
       renderSuccess({
-        headline: "Project ready",
+        headline: labelled(theme.i.ready, "Project ready"),
         theme,
         sections: [{ fields: initSummary(answers, r) }],
-        footer: [
-          // Deny-by-default is a guess about a column NAME, never a reading of the data, and
-          // saying so is the difference between a safe scaffold and one somebody trusts.
-          ...(r.inferred?.length
-            ? [
-                `${closed.length} field(s) closed by default — every posture is a guess about a name, not a reading of the data.`,
-                "Read warehousd.yml before `warehousd apply`.",
-              ]
-            : []),
-          "Next: warehousd start",
-        ],
       }),
     );
+
+    // Deny-by-default is a guess about a column NAME, never a reading of the data, and saying so is
+    // the difference between a safe scaffold and one somebody trusts.
+    const closed = (r.inferred ?? []).flatMap((c) => c.fields.filter((f) => f.closedBecause));
+    if (closed.length > 0) {
+      frame.block(
+        railWarn(
+          [
+            `${closed.length} field(s) are closed by default. Each posture is a guess from a`,
+            "column name, not a reading of your data — review warehousd.yml before you",
+            "apply it.",
+          ],
+          theme,
+        ),
+      );
+    }
+
+    frame.block(rail(initNextSteps(theme), theme));
+    frame.block(rail([`${labelled(theme.i.docs, "Docs")}  ${theme.c.cyan(DOCS_URL)}`], theme));
+    frame.close("Run `warehousd start` to bring your project up.");
   });
 
 /** What `init` decided, for the summary panel. Omits a row it has no answer for. */
@@ -313,25 +367,28 @@ program
   .option("-s, --seed <n>", "synthetic seed", "42")
   .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
-    const { reporter, theme, json, quiet } = ui();
-    banner({ theme, quiet, json });
+    const { reporter, theme, json, frame } = ui("start");
     const began = Date.now();
     const outputs = await runStart(o.dir, { seed: Number(o.seed), reporter });
     const st = ensureState(o.dir);
 
     if (json) {
       // The machine contract keeps full values: a caller that asked for JSON asked for the secret.
-      process.stdout.write(`${JSON.stringify(outputs, null, 2)}\n`);
+      emitJson(outputs);
       return;
     }
-    const elapsed = `ready in ${((Date.now() - began) / 1000).toFixed(1)}s`;
-    reporter.out(
+    frame.block(
       formatOutputs(
         outputs,
         { adminEmail: "admin@warehousd.local", adminPassword: st.adminPassword },
-        { theme, showSecrets: o.showSecrets, elapsed },
+        {
+          theme,
+          showSecrets: o.showSecrets,
+          elapsed: `ready in ${((Date.now() - began) / 1000).toFixed(1)}s`,
+        },
       ),
     );
+    frame.close(docsOutro(theme));
   });
 program
   .command("apply")
@@ -339,25 +396,32 @@ program
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .action(async (o) => {
-    const { reporter, theme } = ui();
+    const { reporter, theme, json, frame } = ui("apply");
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runApply(o.dir, db, { reporter });
+    if (json) {
+      emitJson({ applied: true, ...r });
+      return;
+    }
+    for (const m of r.migrated) reporter.step("Migration", m, `Migration ${m} applied`).done();
+    if (r.rebuilt.length) reporter.step("Rebuilding", r.rebuilt.join(", "), "Rebuilt").done();
     // A rebuilt synth table is empty until the generator runs again. Saying so is the difference
     // between "apply worked" and an operator wondering where their dev data went.
-    const fields = [
-      ...(r.migrated.length ? [{ label: "Migrations", value: r.migrated.join(", ") }] : []),
-      ...(r.rebuilt.length ? [{ label: "Rebuilt", value: r.rebuilt.join(", ") }] : []),
-    ];
-    emit(
-      { applied: true, ...r },
-      renderSuccess({
-        headline: "Configuration applied",
-        theme,
-        sections: fields.length ? [{ fields }] : [],
-        ...(r.rebuilt.length
-          ? { footer: ["A rebuilt collection is empty until you run `warehousd seed`"] }
-          : {}),
-      }),
+    if (r.rebuilt.length) {
+      frame.block(
+        railWarn(
+          [
+            "A rebuilt collection is empty until you run `warehousd seed`",
+            "or import data into it.",
+          ],
+          theme,
+        ),
+      );
+    }
+    frame.close(
+      r.migrated.length + r.rebuilt.length === 0
+        ? "Nothing needed changing — edit warehousd.yml, then re-run."
+        : "Applied to the running stack — no restart needed.",
     );
   });
 const migrate = program
@@ -369,12 +433,17 @@ migrate
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .action(async (o) => {
-    ui();
+    const { theme, json, frame } = ui("migrate plan");
     // No `resolveDbUrl` throw here: a plan from the last deploy snapshot is still worth printing
     // when there is no database to reach, which is the normal case before a deploy.
     const db = tryResolveDbUrl(o.dir, o.db);
     const plan = await buildPlan(o.dir, db);
-    emit(plan, renderPlan(plan));
+    if (json) {
+      emitJson(plan);
+      return;
+    }
+    frame.block(renderPlan(plan, theme));
+    frame.close(planOutro(plan));
   });
 migrate
   .command("generate")
@@ -383,22 +452,41 @@ migrate
   .option("--db <url>", "database url")
   .option("-n, --name <slug>", "name for the migration file", "schema-change")
   .action(async (o) => {
-    ui();
+    const { theme, json, frame } = ui("migrate generate");
     const db = tryResolveDbUrl(o.dir, o.db);
     const plan = await buildPlan(o.dir, db);
     const blocking = plan.changes.filter((c) => c.destructive);
     if (blocking.length === 0) {
-      emit({ written: null, changes: [] }, "nothing to migrate");
+      if (json) {
+        emitJson({ written: null, changes: [] });
+        return;
+      }
+      frame.block(railDone(["Nothing to migrate — no change would destroy data."], theme));
+      frame.close("`warehousd apply` applies the rest without a migration.");
       return;
     }
     const path = writeMigration(o.dir, plan.changes, o.name);
     const review = blocking.filter((c) => c.reviewRequired).length;
-    emit(
-      { written: path, changes: blocking, reviewRequired: review },
-      review > 0
-        ? `wrote ${path} — ${review} statement(s) are commented out pending your review`
-        : `wrote ${path} — every statement is lossless and ready to run`,
-    );
+    if (json) {
+      emitJson({ written: path, changes: blocking, reviewRequired: review });
+      return;
+    }
+    frame.block(railDone([`Wrote ${theme.c.cyan(path)}`], theme));
+    if (review > 0) {
+      frame.block(
+        railWarn(
+          [
+            `${review} statement(s) are commented out pending your review — they would`,
+            "destroy live data if run as-is.",
+          ],
+          theme,
+        ),
+      );
+      frame.close("Review the file, then `warehousd apply` runs it.");
+      return;
+    }
+    frame.block(railDone(["Every statement is lossless and ready to run."], theme));
+    frame.close("`warehousd apply` runs it.");
   });
 migrate
   .command("status")
@@ -406,13 +494,32 @@ migrate
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--db <url>", "database url")
   .action(async (o) => {
-    ui();
+    const { theme, json, frame } = ui("migrate status");
     const rows = await migrationStatus(o.dir, resolveDbUrl(o.dir, o.db));
-    emit(
-      rows,
-      rows.length === 0
-        ? "no migrations in this project"
-        : rows.map((r) => `${r.state.padEnd(8)} ${r.version}`).join("\n"),
+    if (json) {
+      emitJson(rows);
+      return;
+    }
+    if (rows.length === 0) {
+      frame.block(railDone(["No migrations in this project."], theme));
+      frame.close("`warehousd migrate generate` writes the first one.");
+      return;
+    }
+    const width = Math.max(...rows.map((r) => r.version.length));
+    frame.block(
+      rows
+        .map((r) =>
+          r.state === "applied"
+            ? railDone([`${r.version.padEnd(width)}   ${theme.c.dim("applied")}`], theme)
+            : railWarn([`${r.version.padEnd(width)}   ${theme.c.dim(r.state)}`], theme),
+        )
+        .join("\n"),
+    );
+    const pending = rows.filter((r) => r.state !== "applied").length;
+    frame.close(
+      pending === 0
+        ? "Everything applied — nothing pending."
+        : `${pending} pending — \`warehousd apply\` runs ${pending === 1 ? "it" : "them"}.`,
     );
   });
 program
@@ -423,26 +530,14 @@ program
   .option("-s, --seed <n>", "seed", "42")
   .option("--no-reindex", "leave file collections as they are")
   .action(async (o) => {
-    const { reporter, theme } = ui();
+    const { reporter, json, frame } = ui("seed");
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runSeed(o.dir, db, Number(o.seed), { reindex: o.reindex, reporter });
-    emit(
-      { seeded: true, seed: r.seed, reindexed: r.reindexed },
-      renderSuccess({
-        headline: "Synthetic data regenerated",
-        theme,
-        sections: [
-          {
-            fields: [
-              { label: "Seed", value: String(r.seed) },
-              ...(r.reindexed.length
-                ? [{ label: "Re-indexed", value: r.reindexed.join(", ") }]
-                : []),
-            ],
-          },
-        ],
-      }),
-    );
+    if (json) {
+      emitJson({ seeded: true, seed: r.seed, reindexed: r.reindexed });
+      return;
+    }
+    frame.close("`warehousd open` shows the new data in the admin UI.");
   });
 program
   .command("index <collection>")
@@ -453,7 +548,7 @@ program
   .option("--source <dir>", "override source directory")
   .option("--no-embed", "skip embedding the new chunks (see `warehousd embed`)")
   .action(async (collection, o) => {
-    const { reporter } = ui();
+    const { reporter, json, frame } = ui(`index ${collection}`);
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runIndex(o.dir, db, collection, {
       env: o.env,
@@ -461,7 +556,15 @@ program
       embed: o.embed,
       reporter,
     });
-    emit(r, `indexed=${r.indexed} skipped=${r.skipped} deleted=${r.deleted}`);
+    if (json) {
+      emitJson(r);
+      return;
+    }
+    frame.close(
+      r.indexed === 0
+        ? "Nothing had changed — every file was already indexed."
+        : "`warehousd embed` fills the embeddings for what changed.",
+    );
   });
 program
   .command("embed [collection]")
@@ -470,10 +573,14 @@ program
   .option("--db <url>", "database url")
   .option("--env <env>", "dev|live", "dev")
   .action(async (collection, o) => {
-    const { reporter } = ui();
+    const { reporter, json, frame } = ui(collection ? `embed ${collection}` : "embed");
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runEmbed(o.dir, db, { collection, env: o.env, reporter });
-    emit(r, `embedded=${r.embedded} collections=${r.collections.join(",")}`);
+    if (json) {
+      emitJson(r);
+      return;
+    }
+    frame.close("Resumable — re-running continues where this stopped.");
   });
 // `import` mirrors `migrate plan|generate|status`: a noun with verbs under it, one project dir
 // option each. Import used to be reachable only from /admin/import, so it could not be scripted,
@@ -504,15 +611,33 @@ importCmd
   .option("--sheet <name>", "which sheet of an .xlsx to read")
   .option("--header-row <n>", "1-based row the headers are on", "1")
   .action((file, o) => {
-    ui();
+    // The proposal is the product and goes to stdout untouched — people pipe it into
+    // warehousd.yml — so this command's frame narrates around it on **stderr** instead.
+    const { theme, json, quiet } = ui(`import map ${file}`, "");
+    const frame = openFrame(`warehousd import map ${file}`, theme, {
+      json,
+      quiet,
+      stream: "err",
+    });
     const r = runImportMap(o.dir, file, {
       collection: o.collection,
       sheet: o.sheet,
       headerRow: Number(o.headerRow),
     });
-    // stdout, and stdout only: this output exists to be piped into an editor or a clipboard.
-    // Nothing is written — see runImportMap.
-    emit(r, formatMapResult(r));
+    if (json) {
+      emitJson(r);
+      return;
+    }
+    frame.block(railDone([mapHeadline(r)], theme));
+    const notes = mapNotes(r);
+    if (notes.length) frame.block(rail(notes, theme));
+    const yaml = formatMapResult(r);
+    frame.close(
+      yaml
+        ? "Paste the block below into warehousd.yml, then review each posture."
+        : "Nothing to paste — the collection already matches the file.",
+    );
+    if (yaml) process.stdout.write(`${yaml}\n`);
   });
 importCmd
   .command("validate <collection> <file>")
@@ -524,7 +649,7 @@ importCmd
   .option("--sheet <name>", "which sheet of an .xlsx to read")
   .option("--header-row <n>", "1-based row the headers are on", "1")
   .action(async (collection, file, o) => {
-    const { reporter } = ui();
+    const { reporter, theme, json, frame } = ui(`import validate ${collection} ${file}`);
     // The static layer needs no database at all, which is the point of it: it runs in CI, on a
     // laptop, against a file somebody just emailed.
     const live = o.live || o.db ? resolveDbUrl(o.dir, o.db) : undefined;
@@ -535,7 +660,21 @@ importCmd
       headerRow: Number(o.headerRow),
       reporter,
     });
-    emit(r, formatValidateResult(r));
+    if (json) {
+      emitJson(r);
+      process.exit(r.ok ? 0 : 1);
+    }
+    const body = formatValidateResult(r).split("\n");
+    frame.block(
+      r.ok
+        ? railDone([validateHeadline(r), ...body.map((l) => theme.c.dim(l))], theme)
+        : railFail([validateHeadline(r), ...body], theme),
+    );
+    frame.close(
+      r.ok
+        ? `\`warehousd import run ${collection} ${file}\` loads it.`
+        : "Fix the rows above, then re-run.",
+    );
     process.exit(r.ok ? 0 : 1);
   });
 importCmd
@@ -548,7 +687,7 @@ importCmd
   .option("--sheet <name>", "which sheet of an .xlsx to read")
   .option("--header-row <n>", "1-based row the headers are on", "1")
   .action(async (collection, file, o) => {
-    const { reporter, theme } = ui();
+    const { reporter, theme, json, frame } = ui(`import run ${collection} ${file}`);
     const db = resolveDbUrl(o.dir, o.db);
     const r = await runImportRun(o.dir, db, collection, file, {
       mode: o.mode,
@@ -557,40 +696,54 @@ importCmd
       headerRow: Number(o.headerRow),
       reporter,
     });
+    if (json) {
+      emitJson(r);
+      process.exit(r.ok ? 0 : 1);
+    }
     if (!r.ok) {
-      emit(
-        r,
-        formatValidateResult({
-          ok: false,
-          layer: "live",
-          rows: 0,
-          collection,
-          summary: r.summary,
-          blindSpot: null,
-        }),
+      frame.block(
+        railFail(
+          [
+            `${collection} refused the file`,
+            ...formatValidateResult({
+              ok: false,
+              layer: "live",
+              rows: 0,
+              collection,
+              summary: r.summary,
+              blindSpot: null,
+            }).split("\n"),
+          ],
+          theme,
+        ),
       );
+      frame.close("Fix the rows above, then re-run.");
       process.exit(1);
     }
-    emit(
-      r,
+    const n = (x: number) => x.toLocaleString("en-US");
+    frame.block(
       renderSuccess({
         // A dry run rolls everything back, so calling it an import would be a lie about the state
         // of the database — see runImportRun.
-        headline: r.dryRun ? "Import preview complete" : "Import complete",
+        headline: r.dryRun ? "Preview complete" : `Loaded into ${collection}`,
         theme,
         sections: [
           {
             fields: [
-              { label: "Collection", value: collection },
-              { label: "Added", value: String(r.inserted) },
-              { label: "Revised", value: String(r.updated) },
-              { label: "Deleted", value: String(r.deleted) },
+              { label: labelled(theme.i.data, "Added"), value: n(r.inserted) },
+              { label: labelled(theme.i.data, "Revised"), value: n(r.updated) },
+              { label: labelled(theme.i.data, "Deleted"), value: n(r.deleted) },
             ],
           },
         ],
-        ...(r.dryRun ? { footer: ["Nothing was written — every statement was rolled back."] } : {}),
       }),
     );
+    if (r.dryRun) {
+      frame.block(railWarn(["Nothing was written — every statement was rolled back."], theme));
+      frame.close("Re-run without --dry-run to load it.");
+      return;
+    }
+    frame.close("`warehousd open` shows them in the admin UI.");
   });
 
 program
@@ -600,34 +753,26 @@ program
   .option("--destroy", "remove volume and data (irreversible)")
   .option("-y, --yes", "skip confirmation for --destroy")
   .action(async (o) => {
-    const { theme } = ui();
+    const { theme, json, frame } = ui("stop");
     await runStop(o.dir, { destroy: o.destroy, yes: o.yes });
-    // `emit` branches on --json before it reads the human string, so building the panel
-    // unconditionally costs a machine-readable run nothing.
-    emit(
-      { stopped: true, destroyed: Boolean(o.destroy) },
-      renderSuccess({
-        headline: "Stack stopped",
+    if (json) {
+      emitJson({ stopped: true, destroyed: Boolean(o.destroy) });
+      return;
+    }
+    frame.block(
+      railDone(
+        [theme.c.bold(o.destroy ? "Containers, volume and network removed" : "Containers stopped")],
         theme,
-        sections: [
-          {
-            fields: [
-              {
-                label: "Removed",
-                value: o.destroy ? "containers, volume and network" : "containers",
-              },
-            ],
-          },
-        ],
-        // Data surviving a `stop` is the difference between the two runs, and the one thing
-        // somebody wants confirmed before they walk away.
-        footer: [
-          o.destroy
-            ? "The volume is gone — every document in it went with it."
-            : "Your data is untouched. `warehousd start` brings it back.",
-        ],
-      }),
+      ),
     );
+    // Data surviving a `stop` is the difference between the two runs, and the one thing somebody
+    // wants confirmed before they walk away.
+    if (o.destroy) {
+      frame.block(railWarn(["The volume is gone — every document in it went with it."], theme));
+      frame.close("`warehousd start` begins from an empty database.");
+      return;
+    }
+    frame.close("Your data is untouched — `warehousd start` brings it back.");
   });
 program
   .command("status")
@@ -635,26 +780,35 @@ program
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
-    const { theme, json } = ui();
+    const { theme, json, frame } = ui("status");
     const result = await runStatus(o.dir);
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ healthy: result.healthy, project: result.project, containers: result.containers, outputs: result.outputs }, null, 2)}\n`,
-      );
-    } else if (result.containers.length === 0) {
-      // Indented and spaced like the panel it stands in for. Flush at column 0 it collided with
-      // the release-candidate notice above it and lined up with nothing.
-      process.stdout.write("\n  No containers for this project. Run `warehousd start`.\n\n");
+      emitJson({
+        healthy: result.healthy,
+        project: result.project,
+        containers: result.containers,
+        outputs: result.outputs,
+      });
+      process.exit(result.healthy ? 0 : 1);
+    }
+    if (result.containers.length === 0) {
+      frame.block(railFail([theme.c.bold("No containers for this project.")], theme));
+      frame.close("`warehousd start` brings the stack up.");
     } else {
-      process.stdout.write(
-        `${renderStatus({
+      frame.block(
+        renderStatus({
           project: result.project,
           healthy: result.healthy,
           containers: result.containers,
           outputs: result.outputs,
           theme,
           showSecrets: o.showSecrets,
-        })}\n`,
+        }),
+      );
+      frame.close(
+        result.healthy
+          ? "`warehousd logs -f` follows the server logs."
+          : "`warehousd logs` usually says why.",
       );
     }
     process.exit(result.healthy ? 0 : 1);
@@ -666,18 +820,18 @@ program
   .option("-s, --seed <n>", "synthetic seed", "42")
   .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
-    const { reporter, theme, json, quiet } = ui();
-    banner({ theme, quiet, json });
+    // One frame across both phases: a restart is one thing that happened, not two commands.
+    const { reporter, theme, json, frame } = ui("restart");
     const began = Date.now();
     await runStop(o.dir, { yes: true });
-    reporter.step("stopped", "containers").done();
+    reporter.step("Stopping", "the containers", "Containers stopped").done();
     const outputs = await runStart(o.dir, { seed: Number(o.seed), reporter });
     const st = ensureState(o.dir);
     if (json) {
-      process.stdout.write(`${JSON.stringify(outputs, null, 2)}\n`);
+      emitJson(outputs);
       return;
     }
-    reporter.out(
+    frame.block(
       formatOutputs(
         outputs,
         { adminEmail: "admin@warehousd.local", adminPassword: st.adminPassword },
@@ -688,6 +842,7 @@ program
         },
       ),
     );
+    frame.close(docsOutro(theme));
   });
 program
   .command("logs")
@@ -700,11 +855,22 @@ program
     if (o.service !== "server" && o.service !== "db") {
       throw new Error(`--service must be "server" or "db", not "${o.service}"`);
     }
-    const { json } = ui();
+    // No frame around a raw stream — see below — so this one opens on nothing.
+    const { theme, json } = ui("logs", "");
     // A stream has no last element, so there is no object to close. Refusing beats accepting the
     // flag and quietly emitting raw text that no parser asked for.
     if (json && o.follow) {
       throw new Error("--json cannot be combined with --follow: a stream has no end to serialise.");
+    }
+    // No frame around a raw stream: a rail down the side of the log lines would corrupt every
+    // grep and every pipe. A header on **stderr** is the whole decoration this command gets.
+    if (!json) {
+      const target = resolveLogTarget(o.dir, o.service);
+      const header = frameOpen(
+        `warehousd logs — ${target}, ${o.follow ? "following" : `last ${Number(o.tail)} lines`}`,
+        theme,
+      );
+      if (header) process.stderr.write(`${header}\n\n`);
     }
     const out = await runLogs(o.dir, {
       follow: o.follow,
@@ -713,7 +879,7 @@ program
     });
     if (out === null) return; // --follow already streamed it
     if (json) {
-      emit({ service: o.service, lines: out === "" ? [] : out.split("\n") }, "");
+      emitJson({ service: o.service, lines: out === "" ? [] : out.split("\n") });
       return;
     }
     process.stdout.write(`${out}\n`);
@@ -727,11 +893,22 @@ program
     if (!["admin", "mcp", "api"].includes(t)) {
       throw new Error(`Unknown target "${t}". Use admin, mcp or api.`);
     }
-    const { reporter, json } = ui();
+    const { theme, json, frame } = ui(target ? `open ${target}` : "open");
     const r = runOpen(o.dir, t);
-    if (json) emit(r, "");
-    else if (r.opened) reporter.step("opening", r.url).done();
-    else process.stdout.write(`${r.url}\n`);
+    if (json) {
+      emitJson(r);
+      return;
+    }
+    if (r.opened) {
+      frame.block(railDone([`Opened ${theme.c.cyan(r.url)} in your browser`], theme));
+      frame.close("`warehousd open mcp` and `warehousd open api` open the others.");
+      return;
+    }
+    // Nothing to launch: the URL is the product, so it goes to stdout on a line of its own where
+    // it can be copied or piped.
+    frame.block(railFail(["No browser opener found on this platform."], theme));
+    frame.close("The URL is on the line below — open it yourself.");
+    process.stdout.write(`${r.url}\n`);
   });
 program
   .command("doctor")
@@ -745,13 +922,20 @@ program
     false,
   )
   .action(async (o) => {
-    const { theme, json } = ui();
+    const { theme, json, frame } = ui("doctor", (t) => labelled(t.i.doctor, "warehousd doctor"));
     const result = await runDoctor(o.dir, { deploy: o.deploy });
     if (json) {
-      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    } else {
-      process.stdout.write(`\n${renderChecks(result.checks, theme)}\n\n`);
+      emitJson(result);
+      process.exit(result.ok ? 0 : 1);
     }
+    frame.block(renderChecks(result.checks, theme));
+    const problems = result.checks.filter((c) => !c.ok).length;
+    frame.close(
+      problems === 0
+        ? "Everything checks out — `warehousd start` is safe to run."
+        : `${problems} ${problems === 1 ? "problem" : "problems"} found — fix ` +
+            `${problems === 1 ? "it" : "them"}, then re-run \`warehousd doctor\`.`,
+    );
     process.exit(result.ok ? 0 : 1);
   });
 program
@@ -760,24 +944,31 @@ program
   .option("-d, --dir <dir>", "project dir", process.cwd())
   .option("--show", "print them in full", false)
   .action((o) => {
-    const { theme, json } = ui();
+    const { theme, json, frame } = ui("secrets");
     if (json) {
-      process.stdout.write(`${JSON.stringify(secretsJson(o.dir), null, 2)}\n`);
+      emitJson(secretsJson(o.dir));
       return;
     }
-    const entries = collectSecrets(o.dir);
-    process.stdout.write(
-      `${renderPanel({
-        title: "warehousd secrets",
+    const icons = { secret: theme.i.secrets, login: theme.i.login, database: theme.i.database };
+    frame.block(
+      renderFields({
         sections: [
           {
-            fields: entries.map((e) => ({ label: e.label, value: e.value, secret: e.secret })),
+            fields: collectSecrets(o.dir).map((e) => ({
+              label: labelled(icons[e.kind], e.label),
+              value: e.value,
+              secret: e.secret,
+            })),
           },
         ],
         theme,
         showSecrets: o.show,
-        ...(o.show ? {} : { footer: ["Masked — add --show to reveal, or --json for a script"] }),
-      })}\n`,
+      }),
+    );
+    frame.close(
+      o.show
+        ? "Shown in full — anything on this screen is a live credential."
+        : "Masked — `--show` reveals them, `--json` is for scripts.",
     );
   });
 program
@@ -795,7 +986,7 @@ program
   .option("--destroy", "tear down the deployed app", false)
   .option("--show-secrets", "print credentials in full instead of masked", false)
   .action(async (o) => {
-    const { theme, json, quiet } = ui();
+    const { theme, json, quiet, frame } = ui("deploy");
     await runDeploy(o.dir, {
       allowLocalLogin: o.allowLocalLogin,
       allowDisabledAudit: o.allowDisabledAudit,
@@ -806,8 +997,31 @@ program
       showSecrets: o.showSecrets,
       json,
       quiet,
+      frame,
     });
   });
+
+/**
+ * The global flags, on every per-command `--help`.
+ *
+ * They live on the root command, and commander does not repeat a parent's options in a
+ * subcommand's help — so `warehousd start --help` listed three flags and none of the four that
+ * work everywhere. The discovery screen deliberately leaves them out and points here instead, so
+ * here is where they have to be.
+ */
+const GLOBAL_FLAGS = `
+Global options:
+  --json         machine-readable output on stdout
+  -q, --quiet    only errors and results
+  --no-color     disable colour (also honours NO_COLOR)
+  --verbose      echo every command warehousd shells out to`;
+
+for (const command of allCommands(program)) command.addHelpText("after", GLOBAL_FLAGS);
+
+/** Every command under the root, at any depth — `migrate plan` and `import run` included. */
+function allCommands(root: Command): Command[] {
+  return root.commands.flatMap((c) => [c, ...allCommands(c)]);
+}
 
 // Only parse argv when run as a binary, not when imported by tests. The shipped bundle is CommonJS
 // (tsup.config.ts, bin dist/index.cjs), so `require.main` is the only check that can ever be true —
@@ -821,7 +1035,10 @@ if (typeof require !== "undefined" && require.main === module) {
   // nothing. `status --json | jq` still parses and `start 2>/dev/null` still prints the summary
   // alone. resolveTheme handles NO_COLOR, TERM=dumb and the absence of a TTY, so a piped run is
   // plain text.
-  const notice = rcNotice(
+  // The blank line above *and* below is `rcNoticeBlock`'s, not this call site's. Above so it clears
+  // the shell prompt; below so whatever follows — a frame, a raw log stream, a version number —
+  // never lands hard against it.
+  const notice = rcNoticeBlock(
     version,
     resolveTheme({
       isTTY: Boolean(process.stderr.isTTY),
@@ -830,9 +1047,14 @@ if (typeof require !== "undefined" && require.main === module) {
       json: process.argv.includes("--json"),
     }),
   );
-  // Opened by a blank line so it clears the shell prompt rather than colliding with it. What
-  // follows brings its own top spacing — the greeting, or a panel, which already opens with one.
-  if (notice) process.stderr.write(`\n${notice}\n`);
+  if (notice) process.stderr.write(notice);
+
+  // A bare `warehousd` is somebody who does not yet know what to type, which is the one moment the
+  // grouped screen exists for. Commander's default is the error "missing command".
+  if (process.argv.length <= 2) {
+    process.stdout.write(`${helpScreen(helpTheme())}\n`);
+    process.exit(0);
+  }
 
   // Rejections have to be handled here or not at all: `parseAsync` is the last statement, so an
   // unhandled one printed a stack trace at a user who wanted a message and an exit code.
@@ -847,15 +1069,16 @@ if (typeof require !== "undefined" && require.main === module) {
     });
     // A refusal to prompt is already a finished sentence naming the flag to pass; running it
     // through the Docker translator would only add a hint that does not apply. It still gets the
-    // glyph and the indent — that is presentation, not translation.
-    if (err instanceof NonInteractiveError) {
-      process.stderr.write(`\n${formatExplained({ title: err.message }, theme)}\n\n`);
-      process.exit(1);
-    }
-    const explained = explain(err);
-    process.stderr.write(`\n${formatExplained(explained, theme)}\n\n`);
+    // glyph and the rail — that is presentation, not translation.
+    const explained = err instanceof NonInteractiveError ? { title: err.message } : explain(err);
+    // The spacer keeps the failure from landing hard against whatever came before it — the frame's
+    // own opening line, or the release-candidate notice when nothing had opened one.
+    process.stderr.write(`${railLine("", theme)}\n${formatExplained(explained, theme)}\n`);
+    const outro = errorOutro(explained, currentCommand, theme);
+    // The `└` always says what to do, so a failure never ends on a bare stack of red.
+    process.stderr.write(outro === null ? "\n" : `${railLine("", theme)}\n${outro}\n\n`);
     if (globals().verbose && err instanceof Error && err.stack) {
-      process.stderr.write(`\n${err.stack}\n`);
+      process.stderr.write(`${err.stack}\n\n`);
     }
     process.exit(1);
   });

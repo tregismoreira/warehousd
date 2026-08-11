@@ -1,5 +1,6 @@
 import type { Theme } from "./theme";
 import { plainTheme } from "./theme";
+import { railLine, railWarn, railFail } from "./frame";
 
 // Progress narration, and the one place in the UI layer that holds state.
 //
@@ -29,6 +30,15 @@ export type StepHandle = {
    *     machine-readable.
    */
   update(detail: string): void;
+  /**
+   * The same, for work that knows how far along it is: draws the `█░` bar rather than a count.
+   *
+   * Determinate work is the case where a spinner is actively unhelpful — an image pull, an import,
+   * an embedding run all know their total, and "52%" answers the question the spinner cannot.
+   * Every rule above applies unchanged, off-TTY silence included: a bar redrawn into a CI log ten
+   * times a second is the Christmas tree this design exists to avoid.
+   */
+  progress(done: number, total: number, label?: string): void;
   done(detail?: string): void;
   fail(detail?: string): void;
 };
@@ -57,6 +67,20 @@ export function progressDetail(p: Progress, elapsedMs: number): string {
   return parts.join(" · ");
 }
 
+/** How wide the determinate bar is drawn. Twenty cells reads as a bar and fits a narrow terminal. */
+const BAR_CELLS = 20;
+
+/** `██████████░░░░░░░░░░  52%`. Pure, so the shape can be asserted without a terminal. */
+export function progressBar(done: number, total: number, theme: Theme): string {
+  if (!theme.unicode || total <= 0) {
+    return `${Math.min(100, Math.max(0, Math.round((done / Math.max(total, 1)) * 100)))}%`;
+  }
+  const ratio = Math.min(1, Math.max(0, done / total));
+  const filled = Math.round(ratio * BAR_CELLS);
+  const bar = `${"█".repeat(filled)}${"░".repeat(BAR_CELLS - filled)}`;
+  return `${theme.c.accent(bar)}  ${Math.round(ratio * 100)}%`;
+}
+
 export type Reporter = {
   /**
    * How many steps this command is about to take, so each one can say where it is.
@@ -71,7 +95,15 @@ export type Reporter = {
    * is what a command with two phases wants.
    */
   plan(total: number): void;
-  step(verb: string, label: string): StepHandle;
+  /**
+   * `verb` and `label` are joined into one sentence now rather than sitting in a right-aligned
+   * gutter — "Checking Docker" reads, "  Checking  Docker" only aligned.
+   *
+   * `settled` is the same sentence in the past tense, for the line that survives on screen:
+   * a step that is still running says "Pulling …" and the one that finished says "Pulled …".
+   * Omitted, the live wording stays.
+   */
+  step(verb: string, label: string, settled?: string): StepHandle;
   note(msg: string): void;
   warn(msg: string): void;
   fail(msg: string): void;
@@ -93,13 +125,6 @@ const SPINNER_INTERVAL_MS = 80;
 // The floor between two `update()` writes. One write per row would make the import slower than the
 // import; ten a second is already past what anyone reads.
 const UPDATE_INTERVAL_MS = 100;
-// A fixed gutter, borrowed from cargo: the verb is right-aligned in its own column so the eye
-// tracks a single edge down the page instead of re-finding the text on every line.
-const GUTTER = 10;
-
-function gutter(verb: string): string {
-  return verb.length >= GUTTER ? verb : " ".repeat(GUTTER - verb.length) + verb;
-}
 
 function formatElapsed(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -132,22 +157,22 @@ export function createReporter(opts: ReporterOptions): Reporter {
     clearLine();
   };
 
-  const line = (mark: string, verb: string, label: string, detail?: string) => {
-    const tail = detail ? `  ${theme.c.dim(detail)}` : "";
-    return `${mark}${theme.c.dim(gutter(verb))}  ${label}${tail}\n`;
-  };
+  /**
+   * A step line: the glyph sits in the rail's own column, so a finished step, a failure and the
+   * rail all line up down the page and the frame stays unbroken.
+   */
+  const line = (mark: string, body: string): string =>
+    theme.unicode ? `${mark}  ${body}` : `  ${mark} ${body}`;
 
   /**
    * `[3/9] ` when a plan was declared, nothing otherwise.
    *
-   * Padded to the width of the total so the labels stay on one column — the same reason the verb
-   * sits in a fixed gutter. It goes in front of the *label*, not the verb, so the gutter alignment
-   * every other command relies on is untouched.
+   * Padded to the width of the total so the sentences stay on one column.
    */
   const counter = (n: number): string => {
     if (plannedTotal <= 0) return "";
     const width = String(plannedTotal).length;
-    return theme.c.dim(`[${String(n).padStart(width)}/${plannedTotal}] `);
+    return theme.c.dim(`[${String(n).padStart(width)}/${plannedTotal}]  `);
   };
 
   return {
@@ -156,25 +181,28 @@ export function createReporter(opts: ReporterOptions): Reporter {
       stepNumber = 0;
     },
 
-    step(verb: string, label: string): StepHandle {
+    step(verb: string, label: string, settled?: string): StepHandle {
       const started = now();
-      let settled = false;
+      let done = false;
       stepNumber += 1;
       const prefix = counter(stepNumber);
-      label = `${prefix}${label}`;
+      const live = `${prefix}${[verb, label].filter(Boolean).join(" ")}`;
+      const finished = `${prefix}${settled ?? [verb, label].filter(Boolean).join(" ")}`;
       // What `update()` last said, redrawn by every spinner frame so the detail does not blink
       // out between updates.
       let detail = "";
       let lastUpdate = 0;
 
+      const paintLive = (glyphIndex: number) => {
+        const glyph = theme.unicode ? (FRAMES[glyphIndex % FRAMES.length] ?? "") : "";
+        const tail = detail ? `  ${detail}` : "";
+        opts.writeErr(`\r\x1b[2K${theme.c.cyan(glyph)}  ${live}${tail}`);
+      };
+
       if (!quiet && isTTY) {
         let frame = 0;
         const paint = () => {
-          const glyph = theme.unicode ? (FRAMES[frame % FRAMES.length] ?? "") : "";
-          const tail = detail ? `  ${theme.c.dim(detail)}` : "";
-          opts.writeErr(
-            `\r\x1b[2K${theme.c.cyan(glyph)}${theme.c.dim(gutter(verb))}  ${label}${tail}`,
-          );
+          paintLive(frame);
           frame += 1;
         };
         paint();
@@ -183,30 +211,33 @@ export function createReporter(opts: ReporterOptions): Reporter {
         timer.unref?.();
       }
 
-      const settle = (ok: boolean, detail?: string) => {
-        if (settled) return;
-        settled = true;
+      const settle = (ok: boolean, tail?: string) => {
+        if (done) return;
+        done = true;
         stopSpinner();
         if (quiet && ok) return;
-        const elapsed = formatElapsed(now() - started);
-        const mark = ok ? theme.c.green(theme.s.ok) : theme.c.red(theme.s.fail);
-        const suffix = detail ? `${detail} · ${elapsed}` : elapsed;
-        opts.writeErr(line(`${mark} `, verb, label, suffix));
+        const elapsed = theme.c.dim(` · ${formatElapsed(now() - started)}`);
+        const mark = ok ? theme.c.accent(theme.s.done) : theme.c.red(theme.s.fail);
+        const body = tail ? `${finished} — ${theme.c.dim(tail)}` : finished;
+        opts.writeErr(`${line(mark, `${body}${elapsed}`)}\n`);
+      };
+
+      const draw = (next: string) => {
+        // Nothing to draw into off a TTY, and nothing that should be written instead: see the
+        // rules on StepHandle.update.
+        if (done || quiet || !isTTY) return;
+        const t = now();
+        if (t - lastUpdate < UPDATE_INTERVAL_MS) return;
+        lastUpdate = t;
+        detail = next;
+        paintLive(0);
       };
 
       return {
-        update: (next: string) => {
-          // Nothing to draw into off a TTY, and nothing that should be written instead: see the
-          // rules on StepHandle.update.
-          if (settled || quiet || !isTTY) return;
-          const t = now();
-          if (t - lastUpdate < UPDATE_INTERVAL_MS) return;
-          lastUpdate = t;
-          detail = next;
-          const glyph = theme.unicode ? (FRAMES[0] ?? "") : "";
-          opts.writeErr(
-            `\r\x1b[2K${theme.c.cyan(glyph)}${theme.c.dim(gutter(verb))}  ${label}  ${theme.c.dim(detail)}`,
-          );
+        update: (next: string) => draw(theme.c.dim(next)),
+        progress: (n: number, total: number, label?: string) => {
+          const tail = [formatElapsed(now() - started), ...(label ? [label] : [])].join(" · ");
+          draw(`${progressBar(n, total, theme)}${theme.c.dim(` · ${tail}`)}`);
         },
         done: (d?: string) => settle(true, d),
         fail: (d?: string) => settle(false, d),
@@ -215,17 +246,17 @@ export function createReporter(opts: ReporterOptions): Reporter {
 
     note(msg: string) {
       if (quiet) return;
-      opts.writeErr(`${" ".repeat(GUTTER + 3)}${theme.c.dim(msg)}\n`);
+      opts.writeErr(`${railLine(theme.c.dim(msg), theme)}\n`);
     },
 
     warn(msg: string) {
       if (quiet) return;
-      opts.writeErr(`${theme.c.yellow(theme.s.warn)} ${theme.c.dim(gutter("warning"))}  ${msg}\n`);
+      opts.writeErr(`${railWarn([msg], theme)}\n`);
     },
 
     fail(msg: string) {
       stopSpinner();
-      opts.writeErr(`${theme.c.red(theme.s.fail)} ${theme.c.dim(gutter("error"))}  ${msg}\n`);
+      opts.writeErr(`${railFail([msg], theme)}\n`);
     },
 
     out(msg: string) {
@@ -238,7 +269,7 @@ export function createReporter(opts: ReporterOptions): Reporter {
 // not change what its existing callers or tests have to pass.
 export const silentReporter: Reporter = {
   plan: () => {},
-  step: () => ({ update: () => {}, done: () => {}, fail: () => {} }),
+  step: () => ({ update: () => {}, progress: () => {}, done: () => {}, fail: () => {} }),
   note: () => {},
   warn: () => {},
   fail: () => {},

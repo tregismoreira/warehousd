@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isPrerelease, rcNotice } from "../src/ui/rc-notice";
+import { isPrerelease, rcNotice, rcNoticeBlock } from "../src/ui/rc-notice";
 import { plainTheme, resolveTheme } from "../src/ui/theme";
 
 // A CSI sequence: ESC [ ... final byte. Built from a code point so no raw control character ends
@@ -77,6 +77,10 @@ describe("rcNotice", () => {
 
   it("carries the warning glyph, so it reads as a warning rather than as noise", () => {
     expect(rcNotice("0.1.0-rc.1", plainTheme)).toContain(`  ${plainTheme.s.warn} This is`);
+    // The same glyph the rest of the CLI uses for a caution, not a `!` of its own.
+    expect(rcNotice("0.1.0-rc.1", resolveTheme({ isTTY: true, env: { NO_COLOR: "1" } }))).toContain(
+      "▲ This is",
+    );
   });
 
   // The second line aligns under the text, not under the glyph, so the two read as one block.
@@ -86,11 +90,34 @@ describe("rcNotice", () => {
     expect(textStarts(lines[1] ?? "")).toBe(textStarts(lines[0] ?? "") + 2);
   });
 
-  // Blank lines belong to the caller: what follows is sometimes a wordmark, sometimes a panel that
-  // opens with its own, so a leading or trailing newline here would double up in one of the two.
-  it("brings no blank line of its own", () => {
+  it("brings no blank line of its own — those belong to rcNoticeBlock", () => {
     const s = rcNotice("0.1.0-rc.1", plainTheme) ?? "";
     expect(s.startsWith("\n")).toBe(false);
     expect(s.endsWith("\n")).toBe(false);
+  });
+});
+
+/**
+ * One blank line above and one below, in **every** case.
+ *
+ * It used to carry only the one above and rely on whatever followed bringing its own top spacing,
+ * which a panel did and a bare result line did not — so a `status` with nothing running printed
+ * its answer hard against the warning. Owning both here is what makes the rule assertable rather
+ * than a convention four call sites have to keep.
+ */
+describe("rcNoticeBlock", () => {
+  it("clears the shell prompt above it and whatever comes next below it", () => {
+    const s = rcNoticeBlock("0.1.0-rc.1", plainTheme) ?? "";
+    expect(s.startsWith("\n")).toBe(true);
+    expect(s.endsWith("\n\n")).toBe(true);
+    const lines = s.split("\n");
+    expect(lines[0]).toBe("");
+    expect(lines[1]).toContain("release candidate");
+    expect(lines[2]).toContain("https://github.com/tregismoreira/warehousd");
+    expect(lines[3]).toBe("");
+  });
+
+  it("goes quiet on a stable release, blank lines and all", () => {
+    expect(rcNoticeBlock("1.0.0", plainTheme)).toBeNull();
   });
 });

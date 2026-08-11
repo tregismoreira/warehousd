@@ -80,11 +80,13 @@ export async function runApply(
     ];
     // A schema change against twenty collections used to render one unchanging spinner, and
     // "still working" is indistinguishable from "hung" without the collection name.
-    const t = trackStepWith<ApplyProgress>(reporter, "applying", "warehousd.yml", (p) => ({
-      done: p.done,
-      total: p.total,
-      label: p.label,
-    }));
+    const t = trackStepWith<ApplyProgress>(
+      reporter,
+      "Applying",
+      "warehousd.yml",
+      (p) => ({ done: p.done, total: p.total, label: p.label }),
+      "Config applied",
+    );
     try {
       await applyConfig(db, cfg, { onProgress: t.onProgress });
       t.step.done(`${Object.keys(cfg.collections).length} collections`);
@@ -119,14 +121,16 @@ export async function runSeed(
   // Dataset-backed vocabularies read their terms out of the rows just generated, so the sync
   // has to happen here — a later `warehousd index` would otherwise see a stale term set.
   try {
-    const gen = trackStepWith<SyntheticProgress>(reporter, "seeding", "synthetic data", (p) => ({
-      done: p.done,
-      total: p.total,
-      label: p.label,
-    }));
+    const gen = trackStepWith<SyntheticProgress>(
+      reporter,
+      "Generating",
+      "synthetic data",
+      (p) => ({ done: p.done, total: p.total, label: p.label }),
+      "Synthetic data regenerated",
+    );
     try {
       await regenerateSynthetic(db, cfg, seed, { onProgress: gen.onProgress });
-      gen.step.done();
+      gen.step.done(`seed ${seed}`);
     } catch (e) {
       gen.step.fail();
       throw e;
@@ -147,7 +151,7 @@ export async function runSeed(
           metadata: fileMetadataFields(c),
           onProgress: t.onProgress,
         });
-        t.step.done(`${r.indexed} indexed, ${r.skipped} unchanged`);
+        t.step.done(`${r.indexed.toLocaleString("en-US")} files, ${r.skipped} unchanged`);
       } catch (e) {
         t.step.fail();
         throw e;
@@ -164,11 +168,13 @@ export async function runSeed(
 // pruning rows whose file has gone. Shown with the phase in the label rather than as two totals,
 // which would look like a bar resetting from 200/200 to 3.
 function indexTracker(reporter: Reporter, collection: string) {
-  return trackStepWith<IndexProgress>(reporter, "indexing", collection, (p) => ({
-    done: p.done,
-    total: p.total,
-    label: p.phase === "prune" ? "pruning" : undefined,
-  }));
+  return trackStepWith<IndexProgress>(
+    reporter,
+    "Indexing",
+    collection,
+    (p) => ({ done: p.done, total: p.total, label: p.phase === "prune" ? "pruning" : undefined }),
+    `Indexed ${collection}`,
+  );
 }
 
 export async function runIndex(
@@ -213,7 +219,9 @@ export async function runIndex(
         metadata,
         onProgress: t.onProgress,
       });
-      t.step.done(`${r.indexed} indexed, ${r.skipped} unchanged, ${r.deleted} pruned`);
+      t.step.done(
+        `${r.indexed.toLocaleString("en-US")} files, ${r.skipped} unchanged, ${r.deleted} pruned`,
+      );
       return r;
     } catch (e) {
       t.step.fail();
@@ -262,14 +270,17 @@ export async function runEmbed(
       // `EmbedProgress` predates the `{ done, total }` convention and is `{ embedded, remaining }`,
       // so the total is derived rather than reported — it is only knowable while there is work
       // left, which is exactly when a total is worth showing.
-      const t = trackStepWith<EmbedProgress>(reporter, "embedding", n, (p) => ({
-        done: p.embedded,
-        total: p.embedded + p.remaining,
-      }));
+      const t = trackStepWith<EmbedProgress>(
+        reporter,
+        "Embedding",
+        n,
+        (p) => ({ done: p.embedded, total: p.embedded + p.remaining }),
+        `Embedded ${n}`,
+      );
       try {
         const r = await embedCollection(db, env, n, embedder, { onProgress: t.onProgress });
         embedded += r.embedded;
-        t.step.done(`${r.embedded} chunks`);
+        t.step.done(`${r.embedded.toLocaleString("en-US")} chunks`);
       } catch (e) {
         t.step.fail();
         throw e;

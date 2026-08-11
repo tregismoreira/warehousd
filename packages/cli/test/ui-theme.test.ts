@@ -61,7 +61,39 @@ describe("resolveTheme", () => {
   it("uses unicode glyphs on a terminal", () => {
     const t = resolveTheme(base);
     expect(t.s.ok).toBe("✓");
-    expect(t.s.fail).toBe("✗");
+    expect(t.s.fail).toBe("■");
+  });
+
+  // The rail is what every command is drawn on now, so its glyphs degrade the same way the rest
+  // do: a `TERM=dumb` terminal still gets something that lines up, rather than nothing.
+  it("carries the frame glyphs, with ASCII fallbacks", () => {
+    const t = resolveTheme(base);
+    expect([t.s.top, t.s.bar, t.s.bottom, t.s.done, t.s.warn]).toEqual(["┌", "│", "└", "◇", "▲"]);
+    const ascii = resolveTheme({ ...base, isTTY: false });
+    expect([ascii.s.top, ascii.s.bar, ascii.s.bottom, ascii.s.done, ascii.s.warn]).toEqual([
+      "*",
+      "|",
+      "*",
+      "o",
+      "!",
+    ]);
+  });
+
+  /**
+   * Icons are dropped off a terminal rather than faked.
+   *
+   * There is no ASCII for a filing cabinet worth having: `[DB]` in front of a label that already
+   * reads "Database" is noise, and a replacement box in a CI log is worse than nothing. One icon
+   * per concept on a terminal, no icons anywhere else.
+   */
+  it("carries one icon per concept on a terminal, and none off one", () => {
+    const t = resolveTheme(base);
+    expect(t.i.running).toBe("🚀");
+    expect(t.i.database).toContain("🗄");
+    expect(new Set(Object.values(t.i)).size).toBe(Object.keys(t.i).length);
+    const ascii = resolveTheme({ ...base, isTTY: false });
+    expect(Object.values(ascii.i).every((v) => v === "")).toBe(true);
+    expect(Object.keys(ascii.i)).toEqual(Object.keys(t.i));
   });
 
   // NO_COLOR is about colour, not about glyphs: a CI log renders ✓ correctly.
@@ -76,6 +108,7 @@ describe("resolveTheme", () => {
     expect(plainTheme.c.bold("x")).toBe("x");
     expect(plainTheme.c.accent("x")).toBe("x");
     expect(plainTheme.c.refusal("x")).toBe("x");
+    expect(plainTheme.i.running).toBe("");
   });
 });
 

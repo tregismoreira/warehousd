@@ -274,7 +274,7 @@ describe("the compose target", () => {
     expect(outputs.databaseUrl).toBeNull();
 
     const summary = written.join("");
-    expect(summary).toContain("warehousd deployed to Self-hosted (Docker Compose)");
+    expect(summary).toContain("warehousd is live on Self-hosted (Docker Compose)");
     expect(summary).toContain("docker compose --env-file");
     expect(summary).toContain("TLS is yours to terminate");
     expect(summary).not.toMatch(/fly/i);
