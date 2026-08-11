@@ -10,11 +10,23 @@
 // is worse than passing it through: the reader can search for Docker's words, but not for ours.
 
 import { plainTheme, type Theme } from "./theme";
+import { frameClose, prose, railFail } from "./frame";
 
 export type Explained = {
   title: string;
   hint?: string | undefined;
+  /**
+   * True when no rule matched, so the words below are the driver's and not ours.
+   *
+   * The 12-factor CLI's fifth rule wants a description, a fix and a *reference*, and the reference
+   * for an error nobody has written a rule for is the issue tracker: we cannot tell the user how
+   * to fix something we did not recognise, but we can tell them who to tell.
+   */
+  unexpected?: boolean | undefined;
 };
+
+/** Where an error nobody anticipated should end up. */
+export const ISSUES_URL = "https://github.com/tregismoreira/warehousd/issues";
 
 type Rule = {
   match: RegExp;
@@ -67,19 +79,31 @@ const RULES: Rule[] = [
   },
 ];
 
+/**
+ * The four JavaScript errors that are always a bug in our own code, never a condition in the world.
+ *
+ * "No rule matched" is *not* the same as "unexpected". Most unmatched errors are warehousd's own
+ * finished sentences — "No secrets yet…", "Unknown collection: x" — and telling the reader to open
+ * an issue about one of those is both wrong and rude. These four are the ones nobody should ever
+ * see, so these are the ones that get the tracker link.
+ */
+const BUGS = new Set(["TypeError", "RangeError", "ReferenceError", "SyntaxError"]);
+
 export function explain(err: unknown): Explained {
   const raw = err instanceof Error ? err.message : String(err);
   for (const rule of RULES) {
     const m = raw.match(rule.match);
     if (m) return rule.explain(m, raw);
   }
+  if (err instanceof Error && BUGS.has(err.name)) {
+    return {
+      title: `Unexpected error — ${err.name}: ${raw.trim()}`,
+      hint: "Re-run with --verbose for the stack trace.",
+      unexpected: true,
+    };
+  }
   return { title: raw.trim() };
 }
-
-/** Matches the two-space indent every panel, progress line and notice in the CLI already uses. */
-const INDENT = "  ";
-/** Continuation lines align under the text, not under the glyph. */
-const CONTINUATION = "    ";
 
 /**
  * The failure, shaped like everything else the CLI prints.
@@ -89,18 +113,31 @@ const CONTINUATION = "    ";
  * one-line "No warehousd.yml in /path" read as though the terminal had emitted it rather
  * than warehousd.
  *
- * The glyph and the indent are the whole change; the words are still whatever `explain`
- * decided, including the driver's own where nothing matched. Blank lines around the block
- * belong to the caller.
+ * The `■` takes the rail's own column and the hint hangs from the rail under it, so a failure is
+ * part of the same frame as the steps that led to it rather than a separate thing printed
+ * afterwards. The words are still whatever `explain` decided, including the driver's own where
+ * nothing matched. Blank lines around the block belong to the caller.
  */
 export function formatExplained(e: Explained, theme: Theme = plainTheme): string {
-  const title = e.title.split("\n");
-  const lines = title.map((line, i) =>
-    i === 0 ? `${INDENT}${theme.c.red(theme.s.fail)} ${line}` : `${CONTINUATION}${line}`,
-  );
-  if (e.hint) {
-    lines.push("");
-    for (const line of e.hint.split("\n")) lines.push(`${CONTINUATION}${theme.c.dim(line)}`);
-  }
-  return lines.join("\n");
+  const lines = e.title.split("\n");
+  // The hint is ours and always names a command; the title may be the driver's own words, so it is
+  // left exactly as it arrived.
+  if (e.hint) for (const line of e.hint.split("\n")) lines.push(prose(line, theme, theme.c.dim));
+  return railFail(lines, theme);
+}
+
+/**
+ * The `└` a failed command closes on: what to do, never a repeat of what went wrong.
+ *
+ * clig.dev's rule and Atlassian's seventh — suggest the next best step, always. A run that ends on
+ * a bare stack of red tells somebody they have a problem and leaves them there; this is the line
+ * that says which way is out. For an error no rule recognised, the way out is the issue tracker.
+ */
+export function errorOutro(e: Explained, command: string | null, theme: Theme): string | null {
+  const next = e.unexpected
+    ? `If this keeps happening, report it: ${theme.c.cyan(ISSUES_URL)}`
+    : command
+      ? `Fix the problem above, then re-run \`warehousd ${command}\`.`
+      : "Fix the problem above, then try again.";
+  return frameClose(next, theme);
 }

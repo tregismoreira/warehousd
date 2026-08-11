@@ -29,10 +29,88 @@ These work on **every** command, `deploy` included. Progress goes to **stderr**;
 
 Four deliberate exceptions:
 
-- `init`, `start` and `restart` open with a two-line greeting on stderr, above the progress. It is written **only** to a terminal: piped, redirected, in CI, under `--quiet` or `--json`, nothing at all is written — not even a plain-text version — so `warehousd start 2>/dev/null` still prints the summary alone and a CI log carries no decoration. The second line is dropped rather than wrapped on a narrow terminal, and the name is set in the brand's own green where the terminal reports 24-bit or 256-colour support, falling back to plain ANSI green otherwise. `NO_COLOR`, `TERM=dumb` and `--no-color` remove the colour as they do everywhere else.
+- `init` opens with a welcome on stdout, above the wizard: what warehousd is, what the next two minutes consist of, and how to quit. It is written **only** to a terminal — piped, redirected, in CI, under `--quiet` or `--json`, nothing at all is written, not even a plain-text version. The name is set in the brand's own green where the terminal reports 24-bit or 256-colour support, falling back to plain ANSI green otherwise. `NO_COLOR`, `TERM=dumb` and `--no-color` remove the colour as they do everywhere else.
 - Every invocation opens with one line on stderr saying this is a release candidate and not meant to be used in production. It is printed before the arguments are read, so `--help`, `--version` and a bare `warehousd` carry it too, and neither `--quiet` nor `--json` suppresses it — it costs stdout nothing, so `warehousd status --json | jq` still parses and `warehousd start 2>/dev/null` still prints the summary alone. It stops printing by itself once the published version is no longer a prerelease.
 - `--json` with `logs --follow` is an error, not a no-op — a stream has no end to serialise.
 - `--verbose` never prints a failing `fly secrets` or `railway variables --set` payload. Both CLIs echo the offending assignment on that path, so it stays redacted — and `railway variables --set` carries the value in argv, so its trace prints `NAME=***` rather than the value. A debug flag that prints secrets is a secret-printing flag.
+
+## How the output is drawn
+
+Every human run of a command is **one frame**: `┌` on the command's own name, a `│` rail down the left of everything it says, and `└` on a sentence telling you what to do next. The wizard already looked like this — it is [@clack/prompts](https://github.com/bombshell-dev/clack)' own shape — and everything around it did not, so the two halves of `init` read as separate programs.
+
+```
+┌  warehousd stop
+│
+◇  Containers stopped
+│
+└  Your data is untouched — `warehousd start` brings it back.
+```
+
+The `└` line is always *what next*, never a repeat of the status above it — including on a failure, so a run never ends on a bare stack of red.
+
+**Off a terminal there is no frame and no rail at all.** Piped, redirected, in CI, under `--json`: flat two-space-indented lines and ASCII marks, exactly as before. That is what the e2e suite reads, and a `│` in front of every line is a `│` in everything anybody greps.
+
+One meaning per glyph, and per colour:
+
+| Glyph | ASCII | Means                                                |
+| ----- | ----- | ---------------------------------------------------- |
+| `◇`   | `o`   | Done — a finished step, or a fact needing nothing done about it |
+| `▲`   | `!`   | Caution — act before you trust it                    |
+| `■`   | `x`   | Failure — act now                                    |
+| braille spinner | — | Work in progress. Determinate work draws a `█░` bar and a percentage instead |
+
+| Colour              | Means                                          |
+| ------------------- | ---------------------------------------------- |
+| accent green        | Success, and the `◇`                           |
+| yellow              | Caution, and the `▲`                           |
+| red                 | Failure, and the `■`                           |
+| cyan                | Somewhere you can go — URLs and file paths     |
+| bold accent         | Something you can type — a `warehousd` command |
+| dim                 | Labels, the rail, counters, elapsed times, masked secrets |
+
+Content icons — 🚀 running, ✨ ready, 🖥️ admin UI, ⚡ API, 🤖 MCP, 🌱 env, 🗄️ database, 🔑 credentials, 👤 login, 📦 collections, 📚 docs, 🩺 doctor — sit beside a label on a terminal and are **dropped entirely** off one rather than faked in ASCII: the label already says "Database".
+
+A bare `warehousd`, and `warehousd --help`, print a grouped screen rather than an alphabetical dump of every command and flag — `init` first, `apply` under "Change the schema", three worked examples at the bottom. The global flags above are deliberately absent from it; every `warehousd <command> --help` lists them under **Global options**.
+
+```
+  warehousd — all your documents and datasets in one place,
+  safely queryable by AI assistants.
+
+  Usage
+    warehousd <command> [options]
+
+  Start here
+    init     set up a warehousd project in this directory
+    start    start the server and its database, then print the URLs
+    open     open the admin UI (or mcp|api) in a browser
+
+  Work with data
+    import   map a spreadsheet onto a collection, validate it, load it
+    seed     regenerate synthetic data, then re-index file collections
+    index    re-index a file collection
+    embed    fill embeddings for file collections (resumable)
+
+  Change the schema
+    apply    apply config changes to a running stack, without a restart
+    migrate  plan and write migrations for destructive changes
+
+  Run it
+    status   is this project's stack up, and on which URLs
+    logs     container logs — the answer to most 'it started but nothing works'
+    stop     stop the containers, keeping your data
+    restart  stop, then start again
+    doctor   check Docker, image, ports and config before anything breaks
+    secrets  show the generated credentials, masked unless --show
+    deploy   deploy this project to the target in warehousd.yml
+
+  Examples
+    warehousd init                          set up a new project, guided
+    warehousd start                         bring it up on this machine
+    warehousd import run products data.csv  load a spreadsheet
+
+  warehousd <command> --help shows every option.
+  Docs: https://github.com/tregismoreira/warehousd
+```
 
 ## Commands
 
@@ -100,34 +178,54 @@ Before creating anything it checks that the ports are free and reports which ima
 Progress is written to stderr as each step completes:
 
 ```
-✓  Checking  harbor              docker 29.6.2 · 120ms
-✓     Image  warehousd:dev       WAREHOUSD_IMAGE, local · 40ms
-✓  Starting  wh_harbor_db → :8723                       · 0.9s
-✓  Starting  wh_harbor_server → :8722                   · 0.6s
-✓   Waiting  health check                               · 12.4s
+◇  [1/7]  Checked docker — version 29.6.2 · 120ms
+◇  [2/7]  Image warehousd:dev — WAREHOUSD_IMAGE, local · 40ms
+◇  [3/7]  Pulled pgvector/pgvector:pg16 · 8.2s
+◇  [4/7]  Database credentials check out · 0.4s
+◇  [5/7]  Database started — :8723 · 0.9s
+◇  [6/7]  Server started — :8722 · 0.6s
+◇  [7/7]  Healthy · 12.4s
 ```
 
-Then the summary, on stdout:
+A step that knows how far along it is draws a bar rather than a spinner — `⠹  [3/7]  Pulling pgvector/pgvector:pg16  ██████████░░░░░░░░░░  52% · 12s`. Neither animates off a terminal, where the settled line is the only thing written.
+
+Then the summary, on stdout, and what to do with it:
 
 ```
-  warehousd is running  ready in 15.1s
-
-  MCP       http://localhost:8722/mcp
-  API       http://localhost:8722
-  Admin     http://localhost:8722/admin
-  Database  postgres://warehousd:7fc2…c97d@localhost:8723/warehousd
-  Env       dev
-
-  Dev client
-    ID      2f564a968b9bbaafdb7b78cddec53c63
-    Secret  4215…daf8
-
-  Admin login
-    Email     admin@warehousd.local
-    Password  7ac7…996b
-
-  Secrets are masked — reveal with `warehousd secrets --show`
+┌  warehousd start
+│
+◇  🚀 Your data layer is running   ready in 15.1s
+│
+│  🖥️ Admin UI  http://localhost:8722/admin
+│  ⚡ API       http://localhost:8722
+│  🤖 MCP       http://localhost:8722/mcp
+│  🗄️ Database  postgres://warehousd:7fc2…c97d@localhost:8723/warehousd
+│  🌱 Env       dev
+│
+│  👤 Admin login
+│     Email     admin@warehousd.local
+│     Password  7ac7…996b
+│
+│  🔑 Dev client
+│     ID      2f564a968b9bbaafdb7b78cddec53c63
+│     Secret  4215…daf8
+│
+│  Next steps
+│  warehousd open                            open the admin UI in a browser
+│  warehousd import run <collection> <file>  load a spreadsheet into a collection
+│  warehousd seed                            fill it with synthetic data instead
+│
+│  Everyday commands
+│  warehousd status   is it up, and on which URLs
+│  warehousd logs -f  follow the server logs
+│  warehousd stop     stop the containers, keeping your data
+│
+│  Secrets are masked — `warehousd secrets --show` reveals them.
+│
+└  📚 Docs and guides: https://github.com/tregismoreira/warehousd
 ```
+
+`restart` and `deploy` end on the same block, for the same reason: they are the three moments where somebody has just arrived somewhere new and the next command is not obvious.
 
 Credentials are masked because this panel prints on every start and ends up in scrollback, screen shares and terminal recordings. The full values are in `.warehousd/state.json` and `outputs.json` (both mode 0600), and are printed in full by `warehousd secrets --show`, by `--show-secrets`, and by `--json`.
 
@@ -179,11 +277,16 @@ Opens `admin` (default), `mcp` or `api` in a browser. Where no opener is known f
 Checks Docker, the config, the server image, both ports and the containers, then exits `0` if every check passed and `1` otherwise. Run it when `start` fails and you want to know which part is at fault.
 
 ```
-  ✓  docker       daemon reachable, server 29.6.2
-  ✓  config       warehousd.yml parses, 20 collection(s)
-  ✓  image        warehousd:dev (WAREHOUSD_IMAGE, present locally)
-  ✗  port:server  8722 is held by container other_server — stop it, or change the port in warehousd.yml
-  ✓  containers   2 container(s), server running
+┌  warehousd doctor 🩺
+│
+◇  docker       daemon reachable, server 29.6.2
+◇  config       warehousd.yml parses, 20 collection(s)
+◇  image        warehousd:dev (WAREHOUSD_IMAGE, present locally)
+■  port:server  8722 is held by container other_server
+◇  port:db      8723 is free
+◇  containers   2 container(s), server running
+│
+└  1 problem found — fix it, then re-run `warehousd doctor`.
 ```
 
 | Flag       |                                                              |

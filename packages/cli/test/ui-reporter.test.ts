@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { createReporter, silentReporter, progressDetail } from "../src/ui/reporter";
-import { plainTheme } from "../src/ui/theme";
+import { createReporter, silentReporter, progressDetail, progressBar } from "../src/ui/reporter";
+import { plainTheme, resolveTheme } from "../src/ui/theme";
+
+// What a terminal gets, with colour off so the strings stay readable in an assertion.
+const railTheme = resolveTheme({ isTTY: true, env: { NO_COLOR: "1" } });
 
 // A fake clock, so elapsed times are asserted rather than tolerated.
 function harness(opts: { isTTY?: boolean; quiet?: boolean } = {}) {
@@ -54,7 +57,59 @@ describe("createReporter", () => {
     const h = harness();
     h.reporter.step("Waiting", "health check").fail();
     expect(h.err()).toContain(plainTheme.s.fail);
-    expect(h.err()).not.toContain(plainTheme.s.ok);
+    expect(h.err()).not.toContain(plainTheme.s.done);
+  });
+
+  // The verb and the label are one sentence now. They used to sit either side of a ten-character
+  // right-aligned gutter, which aligned but did not read.
+  it("reads the verb and the label as one sentence, with no gutter", () => {
+    const h = harness();
+    h.reporter.step("Pulling", "warehousd:dev").done();
+    expect(h.err()).toContain("Pulling warehousd:dev");
+    expect(h.err()).not.toMatch(/ {4}Pulling/);
+  });
+
+  /**
+   * A step that is still running says "Pulling"; the line that survives says "Pulled".
+   *
+   * The settled line is the one left on screen, and a page of present participles reads as a
+   * command that never finished any of them.
+   */
+  it("settles into the past tense when given one", () => {
+    const h = harness();
+    h.reporter.step("Starting", "the server", "Server started").done(":8722");
+    expect(h.err()).toContain("Server started — :8722");
+    expect(h.err()).not.toContain("Starting the server");
+  });
+
+  it("puts the glyph in the rail column on a terminal", () => {
+    const err: string[] = [];
+    const reporter = createReporter({
+      writeErr: (s) => err.push(s),
+      writeOut: () => {},
+      theme: railTheme,
+      isTTY: false,
+      now: () => 0,
+    });
+    reporter.step("Checking", "Docker", "Checked Docker").done("version 27.0.0");
+    expect(err.join("")).toContain(`${railTheme.s.done}  Checked Docker — version 27.0.0`);
+  });
+
+  it("hangs a note, a warning and a failure from the rail", () => {
+    const err: string[] = [];
+    const reporter = createReporter({
+      writeErr: (s) => err.push(s),
+      writeOut: () => {},
+      theme: railTheme,
+      isTTY: false,
+      now: () => 0,
+    });
+    reporter.note("a note");
+    reporter.warn("a warning");
+    reporter.fail("a failure");
+    expect(err.join("")).toContain(`${railTheme.s.bar}  a note`);
+    expect(err.join("")).toContain(`${railTheme.s.warn}  a warning`);
+    expect(err.join("")).toContain(`${railTheme.s.fail}  a failure`);
   });
 
   it("settles only once, so a done() after a fail() cannot overwrite it", () => {
@@ -207,6 +262,79 @@ describe("StepHandle.update", () => {
   });
 });
 
+// Determinate work — an image pull, an import, an embedding run — knows its total, and a spinner
+// is actively unhelpful there: "52%" answers the question it cannot.
+describe("StepHandle.progress", () => {
+  it("draws the bar into the live line on a terminal", () => {
+    const err: string[] = [];
+    const reporter = createReporter({
+      writeErr: (s) => err.push(s),
+      writeOut: () => {},
+      theme: railTheme,
+      isTTY: true,
+      now: () => 1000,
+    });
+    const step = reporter.step("Pulling", "pgvector/pgvector:pg16");
+    step.progress(52, 100);
+    expect(err.join("")).toContain("52%");
+    expect(err.join("")).toContain("█");
+    step.done();
+  });
+
+  /**
+   * Off a TTY it is as silent as `update()`, and for the same reason.
+   *
+   * A bar redrawn into a CI log ten times a second is thousands of lines of Christmas tree, and
+   * the e2e suite reads that pipe and asserts what is in it. The settled line still prints.
+   */
+  it("emits nothing at all off a TTY", () => {
+    const h = harness({ isTTY: false });
+    const step = h.reporter.step("Pulling", "an image");
+    for (let i = 0; i <= 100; i++) {
+      h.advance(200);
+      step.progress(i, 100);
+    }
+    expect(h.err()).toBe("");
+    step.done();
+    expect(h.err()).toContain("Pulling an image");
+  });
+
+  it("carries the phase label where there is one", () => {
+    const err: string[] = [];
+    const reporter = createReporter({
+      writeErr: (s) => err.push(s),
+      writeOut: () => {},
+      theme: railTheme,
+      isTTY: true,
+      now: () => 1000,
+    });
+    reporter.step("Indexing", "docs").progress(3, 20, "pruning");
+    expect(err.join("")).toContain("pruning");
+  });
+});
+
+describe("progressBar", () => {
+  it("fills in proportion, in twenty cells", () => {
+    expect(progressBar(0, 100, railTheme)).toContain("░".repeat(20));
+    expect(progressBar(100, 100, railTheme)).toContain("█".repeat(20));
+    expect(progressBar(50, 100, railTheme)).toContain(`${"█".repeat(10)}${"░".repeat(10)}`);
+  });
+
+  it("says the percentage beside it", () => {
+    expect(progressBar(52, 100, railTheme)).toContain("52%");
+  });
+
+  // Nothing to draw a bar into off a terminal, and a row of blocks in a log file is noise.
+  it("is a bare percentage where there is no terminal", () => {
+    expect(progressBar(52, 100, plainTheme)).toBe("52%");
+  });
+
+  it("clamps rather than overflowing on a total that was wrong", () => {
+    expect(progressBar(150, 100, railTheme)).toContain("100%");
+    expect(progressBar(1, 0, railTheme)).toBe("100%");
+  });
+});
+
 describe("progressDetail", () => {
   it("renders count, total, elapsed and an ETA", () => {
     // 5,111 items left at 1,240 per 38s → about 157 seconds.
@@ -248,8 +376,8 @@ describe("plan", () => {
     reporter.step("Creating", "one").done();
     reporter.step("Creating", "two").done();
     const out = lines.join("");
-    expect(out).toContain("[1/3] one");
-    expect(out).toContain("[2/3] two");
+    expect(out).toContain("[1/3]  Creating one");
+    expect(out).toContain("[2/3]  Creating two");
   });
 
   // Every command that has not opted in must look exactly as it did before.
@@ -261,11 +389,11 @@ describe("plan", () => {
 
   // Padded to the width of the total, so the labels stay on one column — the same reason the verb
   // sits in a fixed gutter.
-  it("pads the counter so the labels stay aligned", () => {
+  it("pads the counter so the sentences stay aligned", () => {
     const { reporter, lines } = capture(false);
     reporter.plan(10);
     reporter.step("Creating", "one").done();
-    expect(lines.join("")).toContain("[ 1/10] one");
+    expect(lines.join("")).toContain("[ 1/10]  Creating one");
   });
 
   it("resets on a second plan, for a command with two phases", () => {
@@ -274,6 +402,6 @@ describe("plan", () => {
     reporter.step("Creating", "one").done();
     reporter.plan(2);
     reporter.step("Creating", "two").done();
-    expect(lines.join("")).toContain("[1/2] two");
+    expect(lines.join("")).toContain("[1/2]  Creating two");
   });
 });

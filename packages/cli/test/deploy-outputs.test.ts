@@ -179,7 +179,7 @@ describe("formatDeployOutputs", () => {
       },
     );
     expect(compose).toContain("the `db` service");
-    expect(compose).toContain("warehousd deployed to Self-hosted (Docker Compose)");
+    expect(compose).toContain("warehousd is live on Self-hosted (Docker Compose)");
     expect(compose).toContain("start it yourself");
     expect(compose).not.toContain("fly postgres connect");
   });

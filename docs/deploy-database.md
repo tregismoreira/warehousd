@@ -70,11 +70,11 @@ Not much, but the list is not negotiable — every item is load-bearing for an i
 `warehousd deploy` checks all of this before it builds an image, as `db-*` lines in the pre-flight output:
 
 ```
-✓ db-reachable        connected to db.abcdefghij.supabase.co:5432
-✓ db-can-create-role  postgres may create roles
-✓ db-extensions       vector, pgcrypto available on this server
-✓ db-search-path      pgcrypto in "extensions" — reachable, or grantable by this role
-✓ db-provider         Supabase on port 5432 — session pooler or direct
+◇  db-reachable        connected to db.abcdefghij.supabase.co:5432
+◇  db-can-create-role  postgres may create roles
+◇  db-extensions       vector, pgcrypto available on this server
+◇  db-search-path      pgcrypto in "extensions" — reachable, or grantable by this role
+◇  db-provider         Supabase on port 5432 — session pooler or direct
 ```
 
 These run only when `database.url` is set. Under `managed: true` there is no database yet to ask. `warehousd doctor --deploy` runs the same lines without deploying anything.

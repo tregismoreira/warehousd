@@ -1,6 +1,14 @@
 import type { Theme } from "./theme";
+import { frameOpen, rail } from "./frame";
 
-// The greeting `init`, `start` and `restart` open with.
+// The frame `init` opens on: a greeting, what the product is, and what the next two minutes are
+// going to consist of.
+//
+// It used to be a banner that `init`, `start` and `restart` all printed, floating above the wizard
+// with a blank line between them — so the first thing a new user saw was a greeting attached to
+// nothing, and then a separate program's prompts. It is the top of the frame now, and the wizard's
+// own rail continues straight down from it. `start` and `restart` open on their own command name
+// instead: they have a beginning, but not a welcome.
 //
 // Pure, like the rest of this directory: it takes a Theme and a column count and returns a string,
 // so what the terminal shows can be asserted without a terminal. Nothing here reads `process`.
@@ -14,10 +22,8 @@ import type { Theme } from "./theme";
 // **Nothing here is drawn.** There was an ASCII wordmark, and then a mark transcribed from
 // `.github/assets/banner.svg`, and both were worse than the words. The reason is arithmetic: a
 // terminal cell is about one unit wide and two tall, so a letter stroke one character by one row
-// renders at 1×2 and every glyph comes out stretched — at the size nine letters have to fit into,
-// `a`, `o` and `e` become the same shape. Half-blocks buy the vertical resolution back and fix the
-// mark's proportions, but a four-square stack beside a bar is a logo that needs its own legend at
-// 12 pixels. Two lines of type say more, in less room, at every width.
+// renders at 1×2 and every glyph comes out stretched. Two lines of type say more, in less room, at
+// every width.
 
 const GREETING = "Welcome to ";
 const NAME = "warehousd";
@@ -30,22 +36,33 @@ const NAME = "warehousd";
  */
 const BLURB = "All your documents and datasets in one place, safely queryable by AI assistants.";
 
-const INDENT = "  ";
+/**
+ * What the wizard is about to do, where the answers go, and how to leave.
+ *
+ * Atlassian's ninth principle — provide an easy way out — and the answer to the question a first
+ * run actually raises, which is not "what is warehousd" but "is this about to write something".
+ */
+const WHAT_HAPPENS = [
+  "The steps below set up this folder as a project. Answers are written to warehousd.yml — you can change any of them there later.",
+  "Ctrl+C quits at any point; nothing is written until the end.",
+];
 
-const GREETING_COLUMNS = INDENT.length + GREETING.length + NAME.length;
-const BLURB_COLUMNS = INDENT.length + BLURB.length;
+/** The rail eats three columns, and prose past this is harder to read, not easier. */
+const MAX_TEXT_COLUMNS = 72;
+const RAIL_COLUMNS = 3;
 
 /**
  * What to assume when the terminal will not say how wide it is.
  *
- * Wide enough for both lines, on the same principle as the zero-width case below: an unsized
- * terminal is an unknown one, not a narrow one, and guessing narrow silently drops content in
- * exactly the environments nobody thinks to check. 80 would be a guess that loses the second line
- * by two characters.
+ * An unsized terminal is an unknown one, not a narrow one, and guessing narrow silently drops
+ * content in exactly the environments nobody thinks to check.
  */
-const ASSUMED_COLUMNS = Math.max(80, BLURB_COLUMNS);
+const ASSUMED_COLUMNS = 80;
 
-export type BannerInput = {
+/** Below this there is no room for a frame at all, and the greeting alone is the whole intro. */
+const MIN_COLUMNS = RAIL_COLUMNS + GREETING.length + NAME.length;
+
+export type IntroInput = {
   theme: Theme;
   isTTY: boolean;
   quiet?: boolean | undefined;
@@ -55,7 +72,7 @@ export type BannerInput = {
 };
 
 /**
- * The greeting, or `null` where it does not belong.
+ * The opening of the `init` frame, or `null` where it does not belong.
  *
  * `null` covers three cases and one of them is load-bearing. Under `--quiet` and `--json` it is
  * noise the caller has asked not to receive. Off a TTY it is worse than noise: see the header.
@@ -63,7 +80,7 @@ export type BannerInput = {
  * No blank line of its own at either end. The caller owns the spacing, because what sits above
  * this varies — the release-candidate notice, or nothing once that retires at 1.0.
  */
-export function brandBanner(input: BannerInput): string | null {
+export function initIntro(input: IntroInput): string | null {
   if (!input.isTTY || input.quiet === true || input.json === true) return null;
 
   // `??` is not enough: `process.stderr.columns` is **0**, not undefined, on a pty that has not
@@ -72,12 +89,37 @@ export function brandBanner(input: BannerInput): string | null {
   // suppressed the banner everywhere it was hardest to notice.
   const columns =
     input.columns !== undefined && input.columns > 0 ? input.columns : ASSUMED_COLUMNS;
-  if (columns < GREETING_COLUMNS) return null;
+  if (columns < MIN_COLUMNS) return null;
 
   const { theme } = input;
-  const lines = [`${INDENT}${theme.c.bold(`${GREETING}${theme.c.accent(NAME)}`)}`];
-  // Dropped rather than wrapped: a sentence rewrapped by the terminal lands differently on every
-  // machine, which is the same reason the release-candidate notice breaks at its own sentence.
-  if (columns >= BLURB_COLUMNS) lines.push(`${INDENT}${theme.c.dim(BLURB)}`);
-  return lines.join("\n");
+  const width = Math.min(MAX_TEXT_COLUMNS, columns - RAIL_COLUMNS);
+  const open = frameOpen(`${GREETING}${theme.c.accent(NAME)}`, theme);
+
+  // Wrapped rather than dropped, unlike the banner this replaces: inside a frame the text has a
+  // known width to wrap to, so it lands the same way on every terminal instead of being at the
+  // mercy of one.
+  const body = [
+    "",
+    ...wrap(BLURB, width).map((l) => theme.c.dim(l)),
+    "",
+    ...WHAT_HAPPENS.flatMap((p) => wrap(p, width)).map((l) => theme.c.dim(l)),
+  ];
+
+  return [open, rail(body, theme)].filter((s): s is string => s !== null).join("\n");
+}
+
+/** Greedy word wrap. Long enough for two sentences, and nothing here has a word past 20 columns. */
+export function wrap(text: string, width: number): string[] {
+  const out: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line === "") line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else {
+      out.push(line);
+      line = word;
+    }
+  }
+  if (line) out.push(line);
+  return out;
 }

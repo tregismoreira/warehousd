@@ -81,10 +81,13 @@ const DEFAULTS: InitAnswers = {
   dbOrg: null,
 };
 
+// The wizard's two section headings go to stdout. Swallowed here so the suite's output stays clean.
+const SILENT = { say: () => {} };
+
 describe("promptInit validation", () => {
   /** Pull the `validate` callback clack was handed, so its branches can be exercised directly. */
   async function validatorFor(callIndex: number) {
-    await promptInit(DEFAULTS);
+    await promptInit(DEFAULTS, SILENT);
     const call = vi.mocked(clack.text).mock.calls[callIndex]?.[0] as {
       validate?: (v: string) => string | undefined;
     };
@@ -116,7 +119,7 @@ describe("promptInit validation", () => {
     // which is neither question's value.
     vi.mocked(clack.select).mockResolvedValueOnce("guided").mockResolvedValueOnce("docker");
     vi.mocked(clack.text).mockResolvedValueOnce("").mockResolvedValueOnce("");
-    const answers = await promptInit({ ...DEFAULTS, project: "fallback", port: 9999 });
+    const answers = await promptInit({ ...DEFAULTS, project: "fallback", port: 9999 }, SILENT);
     expect(answers).toEqual({
       project: "fallback",
       port: 9999,
@@ -324,7 +327,7 @@ describe("render branches", () => {
       },
       theme: plainTheme,
     });
-    expect(s).toContain("warehousd deployed to Self-hosted (Docker Compose)");
+    expect(s).toContain("warehousd is live on Self-hosted (Docker Compose)");
     expect(s).toContain("the `db` service");
     expect(s).not.toMatch(/fly/i);
   });
@@ -347,7 +350,7 @@ describe("render branches", () => {
       },
       theme: plainTheme,
     });
-    const first = s.split("\n").find((l) => l.includes("first"));
+    const first = s.split("\n").find((l) => l.endsWith("first"));
     const masked = s.split("\n").find((l) => l.includes("Secrets are masked"));
     expect(first?.indexOf("first")).toBe(masked?.indexOf("Secrets"));
   });

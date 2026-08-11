@@ -4,7 +4,14 @@ import { readState, readOutputs } from "./../state";
 // just has to be asked for, so a screen share or a scrollback buffer is not the thing that hands
 // it over.
 
-export type SecretEntry = { label: string; value: string; secret: boolean };
+/**
+ * `kind` is which concept icon the label carries, not a second copy of `secret`.
+ *
+ * Three of these are credentials for a client, two are the admin's login and one is the database's
+ * own password, and the icon is what makes the three groups visible without three headings.
+ */
+export type SecretKind = "secret" | "login" | "database";
+export type SecretEntry = { label: string; value: string; secret: boolean; kind: SecretKind };
 
 export function collectSecrets(dir: string): SecretEntry[] {
   const state = readState(dir);
@@ -18,18 +25,44 @@ export function collectSecrets(dir: string): SecretEntry[] {
 
   const entries: SecretEntry[] = [];
   if (outputs) {
-    entries.push({ label: "Database URL", value: outputs.databaseUrl, secret: true });
-    entries.push({ label: "Dev client ID", value: outputs.devClient.clientId, secret: false });
+    entries.push({
+      label: "Database URL",
+      value: outputs.databaseUrl,
+      secret: true,
+      kind: "secret",
+    });
+    entries.push({
+      label: "Dev client ID",
+      value: outputs.devClient.clientId,
+      secret: false,
+      kind: "secret",
+    });
     entries.push({
       label: "Dev client secret",
       value: outputs.devClient.clientSecret,
       secret: true,
+      kind: "secret",
     });
   }
   if (state) {
-    entries.push({ label: "Admin email", value: "admin@warehousd.local", secret: false });
-    entries.push({ label: "Admin password", value: state.adminPassword, secret: true });
-    entries.push({ label: "Database password", value: state.dbPassword, secret: true });
+    entries.push({
+      label: "Admin email",
+      value: "admin@warehousd.local",
+      secret: false,
+      kind: "login",
+    });
+    entries.push({
+      label: "Admin password",
+      value: state.adminPassword,
+      secret: true,
+      kind: "login",
+    });
+    entries.push({
+      label: "Database password",
+      value: state.dbPassword,
+      secret: true,
+      kind: "database",
+    });
   }
   return entries;
 }

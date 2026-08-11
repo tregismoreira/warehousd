@@ -125,7 +125,11 @@ export async function runImportValidate(
 
   if (!opts.live) {
     const rows = rowsFrom(payload);
-    const step = reporter.step("validating", `${basename(file)} → ${collection}`);
+    const step = reporter.step(
+      "Validating",
+      `${basename(file)} against ${collection}`,
+      `Validated ${basename(file)} against ${collection}`,
+    );
     const r = validateImportRows(cfg, collection, rows, { mode });
     if (r.ok) {
       step.done(`${rows.length} rows`);
@@ -154,9 +158,10 @@ export async function runImportValidate(
   try {
     const t = trackStepWith<ImportProgress>(
       reporter,
-      "validating",
-      `${basename(file)} → ${collection} (live)`,
+      "Validating",
+      `${basename(file)} against ${collection}, live`,
       (p) => ({ done: p.done, total: p.total, label: p.phase }),
+      `Validated ${basename(file)} against ${collection}, live`,
     );
     const r = await importCollection(pools, cfg, "cli", collection, payload, {
       mode,
@@ -191,17 +196,28 @@ export async function runImportValidate(
   }
 }
 
+/** The headline a validate run gets, with no glyph of its own — the frame supplies that. */
+export function validateHeadline(r: ValidateResult): string {
+  const how = r.layer === "live" ? "live, a dry run against the database" : "offline";
+  return r.ok
+    ? `Validated ${r.rows.toLocaleString("en-US")} rows against ${r.collection} — ${how}`
+    : `${r.collection} refused the file`;
+}
+
+/**
+ * What the run found, as rail lines under the headline.
+ *
+ * The glyph moved out to the caller, which knows whether it is drawing a frame; what stayed is the
+ * one thing this has always had to say, which is *which layer ran*. The static layer has a
+ * false-failure mode a reader who does not know that would go and chase.
+ */
 export function formatValidateResult(r: ValidateResult): string {
   const layer = r.layer === "live" ? "live (dry run against the database)" : "static (no database)";
-  if (r.ok) {
-    const lines = [`✓ ${r.rows.toLocaleString("en-US")} rows are valid for ${r.collection}`];
-    lines.push(`  checked: ${layer}`);
-    if (r.blindSpot) lines.push(`  not checked: ${r.blindSpot}`);
-    return lines.join("\n");
-  }
-  const lines = [r.summary ? formatImportReport(r.summary) : `✗ ${r.collection}: import refused`];
-  lines.push("", `  checked: ${layer}`);
-  if (r.blindSpot) lines.push(`  not checked: ${r.blindSpot}`);
+  const lines = r.ok
+    ? []
+    : [r.summary ? formatImportReport(r.summary) : `${r.collection}: import refused`, ""];
+  lines.push(`checked: ${layer}`);
+  if (r.blindSpot) lines.push(`not checked: ${r.blindSpot}`);
   return lines.join("\n");
 }
 
@@ -227,9 +243,10 @@ export async function runImportRun(
   try {
     const t = trackStepWith<ImportProgress>(
       reporter,
-      opts.dryRun ? "previewing" : "importing",
-      `${basename(file)} → ${collection}`,
+      opts.dryRun ? "Previewing" : "Loading",
+      `${basename(file)} into ${collection}`,
       (p) => ({ done: p.done, total: p.total, label: p.phase }),
+      opts.dryRun ? `Previewed ${basename(file)}` : `Loaded ${basename(file)} into ${collection}`,
     );
     const r = await importCollection(pools, cfg, "cli", collection, payload, {
       mode: opts.mode ?? "append",
@@ -290,49 +307,77 @@ export function defaultCollectionName(file: string): string {
     .toLowerCase();
 }
 
+/**
+ * The proposal itself, and nothing else. **stdout**, because people pipe it into warehousd.yml.
+ *
+ * Everything this run has to *say* about the proposal — which fields it closed and why, which
+ * headers matched nothing — is `mapNotes` below, and that goes on stderr inside the frame. They
+ * used to be one string, so `warehousd import map people.csv >> warehousd.yml` appended a page of
+ * English to a YAML file.
+ */
 export function formatMapResult(r: MapResult): string {
-  const out: string[] = [];
   if (r.kind === "collection") {
-    const closed = r.inferred.fields.filter((f) => f.closedBecause);
-    out.push(
+    return [
       `# Proposed from ${r.inferred.sampled} row(s). This is a STARTING POINT — read every line.`,
       `# Nothing has been written. Paste this into warehousd.yml, correct it, then \`warehousd apply\`.`,
       "",
       r.yaml,
-    );
+    ].join("\n");
+  }
+  if (!r.yaml) return "";
+  return [
+    `# ${Object.keys(r.mapping.columns).length} header(s) need mapping. Paste into warehousd.yml, then \`warehousd apply\`.`,
+    "",
+    r.yaml,
+  ].join("\n");
+}
+
+/** The headline for a map run, with no glyph of its own. */
+export function mapHeadline(r: MapResult): string {
+  if (r.kind === "collection") {
+    return `Read ${r.inferred.sampled.toLocaleString("en-US")} rows — proposing a collections block`;
+  }
+  const n = Object.keys(r.mapping.columns).length;
+  return n === 0
+    ? `Every header already matches a field on ${r.mapping.collection} — no mapping needed`
+    : `Read ${r.mapping.collection} — ${n} header(s) need mapping`;
+}
+
+/** What the proposal glossed over, as rail lines. Empty when there is nothing to say. */
+export function mapNotes(r: MapResult): string[] {
+  const out: string[] = [];
+  if (r.kind === "collection") {
+    const closed = r.inferred.fields.filter((f) => f.closedBecause);
     if (closed.length) {
-      out.push("", `Closed by default (${closed.length}):`);
-      for (const f of closed) out.push(`  ${f.field.padEnd(24)} ${f.closedBecause}`);
+      const width = Math.max(...closed.map((f) => f.field.length));
       out.push(
+        `Closed by default (${closed.length}):`,
+        ...closed.map((f) => `  ${f.field.padEnd(width)}  ${f.closedBecause}`),
         "",
-        "  Deny-by-default is a guess about the name, not a reading of the data. Open what",
-        "  should be open, and check what it left open.",
+        "Deny-by-default is a guess about the name, not a reading of the data. Open what",
+        "should be open, and check what it left open.",
       );
     }
-    return out.join("\n");
+    return out;
   }
 
   const m = r.mapping;
-  if (r.yaml) {
-    out.push(
-      `# ${Object.keys(m.columns).length} header(s) need mapping. Paste into warehousd.yml, then \`warehousd apply\`.`,
-      "",
-      r.yaml,
-    );
-  } else {
-    out.push(`Every header already matches a field on ${m.collection}. No mapping needed.`);
-  }
   if (m.unmatchedHeaders.length) {
-    out.push("", `Headers with no field (${m.unmatchedHeaders.length}):`);
-    for (const h of m.unmatchedHeaders) out.push(`  ${h}`);
-    out.push("  Add the field to the collection, or drop the column from the sheet.");
+    out.push(
+      `Headers with no field (${m.unmatchedHeaders.length}):`,
+      ...m.unmatchedHeaders.map((h) => `  ${h}`),
+      "Add the field to the collection, or drop the column from the sheet.",
+    );
   }
   if (m.missingRequired.length) {
-    out.push("", `Required fields with no header (${m.missingRequired.length}):`);
-    for (const f of m.missingRequired) out.push(`  ${f}`);
-    out.push("  An `append` will refuse the file until each has a column, or is `nullable: true`.");
+    if (out.length) out.push("");
+    out.push(
+      `Required fields with no header (${m.missingRequired.length}):`,
+      ...m.missingRequired.map((f) => `  ${f}`),
+      "An `append` will refuse the file until each has a column, or is `nullable: true`.",
+    );
   }
-  return out.join("\n");
+  return out;
 }
 
 /** Reserved for the taxonomy pre-resolution `--live` needs; kept here so both layers agree. */

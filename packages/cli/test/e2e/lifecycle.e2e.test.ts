@@ -320,9 +320,11 @@ taxonomies:
     const stderr = stack.firstStartStderr ?? "";
     const stdout = stack.firstStartStdout ?? "";
     // Progress is narration; the panel is the product. `start 2>/dev/null` must still be useful.
-    expect(stderr).toContain("Starting");
-    expect(stdout).toContain("warehousd is running");
+    expect(stderr).toContain("Server started");
+    expect(stdout).toContain("Your data layer is running");
     expect(stdout).toContain(stack.mcpUrl);
+    // ...and the summary now says what to do with it, which is the whole point of the redesign.
+    expect(stdout).toContain("Next steps");
   });
 
   it("Step 3d: the printed summary carries no secret in plaintext", () => {

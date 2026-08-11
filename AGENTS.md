@@ -60,6 +60,7 @@ Tests live in a `test/` directory beside the code, not next to the source file.
 | ----------------------------------------- | ------------------------------------------------ | --------------------------- |
 | `packages/*/test/`, `apps/web/test/`      | `*.test.ts`, `*.integration.test.ts`             | `pnpm test` (parallel pass) |
 | `packages/broker/test/`, `apps/web/test/` | the files in `SERIAL_TESTS` (`vitest.config.ts`) | `pnpm test` (serial pass)   |
+| `packages/cli/test/e2e/surface…`          | `surface.e2e.test.ts`                            | `pnpm test:e2e:cli:surface` |
 | `packages/cli/test/e2e/`                  | `*.e2e.test.ts`                                  | `pnpm test:e2e:cli`         |
 | `apps/web/e2e/`                           | `*.spec.ts`                                      | `pnpm e2e`                  |
 
