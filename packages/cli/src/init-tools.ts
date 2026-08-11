@@ -1,4 +1,4 @@
-import { checkTool, offerInstall, type CliTool } from "./cli-tools";
+import { checkTool, offerInstall, type CliTool, type ToolProbe } from "./cli-tools";
 import { runtimeFor } from "./containers/runtimes";
 import { hostFor } from "./db/hosts";
 import { NonInteractiveError, type InitAnswers } from "./ui/prompt";
@@ -26,13 +26,27 @@ import type { Reporter } from "./ui/reporter";
  */
 export async function ensureToolsFor(
   answers: InitAnswers,
-  opts: { reporter: Reporter; installMissing?: boolean | undefined; interactive?: boolean },
+  opts: {
+    reporter: Reporter;
+    installMissing?: boolean | undefined;
+    interactive?: boolean;
+    /**
+     * The platform and PATH to answer questions about, defaulting to this machine's. Threaded
+     * through because both `checkTool` and `offerInstall` already take one and this was the only
+     * layer that did not: without it the outcome depends on what the *host* has installed, so the
+     * tests could only assert whichever branch the developer's own machine happened to take. That
+     * is how the "warns rather than aborting" test came to pass on macOS and fail on every Linux
+     * CI runner — Docker installs via `brew` or `winget` and neither exists there, so the message
+     * is the manual-instructions one rather than the `--install-missing` one.
+     */
+    probe?: ToolProbe | undefined;
+  },
 ): Promise<void> {
   const needed = requiredTools(answers);
   if (needed.length === 0) return;
 
   for (const tool of needed) {
-    const check = checkTool(tool);
+    const check = checkTool(tool, opts.probe);
     if (check.ok) {
       opts.reporter.step("checked", tool.label).done(check.detail);
       continue;
@@ -50,6 +64,7 @@ export async function ensureToolsFor(
       const outcome = await offerInstall(tool, {
         ...(opts.installMissing !== undefined ? { assumeYes: opts.installMissing } : {}),
         ...(opts.interactive !== undefined ? { interactive: opts.interactive } : {}),
+        ...(opts.probe !== undefined ? { probe: opts.probe } : {}),
         say: (msg) => opts.reporter.note(msg),
       });
       if (outcome.ok) {
