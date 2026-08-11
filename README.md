@@ -184,7 +184,7 @@ The same broker and the same grants over `/v1`, for clients that are not MCP —
 
 Every command takes `--json`, `-q/--quiet`, `--no-color` and `--verbose`. Progress goes to stderr and results to stdout, so `warehousd status --json | jq` works and `warehousd start 2>/dev/null` prints just the summary. Credentials are masked in the human output; `--json` does not mask them.
 
-Bring your own Postgres by setting `database.url`. After the first image pull, `start` works with no network at all — synthetic generation uses wordlists, not a model.
+Bring your own Postgres by setting `database.url`, or run somebody else's local stack with `database.provider: supabase`. After the first image pull, `start` works with no network at all — synthetic generation uses wordlists, not a model.
 
 Full reference, flags and the outputs contract: [cli.md](docs/cli.md) · [migrations.md](docs/migrations.md).
 
@@ -218,7 +218,7 @@ Consumers never need this. To work on warehousd itself, [CONTRIBUTING.md](CONTRI
 | [docs/rest-api.md](docs/rest-api.md) | `/v1` endpoints, auth flows, status codes |
 | [docs/migrations.md](docs/migrations.md) | Schema changes `apply` will not make on its own |
 | [docs/deploy-fly.md](docs/deploy-fly.md) · [railway](docs/deploy-railway.md) · [compose](docs/deploy-compose.md) | End-to-end deployment runbooks |
-| [docs/deploy-database.md](docs/deploy-database.md) | Pointing a deployment at Supabase, Neon, Railway or your own Postgres |
+| [docs/deploy-database.md](docs/deploy-database.md) | Having warehousd create the database on Supabase or Neon, or pointing a deployment at one you already run |
 | [examples/harbor/README.md](examples/harbor/README.md) | The demo project end to end — collections, personas, the grant arc |
 | [examples/harbor/SCENARIOS.md](examples/harbor/SCENARIOS.md) | 20 things to try against the demo, simplest first |
 | [SECURITY.md](SECURITY.md) | Reporting a vulnerability, deployment expectations, known limitations |
