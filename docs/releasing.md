@@ -11,7 +11,7 @@ A GitHub Release is published alongside them, carrying the generated notes and t
 
 ## Versioning policy
 
-warehousd follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). One version number covers both artifacts, because they are pulled as a pair.
+Versioning follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). One version number covers both artifacts, because they are pulled as a pair.
 
 **The public surface** — what a version number makes a promise about:
 

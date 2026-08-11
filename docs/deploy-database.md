@@ -8,7 +8,7 @@
 | `managed: true` + `provider:` | warehousd, through that provider's own CLI. |
 | `url:` | Nobody. You already have one. |
 
-The second is the one to reach for when the database should not live on the platform running the container — Supabase or Neon behind a Fly app, say. warehousd creates the project, records what it made, connects to it, and deletes it again on `--destroy`:
+The second is the one to reach for when the database should not live on the platform running the container — Supabase or Neon behind a Fly app, say. Here warehousd creates the project, records what it made, connects to it, and deletes it again on `--destroy`:
 
 ```yaml
 deploy:
@@ -47,7 +47,7 @@ warehousd deploy
 
 Three things are worth knowing before the first run.
 
-**It costs money.** A Supabase or Neon project on a paid plan is billed from the moment it exists, and on a free plan it counts against the project limit. warehousd names what it created in the deploy summary.
+**It costs money.** A Supabase or Neon project on a paid plan is billed from the moment it exists, and on a free plan it counts against the project limit. The deploy summary names what warehousd created.
 
 **The record lives in `.warehousd/state.json`.** That file — mode `0600`, already gitignored — is how a second `warehousd deploy` knows to reconnect rather than create a second project. Fly and Railway get this for free, because the target's own project is the identity; a provider host has none, so losing the state file means the next deploy creates another database. For Supabase it also holds the **only** copy of the database password: `supabase projects create --db-password` is the one place that value can be set, and nothing reads it back.
 
@@ -95,7 +95,7 @@ That is the run where the answer matters. After the first boot, `ensureExtension
 
 On a local Postgres `create extension` puts everything in `public`, which every role already reaches. A hosted Postgres often does not: Supabase ships `pgcrypto` preinstalled in a schema called `extensions`, which makes `create extension if not exists pgcrypto` a silent no-op.
 
-The failure mode is the bad one — `apply` succeeds, boot succeeds, and the first masked read fails at request time with `internal_error`. warehousd handles this at apply time: it reads back where the extensions actually landed, grants the warehousd roles usage on those schemas, and puts them on each role's `search_path` for that database only.
+The failure mode is the bad one — `apply` succeeds, boot succeeds, and the first masked read fails at request time with `internal_error`. So warehousd handles this at apply time: it reads back where the extensions actually landed, grants the warehousd roles usage on those schemas, and puts them on each role's `search_path` for that database only.
 
 That needs the connecting role to either already have the grant or be able to make it — which is what `db-search-path` checks for. If it refuses, connect as the role that owns the schema, or grant usage by hand and deploy again.
 
@@ -137,7 +137,7 @@ When you paste one yourself, the rule is the same:
 
 `warehousd deploy` refuses `:6543` outright. The reason is that warehousd sets three connection startup parameters — `search_path` for the auth schema, and `statement_timeout` / `idle_in_transaction_session_timeout` as the ceilings on a pathological query — and the transaction pooler does not honour them. Those timeouts are deliberately pool-level rather than per-request `set` statements: a ceiling you can forget to apply is not a ceiling. The transaction-scoped `set_config` the broker uses for org isolation *would* have been pooler-safe, so this is a single blocker rather than a fundamental one, and it may be revisited.
 
-The other Supabase-specific thing is the username. Through Supavisor one pooler fronts every project in a region, and the username is how it knows which: `postgres.<project_ref>`. So "the same database, as `warehousd_dev`" is spelled `warehousd_dev.<project_ref>`, not `warehousd_dev` — and a bare role name authenticates as nobody. warehousd derives this for you from the URL you give it; the `supabase` provider is what makes it happen.
+The other Supabase-specific thing is the username. Through Supavisor one pooler fronts every project in a region, and the username is how it knows which: `postgres.<project_ref>`. So "the same database, as `warehousd_dev`" is spelled `warehousd_dev.<project_ref>`, not `warehousd_dev` — and a bare role name authenticates as nobody. All of which warehousd derives for you from the URL you give it; the `supabase` provider is what makes it happen.
 
 Connect as the project's `postgres` role. It has `CREATEROLE`, and it owns the `extensions` schema, which is what lets the apply grant usage on it.
 

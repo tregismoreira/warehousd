@@ -1,6 +1,6 @@
 # Configure SSO (admin runbook)
 
-Register an identity provider so members sign in with their company account instead of a local warehousd password. Requires an `admin` account.
+Register an identity provider so members sign in with their company account instead of a local **warehousd** password. Requires an `admin` account.
 
 This runbook covers OIDC (generic — Okta, Entra ID, Google Workspace, Keycloak, etc.) and SAML. Both are driven through the same admin API; the login page picks the right client-side flow automatically based on the provider's `type`.
 

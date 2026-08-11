@@ -1,6 +1,6 @@
 # Configuration reference
 
-`warehousd.yml` is the source of truth. It lives at the root of the project that *uses* warehousd — not inside warehousd's own repo — so governance is reviewed and versioned in the same pull requests as the app it governs.
+`warehousd.yml` is the source of truth. It lives at the root of the project that *uses* **warehousd** — not inside warehousd's own repo — so governance is reviewed and versioned in the same pull requests as the app it governs.
 
 `warehousd init` scaffolds it; `warehousd start` and `warehousd apply` apply it idempotently.
 

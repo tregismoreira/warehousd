@@ -1,6 +1,6 @@
 # Glossary
 
-The words warehousd uses, and the ones it deliberately does not. The core model is one sentence: **a Collection holds Documents; each Document has Fields.**
+The words **warehousd** uses, and the ones it deliberately does not. The core model is one sentence: **a Collection holds Documents; each Document has Fields.**
 
 | Term | Meaning |
 |---|---|
@@ -23,6 +23,20 @@ The words warehousd uses, and the ones it deliberately does not. The core model 
 | **Principal** | Who a caller *is*, for an ACL: `user:<id>` or `group:<name>`. The namespace is required — without it a group named the same as a user id would grant that user's access. |
 | **Group** | A named set of users, held in warehousd's own `app.user_groups` and derived from the caller's id on every request. Synced from an IdP's group claim on login, or pinned by an admin. Never read from a token. |
 | **Row** | Internal only: the SQL tuple the broker materializes, 1:1 with a document. It lives in the query-builder and DDL layers and never appears in a public contract. |
+
+## The name
+
+**The name is lowercase — warehousd, always and everywhere, including where a sentence would capitalise it. So don't start a sentence with it.**
+
+The name is not only a brand: it is the command you type (`warehousd start`), the package you install (`warehousd` on npm), the file you commit (`warehousd.yml`), the directory it writes (`.warehousd/`) and the prefix on every environment variable (`WAREHOUSD_*`, uppercase only because shells are). Capitalising it in prose forks the product from the thing that is typed, and a reader who meets "Warehousd" in a paragraph and `warehousd` in the next code block has to work out whether they are the same. They are, so it is spelled one way.
+
+The cost of that rule is that a lowercase word opening a sentence reads as a typo. The fix is to write around it — "At 0.1.0-rc.1, warehousd is a release candidate", not "warehousd is at 0.1.0-rc.1" — never to capitalise it.
+
+**Bold it once per document, on the first mention in prose, and never again in that document.** Introducing a term in bold is ordinary editorial practice, and it is what stops a lowercase name from reading as a stray word the first time it appears — after one **warehousd** the reader knows it is a name and every later mention is legible bare. Bolding *every* occurrence is the failure mode to avoid: the name is in nearly every paragraph here, and marking all of them would drain `**bold**` of the emphasis it is doing elsewhere on the same page. Skip the first-mention bold where the heading above already carries the name, or where it would land beside other bold in the same sentence.
+
+Backticks are for the literal string: the command, the package, the file, the env var, the roles (`warehousd_dev`). Bare lowercase is for the product. `warehousd start` is a command; warehousd is what runs.
+
+Identifiers follow their language, not this rule: `WarehousdConfig` is PascalCase because TypeScript types are, and `WAREHOUSD_PROJECT_DIR` is uppercase because environment variables are. Neither is a mention of the name in prose.
 
 ## Words we don't use
 

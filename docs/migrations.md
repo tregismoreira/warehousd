@@ -2,7 +2,7 @@
 
 `warehousd apply` is additive. It creates tables and adds columns, and it never rewrites or drops one. That is what makes it safe to run on every boot — and it is why a change that needs a column rewritten has to be refused rather than guessed at.
 
-This is about **your data**, not warehousd's own schema. warehousd's `app.*` tables are versioned separately and upgrade themselves; nothing here applies to them.
+This is about **your data**, not warehousd's own schema. The `app.*` tables are versioned separately and upgrade themselves; nothing here applies to them.
 
 ## What counts as a breaking change
 
