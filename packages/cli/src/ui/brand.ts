@@ -145,6 +145,8 @@ export function brandBanner(input: BannerInput): string | null {
   const { theme } = input;
   const art = columns >= WIDE_COLUMNS ? wordmark(theme) : compactMark(theme);
   const tagline =
-    columns >= INDENT.length + TAGLINE.length ? `\n${INDENT}${theme.c.dim(TAGLINE)}` : "";
-  return `\n${art}\n${tagline}`;
+    columns >= INDENT.length + TAGLINE.length ? `\n\n${INDENT}${theme.c.dim(TAGLINE)}` : "";
+  // No blank line of its own at either end. The caller owns the spacing, because what sits above
+  // this varies — the release-candidate notice, or nothing once that retires at 1.0.
+  return `${art}${tagline}`;
 }

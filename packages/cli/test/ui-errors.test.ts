@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { explain, formatExplained } from "../src/ui/errors";
+import { plainTheme } from "../src/ui/theme";
 import { DockerError } from "../src/docker";
 
 describe("explain", () => {
@@ -73,10 +74,32 @@ describe("explain", () => {
 
 describe("formatExplained", () => {
   it("separates title and hint with a blank line", () => {
-    expect(formatExplained({ title: "t", hint: "h" })).toBe("t\n\nh");
+    // Indented and marked like every other surface: flush at column 0 a failure read as though
+    // the terminal had emitted it rather than warehousd. The hint aligns under the title's text.
+    expect(formatExplained({ title: "t", hint: "h" })).toBe(`  ${plainTheme.s.fail} t\n\n    h`);
   });
 
   it("is just the title when there is no hint", () => {
-    expect(formatExplained({ title: "t" })).toBe("t");
+    expect(formatExplained({ title: "t" })).toBe(`  ${plainTheme.s.fail} t`);
+  });
+
+  // The rules that keep the driver's own words append them to the title on a second line. Those
+  // have to stay legible: indented to the text column, not left at 0 under an indented first line.
+  it("aligns a multi-line title under its own first line", () => {
+    expect(formatExplained({ title: "first\nsecond" })).toBe(
+      `  ${plainTheme.s.fail} first\n    second`,
+    );
+  });
+
+  // Blank lines belong to the caller, as with the wordmark and the release-candidate notice.
+  it("brings no blank line of its own", () => {
+    const s = formatExplained({ title: "t", hint: "h" });
+    expect(s.startsWith("\n")).toBe(false);
+    expect(s.endsWith("\n")).toBe(false);
+  });
+
+  it("carries no ANSI when there is no terminal behind it", () => {
+    const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`);
+    expect(formatExplained({ title: "t", hint: "h" })).not.toMatch(ansi);
   });
 });

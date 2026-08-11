@@ -101,6 +101,14 @@ describe("brandBanner", () => {
     expect(wide.split("\n").filter((l) => l.includes("██"))).toHaveLength(7);
   });
 
+  // Same contract as rcNotice, for the same reason: the release-candidate notice may or may not be
+  // above this, and only the caller knows. A newline at either end would double up with one of them.
+  it("brings no blank line of its own", () => {
+    const s = brandBanner(tty) ?? "";
+    expect(s.startsWith("\n")).toBe(false);
+    expect(s.endsWith("\n")).toBe(false);
+  });
+
   // docs/glossary.md: the name is lowercase everywhere and never opens a sentence.
   it("does not open the tagline with the name", () => {
     const banner = brandBanner(tty) ?? "";

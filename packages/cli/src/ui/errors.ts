@@ -9,6 +9,8 @@
 // Anything not recognised here keeps its original text. Guessing wrong about an unfamiliar error
 // is worse than passing it through: the reader can search for Docker's words, but not for ours.
 
+import { plainTheme, type Theme } from "./theme";
+
 export type Explained = {
   title: string;
   hint?: string | undefined;
@@ -74,6 +76,31 @@ export function explain(err: unknown): Explained {
   return { title: raw.trim() };
 }
 
-export function formatExplained(e: Explained): string {
-  return e.hint ? `${e.title}\n\n${e.hint}` : e.title;
+/** Matches the two-space indent every panel, progress line and notice in the CLI already uses. */
+const INDENT = "  ";
+/** Continuation lines align under the text, not under the glyph. */
+const CONTINUATION = "    ";
+
+/**
+ * The failure, shaped like everything else the CLI prints.
+ *
+ * It used to be returned flush at column 0, so a failure landed hard against the
+ * release-candidate notice above it and lined up with none of the output around it — a
+ * one-line "No warehousd.yml in /path" read as though the terminal had emitted it rather
+ * than warehousd.
+ *
+ * The glyph and the indent are the whole change; the words are still whatever `explain`
+ * decided, including the driver's own where nothing matched. Blank lines around the block
+ * belong to the caller.
+ */
+export function formatExplained(e: Explained, theme: Theme = plainTheme): string {
+  const title = e.title.split("\n");
+  const lines = title.map((line, i) =>
+    i === 0 ? `${INDENT}${theme.c.red(theme.s.fail)} ${line}` : `${CONTINUATION}${line}`,
+  );
+  if (e.hint) {
+    lines.push("");
+    for (const line of e.hint.split("\n")) lines.push(`${CONTINUATION}${theme.c.dim(line)}`);
+  }
+  return lines.join("\n");
 }

@@ -142,7 +142,9 @@ function banner(g: { theme: Theme; quiet: boolean; json: boolean }): void {
     json: g.json,
     columns: process.stderr.columns,
   });
-  if (art) process.stderr.write(`${art}\n`);
+  // A blank line above and below. `brandBanner` deliberately carries neither, because whether
+  // there is a release-candidate notice sitting above it is not something it can know.
+  if (art) process.stderr.write(`\n${art}\n\n`);
 }
 
 /**
@@ -640,7 +642,9 @@ program
         `${JSON.stringify({ healthy: result.healthy, project: result.project, containers: result.containers, outputs: result.outputs }, null, 2)}\n`,
       );
     } else if (result.containers.length === 0) {
-      process.stdout.write("No containers for this project. Run `warehousd start`.\n");
+      // Indented and spaced like the panel it stands in for. Flush at column 0 it collided with
+      // the release-candidate notice above it and lined up with nothing.
+      process.stdout.write("\n  No containers for this project. Run `warehousd start`.\n\n");
     } else {
       process.stdout.write(
         `${renderStatus({
@@ -826,19 +830,30 @@ if (typeof require !== "undefined" && require.main === module) {
       json: process.argv.includes("--json"),
     }),
   );
-  if (notice) process.stderr.write(`${notice}\n`);
+  // Opened by a blank line so it clears the shell prompt rather than colliding with it. What
+  // follows brings its own top spacing — the wordmark, or a panel, which already opens with one.
+  if (notice) process.stderr.write(`\n${notice}\n`);
 
   // Rejections have to be handled here or not at all: `parseAsync` is the last statement, so an
   // unhandled one printed a stack trace at a user who wanted a message and an exit code.
   program.parseAsync().catch((err: unknown) => {
+    // The same theme the notice above resolved. Built again rather than hoisted because a failure
+    // during `parseAsync` may come from a command that never reached `ui()`.
+    const theme = resolveTheme({
+      isTTY: Boolean(process.stderr.isTTY),
+      env: process.env,
+      noColor: process.argv.includes("--no-color"),
+      json: process.argv.includes("--json"),
+    });
     // A refusal to prompt is already a finished sentence naming the flag to pass; running it
-    // through the Docker translator would only add a hint that does not apply.
+    // through the Docker translator would only add a hint that does not apply. It still gets the
+    // glyph and the indent — that is presentation, not translation.
     if (err instanceof NonInteractiveError) {
-      process.stderr.write(`${err.message}\n`);
+      process.stderr.write(`\n${formatExplained({ title: err.message }, theme)}\n\n`);
       process.exit(1);
     }
     const explained = explain(err);
-    process.stderr.write(`${formatExplained(explained)}\n`);
+    process.stderr.write(`\n${formatExplained(explained, theme)}\n\n`);
     if (globals().verbose && err instanceof Error && err.stack) {
       process.stderr.write(`\n${err.stack}\n`);
     }
