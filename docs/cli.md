@@ -1,6 +1,6 @@
 # CLI reference
 
-`warehousd` manages the lifecycle of a warehousd project: scaffolding the config, running the server and its database, applying configuration, seeding synthetic data, and indexing files.
+`warehousd` manages the lifecycle of a **warehousd** project: scaffolding the config, running the server and its database, applying configuration, seeding synthetic data, and indexing files.
 
 You do not clone this repository to use it. Add a `warehousd.yml` to your own app's repo and run the CLI there.
 
@@ -47,7 +47,7 @@ The first question is how you want to set up at all:
 
 Every list is read from the runtime, target and host registries, so none of them goes stale. Piped, in CI, under `--json` or `--no-input` it writes the template without asking.
 
-The install offer is always an explicit confirmation — running a package manager against your machine is not a side effect of picking a menu item — and never happens under `--no-input` unless `--install-missing` said yes in advance. warehousd looks for the package managers this platform actually has (`brew` and `npm` on macOS; `apt-get`, `dnf`, `pacman` or `npm` on Linux) and never invokes `sudo`: an installer that needs root is printed for you to run. Authentication is never automated either — `supabase login` and `neon auth` open a browser, and the check reports the command rather than running it.
+The install offer is always an explicit confirmation — running a package manager against your machine is not a side effect of picking a menu item — and never happens under `--no-input` unless `--install-missing` said yes in advance. From there warehousd looks for the package managers this platform actually has (`brew` and `npm` on macOS; `apt-get`, `dnf`, `pacman` or `npm` on Linux) and never invokes `sudo`: an installer that needs root is printed for you to run. Authentication is never automated either — `supabase login` and `neon auth` open a browser, and the check reports the command rather than running it.
 
 The two database questions are independent. A container locally and Supabase in production is the ordinary case, and it is what one shared answer could not express: `--db-provider` decides `deploy.database` only and never rewrites the top-level `database:` block, while `--local-db` decides only that block.
 

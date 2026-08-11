@@ -1,6 +1,6 @@
 # Deploying to Railway
 
-End-to-end walkthrough of provisioning a warehousd stack to Railway. It is the same runbook as [deploy-fly.md](deploy-fly.md) — same pre-flight, same secrets, same diff-and-confirm — with a different target behind it. This page covers only what differs. To run the stack on hardware you control instead, see [deploy-compose.md](deploy-compose.md); `deploy.target` is what chooses between the three.
+End-to-end walkthrough of provisioning a **warehousd** stack to Railway. It is the same runbook as [deploy-fly.md](deploy-fly.md) — same pre-flight, same secrets, same diff-and-confirm — with a different target behind it. This page covers only what differs. To run the stack on hardware you control instead, see [deploy-compose.md](deploy-compose.md); `deploy.target` is what chooses between the three.
 
 ## Prerequisites
 
@@ -76,11 +76,11 @@ What happens, in order:
 1. **`railway init --name <app_name>`**, then **`railway add --service
    <app_name>`** — unless a project is already linked and already has that
    service. Both are idempotent; a redeploy creates neither.
-2. **`railway add --database postgres`**, under `managed: true` only. Railway's Postgres is a plain container whose `POSTGRES_USER` is a real superuser, so `create role` and `create extension` work with no special handling and there is no pooler in front of it to drop connection startup parameters. warehousd reads `DATABASE_URL` back off that service and sets it as `APP_DATABASE_URL` on the app — preferring the private `*.railway.internal` hostname, which skips the public proxy and its egress, and falling back to `DATABASE_PUBLIC_URL`. Provisioning is asynchronous on Railway's side, so that read is retried for up to 30s before it is treated as a database that failed to come up.
+2. **`railway add --database postgres`**, under `managed: true` only. Railway's Postgres is a plain container whose `POSTGRES_USER` is a real superuser, so `create role` and `create extension` work with no special handling and there is no pooler in front of it to drop connection startup parameters. From there warehousd reads `DATABASE_URL` back off that service and sets it as `APP_DATABASE_URL` on the app — preferring the private `*.railway.internal` hostname, which skips the public proxy and its egress, and falling back to `DATABASE_PUBLIC_URL`. Provisioning is asynchronous on Railway's side, so that read is retried for up to 30s before it is treated as a database that failed to come up.
 3. **`railway domain --port 8722 --json`** — generates the public hostname if the service has none, which is what `BETTER_AUTH_URL` and the health poll need. The port is passed explicitly because this runs *before* the deploy — `BETTER_AUTH_URL` has to be in the secrets the release reads — so there is no running deployment for Railway to infer one from, and without it a first deploy got no domain at all. The `--json` body is what warehousd reads; the printed line is a fallback for older CLI versions, and `RAILWAY_PUBLIC_DOMAIN` is read back for a service that already had one. A CLI old enough to reject `--port` or `--json` outright gets one more attempt at the bare `railway domain --service <app>`, so an old install is a domain generated the slower way rather than a deploy with no address.
 4. **`railway variables --set …`** — the generated secrets, plus `PORT`, `WAREHOUSD_PROJECT_DIR` and `NODE_ENV`. Fly gets those three from `fly.toml`'s `[env]`; Railway has no equivalent file, so they travel the same channel. `WAREHOUSD_DEMO` is deliberately never set — its absence is what keeps demo personas from being seeded.
 5. **`railway up --detach`** — uploads `.warehousd/deploy`, which holds the generated `Dockerfile`, the rendered `railway.json`, and the project bundle.
-6. warehousd polls `/api/health` until it answers.
+6. Finally, warehousd polls `/api/health` until it answers.
 
 ### Secrets travel in argv
 

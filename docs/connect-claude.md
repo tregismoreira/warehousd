@@ -10,7 +10,7 @@ This is a manual walkthrough: it drives a real Claude connector session, so it i
 
 ## 0. Prerequisites
 
-- warehousd running with at least one SSO provider registered (`configure-sso.md`).
+- A running warehousd with at least one SSO provider registered (`configure-sso.md`).
 - `WAREHOUSD_DEMO=true` is fine to leave on; it only affects the local-login form.
 - The app's `mcpUrl` — `http://localhost:8722/mcp` locally, or the public HTTPS URL of your deployment.
 

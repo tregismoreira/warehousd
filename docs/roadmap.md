@@ -2,7 +2,7 @@
 
 What is planned, and where the open-source line sits. For what is built *today*, [status.md](status.md) is the authoritative list — it marks each component `real`, `partial` or `not built`, and it is checked against the code rather than against intentions.
 
-warehousd is at 0.1.0-rc.1, a release candidate that is not meant to be used in production. That changes nothing below: the open-core commitment holds from the first release, and the planned items are as Apache 2.0 as the shipped ones.
+At 0.1.0-rc.1, **warehousd** is a release candidate that is not meant to be used in production. That changes nothing below: the open-core commitment holds from the first release, and the planned items are as Apache 2.0 as the shipped ones.
 
 ## The open-core line
 
@@ -29,7 +29,7 @@ None of that removes anything from the open-source side. The test is simple: if 
 
 - **Grant expiry notifications.** Expiry now has a lifecycle — a per-collection default, an expiring-soon panel, and an access-review view keyed on last use — but every part of it is something a person has to come and look at. Telling the holder and the approver that access lapses on Friday needs an outbound channel the deployment does not have yet, which is why it is a separate item.
 
-- **Windows support for the CLI.** warehousd is developed and tested on macOS and Linux: every CI job in `.github/workflows` runs on `ubuntu-latest`, and the agent tooling under `scripts/agent/` is POSIX. Nothing structural prevents Windows — the CLI is Node, and every child process is `execFileSync` with an argv array rather than a shell string, so there is no quoting layer to port. What is missing is a CI job and a pass over path handling in the bundle and Compose writers. The package-manager table in `packages/cli/src/cli-tools.ts` already lists `winget`, `scoop` and `choco` because that is the right shape for the table, **not** because the platform is supported.
+- **Windows support for the CLI.** Development and testing happen on macOS and Linux: every CI job in `.github/workflows` runs on `ubuntu-latest`, and the agent tooling under `scripts/agent/` is POSIX. Nothing structural prevents Windows — the CLI is Node, and every child process is `execFileSync` with an argv array rather than a shell string, so there is no quoting layer to port. What is missing is a CI job and a pass over path handling in the bundle and Compose writers. The package-manager table in `packages/cli/src/cli-tools.ts` already lists `winget`, `scoop` and `choco` because that is the right shape for the table, **not** because the platform is supported.
 
 ## Undecided
 
