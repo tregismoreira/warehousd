@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   buildRunArgs,
   assertRuntime,
@@ -7,6 +7,7 @@ import {
   tryRun,
   removeContainer,
   ensureImage,
+  logs,
   psByLabel,
   containerOnPort,
   DockerError,
@@ -89,6 +90,67 @@ describe("tryRun", () => {
       throw new Error("nope");
     });
     expect(tryRun(["network", "inspect", "x"])).toEqual({ ok: false, out: "" });
+  });
+});
+
+// The bug this covers.
+//
+// `docker logs` splits the container's own stdout and stderr onto its two streams, and `run`
+// returns execFileSync's stdout alone. The server writes every boot failure to stderr, so the
+// "Container logs:" block `start` prints when the health check times out came back empty — in
+// precisely the situation the block exists to explain. A real failure looked like this:
+//
+//     Container health check failed: Error: Health check timeout after 180000ms
+//
+//     Container logs:
+//
+// while `docker logs` showed "FATAL: password authentication failed for user warehousd" the
+// whole time.
+describe("logs", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("returns the container's stderr, which is where a failed boot writes", () => {
+    vi.mocked(spawnSync).mockReturnValue({
+      stdout: "",
+      stderr: "Error: Timeout waiting for Postgres after 60000ms",
+      status: 1,
+    } as never);
+    expect(logs("wh_harbor_server", 50)).toContain("Timeout waiting for Postgres");
+  });
+
+  it("returns both streams when the container wrote to each", () => {
+    vi.mocked(spawnSync).mockReturnValue({
+      stdout: "bootstrap complete",
+      stderr: "FATAL: password authentication failed",
+      status: 0,
+    } as never);
+    const out = logs("wh_harbor_server");
+    expect(out).toContain("bootstrap complete");
+    expect(out).toContain("password authentication failed");
+  });
+
+  it("passes --tail through and names the container", () => {
+    vi.mocked(spawnSync).mockReturnValue({ stdout: "", stderr: "", status: 0 } as never);
+    logs("wh_harbor_server", 50);
+    expect(vi.mocked(spawnSync).mock.calls[0]![1]).toEqual([
+      "logs",
+      "--tail",
+      "50",
+      "wh_harbor_server",
+    ]);
+  });
+
+  // An engine that is not installed, or a container that never existed, must not take down the
+  // error path that called this — it is already reporting a different failure.
+  it("says so rather than throwing when the engine cannot be run at all", () => {
+    vi.mocked(spawnSync).mockReturnValue({
+      stdout: "",
+      stderr: "",
+      status: null,
+      error: new Error("spawn docker ENOENT"),
+    } as never);
+    expect(() => logs("wh_harbor_server")).not.toThrow();
+    expect(logs("wh_harbor_server")).toContain("could not be read");
   });
 });
 

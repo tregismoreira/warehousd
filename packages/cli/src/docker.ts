@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { checkTool, type PreflightCheck, type ToolProbe } from "./cli-tools";
 import { docker } from "./containers/runtimes/docker";
 import type { ContainerRuntime } from "./containers/runtimes/types";
@@ -244,13 +244,38 @@ export function runContainer(spec: ContainerSpec): void {
   run(args);
 }
 
+/**
+ * A container's logs — **both** of its streams.
+ *
+ * `docker logs` reproduces the split it recorded: the container's stdout on its own stdout, the
+ * container's stderr on its own stderr. `run` returns execFileSync's stdout alone, so routing this
+ * through it dropped every line the container wrote to stderr — which is where a Node process
+ * writes an unhandled error, and therefore where every boot failure lands. The one caller is the
+ * health-check timeout in `start`, so the "Container logs:" block printed empty in exactly the
+ * situation it exists to explain, while `docker logs` showed the FATAL the whole time.
+ *
+ * spawnSync rather than execFileSync because it hands back both streams. A non-zero exit is not
+ * checked: `docker logs` exits non-zero for a container that never started, and its stderr is then
+ * the most useful thing we have to show. Interleaving is lost — the two streams are concatenated,
+ * stdout first — which is the price of reading them separately and is worth paying to have them
+ * at all.
+ */
 export function logs(name: string, tail?: number): string {
   const args = ["logs"];
   if (tail) {
     args.push("--tail", String(tail));
   }
   args.push(name);
-  return run(args);
+  const bin = activeRuntime.cli.bin;
+  traceCommand(bin, args);
+  const result = spawnSync(bin, args, { encoding: "utf8" });
+  // The engine is missing, or could not be executed at all. The caller is already reporting a
+  // different failure and must not be displaced by this one.
+  if (result.error) return `(container logs could not be read: ${result.error.message})`;
+  return [result.stdout ?? "", result.stderr ?? ""]
+    .map((s) => s.trim())
+    .join("\n")
+    .trim();
 }
 
 export type ContainerRow = { name: string; state: string };

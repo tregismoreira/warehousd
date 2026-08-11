@@ -8,6 +8,9 @@ const spawned: { cmd: string; args: string[]; opts: unknown }[] = [];
 
 vi.mock("node:child_process", () => ({
   execFileSync: vi.fn(() => ""),
+  // `logs` reads both of the container's streams, so it is spawnSync rather than execFileSync —
+  // see the note on it in docker.ts.
+  spawnSync: vi.fn(() => ({ stdout: "", stderr: "", status: 0 })),
   spawn: vi.fn((cmd: string, args: string[], opts: unknown) => {
     spawned.push({ cmd, args, opts });
     const child = new EventEmitter() as EventEmitter & { unref: () => void };
@@ -26,7 +29,7 @@ vi.mock("@clack/prompts", () => ({
   cancel: vi.fn(),
 }));
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as clack from "@clack/prompts";
 import { runLogs } from "../src/commands/logs";
 import { runOpen } from "../src/commands/open";
@@ -73,22 +76,37 @@ afterEach(() => {
 
 describe("runLogs", () => {
   it("returns the log text for a one-shot read", async () => {
-    vi.mocked(execFileSync).mockImplementation((_c, args) => {
-      const a = args as string[];
-      if (a[0] === "inspect") return "running";
-      if (a[0] === "logs") return "line one\nline two";
-      return "";
-    });
+    vi.mocked(execFileSync).mockImplementation((_c, args) =>
+      (args as string[])[0] === "inspect" ? "running" : "",
+    );
+    vi.mocked(spawnSync).mockReturnValue({
+      stdout: "line one\nline two",
+      stderr: "",
+      status: 0,
+    } as never);
     await expect(runLogs(dir, { tail: 50 })).resolves.toBe("line one\nline two");
   });
 
+  // The container's stderr is where a crashed server writes, and it used to be dropped.
+  it("includes the container's stderr, not just its stdout", async () => {
+    vi.mocked(execFileSync).mockImplementation((_c, args) =>
+      (args as string[])[0] === "inspect" ? "running" : "",
+    );
+    vi.mocked(spawnSync).mockReturnValue({
+      stdout: "listening on 8722",
+      stderr: "Error: Timeout waiting for Postgres",
+      status: 0,
+    } as never);
+    await expect(runLogs(dir)).resolves.toContain("Timeout waiting for Postgres");
+  });
+
   it("passes --tail through", async () => {
-    vi.mocked(execFileSync).mockImplementation((_c, args) => {
-      const a = args as string[];
-      return a[0] === "inspect" ? "running" : "";
-    });
+    vi.mocked(execFileSync).mockImplementation((_c, args) =>
+      (args as string[])[0] === "inspect" ? "running" : "",
+    );
+    vi.mocked(spawnSync).mockReturnValue({ stdout: "", stderr: "", status: 0 } as never);
     await runLogs(dir, { tail: 25 });
-    const call = vi.mocked(execFileSync).mock.calls.find((c) => (c[1] as string[])[0] === "logs");
+    const call = vi.mocked(spawnSync).mock.calls.find((c) => (c[1] as string[])[0] === "logs");
     expect(call?.[1]).toEqual(["logs", "--tail", "25", "wh_harbor_server"]);
   });
 

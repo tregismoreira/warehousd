@@ -6,26 +6,13 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 
 ## [Unreleased]
 
-### Added
+## [0.1.0-rc.1] - 2026-08-11
 
-- `deploy.database` takes a third shape: `managed: true` alongside `provider: supabase` or `provider: neon` has warehousd create the database through that provider's own CLI, record it in `.warehousd/state.json` so a redeploy reconnects instead of creating a second one, and delete it on `--destroy`. `deploy.database.region` and `deploy.database.org` are the new keys that shape go with. See [docs/deploy-database.md](docs/deploy-database.md).
-- `database.provider` on the top-level block runs a provider's local stack instead of warehousd's own `pgvector` container. Supabase is the one that has one, and it reproduces the hosted product's `extensions` schema — the difference behind a class of masked-read failure that only appeared in production before.
-- `server.runtime` selects the container engine: `docker` (default) or `podman`. Podman is selectable and checkable but unverified.
-- `warehousd init` asks whether to set up guided or manually, and in guided mode checks every CLI the answers need — offering to install any that is missing through `brew`, `npm`, `apt-get`, `dnf`, `pacman`, `winget`, `scoop` or `choco`, whichever this machine actually has. It never installs without an explicit confirmation or `--install-missing`, and never runs `sudo`. New flags: `--runtime`, `--local-db`, `--db-region`, `--db-org`, `--attach-db`, `--manual`, `--install-missing`.
-- Long commands number their steps — `[4/9] Creating …` — so progress has an end in sight.
+The first release candidate, and the first artifact this repository publishes at all — nothing precedes it on npm or ghcr.io. The categories below are therefore not a delta from an earlier version: **Security** is the enforcement this release ships with, and **Changed** and **Fixed** record decisions taken during development that a reader of the code would otherwise have to reconstruct from the history.
 
-### Changed
+Every component is listed with its status in the [README's component table](README.md#component-status), which is checked against the code. Four entries there are not `real` at this release: multi-tenancy is *partial* — every grant, audit event and document carries an org and is isolated by a view predicate and RLS, but a single implicit org is created at bootstrap and there is no UI for creating or switching orgs — database provisioning through a provider CLI is *partial* for Supabase and `real` for Neon, container runtime selection is *partial* because podman is selectable and checkable but unverified, and SCIM and compliance exports are *not built*.
 
-- `--db-provider` now means "create the database there" when the provider has a CLI warehousd can drive. `--attach-db` restores the previous reading, "who hosts the url I am about to supply". The two are worth keeping apart, so the second is spelled out rather than inferred.
-- `deploy.database.provider` is no longer refused without a `url`.
-
-## [0.1.0] - 2026-08-05
-
-The first published release. Nothing preceded it, so the categories below are not a delta from an earlier version: **Security** is the enforcement this release ships with, and **Changed** and **Fixed** record decisions taken during development that a reader of the code would otherwise have to reconstruct from the history.
-
-Every component is listed with its status in the [README's component table](README.md#component-status), which is checked against the code. Two entries there are not `real` at this release: multi-tenancy is *partial* — every grant, audit event and document carries an org and is isolated by a view predicate and RLS, but a single implicit org is created at bootstrap and there is no UI for creating or switching orgs — and SCIM and compliance exports are *not built*.
-
-This is a `0.y.z` release. Per [docs/releasing.md](docs/releasing.md#versioning-policy), a minor bump before 1.0.0 may carry a breaking change; each one is recorded under **Changed**.
+This is a `0.y.z` prerelease, so installing it is explicit: it publishes to npm's `next` dist-tag and does not move the `:latest` image tag. `npm i warehousd@next`, or `npx warehousd@0.1.0-rc.1`. Per [docs/releasing.md](docs/releasing.md#versioning-policy), a minor bump before 1.0.0 may carry a breaking change; each one is recorded under **Changed**.
 
 ### Security
 
@@ -42,6 +29,8 @@ This is a `0.y.z` release. Per [docs/releasing.md](docs/releasing.md#versioning-
 
 ### Changed
 
+- `--db-provider` now means "create the database there" when the provider has a CLI warehousd can drive. `--attach-db` restores the previous reading, "who hosts the url I am about to supply". The two are worth keeping apart, so the second is spelled out rather than inferred.
+- `deploy.database.provider` is no longer refused without a `url`.
 - **`deploy.region` is no longer validated as a three-letter slug by the schema.** Region format belongs to the target, not to the config loader — `us-west2` could not be expressed at all, and a bad region produced a zod issue naming a line number instead of a refusal naming the target. It is a target pre-flight check now (`fly-region`, `railway-region`), which can say which codes that target actually has.
 - The deploy summary names the target it deployed to, and how to reach a database it did not print a URL for. Both used to be Fly's wording on every target: `` managed by Fly Postgres — `fly postgres connect` `` after a Railway deploy.
 - The `app_name` validation message no longer names Fly. The constraint is a DNS label, which every target shares.
@@ -59,6 +48,12 @@ This is a `0.y.z` release. Per [docs/releasing.md](docs/releasing.md#versioning-
 
 ### Added
 
+- `deploy.database` takes a third shape: `managed: true` alongside `provider: supabase` or `provider: neon` has warehousd create the database through that provider's own CLI, record it in `.warehousd/state.json` so a redeploy reconnects instead of creating a second one, and delete it on `--destroy`. `deploy.database.region` and `deploy.database.org` are the new keys that shape go with. See [docs/deploy-database.md](docs/deploy-database.md).
+- `database.provider` on the top-level block runs a provider's local stack instead of warehousd's own `pgvector` container. Supabase is the one that has one, and it reproduces the hosted product's `extensions` schema — the difference behind a class of masked-read failure that only appeared in production before.
+- `server.runtime` selects the container engine: `docker` (default) or `podman`. Podman is selectable and checkable but unverified.
+- `warehousd init` asks whether to set up guided or manually, and in guided mode checks every CLI the answers need — offering to install any that is missing through `brew`, `npm`, `apt-get`, `dnf`, `pacman`, `winget`, `scoop` or `choco`, whichever this machine actually has. It never installs without an explicit confirmation or `--install-missing`, and never runs `sudo`. New flags: `--runtime`, `--local-db`, `--db-region`, `--db-org`, `--attach-db`, `--manual`, `--install-missing`.
+- Long commands number their steps — `[4/9] Creating …` — so progress has an end in sight.
+- `start` proves the password in `.warehousd/state.json` opens the database before it starts the server, when that database is warehousd's own container. See the entry under **Fixed** for what it replaces.
 - **`deploy.target` — `fly | railway | compose`.** Where a deployment's container runs is a `DeployTarget` behind a registry, and every behavioural difference between the three is a method on it: nothing outside `packages/cli/src/deploy/targets` branches on a target id, and a fourth target is one new file. `fly` remains the default, so an existing `deploy:` block is unchanged.
   - **Railway.** `railway init`/`add` for the project and its service, `railway add --database postgres` under `managed: true`, a generated `railway.json` carrying the health check and `deploy.region` (Railway has no `--region` flag anywhere), and `railway up --detach`. Railway has no `release_command` equivalent, so the image's own CMD runs the bootstrap and then serves in one container. `railway variables --set K=V` is the only way that CLI sets a variable and the value travels in argv — `--verbose` redacts it, a failed call throws with the CLI's stderr stripped, and `docs/deploy-railway.md` states the residual exposure.
   - **Docker Compose.** Renders `docker-compose.deploy.yml` and a mode-0600 env file beside the project bundle, and starts nothing: the stack runs on a machine this command does not control. No secret appears in the compose file, `/project` is mounted read-only, and the server is published on loopback for a reverse proxy to sit in front of.
@@ -93,6 +88,8 @@ This is a `0.y.z` release. Per [docs/releasing.md](docs/releasing.md#versioning-
 
 ### Fixed
 
+- A database volume that outlives its `.warehousd/state.json` is now refused in about two seconds, naming the volume, the state file and `warehousd stop --destroy`. Postgres takes `POSTGRES_PASSWORD` only from an empty data directory and ignores it ever after, while the volume name is global (`wh_<project>_pgdata`) and the state file is per-directory and gitignored — so deleting that file, or starting the same project from a second checkout, hands the server a password the database has never had. It presented as the full 180-second health-check timeout followed by a message blaming "a SQL error applying the config or an unreachable database", while Postgres had been answering `password authentication failed for user "warehousd"` from the first attempt.
+- `warehousd logs`, and the log excerpt `start` prints when the health check fails, now carry the container's **stderr**. `docker logs` reproduces the split it recorded and the helper returned only stdout, so every line a Node process writes when it dies — which is every boot failure — was dropped. The `Container logs:` block printed empty in exactly the situation it exists to explain.
 - The deploy health poll requested `/api/health/api/health` and timed out for three minutes against an app that was serving. The endpoint was appended twice — once by the caller and once inside the poll — so a successful deploy was reported as a failed one.
 - A first Railway deploy no longer fails at `railway domain`. The domain is generated before the deploy, because `BETTER_AUTH_URL` has to be in the secrets the release reads, so the service has no deployment and Railway has no port to infer one from; the container port is passed explicitly now, and the `--json` body is preferred over the printed line, whose wording has changed across CLI versions.
 - A first Railway deploy no longer refuses over a database that is still provisioning. `railway add --database postgres` returns once the request is accepted, not once the database exists, so reading its `DATABASE_URL` immediately afterwards saw nothing and reported "check the database provisioned cleanly" on the happy path. The read is retried for up to 30s.
@@ -100,5 +97,5 @@ This is a `0.y.z` release. Per [docs/releasing.md](docs/releasing.md#versioning-
 - warehousd works against a hosted Postgres that installs its extensions outside `public`. Supabase ships pgcrypto preinstalled in a schema called `extensions`, which made `create extension if not exists pgcrypto` a silent no-op — and left every unqualified reference to one of those extensions unresolvable for the data roles, whose `search_path` is `"$user", public`. The failure mode was the worst kind: apply succeeded, boot succeeded, and the first masked read (`hmac`) or semantic search (`<=>`) failed at request time as an `internal_error`. `applyConfig` now reads back where `vector`, `pgcrypto` and `postgres_fdw` actually landed, grants the `warehousd_*` roles usage on that schema, and puts it on their `search_path` — scoped to the one database, because roles are cluster-global. A Postgres that keeps its extensions in `public` is left untouched.
 - The boot wait for Postgres no longer leaks a connection pool per failed attempt. It constructed one per retry and ended it only on success, so a 60s wait at 500ms intervals left up to 120 dangling. Against a local container that answers immediately this cost nothing; against a hosted endpoint resuming from suspend, the whole wait is failed attempts.
 
-[Unreleased]: https://github.com/tregismoreira/warehousd/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/tregismoreira/warehousd/releases/tag/v0.1.0
+[Unreleased]: https://github.com/tregismoreira/warehousd/compare/v0.1.0-rc.1...HEAD
+[0.1.0-rc.1]: https://github.com/tregismoreira/warehousd/releases/tag/v0.1.0-rc.1

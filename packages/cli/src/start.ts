@@ -19,11 +19,16 @@ import { ensureState, writeOutputs, type Outputs } from "./state";
 import { buildOutputs } from "./outputs";
 import { resolveServerImage } from "./image-resolve";
 import { portIsFree } from "./preflight";
+import { waitForDatabaseAt } from "./db-preflight";
 import { silentReporter, type Reporter } from "./ui/reporter";
 import { getDevClient } from "@warehousd/broker";
 
 const HEALTH_CHECK_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_INTERVAL_MS = 1000;
+// Shorter than the health check on purpose. This waits only for a local Postgres container to open
+// its socket — seconds on a restart, a little longer on a first initialisation — and the failure it
+// exists to catch is answered on the first attempt rather than waited out.
+const DB_CONNECT_TIMEOUT_MS = 60_000;
 
 async function pollHealth(url: string, timeoutMs: number): Promise<void> {
   const startTime = Date.now();
@@ -91,10 +96,11 @@ export async function runStart(
 
   const st = ensureState(p.dir);
 
-  // Five steps on the ordinary path — check, server image, database, server, health — and one
-  // more when a second image has to be pulled for warehousd's own Postgres. Counted here rather
-  // than incremented as it goes, so the total is right on the first line rather than the last.
-  report.plan(p.managed && !localDbHost ? 6 : 5);
+  // Five steps on the ordinary path — check, server image, database, server, health — and two
+  // more when warehousd runs its own Postgres: a second image to pull, and the credential check
+  // against the volume that image populates. Counted here rather than incremented as it goes, so
+  // the total is right on the first line rather than the last.
+  report.plan(p.managed && !localDbHost ? 7 : 5);
 
   const check = report.step("Checking", `${p.name}`);
   check.done(`${containerRuntime().cli.bin} ${runtimeVersion()}`);
@@ -214,6 +220,27 @@ export async function runStart(
     // `Project` is a union on `managed`, so the URL is here by type rather than by assertion.
     appUrlHost = p.databaseUrl;
     appUrlContainer = appUrlHost;
+  }
+
+  // Step 6b: Prove the credential in state.json opens this database, before anything depends on it.
+  //
+  // Only for our own container on our own volume: that is the pair that can come apart, because
+  // Postgres takes a password only from an empty data directory and the volume outlives the state
+  // file. A URL the user supplied is theirs to get right, and a provider's local stack manages its
+  // own credentials — neither has this failure mode, and probing them would only add a wait.
+  if (p.managed && !localDbHost) {
+    const dbCheck = report.step("Checking", "database credentials");
+    try {
+      await waitForDatabaseAt(appUrlHost, {
+        volume: p.ns.volume,
+        stateFile: ".warehousd/state.json",
+        timeoutMs: DB_CONNECT_TIMEOUT_MS,
+      });
+      dbCheck.done();
+    } catch (err: unknown) {
+      dbCheck.fail();
+      throw err;
+    }
   }
 
   // Step 7: Recreate server container

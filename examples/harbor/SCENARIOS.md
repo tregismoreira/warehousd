@@ -221,7 +221,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8722/v1/collections/p
 
 **Look for** — The key acts under **Mia's** grants, not Ana's, and the ceiling narrows even those: `policies` refuses even if Mia holds a grant on it. Two walls, and the narrower one wins. Grants and client policy are re-read on every call, so revoking Mia's grant stops the key mid-flight; revoking the *secret* stops new tokens being minted, and the one you hold expires within 15 minutes. Audit rows carry `via: api_key:<clientId>`.
 
-The dev client printed by `warehousd start` is a *delegated* client and answers `unauthorized_client` to `client_credentials` — the right refusal, since it exists for the interactive flow in scenario 16. [rest-api.md](../../docs/rest-api.md).
+The dev client printed by `warehousd start` is not one of these, and `/v1/token` answers it `invalid_client`. That endpoint authenticates API keys — the `whd_dev_`/`whd_live_` secrets minted above, hashed at rest — while the dev client is an OAuth application whose secret is stored verbatim, because Better Auth's MCP token endpoint compares that column directly. Two registries, deliberately: the credential a browser flow round-trips is not one the machine endpoint should mint tokens from. What answers `unauthorized_client` here is a *delegated* API key, one made for scenario 16's flow rather than this one. [rest-api.md](../../docs/rest-api.md).
 
 ### 18. The governed write path
 
