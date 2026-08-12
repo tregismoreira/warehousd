@@ -2,7 +2,6 @@ import { Pool } from "pg";
 import {
   assertRuntime,
   runtimeVersion,
-  containerRuntime,
   ensureImage,
   ensureNetwork,
   ensureVolume,
@@ -13,7 +12,7 @@ import {
   runContainer,
   logs,
 } from "./docker";
-import { useProject } from "./project";
+import { resolveProject } from "./project";
 import { hostFor } from "./db/hosts";
 import { ensureState, writeOutputs, type Outputs } from "./state";
 import { buildOutputs } from "./outputs";
@@ -75,10 +74,7 @@ export async function runStart(
   const report = opts.reporter ?? silentReporter;
 
   // Step 1: Resolve project config.
-  //
-  // Before the engine check, not after: `server.runtime` is what decides *which* engine to assert,
-  // so asking first would check Docker for a project that runs Podman.
-  const p = useProject(dir);
+  const p = resolveProject(dir);
 
   // Whose local database, when it is not warehousd's own container. Resolved here so that a
   // provider with no local stack is refused by name rather than by a missing subcommand later.
@@ -102,11 +98,7 @@ export async function runStart(
   // the total is right on the first line rather than the last.
   report.plan(p.managed && !localDbHost ? 7 : 5);
 
-  const check = report.step(
-    "Checking",
-    containerRuntime().cli.bin,
-    `Checked ${containerRuntime().cli.bin}`,
-  );
+  const check = report.step("Checking", "docker", "Checked docker");
   check.done(`version ${runtimeVersion()}`);
 
   // Step 3: Ensure images exist.

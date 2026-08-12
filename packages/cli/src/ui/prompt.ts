@@ -2,12 +2,10 @@ import { confirm as clackConfirm, text, select, isCancel, cancel } from "@clack/
 import {
   dbProviders,
   DEFAULT_DEPLOY_TARGET_ID,
-  type ContainerRuntimeId,
   type DbProviderId,
   type DeployTargetId,
 } from "@warehousd/broker";
 import { targets } from "../deploy/targets";
-import { runtimes } from "../containers/runtimes";
 import { dbHosts, hostFor, localHosts } from "../db/hosts";
 import { rail } from "./frame";
 import { resolveTheme, type Theme } from "./theme";
@@ -89,8 +87,6 @@ export type InitAnswers = {
    * of the provider registries is that pasting a URL should not be the only way in.
    */
   guided: boolean;
-  /** Which container engine `warehousd start` drives. */
-  runtime: ContainerRuntimeId;
   /**
    * Whose local stack runs the development database, when it is not warehousd's own container.
    *
@@ -203,19 +199,6 @@ export async function promptInit(
    */
   section("On this machine", "Where warehousd runs while you develop.");
 
-  // Which engine runs the containers. Asked before the database, because a local database that is
-  // a container needs one — and because "warehousd could not find docker" is a better first
-  // sentence than a failure four questions later.
-  const runtime = guided
-    ? await select({
-        message: "Which container engine?",
-        options: optionsFrom(runtimes),
-        initialValue: String(defaults.runtime),
-      })
-    : defaults.runtime;
-  if (isCancel(runtime)) return null;
-  const runtimeId = idIn(runtime, runtimes, defaults.runtime);
-
   // Every option opens with *where the data is*, so the list reads as three answers to one
   // question rather than three sentences about what warehousd will do. The provider options are
   // mapped from the registry, so a third host with a local stack appears here with no edit.
@@ -273,7 +256,6 @@ export async function promptInit(
     port: Number(port) || defaults.port,
     managed,
     guided,
-    runtime: runtimeId,
     localDbProvider,
   };
 

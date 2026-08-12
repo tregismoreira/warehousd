@@ -1,4 +1,4 @@
-import { useProject } from "./project";
+import { resolveProject } from "./project";
 import { hostFor } from "./db/hosts";
 import { tryRun, removeVolume, removeNetwork } from "./docker";
 import { confirm, isInteractive } from "./ui/prompt";
@@ -9,7 +9,7 @@ export async function runStop(
   dir: string,
   opts: { destroy?: boolean; yes?: boolean; interactive?: boolean } = {},
 ): Promise<void> {
-  const p = useProject(dir);
+  const p = resolveProject(dir);
 
   // A provider's local stack is not labelled as ours and is not on our network, so the sweep
   // below will not touch it — it has to be stopped through its own CLI. Anything warehousd

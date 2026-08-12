@@ -18,12 +18,7 @@
 
 import { Command } from "commander";
 import { resolve, basename } from "node:path";
-import {
-  CONTAINER_RUNTIME_IDS,
-  DEPLOY_TARGET_IDS,
-  DB_PROVIDER_IDS,
-  dbProviders,
-} from "@warehousd/broker";
+import { DEPLOY_TARGET_IDS, DB_PROVIDER_IDS, dbProviders } from "@warehousd/broker";
 import { dbHosts, hostFor, localHosts } from "./db/hosts";
 import { targets } from "./deploy/targets";
 import { ensureToolsFor } from "./init-tools";
@@ -206,7 +201,6 @@ program
     "--from <dir>",
     "infer a collection per spreadsheet in this directory instead of the example",
   )
-  .option("--runtime <id>", `container engine: ${CONTAINER_RUNTIME_IDS.join(", ")}`)
   // Every value joined into one list rather than "docker, url, or one of <hosts>", which read as
   // "or one of supabase" while exactly one host has a local stack.
   .option(
@@ -242,7 +236,6 @@ program
     const { defaults, fromFlags } = initDefaults({
       project: basename(resolve(o.dir)) || "my-app",
       target: o.target,
-      runtime: o.runtime,
       devDb: o.devDb,
       prodDb: o.prodDb,
       prodDbHost: o.prodDbHost,

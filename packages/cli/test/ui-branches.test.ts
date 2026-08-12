@@ -75,7 +75,6 @@ const DEFAULTS: InitAnswers = {
   deployManaged: true,
   dbProvider: null,
   guided: true,
-  runtime: "docker",
   localDbProvider: null,
   dbRegion: null,
   dbOrg: null,
@@ -115,9 +114,9 @@ describe("promptInit validation", () => {
   });
 
   it("falls back to the defaults when the answers come back empty", async () => {
-    // The mode and runtime questions come first now; the default select mock answers "managed",
-    // which is neither question's value.
-    vi.mocked(clack.select).mockResolvedValueOnce("guided").mockResolvedValueOnce("docker");
+    // The mode question comes first; the default select mock answers "managed", which is not
+    // that question's value.
+    vi.mocked(clack.select).mockResolvedValueOnce("guided");
     vi.mocked(clack.text).mockResolvedValueOnce("").mockResolvedValueOnce("");
     const answers = await promptInit({ ...DEFAULTS, project: "fallback", port: 9999 }, SILENT);
     expect(answers).toEqual({
@@ -128,7 +127,6 @@ describe("promptInit validation", () => {
       deployManaged: true,
       dbProvider: null,
       guided: true,
-      runtime: "docker",
       localDbProvider: null,
       dbRegion: null,
       dbOrg: null,
@@ -165,7 +163,6 @@ describe("applyAnswers", () => {
     deployManaged: true,
     dbProvider: null,
     guided: true,
-    runtime: "docker",
     localDbProvider: null,
     dbRegion: null,
     dbOrg: null,

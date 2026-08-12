@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { loadConfig, envRefs } from "../src/config/load";
 import { readPosture, ConfigSchema } from "../src/config/schema";
 import { DEPLOY_TARGET_IDS } from "../src/config/targets";
-import { CONTAINER_RUNTIME_IDS, DEFAULT_CONTAINER_RUNTIME_ID } from "../src/config/runtimes";
 import { PROVISIONABLE_DB_PROVIDER_IDS } from "../src/db/providers";
 import { must } from "./helpers/must";
 
@@ -604,48 +603,6 @@ describe("config schema rejects unrecognised keys", () => {
     // collections, metadata fields, synthetic settings and the writable dataset.
     const dir = resolve(__dirname, "../../../examples/harbor");
     expect(() => loadConfig(dir)).not.toThrow();
-  });
-});
-
-describe("server.runtime", () => {
-  function load(runtimeLine: string): ReturnType<typeof loadConfig> {
-    const dir = mkdtempSync(join(tmpdir(), "wh-cfg-"));
-    writeFileSync(
-      join(dir, "warehousd.yml"),
-      `
-project: p
-server:
-  port: 8722
-${runtimeLine}
-collections:
-  a: { description: d, fields: { id: { type: uuid, posture: allow, pk: true } } }
-`,
-    );
-    try {
-      return loadConfig(dir);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }
-
-  // The default is a value, not "whichever engine is on PATH". A config that resolves differently
-  // on two machines is a config that cannot be reviewed in git, which is the property the whole
-  // product rests on.
-  it("defaults to docker rather than to whatever is installed", () => {
-    expect(load("").server.runtime).toBe("docker");
-    expect(load("").server.runtime).toBe(DEFAULT_CONTAINER_RUNTIME_ID);
-  });
-
-  it("takes any id the registry implements", () => {
-    for (const id of CONTAINER_RUNTIME_IDS) {
-      expect(load(`  runtime: ${id}`).server.runtime).toBe(id);
-    }
-  });
-
-  // A typo here would otherwise surface as `execFileSync("nerdctl")` failing with ENOENT deep in a
-  // start, naming a binary the operator never asked for.
-  it("refuses an engine with no module behind it", () => {
-    expect(() => load("  runtime: nerdctl")).toThrow();
   });
 });
 

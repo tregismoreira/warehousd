@@ -6,6 +6,11 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 
 ## [Unreleased]
 
+### Removed
+
+- **`server.runtime`, `warehousd init --runtime`, and the wizard's "Which container engine?" question.** Docker is the container engine, and the CLI now says so rather than offering a choice it had never verified: podman was selectable and checkable but nothing in this repository had ever run a container under it. An unverified option in `warehousd.yml` is worse than no option, because that file is the one the product asks you to review in git. Podman moves to [docs/roadmap.md](docs/roadmap.md#planned) with what verifying it would actually take. A leftover `runtime:` key is ignored rather than rejected.
+- One bug went with it: `warehousd logs --follow` always spawned `docker` regardless of the configured engine.
+
 ## [0.1.0-rc.1] - 2026-08-11
 
 The first release candidate, and the first artifact this repository publishes at all — nothing precedes it on npm or ghcr.io. The categories below are therefore not a delta from an earlier version.

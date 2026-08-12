@@ -1,7 +1,5 @@
 import { resolve } from "node:path";
 import { loadConfig, type WarehousdConfig } from "@warehousd/broker";
-import { runtimeFor } from "./containers/runtimes";
-import { setContainerRuntime } from "./docker";
 
 type ProjectBase = {
   dir: string; // absolute project dir
@@ -55,18 +53,4 @@ export function resolveProject(dir: string): Project {
   };
   const databaseUrl = cfg.database?.url;
   return databaseUrl ? { ...base, managed: false, databaseUrl } : { ...base, managed: true };
-}
-
-/**
- * Resolve, and point the container wrapper at the engine this project asked for.
- *
- * Every command that touches a container goes through here rather than `resolveProject`, because
- * `server.runtime` has to be applied *before* the first `docker.run` and there is no other moment
- * that is true for all of them. The side effect is in the name for the same reason: `resolveProject`
- * stays pure so a test can build a Project without moving process-wide state under its neighbours.
- */
-export function useProject(dir: string): Project {
-  const project = resolveProject(dir);
-  setContainerRuntime(runtimeFor(project.cfg.server.runtime));
-  return project;
 }

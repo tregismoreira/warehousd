@@ -1,4 +1,4 @@
-import { useProject } from "./project";
+import { resolveProject } from "./project";
 import { psByLabel, type ContainerRow } from "./docker";
 import { readOutputs, type Outputs } from "./state";
 
@@ -14,7 +14,7 @@ export type StatusResult = {
 // reachable by a script, since it came wrapped in prose. Rendering now happens in index.ts, from
 // this result, in whichever of the two forms was asked for.
 export async function runStatus(dir: string): Promise<StatusResult> {
-  const p = useProject(dir);
+  const p = resolveProject(dir);
   const outputs = readOutputs(dir);
   const containers = psByLabel(p.ns.label);
 
