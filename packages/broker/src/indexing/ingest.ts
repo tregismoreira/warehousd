@@ -6,6 +6,7 @@ import { chunkText } from "./chunk";
 import { embedChunks } from "../embedding/sync";
 import type { TaxonomyBinding } from "../taxonomy";
 import type { BinaryExtractor, Embedder } from "../providers";
+import { ident } from "../sql/ident";
 
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 export const TEXT_EXT = /\.(md|txt)$/i;
@@ -78,13 +79,14 @@ export type IngestResult = {
 };
 
 export function filesTable(schema: string, collection: string): string {
-  // collection is caller-controlled (server-side config/CLI, not raw user input),
-  // so this identifier interpolation is safe (SQL identifiers can't be parameterized).
-  return `${schema}."${collection}__files"`;
+  // collection is caller-controlled (server-side config/CLI, not raw user input) — ident() is
+  // the check applied at the point of interpolation anyway, per its own header comment, rather
+  // than trusted to hold upstream.
+  return `${schema}.${ident(`${collection}__files`)}`;
 }
 
 export function documentsTable(schema: string, collection: string): string {
-  return `${schema}."${collection}__documents"`;
+  return `${schema}.${ident(`${collection}__documents`)}`;
 }
 
 /**
