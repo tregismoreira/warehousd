@@ -2,6 +2,7 @@
 // data, indexed policies, and the three personas. Idempotent — drops and recreates.
 import { Pool } from "pg";
 import { execSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 const ADMIN = "postgres://postgres:postgres@127.0.0.1:54330/postgres";
@@ -23,7 +24,8 @@ async function main() {
   process.env.DEV_DATABASE_URL = `postgres://warehousd_dev:pw@127.0.0.1:54330/${DB}`;
   process.env.LIVE_DATABASE_URL = `postgres://warehousd_live:pw@127.0.0.1:54330/${DB}`;
   process.env.IMPORT_DATABASE_URL = `postgres://warehousd_import:pw@127.0.0.1:54330/${DB}`;
-  process.env.WAREHOUSD_PROJECT_DIR = resolve(__dirname, "../examples/harbor");
+  const PROJECT_DIR = resolve(__dirname, "../examples/harbor");
+  process.env.WAREHOUSD_PROJECT_DIR = PROJECT_DIR;
   process.env.WAREHOUSD_DEMO = "true";
 
   execSync("pnpm tsx scripts/dev-bootstrap.ts", { stdio: "inherit", env: process.env });
@@ -68,14 +70,14 @@ async function main() {
 
   // dev-bootstrap derives Marcus's and Ana's grants from the config, so they already hold an
   // approved grant on every collection — matter_tasks included. `grants_one_active` permits one
-  // approved grant per (org, user, collection, env), and these specs need a particular shape
+  // approved grant per (workspace, user, collection, env), and these specs need a particular shape
   // (Marcus direct with approve, Mia proposal_only), so retire whatever the demo seed left on
   // the tuples below instead of colliding with it. Revoked rather than deleted: the status
   // transition is the model's own, and the specs read the grant history.
   async function retireApproved(userId: string, collection: string, env: string) {
     const { rows } = await app.query(
       `select id from app.grants
-        where org_id='default' and user_id=$1 and collection=$2 and env=$3 and status='approved'`,
+        where workspace_id='default' and user_id=$1 and collection=$2 and env=$3 and status='approved'`,
       [userId, collection, env],
     );
     for (const r of rows) await revokeGrant(app, r.id, "e2e-setup");
@@ -86,7 +88,7 @@ async function main() {
   const marcusGrant = await requestGrant(app, {
     userId: "marcus",
     collection: "matter_tasks",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "manager",
     allowedFields: fields,
@@ -103,7 +105,7 @@ async function main() {
   const miaGrant = await requestGrant(app, {
     userId: "mia",
     collection: "matter_tasks",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "member",
     allowedFields: fields,
@@ -112,6 +114,28 @@ async function main() {
     verbs: ["read", "create"],
     mode: "proposal_only",
   });
+
+  // A second workspace, and ana as an admin of it too — apps/web/e2e/workspace-switch.spec.ts
+  // needs a caller with more than one membership, since the switcher only ever renders for one.
+  // Left with no synthetic data on purpose: switching into it is what the spec watches for, and
+  // an empty collection list is the simplest, already-instrumented signal that the switch
+  // actually changed which workspace's rows the console reads. No DDL to run for it — the
+  // collection tables already exist from the 'default' bootstrap above; a workspace is rows,
+  // not tables.
+  await app.query(
+    `insert into app.workspaces (id, name) values ('second', 'Second Co') on conflict (id) do nothing`,
+  );
+  await app.query(
+    `insert into app.workspace_members (workspace_id, user_id, role) values ('second', 'ana', 'admin')
+     on conflict (workspace_id, user_id) do update set role='admin'`,
+  );
+
+  // workspaces.enabled must be on for the switcher (and admin/members) to exist at all. Written
+  // as a local override — *.local.yml is gitignored — rather than edited into warehousd.yml
+  // itself, so this stays e2e-only. Playwright's globalTeardown (e2e/teardown-workspace-flag.ts)
+  // removes it once the run ends, since every other suite that loads examples/harbor's real
+  // config (apps/web/test/helpers/web-db.ts among them) would otherwise inherit it too.
+  writeFileSync(resolve(PROJECT_DIR, "warehousd.local.yml"), `workspaces: { enabled: true }\n`);
 
   await db.end();
   console.log(`e2e database ready: ${DB}`);

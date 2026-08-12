@@ -39,14 +39,14 @@ describe("collection ceiling", () => {
     // Insert a grant for the user on salaries
     await db.query(
       `insert into app.grants
-         (user_id, collection, env, status, org_id, verbs, mode)
+         (user_id, collection, env, status, workspace_id, verbs, mode)
        values ($1, $2, $3, $4, $5, $6, $7)`,
       ["user1", "salaries", "dev", "approved", "default", ["read"], "direct"],
     );
 
     // Set the client policy ceiling to only campaigns (not salaries)
     await db.query(
-      `insert into app.client_policies (client_id, allowed_collections, org_id)
+      `insert into app.client_policies (client_id, allowed_collections, workspace_id)
        values ($1, $2, $3)`,
       ["client1", ["campaigns"], "default"],
     );
@@ -58,7 +58,7 @@ describe("collection ceiling", () => {
     // With ceiling excluding salaries, user is refused (returns null)
     grant = await loadActiveGrant(
       db,
-      { userId: "user1", env: "dev", orgId: "default", allowedCollections: ["campaigns"] },
+      { userId: "user1", env: "dev", workspaceId: "default", allowedCollections: ["campaigns"] },
       "salaries",
     );
     expect(grant).toBeNull();
@@ -66,7 +66,7 @@ describe("collection ceiling", () => {
     // With ceiling including salaries, user still has the grant
     grant = await loadActiveGrant(
       db,
-      { userId: "user1", env: "dev", orgId: "default", allowedCollections: ["salaries"] },
+      { userId: "user1", env: "dev", workspaceId: "default", allowedCollections: ["salaries"] },
       "salaries",
     );
     expect(grant).not.toBeNull();
@@ -101,14 +101,14 @@ describe("collection ceiling", () => {
     // Grant exists but ceiling excludes it
     await db.query(
       `insert into app.grants
-         (user_id, collection, env, status, org_id, verbs, mode)
+         (user_id, collection, env, status, workspace_id, verbs, mode)
        values ($1, $2, $3, $4, $5, $6, $7)`,
       ["user2", "salaries", "dev", "approved", "default", ["read"], "direct"],
     );
 
     grant = await loadActiveGrant(
       db,
-      { userId: "user2", env: "dev", orgId: "default", allowedCollections: ["campaigns"] },
+      { userId: "user2", env: "dev", workspaceId: "default", allowedCollections: ["campaigns"] },
       "salaries",
     );
     expect(grant).toBeNull(); // Same result as no grant
@@ -139,7 +139,7 @@ describe("collection ceiling", () => {
     // User has grant only on campaigns
     await db.query(
       `insert into app.grants
-         (user_id, collection, env, status, org_id, verbs, mode)
+         (user_id, collection, env, status, workspace_id, verbs, mode)
        values ($1, $2, $3, $4, $5, $6, $7)`,
       ["user3", "campaigns", "dev", "approved", "default", ["read"], "direct"],
     );
@@ -150,7 +150,7 @@ describe("collection ceiling", () => {
       {
         userId: "user3",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         allowedCollections: ["salaries", "campaigns"],
       },
       "salaries",
@@ -163,7 +163,7 @@ describe("collection ceiling", () => {
       {
         userId: "user3",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         allowedCollections: ["salaries", "campaigns"],
       },
       "campaigns",
@@ -192,7 +192,7 @@ describe("collection ceiling", () => {
     // User has grant
     await db.query(
       `insert into app.grants
-         (user_id, collection, env, status, org_id, verbs, mode)
+         (user_id, collection, env, status, workspace_id, verbs, mode)
        values ($1, $2, $3, $4, $5, $6, $7)`,
       ["user4", "campaigns", "dev", "approved", "default", ["read"], "direct"],
     );
@@ -200,7 +200,7 @@ describe("collection ceiling", () => {
     // With null ceiling (no restriction), grant is visible
     let grant = await loadActiveGrant(
       db,
-      { userId: "user4", env: "dev", orgId: "default", allowedCollections: null },
+      { userId: "user4", env: "dev", workspaceId: "default", allowedCollections: null },
       "campaigns",
     );
     expect(grant).not.toBeNull();
@@ -216,7 +216,7 @@ describe("collection ceiling", () => {
       {
         userId: "user4",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         allowedCollections: undefined as unknown as null,
       },
       "campaigns",
@@ -226,7 +226,7 @@ describe("collection ceiling", () => {
     // With empty array ceiling, grant is rejected (not in the empty set)
     grant = await loadActiveGrant(
       db,
-      { userId: "user4", env: "dev", orgId: "default", allowedCollections: [] },
+      { userId: "user4", env: "dev", workspaceId: "default", allowedCollections: [] },
       "campaigns",
     );
     expect(grant).toBeNull();

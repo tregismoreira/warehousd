@@ -3,14 +3,13 @@ import { rotateClientSecret } from "@warehousd/broker";
 import { getAppPool } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
 import { readJson } from "../../../../../lib/rest";
-import { orgOf } from "../../../../../lib/session";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
 
   const clientId = (await params).id;
-  const org = orgOf(guard.user);
+  const workspace = guard.workspaceId;
   const body = await readJson(req);
   if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
   const { oldSecretId, expiresAt } = body.value as { oldSecretId?: string; expiresAt?: string };
@@ -30,7 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { secret, id } = await rotateClientSecret(
       app,
       clientId,
-      org,
+      workspace,
       oldSecretId,
       expiryDate,
       guard.user.id,

@@ -6,6 +6,7 @@ import { chunkText } from "./chunk";
 import { embedChunks } from "../embedding/sync";
 import type { TaxonomyBinding } from "../taxonomy";
 import type { BinaryExtractor, Embedder } from "../providers";
+import { ident } from "../sql/ident";
 
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 export const TEXT_EXT = /\.(md|txt)$/i;
@@ -78,13 +79,14 @@ export type IngestResult = {
 };
 
 export function filesTable(schema: string, collection: string): string {
-  // collection is caller-controlled (server-side config/CLI, not raw user input),
-  // so this identifier interpolation is safe (SQL identifiers can't be parameterized).
-  return `${schema}."${collection}__files"`;
+  // collection is caller-controlled (server-side config/CLI, not raw user input) — ident() is
+  // the check applied at the point of interpolation anyway, per its own header comment, rather
+  // than trusted to hold upstream.
+  return `${schema}.${ident(`${collection}__files`)}`;
 }
 
 export function documentsTable(schema: string, collection: string): string {
-  return `${schema}."${collection}__documents"`;
+  return `${schema}.${ident(`${collection}__documents`)}`;
 }
 
 /**
@@ -99,6 +101,7 @@ export async function ingestFile(
   db: Pool,
   schema: string,
   collection: string,
+  workspaceId: string,
   input: IngestInput,
   deps: IngestDeps = {},
 ): Promise<IngestResult> {
@@ -187,10 +190,13 @@ export async function ingestFile(
     termValues.push(b.multiple ? values : values[0]!);
   }
 
+  // Scoped by workspace_id, not just path: two workspaces indexing the same collection can each
+  // hold a file at the same path, and without this filter the second workspace's ingest would
+  // find the first's row, treat it as its own "prev", and overwrite someone else's document.
   const prev = (
     await db.query<{ id: string; checksum: string }>(
-      `select id, checksum from ${filesT} where path = $1`,
-      [rel],
+      `select id, checksum from ${filesT} where path = $1 and workspace_id = $2`,
+      [rel, workspaceId],
     )
   ).rows[0];
   if (prev && prev.checksum === file.checksum)
@@ -232,8 +238,8 @@ export async function ingestFile(
     const ph = [...termValues, ...metadataValues].map((_, i) => `,$${i + 7}`).join("");
     const n = 7 + termValues.length + metadataValues.length;
     await db.query(
-      `insert into ${filesT} (id, title, path, owner, checksum, updated_at${cols}, blob, content_type, byte_size, origin)
-       values ($1,$2,$3,$4,$5,$6${ph},$${n},$${n + 1},$${n + 2},$${n + 3})`,
+      `insert into ${filesT} (id, title, path, owner, checksum, updated_at${cols}, blob, content_type, byte_size, origin, workspace_id)
+       values ($1,$2,$3,$4,$5,$6${ph},$${n},$${n + 1},$${n + 2},$${n + 3},$${n + 4})`,
       [
         id,
         file.title,
@@ -247,6 +253,7 @@ export async function ingestFile(
         contentType,
         blob.byteLength,
         input.origin,
+        workspaceId,
       ],
     );
   }
@@ -255,8 +262,8 @@ export async function ingestFile(
   const chunkIds = pieces.map(() => randomUUID());
   for (let i = 0; i < pieces.length; i++)
     await db.query(
-      `insert into ${documentsT} (id, file_id, document_seq, content) values ($1,$2,$3,$4)`,
-      [chunkIds[i], id, i, pieces[i]],
+      `insert into ${documentsT} (id, file_id, document_seq, content, workspace_id) values ($1,$2,$3,$4,$5)`,
+      [chunkIds[i], id, i, pieces[i], workspaceId],
     );
   // Embedded in the same pass when an embedder was supplied. Chunks are deleted and reinserted
   // whenever the checksum changes, so an embedding can never outlive the text it describes —

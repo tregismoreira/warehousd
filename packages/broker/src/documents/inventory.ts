@@ -3,14 +3,14 @@ import { kindOf } from "../config/kinds";
 import { findCollection } from "../config/load";
 import { dataSchema } from "../config/collection";
 import { ident } from "../sql/ident";
-import { dataPool, type Pools, withOrg } from "../db/pools";
+import { dataPool, type Pools, withWorkspace } from "../db/pools";
 
 // Inventory: how much is in a collection, which files back it, how its terms are distributed.
 //
 // The console needs these numbers to say anything about *state* rather than configuration, and
 // invariant 1 says a route may not reach a data schema to get them. So they live here, beside
 // documents/paths.ts, and follow the same three rules: read through the env-scoped pool inside
-// withOrg, validate the collection against the loaded config before its name is interpolated,
+// withWorkspace, validate the collection against the loaded config before its name is interpolated,
 // and hand back plain values that a caller shapes into a response.
 //
 // None of this is grant-checked, and deliberately so — it is inventory metadata for an admin
@@ -19,7 +19,7 @@ import { dataPool, type Pools, withOrg } from "../db/pools";
 // Anything that would return a document goes through broker.query, which is grant-checked.
 
 /** Which environment's data, and whose. Neither is ever read from a request. */
-export type Scope = { env: "dev" | "live"; orgId: string };
+export type Scope = { env: "dev" | "live"; workspaceId: string };
 
 /**
  * One indexed source file, with the number of documents it was chunked into.
@@ -87,7 +87,7 @@ export async function countDocumentsIn(
   if (!names.length) return {};
   const schema = dataSchema(scope.env);
 
-  return withOrg(dataPool(pools, scope), scope.orgId, async (client) => {
+  return withWorkspace(dataPool(pools, scope), scope.workspaceId, async (client) => {
     // Which of them exist here, asked once. A collection declared in the YAML but never applied
     // to this environment has no view, and in Postgres a failed statement aborts the whole
     // transaction — so finding out one `select` at a time would lose every count after the
@@ -133,7 +133,7 @@ export async function listFiles(
   if (!kindOf(c).chunked) throw new Error(`Collection ${collection} is not a file collection`);
   const view = viewOf(cfg, scope.env, collection);
 
-  const r = await withOrg(dataPool(pools, scope), scope.orgId, (client) =>
+  const r = await withWorkspace(dataPool(pools, scope), scope.workspaceId, (client) =>
     client.query<{
       id: string;
       title: string | null;
@@ -187,7 +187,7 @@ export async function countTermUsage(
     ? `select t as term, count(*)::text as n from ${view}, unnest(${col}) t group by t`
     : `select ${col} as term, count(*)::text as n from ${view} where ${col} is not null group by ${col}`;
 
-  const r = await withOrg(dataPool(pools, scope), scope.orgId, (client) =>
+  const r = await withWorkspace(dataPool(pools, scope), scope.workspaceId, (client) =>
     client.query<{ term: string; n: string }>(text),
   );
   return Object.fromEntries(r.rows.map((x) => [x.term, Number(x.n)]));

@@ -14,7 +14,7 @@ const fixtureDir = new URL("./fixtures/rest-api", import.meta.url).pathname;
 // grant with every verb (including approve) for the CRUD/read-side happy paths; mia gets a
 // proposal_only-mode grant with only create+read, so her creates land as pending proposals for
 // marcus to approve/reject. Two personas are required — loadActiveGrant picks one active grant
-// per (user, collection, env, org), so a single user can't hold both modes at once.
+// per (user, collection, env, workspace), so a single user can't hold both modes at once.
 describe("REST API /v1/* routes", () => {
   let db: Awaited<ReturnType<typeof setupWebDbWithConfig>>;
   let marcusToken: string;
@@ -65,7 +65,7 @@ describe("REST API /v1/* routes", () => {
     const marcusGrant = await requestGrant(app, {
       userId: "marcus",
       collection: "feedback",
-      orgId: "default",
+      workspaceId: "default",
       env: "dev",
       purposeLabel: "test",
       allowedFields: fields,
@@ -78,7 +78,7 @@ describe("REST API /v1/* routes", () => {
     const miaGrant = await requestGrant(app, {
       userId: "mia",
       collection: "feedback",
-      orgId: "default",
+      workspaceId: "default",
       env: "dev",
       purposeLabel: "test",
       allowedFields: fields,

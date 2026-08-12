@@ -56,7 +56,7 @@ describe("broker.mutate dataset operations", () => {
       userId: "create_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -98,7 +98,7 @@ describe("broker.mutate dataset operations", () => {
       userId: "autoid_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -123,7 +123,7 @@ describe("broker.mutate dataset operations", () => {
       userId: "update_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -131,7 +131,7 @@ describe("broker.mutate dataset operations", () => {
 
     // Create a document first
     const createResult = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'old@ex.com', 'Old', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id, _rev`,
     );
@@ -174,7 +174,7 @@ describe("broker.mutate dataset operations", () => {
       userId: "copy_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -182,7 +182,7 @@ describe("broker.mutate dataset operations", () => {
 
     // Create with both email and name
     const createResult = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'test@ex.com', 'TestName', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -214,7 +214,7 @@ describe("broker.mutate dataset operations", () => {
       userId: "delete_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -222,7 +222,7 @@ describe("broker.mutate dataset operations", () => {
 
     // Create a document
     const createResult = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'del@ex.com', 'Del', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -259,14 +259,14 @@ describe("broker.mutate dataset operations", () => {
       userId: "expect_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "update"] });
 
     const createResult = await app.query(
-      `insert into data_synth.people (org_id, id, email, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'expect@ex.com', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id, _rev`,
     );
@@ -290,14 +290,14 @@ describe("broker.mutate dataset operations", () => {
       userId: "expect_match_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
     await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "update"] });
 
     const createResult = await app.query(
-      `insert into data_synth.people (org_id, id, email, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'match@ex.com', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id, _rev`,
     );
@@ -326,7 +326,7 @@ describe("broker.mutate dataset operations", () => {
       userId: "join_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -342,7 +342,7 @@ describe("broker.mutate dataset operations", () => {
       userId: "self_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "owner"],
     });
@@ -354,7 +354,7 @@ describe("broker.mutate dataset operations", () => {
     // Insert document owned by someone else
     const otherId = (
       await app.query(
-        `insert into data_synth.people (org_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+        `insert into data_synth.people (workspace_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'other@ex.com', 'other_user', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
       )
@@ -377,7 +377,7 @@ describe("broker.mutate dataset operations", () => {
       userId: "audit_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });

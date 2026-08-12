@@ -28,7 +28,8 @@ describe("app schema", () => {
       "collections",
       "grants",
       "login_attempts",
-      "organizations",
+      // The /v1/platform bearer credential — above the workspace boundary, see credentials/platform-keys.ts.
+      "platform_keys",
       // The migration ledger itself. It is created by the runner rather than by a migration,
       // so it exists before 0001 does anything — see packages/broker/src/db/migrate.ts.
       "schema_migrations",
@@ -41,20 +42,23 @@ describe("app schema", () => {
       // on a per-document ACL resolves against. Never read from a token — see acl/principals.ts.
       "user_groups",
       "vocabularies",
+      // Per-workspace role membership — see packages/broker/src/workspaces/members.ts.
+      "workspace_members",
+      "workspaces",
     ]);
   });
 
-  it("bootstraps exactly one implicit org, and stays at one across re-runs", async () => {
+  it("bootstraps exactly one implicit workspace, and stays at one across re-runs", async () => {
     p = await provision("appschema");
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await createAppSchema(db);
-    const r = await db.query(`select id from app.organizations`);
+    const r = await db.query(`select id from app.workspaces`);
     await db.end();
     expect(r.rows.map((x) => x.id)).toEqual(["default"]);
   });
 
-  it("org_id defaults to the implicit org on every governed table", async () => {
+  it("workspace_id defaults to the implicit workspace on every governed table", async () => {
     p = await provision("appschema");
     const db = new Pool({ connectionString: p.urls.admin });
     await createAppSchema(db);
@@ -67,8 +71,8 @@ describe("app schema", () => {
     await db.query(`insert into app.collections (name, description) values ('people','People')`);
     await db.query(`insert into app.client_policies (client_id) values ('c1')`);
     for (const t of ["grants", "audit_events", "collections", "client_policies"]) {
-      const r = await db.query(`select org_id from app.${t}`);
-      expect(r.rows.every((x) => x.org_id === "default")).toBe(true);
+      const r = await db.query(`select workspace_id from app.${t}`);
+      expect(r.rows.every((x) => x.workspace_id === "default")).toBe(true);
     }
     await db.end();
   });

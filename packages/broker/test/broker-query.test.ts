@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema } from "../src/db/migrate-app";
+import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
 import { createPools, type Pools } from "../src/db/pools";
@@ -36,7 +36,7 @@ beforeAll(async () => {
   admin = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
-  await generateSynthetic(admin, cfg, 7);
+  await generateSynthetic(admin, cfg, 7, DEFAULT_WORKSPACE_ID);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
 });

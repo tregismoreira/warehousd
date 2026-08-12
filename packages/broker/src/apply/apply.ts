@@ -83,7 +83,7 @@ async function resolveDestructiveChanges(db: Queryable, cfg: WarehousdConfig): P
   );
   for (const name of gone) {
     await db.query(`delete from app.collections where name = $1`, [name]);
-    // Its ACL rows too. `_acl` is one shared table keyed by (org, collection, document), so
+    // Its ACL rows too. `_acl` is one shared table keyed by (workspace, collection, document), so
     // dropping the collection's table does not take them with it — and a collection later
     // re-created under the same name would inherit restrictions nobody remembers setting.
     for (const schema of ["data_synth", "data_live"])
@@ -169,12 +169,14 @@ async function applyOn(
         [slug, v.label],
       )
     ).rows[0].id;
-    // Insert YAML-sourced terms with env='all'
+    // Insert YAML-sourced terms with env='all'. workspace_id='*': declared in warehousd.yml,
+    // therefore deployment-global — every workspace sees the same config-declared terms, unlike
+    // a dataset-sourced vocabulary's terms, which syncDatasetTerms derives per workspace.
     if (v.terms) {
       for (const [t, tv] of Object.entries(v.terms))
         await db.query(
-          `insert into app.terms (vocabulary_id, env, slug, label) values ($1,$2,$3,$4)
-           on conflict (vocabulary_id, env, slug) do update set label=excluded.label`,
+          `insert into app.terms (vocabulary_id, env, workspace_id, slug, label) values ($1,$2,'*',$3,$4)
+           on conflict (vocabulary_id, env, workspace_id, slug) do update set label=excluded.label`,
           [vid, "all", t, tv.label],
         );
     }

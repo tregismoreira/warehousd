@@ -53,7 +53,7 @@ beforeAll(async () => {
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
   await app.query(
-    `insert into data_synth.salaries (${R}, org_id, id, band)
+    `insert into data_synth.salaries (${R}, workspace_id, id, band)
      values (${RV}, 'default', gen_random_uuid(), 100000)`,
   );
 }, 60_000);
@@ -73,7 +73,7 @@ async function grant(
     userId,
     collection,
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "t",
     allowedFields: ["id"],
   });

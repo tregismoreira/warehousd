@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema, applyConfig, createPools, type Pools } from "../src/index";
+import {
+  createAppSchema,
+  applyConfig,
+  createPools,
+  DEFAULT_WORKSPACE_ID,
+  type Pools,
+} from "../src/index";
 import { importCollection } from "../src/import/run";
 import { syncDatasetTerms } from "../src/taxonomy";
 import { loadConfig } from "../src/config/load";
@@ -238,8 +244,8 @@ describe("importCollection: upsert and delete write revisions", () => {
     (await admin.query(`select name from data_live.v_departments where id=$1`, [id])).rows;
 
   beforeAll(async () => {
-    // The view filters on the org GUC, which is unset on a bare admin connection.
-    await admin.query(`select set_config('warehousd.org_id', 'default', false)`);
+    // The view filters on the workspace GUC, which is unset on a bare admin connection.
+    await admin.query(`select set_config('warehousd.workspace_id', 'default', false)`);
   });
 
   it("upsert creates a document that does not exist yet", async () => {
@@ -660,7 +666,7 @@ describe("importCollection: dataset-sourced vocabulary", () => {
       expect(r.errors?.[0]).toMatchObject({ column: "client", reason: "unvalidatable_term" });
     } finally {
       await applyConfig(dAdmin, dsCfg);
-      await syncDatasetTerms(dAdmin, dsCfg, "live");
+      await syncDatasetTerms(dAdmin, dsCfg, "live", DEFAULT_WORKSPACE_ID);
     }
   });
 

@@ -63,8 +63,15 @@ collections:
     // Setup test database
     setup = await setupWebDb("entrypoint-test");
 
-    // Delete the demo personas that setupWebDb creates, so we can test bootstrap creating the admin alone
+    // Delete the demo personas that setupWebDb creates, so we can test bootstrap creating the admin alone.
+    // workspace_members.user_id carries no FK to app.user (see entrypoint.ts's own comment on the
+    // same hazard), so the membership rows have to be deleted too — left behind, they orphan onto
+    // 'ana'/'marcus'/'mia' and collide with seedDemoPersonas re-keying a fresh signup onto the same
+    // slug later in this file.
     const cleanupDb = new Pool({ connectionString: setup.appUrl });
+    await cleanupDb.query(
+      `delete from app.workspace_members where user_id in ('ana', 'marcus', 'mia')`,
+    );
     await cleanupDb.query(`delete from app."user" where id in ('ana', 'marcus', 'mia')`);
     await cleanupDb.end();
 

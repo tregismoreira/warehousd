@@ -45,7 +45,7 @@ async function ask(userId: string, env: "dev" | "live") {
   return requestGrant(admin, {
     userId,
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env,
     purposeLabel: "t",
     allowedFields: ["id", "full_name"],
@@ -93,11 +93,11 @@ describe("approveGrant — self-approval", () => {
     expect(r).toEqual({ ok: false, error: "self_approval_denied" });
   });
 
-  // Org scoping still comes first: a grant in another tenant is not found at all, which must not
+  // Workspace scoping still comes first: a grant in another tenant is not found at all, which must not
   // be reported as a self-approval problem.
   it("still reports an unreachable grant as unknown, not as self-approval", async () => {
     const id = await ask("marcus", "live");
-    const r = await approveGrant(admin, cfg, id, "marcus", { orgId: "some-other-org" });
+    const r = await approveGrant(admin, cfg, id, "marcus", { workspaceId: "some-other-workspace" });
     expect(r).toEqual({ ok: false, error: "unknown_grant" });
   });
 });

@@ -83,11 +83,11 @@ describe("declaredTables", () => {
       { name: "ok", pgType: "boolean", pk: false },
       { name: "blob", pgType: "jsonb", pk: false },
     ]);
-    // org_id, the revision bookkeeping every dataset carries, plus a reserved `<field>_tsv` slot
+    // workspace_id, the revision bookkeeping every dataset carries, plus a reserved `<field>_tsv` slot
     // per field — see the note in declaredTables on why the slot is reserved whether or not the
     // field is currently searchable.
     expect(t!.structural).toEqual([
-      "org_id",
+      "workspace_id",
       "_rev",
       "_rev_seq",
       "_rev_at",
@@ -111,7 +111,7 @@ describe("declaredTables", () => {
 
   // A stranded column is only findable if the planner knows which columns it is not responsible
   // for. Get this wrong and every writable collection reports nine phantom drop_columns.
-  it("counts revision, search and org columns as structural, not declared", () => {
+  it("counts revision, search and workspace columns as structural, not declared", () => {
     const cfg = ConfigSchema.parse({
       project: "t",
       collections: {
@@ -127,7 +127,7 @@ describe("declaredTables", () => {
     });
     const [t] = declaredTables("orders", cfg);
     expect(t!.columns.map((c) => c.name)).toEqual(["id", "note"]);
-    expect(t!.structural).toContain("org_id");
+    expect(t!.structural).toContain("workspace_id");
     expect(t!.structural).toContain("note_tsv");
     expect(t!.structural).toContain("_rev");
     expect(t!.structural).toContain("_current");

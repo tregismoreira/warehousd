@@ -28,7 +28,7 @@ export type RevisionMeta = {
   // *proposer* here rather than the approver, so authorship survives the merge — the audit row
   // is where the approver's identity is recorded.
   by: string;
-  orgId: string;
+  workspaceId: string;
 };
 
 // Seeders and fixtures write straight SQL against a dataset table rather than going through
@@ -37,7 +37,7 @@ export type RevisionMeta = {
 // now fails on the NOT NULL bookkeeping columns. These two constants are the literal fragment
 // that makes such an insert a well-formed `create` revision.
 //
-// `_rev`, `_rev_at` and `org_id` are omitted deliberately: each has a column default, and a
+// `_rev`, `_rev_at` and `workspace_id` are omitted deliberately: each has a column default, and a
 // seeder that spelled them out would be one more copy to keep in step with the DDL.
 export const SEED_REV_COLUMNS = "_rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields, _current";
 export const SEED_REV_VALUES = "1, 'seed', 'create', 'approved', '{}', true";
@@ -63,7 +63,7 @@ export async function insertRevision(
     meta.fields,
     meta.base,
     meta.current,
-    meta.orgId,
+    meta.workspaceId,
     ...dataCols.map((k) => row[k] ?? null),
   ];
   await client.query(
@@ -76,7 +76,7 @@ export async function insertRevision(
 /**
  * Clear `_current` on one revision. Always call this BEFORE inserting its replacement: both rows
  * are `_current` between the two statements otherwise, and the partial unique index on
- * (org_id, pk) where _current rejects the insert.
+ * (workspace_id, pk) where _current rejects the insert.
  */
 export async function demoteRevision(
   client: PoolClient,
@@ -121,7 +121,7 @@ export async function reviseDocument(
   dataCols: string[],
   current: RevisionRow,
   changed: Record<string, unknown>,
-  meta: Pick<RevisionMeta, "op" | "status" | "by" | "orgId">,
+  meta: Pick<RevisionMeta, "op" | "status" | "by" | "workspaceId">,
 ): Promise<string> {
   const next: Record<string, unknown> = {};
   for (const f of dataCols) next[f] = f in changed ? changed[f] : current[f];
@@ -138,7 +138,7 @@ export async function reviseDocument(
       base: Number(current._rev_seq),
       current: true,
       by: meta.by,
-      orgId: meta.orgId,
+      workspaceId: meta.workspaceId,
     },
     next,
   );

@@ -59,6 +59,18 @@ describe("requireSession", () => {
     expect(r.user.id).toBe("mia");
     expect(r.user.role).toBe("member");
   });
+
+  // The role a guard carries is the caller's MEMBERSHIP role in the active workspace, not the
+  // global `user.role` column — they agree here only because the bootstrap backfill copied one
+  // into the other. workspace-members.integration.test.ts is where they're made to disagree.
+  it("carries the workspace and the membership role on the guard", async () => {
+    const { requireSession } = await import("../lib/authz");
+    const r = await requireSession(req(anaCookie));
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r.workspaceId).toBe("default");
+    expect(r.role).toBe("admin");
+  });
 });
 
 describe("requireRole", () => {

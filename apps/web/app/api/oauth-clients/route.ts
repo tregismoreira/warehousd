@@ -12,20 +12,28 @@ export async function GET(req: NextRequest) {
   if (!guard.ok) return guard.response;
   // Left join: a dynamically registered client (RFC 7591) may have no policy row yet, and
   // getClientPolicy treats a missing row as {env:dev} — mirror that here, never allow-all.
-  const r = await getAppPool().query(`
-    select a."clientId"                      as "clientId",
-           coalesce(p.display_name, a.name)  as "displayName",
-           coalesce(p.allowed_scopes, '{env:dev}') as "allowedScopes",
-           -- Absent policy row means false, mirroring getClientPolicy. Never allow-all.
-           coalesce(p.can_manage_acl, false) as "canManageAcl",
-           p.promoted_at                     as "promotedAt",
-           p.promoted_by                     as "promotedBy",
-           a."createdAt"                     as "createdAt",
-           (select max(t."createdAt") from app."oauthAccessToken" t
-             where t."clientId" = a."clientId") as "lastTokenAt"
-    from app."oauthApplication" a
-    left join app.client_policies p on p.client_id = a."clientId"
-    order by a."createdAt" desc`);
+  //
+  // The workspace predicate is on the policy row, not the join condition, so it stays a left
+  // join rather than silently becoming an inner one: a client with no policy row has no
+  // workspace_id to compare and — matching ClientPolicy's own "null means no pin, do not
+  // restrict" rule — is left visible rather than dropped.
+  const r = await getAppPool().query(
+    `select a."clientId"                      as "clientId",
+            coalesce(p.display_name, a.name)  as "displayName",
+            coalesce(p.allowed_scopes, '{env:dev}') as "allowedScopes",
+            -- Absent policy row means false, mirroring getClientPolicy. Never allow-all.
+            coalesce(p.can_manage_acl, false) as "canManageAcl",
+            p.promoted_at                     as "promotedAt",
+            p.promoted_by                     as "promotedBy",
+            a."createdAt"                     as "createdAt",
+            (select max(t."createdAt") from app."oauthAccessToken" t
+              where t."clientId" = a."clientId") as "lastTokenAt"
+     from app."oauthApplication" a
+     left join app.client_policies p on p.client_id = a."clientId"
+     where p.workspace_id = $1 or p.workspace_id is null
+     order by a."createdAt" desc`,
+    [guard.workspaceId],
+  );
   return Response.json({ clients: r.rows });
 }
 
@@ -47,7 +55,7 @@ export async function POST(req: NextRequest) {
      values ($1,$2,$3,$4,'web','[]',$5,now(),now())`,
     [id, clientId, clientSecret, name ?? "Untitled client", guard.user.id],
   );
-  await upsertClientPolicy(app, clientId, name ?? null, ["env:dev"]);
+  await upsertClientPolicy(app, clientId, name ?? null, ["env:dev"], guard.workspaceId);
 
   // The secret is returned here and never again — GET deliberately omits it.
   return Response.json({ clientId, clientSecret });

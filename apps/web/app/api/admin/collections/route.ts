@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { countDocumentsIn } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
-import { readEnvCookie, orgOf } from "../../../../lib/session";
+import { readEnvCookie } from "../../../../lib/session";
 import { applyStatus } from "../../../../lib/apply-status";
 
 export async function GET(req: NextRequest) {
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   // it asks; the other three would otherwise pay for twenty scans they never render.
   //
   // Counts are for the console's current environment — the cookie the env switcher writes — and
-  // for the admin's own org. A collection with nothing applied has no view to count, and that is
+  // for the admin's own workspace. A collection with nothing applied has no view to count, and that is
   // `null` rather than `0`: "never deployed here" and "deployed and empty" are different facts,
   // and an admin looking at a fresh environment needs to be able to tell them apart.
   if (new URL(req.url).searchParams.get("counts") !== "1")
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 
   const counts = await countDocumentsIn(
     getBroker().pools,
-    { env, orgId: orgOf(guard.user) },
+    { env, workspaceId: guard.workspaceId },
     cfg,
     shaped.filter((c) => c.status !== "not_applied").map((c) => c.name),
   );

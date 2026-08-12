@@ -66,7 +66,7 @@ describe("broker.changes() change feed", () => {
         userId: "user1_create",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -97,7 +97,7 @@ describe("broker.changes() change feed", () => {
         userId: "user2_update",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -143,7 +143,7 @@ describe("broker.changes() change feed", () => {
         userId: "user3_delete",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -185,7 +185,7 @@ describe("broker.changes() change feed", () => {
         userId: "user4_file",
         collection: "files",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["path", "title", "content"],
       });
@@ -216,7 +216,7 @@ describe("broker.changes() change feed", () => {
         userId: "user5_proposal",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -250,7 +250,7 @@ describe("broker.changes() change feed", () => {
         userId: "user6_approve",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -263,7 +263,7 @@ describe("broker.changes() change feed", () => {
         userId: "user6_approver",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -309,7 +309,7 @@ describe("broker.changes() change feed", () => {
         userId: "user7_rollback",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -352,7 +352,7 @@ describe("broker.changes() change feed", () => {
         userId: "user8_nodata",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -387,7 +387,7 @@ describe("broker.changes() change feed", () => {
         userId: "user9_cursor",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -428,7 +428,7 @@ describe("broker.changes() change feed", () => {
         userId: "user10_order",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -465,7 +465,7 @@ describe("broker.changes() change feed", () => {
         userId: grantedUserId,
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -492,15 +492,15 @@ describe("broker.changes() change feed", () => {
     });
   });
 
-  describe("org and env isolation", () => {
-    it("caller sees only their own org's entries", async () => {
-      // This test is implicit in our use of ctx.orgId; all tests use 'default' org
-      // A true multi-org test would require provisioning users in different orgs
+  describe("workspace and env isolation", () => {
+    it("caller sees only their own workspace's entries", async () => {
+      // This test is implicit in our use of ctx.workspaceId; all tests use 'default' workspace
+      // A true multi-workspace test would require provisioning users in different workspaces
       const grantId = await requestGrant(app, {
         userId: "user12_org",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -510,14 +510,14 @@ describe("broker.changes() change feed", () => {
       await broker.mutate(ctx, {
         collection: "docs",
         op: "create",
-        values: { title: "Test", body: "Org test" },
+        values: { title: "Test", body: "Workspace test" },
       });
 
       const feed = await broker.changes(ctx, { since: 0 });
       expect(feed.ok).toBe(true);
       if (!feed.ok) throw new Error("changes failed");
 
-      // All entries should have this org and env
+      // All entries should have this workspace and env
       for (const entry of feed.entries) {
         expect(entry.collection).toBeDefined();
       }
@@ -528,7 +528,7 @@ describe("broker.changes() change feed", () => {
         userId: "user13_env",
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -538,7 +538,7 @@ describe("broker.changes() change feed", () => {
         userId: "user13_env",
         collection: "docs",
         env: "live",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -583,7 +583,7 @@ describe("broker.changes() change feed", () => {
         userId: user1Id,
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });
@@ -593,7 +593,7 @@ describe("broker.changes() change feed", () => {
         userId: user2Id,
         collection: "docs",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "title", "body"],
       });

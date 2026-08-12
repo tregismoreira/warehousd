@@ -5,7 +5,7 @@ import { resolve } from "path";
 import {
   ensureSchemasAndRoles,
   migrateApp,
-  migrateUserOrg,
+  migrateUserWorkspace,
   loadConfig,
   applyConfig,
   runProjectMigrations,
@@ -17,6 +17,7 @@ import {
   ensureDevClient,
   dataRoleUrl,
   grantableFields,
+  DEFAULT_WORKSPACE_ID,
   type WarehousdConfig,
   kindOf,
 } from "@warehousd/broker";
@@ -48,6 +49,14 @@ async function ensureAdminUser(db: Pool): Promise<string> {
 
   // Update role to admin
   await db.query(`update app."user" set role = $1 where id = $2`, ["admin", userId]);
+  // databaseHooks.user.create.after (lib/auth.ts) already gave this user a 'member' row in
+  // app.workspace_members for 'default' — authorization reads that table, not app.user.role
+  // (lib/authz.ts), so without this the operator's own admin account would be locked out of
+  // every /api/admin/* route despite app.user.role correctly saying 'admin'.
+  await db.query(
+    `update app.workspace_members set role = 'admin' where workspace_id = 'default' and user_id = $1`,
+    [userId],
+  );
 
   return userId;
 }
@@ -91,6 +100,16 @@ async function seedDemoPersonas(db: Pool, cfg: WarehousdConfig): Promise<void> {
     await db.query(`delete from app."session" where "userId" = $1`, [generatedId]);
     await db.query(`delete from app."account" where "userId" = $1`, [generatedId]);
     await db.query(`update app."user" set id = $1, role = $2 where id = $3`, [
+      p.id,
+      p.role,
+      generatedId,
+    ]);
+    // databaseHooks.user.create.after (lib/auth.ts) already gave `generatedId` a 'member' row in
+    // app.workspace_members for 'default' — workspace_members.user_id carries no FK to app.user,
+    // so renaming the user above left that row pointing at an id nothing references any more,
+    // and the persona itself with no membership row at all. Re-key it rather than insert a
+    // second one, and correct the role while at it: the hook's default is always 'member'.
+    await db.query(`update app.workspace_members set user_id = $1, role = $2 where user_id = $3`, [
       p.id,
       p.role,
       generatedId,
@@ -160,9 +179,9 @@ export async function bootstrap(): Promise<void> {
       });
     }
 
-    // 4b. Push the org default down onto Better Auth's generated `user.orgId` column.
+    // 4b. Push the workspace default down onto Better Auth's generated `user.workspaceId` column.
     //     Must follow step 4 — the table does not exist before it.
-    await migrateUserOrg(db);
+    await migrateUserWorkspace(db);
 
     // 5. The project's own migrations, then YAML → data_synth/data_live tables + views +
     //    app.collections. Idempotent by design.
@@ -195,20 +214,25 @@ export async function bootstrap(): Promise<void> {
       if (!kindOf(c).synthesisable) continue;
       await db.query(`truncate data_synth.${name} cascade`);
     }
-    await generateSynthetic(db, cfg, Number(process.env.WAREHOUSD_SEED ?? 42));
+    await generateSynthetic(
+      db,
+      cfg,
+      Number(process.env.WAREHOUSD_SEED ?? 42),
+      DEFAULT_WORKSPACE_ID,
+    );
 
     // 8.5. Sync dataset-sourced vocabulary terms. Both envs, once — the term set is a property
     // of the data, not of the collection being indexed. `live` legitimately yields nothing on a
     // fresh deployment: data_live is populated by admin import, not by this script.
-    await syncDatasetTerms(db, cfg, "dev");
-    await syncDatasetTerms(db, cfg, "live");
+    await syncDatasetTerms(db, cfg, "dev", DEFAULT_WORKSPACE_ID);
+    await syncDatasetTerms(db, cfg, "live", DEFAULT_WORKSPACE_ID);
 
     // 9. Index file collections
     for (const [name, c] of Object.entries(cfg.collections)) {
       if (!kindOf(c).chunked) continue;
       const metadata = fileMetadataFields(c);
-      const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
-      await indexCollection(db, "dev", name, resolve(dir, c.source!), {
+      const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev", DEFAULT_WORKSPACE_ID);
+      await indexCollection(db, "dev", name, resolve(dir, c.source!), DEFAULT_WORKSPACE_ID, {
         taxonomies: devTaxonomies,
         metadata,
       });
@@ -230,7 +254,13 @@ export async function bootstrap(): Promise<void> {
         continue;
       }
       if (liveDir) {
-        const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
+        const liveTaxonomies = await loadTaxonomyBindings(
+          db,
+          cfg,
+          name,
+          "live",
+          DEFAULT_WORKSPACE_ID,
+        );
         // indexCollection throws on a term its bindings don't know, and a dataset-sourced
         // vocabulary has no live terms until data_live holds rows. Indexing anyway would abort
         // the whole boot on a deployment whose only fault is not having imported data yet, so
@@ -244,7 +274,7 @@ export async function bootstrap(): Promise<void> {
           );
           continue;
         }
-        await indexCollection(db, "live", name, liveDir, {
+        await indexCollection(db, "live", name, liveDir, DEFAULT_WORKSPACE_ID, {
           taxonomies: liveTaxonomies,
           metadata,
         });

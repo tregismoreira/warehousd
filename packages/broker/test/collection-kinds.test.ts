@@ -156,7 +156,7 @@ describe("the DDL half is per kind", () => {
     ).toEqual(["people"]);
   });
 
-  it("the org-isolation policy lands on every table the kind stores rows in", () => {
+  it("the workspace-isolation policy lands on every table the kind stores rows in", () => {
     expect(kindOf(policies).ddl.rlsTables("data_synth", "policies")).toEqual([
       'data_synth."policies__files"',
       'data_synth."policies__documents"',

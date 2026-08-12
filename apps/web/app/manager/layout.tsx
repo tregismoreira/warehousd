@@ -2,6 +2,8 @@ import { headers, cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { atLeast, type Role } from "@/lib/authz";
+import { activeWorkspaceIdFromSession } from "@/lib/session";
+import { workspaceShellData } from "@/lib/workspace-shell";
 import { AppShell } from "@/components/shell/AppShell";
 
 export default async function ManagerLayout({ children }: { children: React.ReactNode }) {
@@ -10,8 +12,18 @@ export default async function ManagerLayout({ children }: { children: React.Reac
   const role = (session.user as { role?: Role }).role ?? "member";
   if (!atLeast(role, "manager")) redirect("/403");
   const env = (await cookies()).get("wh_env")?.value === "live" ? "live" : "dev";
+  const workspace = await workspaceShellData(
+    session.user.id,
+    activeWorkspaceIdFromSession(session),
+  );
   return (
-    <AppShell surface="manager" role={role} email={session.user.email} env={env}>
+    <AppShell
+      surface="manager"
+      role={role}
+      email={session.user.email}
+      env={env}
+      workspace={workspace}
+    >
       {children}
     </AppShell>
   );

@@ -8,7 +8,7 @@ import {
   indexCollection,
   syncDatasetTerms,
   loadTaxonomyBindings,
-  DEFAULT_ORG_ID,
+  DEFAULT_WORKSPACE_ID,
   type Pools,
 } from "../src/index";
 import { loadConfig } from "../src/config/load";
@@ -30,10 +30,10 @@ let p: Provisioned, admin: Pool, pools: Pools;
 const harborDir = new URL("../../../examples/harbor", import.meta.url).pathname;
 const cfg = loadConfig(harborDir);
 
-const OTHER_ORG = "org-tenant-b";
-const dev = { env: "dev", orgId: DEFAULT_ORG_ID } as const;
-const live = { env: "live", orgId: DEFAULT_ORG_ID } as const;
-const otherDev = { env: "dev", orgId: OTHER_ORG } as const;
+const OTHER_ORG = "workspace-tenant-b";
+const dev = { env: "dev", workspaceId: DEFAULT_WORKSPACE_ID } as const;
+const live = { env: "live", workspaceId: DEFAULT_WORKSPACE_ID } as const;
+const otherDev = { env: "dev", workspaceId: OTHER_ORG } as const;
 
 const DEV_VENDORS = 3;
 const LIVE_VENDORS = 5;
@@ -42,9 +42,9 @@ const TENANT_B_DOCUMENTS = 2;
 async function seedVendors(schema: string, n: number) {
   for (let i = 0; i < n; i++) {
     await admin.query(
-      `insert into ${schema}.vendors (${R}, org_id, id, name, category, tax_id, active)
+      `insert into ${schema}.vendors (${R}, workspace_id, id, name, category, tax_id, active)
        values (${RV}, $1, gen_random_uuid(), $2, 'supplies', 'x', true)`,
-      [DEFAULT_ORG_ID, `Vendor ${i}`],
+      [DEFAULT_WORKSPACE_ID, `Vendor ${i}`],
     );
   }
 }
@@ -55,31 +55,45 @@ beforeAll(async () => {
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
 
-  await syncDatasetTerms(admin, cfg, "dev");
-  await indexCollection(admin, "dev", "policies", `${harborDir}/seed/docs-dev`, {
-    taxonomies: await loadTaxonomyBindings(admin, cfg, "policies", "dev"),
-  });
-  await syncDatasetTerms(admin, cfg, "live");
-  await indexCollection(admin, "live", "policies", `${harborDir}/seed/docs-live`, {
-    taxonomies: await loadTaxonomyBindings(admin, cfg, "policies", "live"),
-  });
+  await syncDatasetTerms(admin, cfg, "dev", DEFAULT_WORKSPACE_ID);
+  await indexCollection(
+    admin,
+    "dev",
+    "policies",
+    `${harborDir}/seed/docs-dev`,
+    DEFAULT_WORKSPACE_ID,
+    {
+      taxonomies: await loadTaxonomyBindings(admin, cfg, "policies", "dev", DEFAULT_WORKSPACE_ID),
+    },
+  );
+  await syncDatasetTerms(admin, cfg, "live", DEFAULT_WORKSPACE_ID);
+  await indexCollection(
+    admin,
+    "live",
+    "policies",
+    `${harborDir}/seed/docs-live`,
+    DEFAULT_WORKSPACE_ID,
+    {
+      taxonomies: await loadTaxonomyBindings(admin, cfg, "policies", "live", DEFAULT_WORKSPACE_ID),
+    },
+  );
 
   // Deliberately different counts per environment: dev and live are separate schemas served by
   // separate roles, and the console's whole claim is that the switcher changes what you see.
   await seedVendors("data_synth", DEV_VENDORS);
   await seedVendors("data_live", LIVE_VENDORS);
 
-  // A second tenant, written straight in. Org isolation on the data plane is enforced by the
+  // A second tenant, written straight in. Workspace isolation on the data plane is enforced by the
   // view's own predicate, so what this proves is that these functions go through it.
   const fileId = "11111111-1111-1111-1111-111111111111";
   await admin.query(
-    `insert into data_synth."policies__files" (id, org_id, title, path, owner, checksum, updated_at, department, tags)
+    `insert into data_synth."policies__files" (id, workspace_id, title, path, owner, checksum, updated_at, department, tags)
      values ($1, $2, 'Tenant B handbook', 'tenant-b/handbook.md', 'b@example.com', 'cafef00d', now(), 'finance', array['compliance','tax'])`,
     [fileId, OTHER_ORG],
   );
   for (let seq = 0; seq < TENANT_B_DOCUMENTS; seq++) {
     await admin.query(
-      `insert into data_synth."policies__documents" (id, org_id, file_id, document_seq, content)
+      `insert into data_synth."policies__documents" (id, workspace_id, file_id, document_seq, content)
        values (gen_random_uuid(), $1, $2, $3, 'tenant b content')`,
       [OTHER_ORG, fileId, seq],
     );
@@ -213,20 +227,20 @@ describe("countTermUsage", () => {
   });
 });
 
-describe("org isolation", () => {
-  it("counts only the caller's org", async () => {
+describe("workspace isolation", () => {
+  it("counts only the caller's workspace", async () => {
     expect(await countDocuments(pools, otherDev, cfg, "policies")).toBe(TENANT_B_DOCUMENTS);
     expect(await countDocuments(pools, dev, cfg, "policies")).toBeGreaterThan(TENANT_B_DOCUMENTS);
   });
 
-  it("lists only the caller's org's files", async () => {
+  it("lists only the caller's workspace's files", async () => {
     const theirs = await listFiles(pools, otherDev, cfg, "policies");
     const mine = await listFiles(pools, dev, cfg, "policies");
     expect(theirs.map((f) => f.path)).toEqual(["tenant-b/handbook.md"]);
     expect(mine.map((f) => f.path)).not.toContain("tenant-b/handbook.md");
   });
 
-  it("counts terms only within the caller's org", async () => {
+  it("counts terms only within the caller's workspace", async () => {
     const theirs = await countTermUsage(pools, otherDev, cfg, "policies", "department");
     expect(theirs).toEqual({ finance: TENANT_B_DOCUMENTS });
 
@@ -234,14 +248,14 @@ describe("org isolation", () => {
     expect(theirTags).toEqual({ compliance: TENANT_B_DOCUMENTS, tax: TENANT_B_DOCUMENTS });
   });
 
-  it("does not leak the other org's documents into the default org's term counts", async () => {
+  it("does not leak the other workspace's documents into the default workspace's term counts", async () => {
     const mine = await countTermUsage(pools, dev, cfg, "policies", "tags");
     const total = Object.values(mine).reduce((a, b) => a + b, 0);
     const theirs = await countTermUsage(pools, otherDev, cfg, "policies", "tags");
     const theirTotal = Object.values(theirs).reduce((a, b) => a + b, 0);
     const both = await countTermUsage(
       pools,
-      { env: "dev", orgId: "no-such-org" },
+      { env: "dev", workspaceId: "no-such-workspace" },
       cfg,
       "policies",
       "tags",

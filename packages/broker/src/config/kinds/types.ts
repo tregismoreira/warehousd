@@ -100,7 +100,7 @@ export type CollectionKind = {
 export type KindDDL = {
   table(env: Env, collection: string, cfg: WarehousdConfig): string;
   view(env: Env, collection: string, cfg: WarehousdConfig): string;
-  /** The tables that carry the org-isolation policy. One for a dataset, two for a file. */
+  /** The tables that carry the workspace-isolation policy. One for a dataset, two for a file. */
   rlsTables(schema: string, collection: string): string[];
   grantImport(collection: string, cfg: WarehousdConfig): string;
   grantWrite(schema: string, role: string, collection: string): string;

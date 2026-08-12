@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { listGroups } from "@warehousd/broker";
 import { getBroker, getAppPool } from "../../../../../lib/broker";
 import { requireRole } from "../../../../../../lib/authz";
-import { deriveContext, orgOf } from "../../../../../../lib/session";
+import { deriveContext } from "../../../../../../lib/session";
 import { restStatus } from "../../../../../../lib/rest";
 
 // The console's half of ACL management. The REST route under /v1 is the client half; both go
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
   const id = new URL(req.url).searchParams.get("id");
   // The group list is served alongside so the editor can offer `group:` principals that exist
   // rather than asking somebody to type a name and hope.
-  const groups = await listGroups(getAppPool(), orgOf(guard.user));
+  const groups = await listGroups(getAppPool(), guard.workspaceId);
   if (!id) return Response.json({ acl: null, groups });
 
   const result = await getBroker().broker.getDocumentAcl(

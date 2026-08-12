@@ -122,3 +122,71 @@ describe("promotion/demotion", () => {
     expect(policy.allowedScopes).toEqual(["env:dev"]);
   });
 });
+
+// PR 7's control-plane audit found neither route checking that a clientId actually belongs to
+// the caller's workspace: GET listed every workspace's clients, and promote/demote would update
+// any client_policies row by id alone — an admin in one workspace could silently widen another
+// workspace's client to env:live. Fails without the fix (both assertions revert-checked by
+// temporarily dropping the added workspace predicates: GET returned the other workspace's
+// client, and promote returned 200 with the policy actually changed).
+describe("workspace isolation", () => {
+  it("a client created in one workspace is invisible to, and unpromotable from, another", async () => {
+    const pool = getAppPool();
+    await pool.query(
+      `insert into app.workspaces (id, name) values ('oc-other','Other') on conflict do nothing`,
+    );
+    await pool.query(
+      `insert into app.workspace_members (workspace_id, user_id, role) values ('oc-other','ana','admin')
+       on conflict (workspace_id, user_id) do update set role='admin'`,
+    );
+
+    const { POST: createClient } = await import("../app/api/oauth-clients/route");
+    const created = await (
+      await createClient(
+        req("/api/oauth-clients", {
+          method: "POST",
+          cookie: anaCookie,
+          body: { name: "Default-only App" },
+        }) as any,
+      )
+    ).json();
+
+    const { POST: switchWorkspace } = await import("../app/api/me/workspace/route");
+    const switchRes = await switchWorkspace(
+      req("/api/me/workspace", {
+        method: "POST",
+        cookie: anaCookie,
+        body: { workspaceId: "oc-other" },
+      }) as any,
+    );
+    expect(switchRes.status).toBe(200);
+
+    try {
+      const { GET } = await import("../app/api/oauth-clients/route");
+      const listRes = await GET(req("/api/oauth-clients", { cookie: anaCookie }) as any);
+      const listed = await listRes.json();
+      expect(listed.clients.some((c: any) => c.clientId === created.clientId)).toBe(false);
+
+      const { POST: promote } = await import("../app/api/oauth-clients/[clientId]/promote/route");
+      const promoteRes = await promote(
+        req(`/api/oauth-clients/${created.clientId}/promote`, {
+          method: "POST",
+          cookie: anaCookie,
+          body: { action: "promote" },
+        }) as any,
+        { params: Promise.resolve({ clientId: created.clientId }) },
+      );
+      expect(promoteRes.status).toBe(404);
+      const policy = await getClientPolicy(pool, created.clientId);
+      expect(policy.allowedScopes).toEqual(["env:dev"]);
+    } finally {
+      await switchWorkspace(
+        req("/api/me/workspace", {
+          method: "POST",
+          cookie: anaCookie,
+          body: { workspaceId: "default" },
+        }) as any,
+      );
+    }
+  });
+});

@@ -41,7 +41,7 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
 const ctx: BrokerContext = {
   userId: "auditfail_user",
   env: "dev",
-  orgId: "default",
+  workspaceId: "default",
   allowedCollections: null,
   via: "session",
 };
@@ -81,7 +81,7 @@ beforeAll(async () => {
     userId: ctx.userId,
     collection: "people",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "test",
     allowedFields: ["id", "email"],
   });
@@ -137,7 +137,7 @@ describe("an audit write that fails", () => {
       expect(r.auditId).toBeNull();
     }
 
-    // The insert ran inside withOrg before the audit write; returning the refusal from inside the
+    // The insert ran inside withWorkspace before the audit write; returning the refusal from inside the
     // transaction would have committed it. assertRecorded throws instead, so nothing is there.
     const rows = await admin.query(`select 1 from data_synth.people where email = $1`, [
       "rolled-back@example.com",

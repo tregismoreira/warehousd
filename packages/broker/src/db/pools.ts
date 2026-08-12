@@ -53,7 +53,7 @@ function timeouts(kind: "query" | "bulk") {
       : num("WAREHOUSD_BULK_STATEMENT_TIMEOUT_MS", 600_000);
   return {
     statement_timeout,
-    // withOrg wraps every data-plane call in a transaction. If the JavaScript between `begin` and
+    // withWorkspace wraps every data-plane call in a transaction. If the JavaScript between `begin` and
     // `commit` stalls, statement_timeout never fires — no statement is running — and the
     // transaction holds its locks and its xmin indefinitely, which also stops vacuum. This is the
     // bound for that case, and it is the one a statement timeout cannot cover.
@@ -115,7 +115,7 @@ export function createPools(urls: {
 // The ONLY place env maps to a data pool. A dev ctx can never reach the live pool.
 //
 // `Pick<…, "env">` rather than the whole context: env is the only thing either of these reads, and
-// asking for the whole context made a caller that has no user or org fabricate one to get a pool.
+// asking for the whole context made a caller that has no user or workspace fabricate one to get a pool.
 export function dataPool(pools: Pools, ctx: Pick<BrokerContext, "env">): Pool {
   return ctx.env === "live" ? pools.live : pools.dev;
 }
@@ -126,18 +126,18 @@ export function writePool(pools: Pools, ctx: Pick<BrokerContext, "env">): Pool |
   return ctx.env === "live" ? pools.liveWrite : pools.devWrite;
 }
 
-// Every data-plane statement runs inside a transaction whose warehousd.org_id is set
-// from ctx.orgId. `set_config(..., true)` is transaction-local, so a pooled connection
-// can never leak one org's setting into another's query.
-export async function withOrg<T>(
+// Every data-plane statement runs inside a transaction whose warehousd.workspace_id is set
+// from ctx.workspaceId. `set_config(..., true)` is transaction-local, so a pooled connection
+// can never leak one workspace's setting into another's query.
+export async function withWorkspace<T>(
   pool: Pool,
-  orgId: string,
+  workspaceId: string,
   fn: (c: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("begin");
-    await client.query("select set_config('warehousd.org_id', $1, true)", [orgId]);
+    await client.query("select set_config('warehousd.workspace_id', $1, true)", [workspaceId]);
     const result = await fn(client);
     await client.query("commit");
     return result;

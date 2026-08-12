@@ -7,7 +7,7 @@ import { loadPrincipals } from "../acl/principals";
 import { makeAuditWriter } from "../audit/decision";
 import { buildSelect, UnsupportedFilter } from "../sql/build";
 import { maskPreview, type MaskPreview } from "../sql/mask-preview";
-import { dataPool, withOrg } from "../db/pools";
+import { dataPool, withWorkspace } from "../db/pools";
 import { validateDocumentFilters } from "../grants/filters";
 import { aclOpts } from "./guard";
 import type { VerbDeps } from "./deps";
@@ -98,8 +98,8 @@ const CONSOLE_ROLES = new Set(["admin", "manager"]);
 
 async function roleOf(app: Pool, ctx: BrokerContext): Promise<string | null> {
   const r = await app.query<{ role: string | null }>(
-    `select role from app."user" where id = $1 and "orgId" = $2`,
-    [ctx.userId, ctx.orgId],
+    `select role from app."user" where id = $1 and "workspaceId" = $2`,
+    [ctx.userId, ctx.workspaceId],
   );
   return r.rows[0]?.role ?? null;
 }
@@ -140,7 +140,7 @@ export function makeExplainVerb(d: VerbDeps) {
     // to "what would happen", which is the one thing this verb must not have.
     const subjectCtx = {
       userId: subjectUserId,
-      orgId: ctx.orgId,
+      workspaceId: ctx.workspaceId,
       env: ctx.env,
       // The SUBJECT's ceiling, not the asker's. A console user asking about somebody else is not
       // acting through a client, so there is none — the answer describes what the subject holds,
@@ -254,7 +254,7 @@ async function countMatched(
         ...aclOpts(c, grant),
       },
     );
-    return await withOrg(dataPool(d.pools, ctx), ctx.orgId, async (client) => {
+    return await withWorkspace(dataPool(d.pools, ctx), ctx.workspaceId, async (client) => {
       const r = await client.query(text, values);
       const row = r.rows[0] as Record<string, unknown> | undefined;
       const n = row ? Object.values(row)[0] : undefined;

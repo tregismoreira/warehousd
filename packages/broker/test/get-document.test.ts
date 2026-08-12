@@ -81,7 +81,7 @@ describe("broker.getDocument", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -90,7 +90,7 @@ describe("broker.getDocument", () => {
     // Insert test data
     const id = (
       await app.query(
-        `insert into data_live.people (${R}, org_id, id, email, status) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com', 'active') returning id`,
+        `insert into data_live.people (${R}, workspace_id, id, email, status) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com', 'active') returning id`,
       )
     ).rows[0].id;
 
@@ -114,7 +114,7 @@ describe("broker.getDocument", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "status"],
     });
@@ -126,7 +126,7 @@ describe("broker.getDocument", () => {
     // Insert inactive document
     const id = (
       await app.query(
-        `insert into data_live.people (${R}, org_id, id, email, status) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com', 'inactive') returning id`,
+        `insert into data_live.people (${R}, workspace_id, id, email, status) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com', 'inactive') returning id`,
       )
     ).rows[0].id;
 
@@ -146,7 +146,7 @@ describe("broker.getDocument", () => {
       userId,
       collection: "people",
       env: ctxSelf.env,
-      orgId: ctxSelf.orgId,
+      workspaceId: ctxSelf.workspaceId,
       purposeLabel: "test",
       allowedFields: ["id", "email", "owner"],
     });
@@ -158,7 +158,7 @@ describe("broker.getDocument", () => {
     // Insert document owned by self_user
     const ownedId = (
       await app.query(
-        `insert into data_live.people (${R}, org_id, id, email, owner) values (${RV}, 'default', gen_random_uuid(), 'self@ex.com', $1) returning id`,
+        `insert into data_live.people (${R}, workspace_id, id, email, owner) values (${RV}, 'default', gen_random_uuid(), 'self@ex.com', $1) returning id`,
         [userId],
       )
     ).rows[0].id;
@@ -166,7 +166,7 @@ describe("broker.getDocument", () => {
     // Insert document owned by someone else
     const otherId = (
       await app.query(
-        `insert into data_live.people (${R}, org_id, id, email, owner) values (${RV}, 'default', gen_random_uuid(), 'other@ex.com', 'other_user') returning id`,
+        `insert into data_live.people (${R}, workspace_id, id, email, owner) values (${RV}, 'default', gen_random_uuid(), 'other@ex.com', 'other_user') returning id`,
       )
     ).rows[0].id;
 
@@ -193,7 +193,7 @@ describe("broker.getDocument", () => {
     const ctxNoRead: BrokerContext = makeCtx({ userId: "noread_user", env: "live" });
     const id = (
       await app.query(
-        `insert into data_live.people (${R}, org_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
+        `insert into data_live.people (${R}, workspace_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
       )
     ).rows[0].id;
 
@@ -212,7 +212,7 @@ describe("broker.getDocument", () => {
       userId: fileUser,
       collection: "sources",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       // Not `path`: this fixture declares it `posture: deny`, and the path form is a lookup key
       // rather than a field the grant has to carry.
@@ -223,12 +223,12 @@ describe("broker.getDocument", () => {
     // Insert file data
     const fileId = (
       await app.query(
-        `insert into data_live."sources__files" (id, org_id, path, owner, checksum, updated_at)
+        `insert into data_live."sources__files" (id, workspace_id, path, owner, checksum, updated_at)
        values (gen_random_uuid(), 'default', 'test.md', null, 'abc', now()) returning id`,
       )
     ).rows[0].id;
     await app.query(
-      `insert into data_live."sources__documents" (id, file_id, org_id, document_seq, content)
+      `insert into data_live."sources__documents" (id, file_id, workspace_id, document_seq, content)
        values (gen_random_uuid(), $1, 'default', 0, 'test content')`,
       [fileId],
     );
@@ -248,7 +248,7 @@ describe("broker.getDocument", () => {
       userId: datasetUser,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id"],
     });
@@ -266,7 +266,7 @@ describe("broker.getDocument", () => {
       userId,
       collection: "sources",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["title", "content"],
     });
@@ -277,12 +277,12 @@ describe("broker.getDocument", () => {
     const tail = "the overlapping tail";
     const fileId = (
       await app.query(
-        `insert into data_live."sources__files" (id, org_id, title, path, owner, checksum, updated_at)
+        `insert into data_live."sources__files" (id, workspace_id, title, path, owner, checksum, updated_at)
        values (gen_random_uuid(), 'default', 'Multi', 'multi.md', null, 'c', now()) returning id`,
       )
     ).rows[0].id;
     await app.query(
-      `insert into data_live."sources__documents" (id, file_id, org_id, document_seq, content)
+      `insert into data_live."sources__documents" (id, file_id, workspace_id, document_seq, content)
        values (gen_random_uuid(), $1, 'default', 0, $2),
               (gen_random_uuid(), $1, 'default', 1, $3)`,
       [fileId, `first part, then ${tail}`, `${tail} and the second part`],
@@ -306,7 +306,7 @@ describe("broker.getDocument", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -314,7 +314,7 @@ describe("broker.getDocument", () => {
 
     const id = (
       await app.query(
-        `insert into data_live.people (${R}, org_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
+        `insert into data_live.people (${R}, workspace_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
       )
     ).rows[0].id;
 
@@ -323,9 +323,9 @@ describe("broker.getDocument", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      // org_id and _rev* are not in warehousd.yml, so no grant can name them and nothing has
+      // workspace_id and _rev* are not in warehousd.yml, so no grant can name them and nothing has
       // to filter them out — invisibility falls out of the field set, not out of code.
-      for (const hidden of ["org_id", "_rev", "_rev_seq", "_rev_status", "_current"])
+      for (const hidden of ["workspace_id", "_rev", "_rev_seq", "_rev_status", "_current"])
         expect(result.document).not.toHaveProperty(hidden);
     }
   });
@@ -337,7 +337,7 @@ describe("broker.getDocument", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id"],
     });
@@ -345,7 +345,7 @@ describe("broker.getDocument", () => {
 
     const id = (
       await app.query(
-        `insert into data_live.people (${R}, org_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
+        `insert into data_live.people (${R}, workspace_id, id, email) values (${RV}, 'default', gen_random_uuid(), 'test@ex.com') returning id`,
       )
     ).rows[0].id;
 
@@ -387,7 +387,7 @@ describe("broker.getDocument", () => {
       userId,
       collection: "articles",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "title", "content"],
     });
@@ -396,7 +396,7 @@ describe("broker.getDocument", () => {
     // Insert writable collection document via SQL (simulating a created document)
     const id = (
       await app.query(
-        `insert into data_live.articles (org_id, id, title, content, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _rev_base, _current)
+        `insert into data_live.articles (workspace_id, id, title, content, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _rev_base, _current)
        values ('default', gen_random_uuid(), 'Test Article', 'Content here', gen_random_uuid(), 1, now(), $1, 'create', 'approved', ARRAY['title', 'content'], null, true)
        returning id`,
         [userId],

@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { getAppPool } from "../../lib/broker";
 import { requireSession } from "../../../lib/authz";
 import { atLeast } from "../../../lib/authz";
-import { orgOf } from "../../../lib/session";
 
 const MAX_LIMIT = 200;
 
@@ -19,14 +18,14 @@ export async function GET(req: NextRequest) {
     where.push(sql.replace("$?", `$${values.length}`));
   };
 
-  // Org first, and unconditionally: the audit trail names users, collections and purposes, so
+  // Workspace first, and unconditionally: the audit trail names users, collections and purposes, so
   // an admin browsing it must never see another tenant's. This is the one filter no query
   // parameter can widen.
-  add("org_id = $?", orgOf(guard.user));
+  add("workspace_id = $?", guard.workspaceId);
 
   // Non-admins see their own trail and nothing else — a ?user= from them is ignored, not
   // honoured and not rejected, so the filter UI can stay identical across roles.
-  if (atLeast(guard.user.role, "admin")) {
+  if (atLeast(guard.role, "admin")) {
     const user = q.get("user");
     if (user) add("user_id = $?", user);
   } else {

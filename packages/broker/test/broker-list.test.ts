@@ -73,7 +73,7 @@ it("annotates the collections the caller holds, with the granted field count", a
     userId: "held",
     collection: "people",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "t",
     allowedFields: ["id"],
   });

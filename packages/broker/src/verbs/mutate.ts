@@ -6,7 +6,7 @@ import type { CollectionConfig } from "../config/schema";
 import { writePosture } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
 import { admits, validateDocumentFilters } from "../grants/filters";
-import { withOrg, writePool } from "../db/pools";
+import { withWorkspace, writePool } from "../db/pools";
 import { insertRevision, currentRevision, reviseDocument } from "../db/revisions";
 import { supportedVerbs } from "../config/load";
 import { pkOf, dataColsOf, dataSchema } from "../config/collection";
@@ -188,16 +188,16 @@ async function mutateFile(
   const checksum = createHash("sha256").update(content).digest("hex");
 
   try {
-    return await withOrg(pool, ctx.orgId, async (client) => {
+    return await withWorkspace(pool, ctx.workspaceId, async (client) => {
       // No pre-check for an existing path: the write role holds INSERT and nothing else on
       // file tables, keeping "write-only means write-only" true for them the way it is for
       // the import role. The unique index on `path` is what answers, and a 23505 below
       // becomes `conflict` — which also closes the race a pre-check would leave open.
       const fileId = randomUUID();
-      const cols = ["id", "org_id", "path", "title", "owner", "checksum", "updated_at"];
+      const cols = ["id", "workspace_id", "path", "title", "owner", "checksum", "updated_at"];
       const vals: unknown[] = [
         fileId,
-        ctx.orgId,
+        ctx.workspaceId,
         path,
         coerced.title ?? null,
         coerced.owner ?? null,
@@ -216,8 +216,8 @@ async function mutateFile(
 
       for (const [seq, chunk] of chunks.entries())
         await client.query(
-          `insert into ${docs} (id, file_id, org_id, document_seq, content) values ($1,$2,$3,$4,$5)`,
-          [randomUUID(), fileId, ctx.orgId, seq, chunk],
+          `insert into ${docs} (id, file_id, workspace_id, document_seq, content) values ($1,$2,$3,$4,$5)`,
+          [randomUUID(), fileId, ctx.workspaceId, seq, chunk],
         );
 
       // For files, store the file_id as the rev identifier in change_log; the checksum is
@@ -270,10 +270,10 @@ async function mutateDataset(
 
   // Storable columns, in one fixed order shared by every insert below.
   const dataCols = dataColsOf(c);
-  const actor = { by: ctx.userId, orgId: ctx.orgId };
+  const actor = { by: ctx.userId, workspaceId: ctx.workspaceId };
 
   try {
-    return await withOrg(pool, ctx.orgId, async (client) => {
+    return await withWorkspace(pool, ctx.workspaceId, async (client) => {
       if (intent.op === "create") {
         let docId = coerced[pk];
         if (docId === undefined && c.fields[pk]!.type === "uuid") {

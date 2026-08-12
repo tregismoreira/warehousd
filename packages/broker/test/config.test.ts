@@ -17,7 +17,7 @@ afterAll(() => {
 });
 
 const base = `
-project: cortex
+project: acme
 server: { port: 8722 }
 collections:
   people:
@@ -33,7 +33,7 @@ synthetic:
 it("parses base config", () => {
   writeFileSync(join(dir, "warehousd.yml"), base);
   const cfg = loadConfig(dir);
-  expect(cfg.project).toBe("cortex");
+  expect(cfg.project).toBe("acme");
   expect(
     readPosture(must(cfg.collections.people?.fields.home_address, "the home_address field")),
   ).toBe("deny");
@@ -67,13 +67,13 @@ it("skips interpolation inside YAML comment lines", () => {
   rmSync(join(dir, "warehousd.local.yml"), { force: true });
   // Should not throw even though UNDEFINED_VAR is not set
   const cfg = loadConfig(dir);
-  expect(cfg.project).toBe("cortex");
+  expect(cfg.project).toBe("acme");
 });
 
 it("skips interpolation inside a trailing inline comment on a real line", () => {
   process.env.WH_TEST_PORT2 = "7001";
   const yml = `
-project: cortex
+project: acme
 server:
   port: \${env:WH_TEST_PORT2}  # alternative: \${env:UNDEFINED_VAR2}
 collections:

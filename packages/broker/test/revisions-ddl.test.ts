@@ -87,7 +87,7 @@ describe("dataset revision DDL", () => {
     );
     expect(idx.rowCount).toBe(1);
     expect(idx.rows[0].indexdef.toLowerCase()).toContain("unique");
-    expect(idx.rows[0].indexdef.toLowerCase()).toContain("(org_id, id)");
+    expect(idx.rows[0].indexdef.toLowerCase()).toContain("(workspace_id, id)");
     expect(idx.rows[0].indexdef.toLowerCase()).toContain("where _current");
 
     await db.end();
@@ -102,7 +102,7 @@ describe("dataset revision DDL", () => {
     const insert = (current: boolean) =>
       db.query(
         `insert into data_live.pages
-         (_rev_seq,_rev_by,_rev_op,_rev_status,_rev_fields,_current,org_id,id,title)
+         (_rev_seq,_rev_by,_rev_op,_rev_status,_rev_fields,_current,workspace_id,id,title)
        values (1,'u','create','approved','{title}',$1,'default',
                '11111111-1111-1111-1111-111111111111','t')`,
         [current],
@@ -147,13 +147,13 @@ describe("dataset revision DDL", () => {
     const rev = (seq: number, op: string, current: boolean, title: string) =>
       db.query(
         `insert into data_live.pages
-         (_rev_seq,_rev_by,_rev_op,_rev_status,_rev_fields,_current,org_id,id,title)
+         (_rev_seq,_rev_by,_rev_op,_rev_status,_rev_fields,_current,workspace_id,id,title)
        values ($1,'u',$2,'approved','{title}',$3,'default',
                '22222222-2222-2222-2222-222222222222',$4)`,
         [seq, op, current, title],
       );
 
-    await db.query(`select set_config('warehousd.org_id','default',false)`);
+    await db.query(`select set_config('warehousd.workspace_id','default',false)`);
     await rev(1, "create", false, "superseded");
     await rev(2, "update", true, "current");
     expect((await db.query(`select title from data_live.v_pages`)).rows).toEqual([
@@ -189,7 +189,7 @@ describe("dataset revision DDL", () => {
     // from its cause. Migrating existing rows into revisions is out of scope, so refuse here.
     await db.query(`create schema if not exists data_live`);
     await db.query(
-      `create table data_live.people (org_id text not null default 'default',
+      `create table data_live.people (workspace_id text not null default 'default',
          id uuid primary key, email text)`,
     );
 

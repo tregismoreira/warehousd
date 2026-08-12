@@ -69,7 +69,7 @@ describe("listRevisions", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "owner"],
     });
@@ -82,7 +82,7 @@ describe("listRevisions", () => {
       const revId = await app.query(`select gen_random_uuid() as id`).then((r) => r.rows[0].id);
       revIds.push(revId);
       await app.query(
-        `insert into data_live.people (org_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+        `insert into data_live.people (workspace_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
          values ('default', $1, $2, $3, $4, $5, now(), $6, $7, $8, $9, $10)`,
         [
           docId,
@@ -129,7 +129,7 @@ describe("listRevisions", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -149,7 +149,7 @@ describe("listRevisions", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -169,7 +169,7 @@ describe("listRevisions", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "owner"],
     });
@@ -181,7 +181,7 @@ describe("listRevisions", () => {
     const docId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
     const revId = (await app.query("select gen_random_uuid() as id")).rows[0].id;
     await app.query(
-      `insert into data_live.people (org_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_live.people (workspace_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', $1, 'user@ex.com', 'other_user', $2, 1, now(), $3, 'create', 'approved', '{}', true)`,
       [docId, revId, userId],
     );
@@ -250,7 +250,7 @@ describe("trusted issuers", () => {
     expect(issuer.jwksUri).toBe("https://issuer.example.com/.well-known/jwks.json");
     expect(issuer.audience).toBe("https://api.example.com");
     expect(issuer.subjectClaim).toBe("sub");
-    expect(issuer.orgId).toBe("default");
+    expect(issuer.workspaceId).toBe("default");
 
     const retrieved = await getTrustedIssuer(app, issuer.id, "default");
     expect(retrieved).not.toBeNull();
@@ -260,8 +260,8 @@ describe("trusted issuers", () => {
     }
   });
 
-  it("lists issuers for org only", async () => {
-    // Create issuer for default org
+  it("lists issuers for workspace only", async () => {
+    // Create issuer for default workspace
     const issuer1 = await createTrustedIssuer(
       app,
       "default",
@@ -270,10 +270,10 @@ describe("trusted issuers", () => {
       "https://api1.example.com",
     );
 
-    // Create issuer for other org
-    await app.query(`insert into app.organizations (id, name) values ($1, $2)`, [
+    // Create issuer for other workspace
+    await app.query(`insert into app.workspaces (id, name) values ($1, $2)`, [
       "other_org",
-      "Other Org",
+      "Other Workspace",
     ]);
     const issuer2 = await createTrustedIssuer(
       app,
@@ -292,11 +292,11 @@ describe("trusted issuers", () => {
 
     expect(defaultCreated).toHaveLength(1);
     expect(otherCreated).toHaveLength(1);
-    expect(defaultCreated[0]!.orgId).toBe("default");
-    expect(otherCreated[0]!.orgId).toBe("other_org");
+    expect(defaultCreated[0]!.workspaceId).toBe("default");
+    expect(otherCreated[0]!.workspaceId).toBe("other_org");
   });
 
-  it("returns null for issuer from another org", async () => {
+  it("returns null for issuer from another workspace", async () => {
     const issuer = await createTrustedIssuer(
       app,
       "default",
@@ -305,8 +305,8 @@ describe("trusted issuers", () => {
       "https://api3.example.com",
     );
 
-    const fromWrongOrg = await getTrustedIssuer(app, issuer.id, "other_org");
-    expect(fromWrongOrg).toBeNull();
+    const fromWrongWorkspace = await getTrustedIssuer(app, issuer.id, "other_org");
+    expect(fromWrongWorkspace).toBeNull();
   });
 });
 
@@ -318,7 +318,7 @@ describe("getProposal", () => {
       userId,
       collection: "people",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields,
     });

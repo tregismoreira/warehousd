@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { provision, type Provisioned } from "./helpers/db";
-import { createPools, withOrg } from "../src/db/pools";
+import { createPools, withWorkspace } from "../src/db/pools";
 
 // No statement was bounded before this. A single slow scan held a pool connection for as long as
 // Postgres would work on it, and a pool has a finite number of them.
@@ -38,7 +38,7 @@ describe("pool statement bounds", () => {
   });
 
   it("bounds the idle transaction too, which a statement timeout cannot cover", async () => {
-    // withOrg holds a transaction open across arbitrary JavaScript. If that stalls, no statement
+    // withWorkspace holds a transaction open across arbitrary JavaScript. If that stalls, no statement
     // is running, so statement_timeout never fires while the locks and xmin are still held.
     const pools = createPools(urlsOf(p));
     try {
@@ -49,13 +49,13 @@ describe("pool statement bounds", () => {
     }
   });
 
-  it("cancels a statement that overruns the bound, inside withOrg's transaction", async () => {
+  it("cancels a statement that overruns the bound, inside withWorkspace's transaction", async () => {
     process.env.WAREHOUSD_STATEMENT_TIMEOUT_MS = "400";
     const pools = createPools(urlsOf(p));
     try {
       const started = Date.now();
       await expect(
-        withOrg(pools.dev, "default", (c) => c.query(`select pg_sleep(10)`)),
+        withWorkspace(pools.dev, "default", (c) => c.query(`select pg_sleep(10)`)),
       ).rejects.toMatchObject({ code: "57014" }); // query_canceled
       // Proves the bound did the cancelling rather than the query simply finishing.
       expect(Date.now() - started).toBeLessThan(5_000);

@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { accessReview } from "@warehousd/broker";
 import { getAppPool } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
-import { orgOf } from "../../../../lib/session";
 
 /**
  * `GET /api/admin/access-review?days=90` — access recertification.
@@ -23,7 +22,7 @@ export async function GET(req: NextRequest) {
   const olderThanDays = Number.isFinite(raw) && raw >= 0 ? raw : 90;
 
   const rows = await accessReview(getAppPool(), {
-    orgId: orgOf(guard.user),
+    workspaceId: guard.workspaceId,
     olderThanDays,
   });
   return Response.json({ olderThanDays, grants: rows });

@@ -49,7 +49,7 @@ beforeAll(async () => {
   broker = makeBroker(pools, cfg);
 
   await app.query(
-    `insert into data_synth.people (${R}, org_id, id, email, dept)
+    `insert into data_synth.people (${R}, workspace_id, id, email, dept)
      values (${RV}, 'default', gen_random_uuid(), 'seed@ex.com', 'Engineering')`,
   );
 }, 60_000);
@@ -70,7 +70,7 @@ async function grantFor(
     userId,
     collection: "people",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "test",
     allowedFields: ["id", "email", "dept"],
   });

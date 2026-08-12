@@ -55,7 +55,7 @@ beforeAll(async () => {
   const seed = async (table: string, titles: string[]) => {
     for (const t of titles)
       await app.query(
-        `insert into data_synth.${table} (${R}, org_id, id, title)
+        `insert into data_synth.${table} (${R}, workspace_id, id, title)
          values (${RV}, 'default', gen_random_uuid(), $1)`,
         [t],
       );
@@ -69,7 +69,7 @@ beforeAll(async () => {
       userId: "ana",
       collection,
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "t",
       allowedFields: ["id", "title"],
     });
@@ -166,7 +166,7 @@ describe("the fan-out audits one row per collection", () => {
       userId: "partial",
       collection: "policies",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "t",
       allowedFields: ["id", "title"],
     });

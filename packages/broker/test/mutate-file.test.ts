@@ -70,7 +70,7 @@ describe("broker.mutate file operations", () => {
       userId: "file_user",
       collection: "docs",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["title", "content", "owner", "updated_at", "category"],
     });
@@ -131,7 +131,7 @@ describe("broker.mutate file operations", () => {
       userId: "dup_user",
       collection: "docs",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["title", "content", "owner", "updated_at"],
     });
@@ -176,7 +176,7 @@ describe("broker.mutate file operations", () => {
       userId: "update_file_user",
       collection: "docs",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["title", "content"],
     });
@@ -186,7 +186,7 @@ describe("broker.mutate file operations", () => {
     // Create a file first
     const fileId = (
       await app.query(
-        `insert into data_synth."docs__files" (id, org_id, path, title, owner, checksum, updated_at)
+        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at)
        values (gen_random_uuid(), 'default', 'seeded-for-update.md', 'Test', 'admin', 'abc', now()) returning id`,
       )
     ).rows[0].id;
@@ -208,7 +208,7 @@ describe("broker.mutate file operations", () => {
       userId: "delete_file_user",
       collection: "docs",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["title", "content"],
     });
@@ -218,7 +218,7 @@ describe("broker.mutate file operations", () => {
     // Create a file first
     const fileId = (
       await app.query(
-        `insert into data_synth."docs__files" (id, org_id, path, title, owner, checksum, updated_at)
+        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at)
        values (gen_random_uuid(), 'default', 'seeded-for-delete.md', 'Test', 'admin', 'abc', now()) returning id`,
       )
     ).rows[0].id;
@@ -239,7 +239,7 @@ describe("broker.mutate file operations", () => {
       userId: "term_user",
       collection: "docs",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["title", "content", "owner", "updated_at", "category"],
     });

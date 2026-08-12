@@ -1,7 +1,7 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema } from "../src/db/migrate-app";
+import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
 import { createPools, type Pools } from "../src/db/pools";
@@ -33,7 +33,7 @@ beforeAll(async () => {
   admin = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
-  await generateSynthetic(admin, cfg, 1);
+  await generateSynthetic(admin, cfg, 1, DEFAULT_WORKSPACE_ID);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
 });
@@ -52,7 +52,7 @@ it("request→pending→approve(trim+expiry)→query ok→revoke→immediately n
   const id = await requestGrant(admin, {
     userId: "mia",
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "onboarding",
     allowedFields: ["id", "full_name", "email"],
@@ -85,7 +85,7 @@ it("approving a second grant for the same (user, collection, env) fails (design 
   const id1 = await requestGrant(admin, {
     userId: "u",
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "a",
     allowedFields: ["id"],
@@ -94,7 +94,7 @@ it("approving a second grant for the same (user, collection, env) fails (design 
   const id2 = await requestGrant(admin, {
     userId: "u",
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "b",
     allowedFields: ["id"],
@@ -108,7 +108,7 @@ it("approveGrant persists documentFilters array", async () => {
   const id = await requestGrant(admin, {
     userId: "u2",
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "p",
     allowedFields: ["id", "full_name"],
@@ -129,7 +129,7 @@ it("denyGrant returns false for already-denied grant", async () => {
   const id = await requestGrant(admin, {
     userId: "u3",
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "test",
     allowedFields: ["id"],
@@ -149,7 +149,7 @@ it("revokeGrant returns false for pending grant (not approved)", async () => {
   const id = await requestGrant(admin, {
     userId: "u4",
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "test",
     allowedFields: ["id"],
@@ -162,7 +162,7 @@ it("denyGrant returns false for approved grant", async () => {
   const id = await requestGrant(admin, {
     userId: "u5",
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "test",
     allowedFields: ["id"],

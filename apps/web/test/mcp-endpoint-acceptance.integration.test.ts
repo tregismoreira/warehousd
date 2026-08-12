@@ -279,7 +279,7 @@ describe("§10 test 4 extended: hostile tool arguments over MCP", () => {
     assertDevOnly?: boolean;
   }[];
 
-  it("ignores forged env, org and identity in tool arguments and leaks no canary", async () => {
+  it("ignores forged env, workspace and identity in tool arguments and leaks no canary", async () => {
     expect(mcpProbes.length).toBeGreaterThan(0);
     const token = await mintAccessToken("env:dev");
 

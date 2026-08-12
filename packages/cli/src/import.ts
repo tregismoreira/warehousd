@@ -3,6 +3,7 @@ import { basename, extname } from "node:path";
 import { Pool } from "pg";
 import {
   createPools,
+  DEFAULT_WORKSPACE_ID,
   formatImportReport,
   importCollection,
   inferCollection,
@@ -381,10 +382,15 @@ export function mapNotes(r: MapResult): string[] {
 }
 
 /** Reserved for the taxonomy pre-resolution `--live` needs; kept here so both layers agree. */
-export async function liveTaxonomies(dbUrl: string, cfg: WarehousdConfig, collection: string) {
+export async function liveTaxonomies(
+  dbUrl: string,
+  cfg: WarehousdConfig,
+  collection: string,
+  workspaceId: string = DEFAULT_WORKSPACE_ID,
+) {
   const db = new Pool({ connectionString: dbUrl });
   try {
-    return await loadTaxonomyBindings(db, cfg, collection, "live");
+    return await loadTaxonomyBindings(db, cfg, collection, "live", workspaceId);
   } finally {
     await db.end();
   }
