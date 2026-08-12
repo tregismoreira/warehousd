@@ -122,15 +122,15 @@ Scaffolds `warehousd.yml` and adds `warehousd.local.yml` and `.warehousd/` to `.
 
 The first question is how you want to set up at all:
 
-- **Guided** — warehousd creates and connects everything. It asks for the container engine, then works through two clearly separated halves. Then it checks each CLI those answers need is installed, and offers to install any that is missing.
+- **Guided** — warehousd creates and connects everything, working through two clearly separated halves. Then it checks each CLI those answers need is installed, and offers to install any that is missing.
 - **Manual** — the escape hatch, and it stays first-class. It prompts for connection strings, touches no package manager, and creates nothing remote.
 
 The wizard names its two halves out loud, **On this machine** and **In production**, because they are two independent questions and reading them as one asked twice is the mistake this heading exists to prevent:
 
-- **On this machine** — the container engine, and where your development data lives: a container warehousd runs, a provider's local stack, or a Postgres you point it at.
+- **On this machine** — where your development data lives: a container warehousd runs, a provider's local stack, or a Postgres you point it at.
 - **In production** — where a deploy would go, and where the production data lives: alongside the app on the target, on a new Supabase or Neon project warehousd creates, or on a Postgres you already run. The target list ends with **Not yet — I'll set this up later**, which skips this half entirely and leaves the commented `deploy:` block in the template. That is the right answer for a first look at warehousd, and until it existed there was no way to give it.
 
-Every list is read from the runtime, target and host registries, so none of them goes stale, and each option carries a one-line hint from the same registry. Piped, in CI, under `--json` or `--no-input` it writes the template without asking.
+Every list is read from the target and host registries, so neither goes stale, and each option carries a one-line hint from the same registry. Piped, in CI, under `--json` or `--no-input` it writes the template without asking.
 
 The install offer is always an explicit confirmation — running a package manager against your machine is not a side effect of picking a menu item — and never happens under `--no-input` unless `--install-missing` said yes in advance. From there warehousd looks for the package managers this platform actually has (`brew` and `npm` on macOS; `apt-get`, `dnf`, `pacman` or `npm` on Linux) and never invokes `sudo`: an installer that needs root is printed for you to run. Authentication is never automated either — `supabase login` and `neon auth` open a browser, and the check reports the command rather than running it.
 
@@ -151,7 +151,6 @@ Without `--target` or `--prod-db`, no `deploy:` block is written and the templat
 | `--no-input`              | Never prompt; write the template.                                                           |
 | `--manual`                | Skip guided setup and paste connection details yourself.                                   |
 | `--from <dir>`            | Infer a collection per spreadsheet in this directory instead of the example.                |
-| `--runtime <id>`          | Container engine: `docker`, `podman`.                                                       |
 | `--dev-db <id>`           | Database for development on this machine: `docker`, `url`, or `supabase`.                  |
 | `--target <id>`           | Where a deploy would go: `fly`, `railway` or `compose`.                                     |
 | `--prod-db <id>`          | Database in production: `target`, `supabase`, `neon` or `existing`.                        |

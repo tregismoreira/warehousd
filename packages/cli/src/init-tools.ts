@@ -1,5 +1,5 @@
 import { checkTool, offerInstall, type CliTool, type ToolProbe } from "./cli-tools";
-import { runtimeFor } from "./containers/runtimes";
+import { DOCKER_CLI } from "./docker";
 import { hostFor } from "./db/hosts";
 import { NonInteractiveError, type InitAnswers } from "./ui/prompt";
 import type { Reporter } from "./ui/reporter";
@@ -93,7 +93,7 @@ export function requiredTools(answers: InitAnswers): CliTool[] {
   const tools: CliTool[] = [];
 
   // Always: something has to run the containers, whichever database is chosen — the server is one.
-  tools.push(runtimeFor(answers.runtime).cli);
+  tools.push(DOCKER_CLI);
 
   // The local stack, when it is somebody else's.
   const localHost = answers.localDbProvider ? hostFor(answers.localDbProvider) : undefined;

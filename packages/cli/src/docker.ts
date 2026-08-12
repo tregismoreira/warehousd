@@ -1,13 +1,9 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { checkTool, type PreflightCheck, type ToolProbe } from "./cli-tools";
-import { docker } from "./containers/runtimes/docker";
-import type { ContainerRuntime } from "./containers/runtimes/types";
+import { checkTool, type CliTool, type PreflightCheck, type ToolProbe } from "./cli-tools";
 import { traceCommand, traceFailure } from "./verbose";
 
-// The wrapper around whichever container engine is selected. Still named docker.ts, and every
-// subcommand below is still Docker's, because Podman takes the same ones — see
-// containers/runtimes. `DockerError` keeps its name for the same reason: it is the error every
-// caller already catches, and the engine it came from is in the message.
+// The wrapper around Docker, which is the container engine warehousd drives. Podman is on the
+// roadmap rather than in the code — see docs/roadmap.md for what verifying it would take.
 export class DockerError extends Error {}
 
 // Why every call below passes `stdio` explicitly.
@@ -49,40 +45,44 @@ export type ContainerSpec = {
 };
 
 /**
- * Which engine every `run` below actually invokes.
+ * Docker, described for cli-tools.ts.
  *
- * A module-level switch set once at command start, the same shape and for the same reason as
- * `setVerbose` in verbose.ts: fourteen exported functions here reach `run`, and threading a
- * binary name through all of them would put a parameter on every call site to express something
- * that is constant for the life of the process. `program.ts` resolves it from `server.runtime`
- * before anything is started, exactly where it already calls `setVerbose`.
+ * The two args lists are doing different jobs. `--version` is the client alone and answers with no
+ * daemon behind it; `version --format {{.Server.Version}}` asks the *server*, so it is what tells
+ * "not installed" apart from "installed, daemon down" — the distinction assertRuntime has always
+ * drawn and the one people actually hit.
  *
- * Podman is argv-compatible, so this is genuinely only the name — see containers/runtimes.
+ * No apt/dnf installer on purpose. Docker on Linux means adding Docker's own repository first, and
+ * a one-liner that is wrong in a way the operator cannot see is worse than the docs link.
+ *
+ * Orbstack and Colima are deliberately not separate entries. Both provide a `docker` CLI and a
+ * socket behind it, so they are already this — a second name for the same thing would be a second
+ * place to keep in step.
  */
-let activeRuntime: ContainerRuntime = docker;
+export const DOCKER_CLI: CliTool = {
+  bin: "docker",
+  label: "Docker",
+  versionArgs: ["--version"],
+  readyArgs: ["version", "--format", "{{.Server.Version}}"],
+  readyHint: "Docker is installed but the daemon isn't reachable. Start Docker and retry.",
+  docsUrl: "https://docs.docker.com/get-docker/",
+  installers: [
+    { manager: "brew", args: ["install", "--cask", "docker"] },
+    { manager: "winget", args: ["install", "Docker.DockerDesktop"] },
+  ],
+};
 
-export function setContainerRuntime(runtime: ContainerRuntime): void {
-  activeRuntime = runtime;
-}
-
-export function containerRuntime(): ContainerRuntime {
-  return activeRuntime;
-}
-
-/** The engine's server version, for the line `warehousd start` prints first. */
+/** The daemon's version, for the line `warehousd start` prints first. */
 export function runtimeVersion(): string {
-  const bin = activeRuntime.cli.bin;
-  // Podman answers `version --format {{.Server.Version}}` too, reporting its own version where
-  // Docker reports the daemon's — which is the right answer in both cases.
-  return execFileSync(bin, ["version", "--format", "{{.Server.Version}}"], {
+  return execFileSync(DOCKER_CLI.bin, ["version", "--format", "{{.Server.Version}}"], {
     encoding: "utf8",
     stdio: CAPTURED,
   }).trim();
 }
 
-/** Installed, and usable? The pre-flight form for whichever engine is selected — never throws. */
+/** Installed, and is the daemon up? The pre-flight form — never throws. */
 export function checkRuntime(probe?: ToolProbe): PreflightCheck {
-  return checkTool(activeRuntime.cli, probe);
+  return checkTool(DOCKER_CLI, probe);
 }
 
 /** The throwing form, for the code paths that cannot carry on without a working engine. */
@@ -92,10 +92,9 @@ export function assertRuntime(probe?: ToolProbe): void {
 }
 
 export function run(args: string[], opts?: { inheritStderr?: boolean }): string {
-  const bin = activeRuntime.cli.bin;
-  traceCommand(bin, args);
+  traceCommand(DOCKER_CLI.bin, args);
   try {
-    const output = execFileSync(bin, args, {
+    const output = execFileSync(DOCKER_CLI.bin, args, {
       encoding: "utf8",
       stdio: opts?.inheritStderr ? INHERIT_STDERR : CAPTURED,
     });
@@ -266,9 +265,8 @@ export function logs(name: string, tail?: number): string {
     args.push("--tail", String(tail));
   }
   args.push(name);
-  const bin = activeRuntime.cli.bin;
-  traceCommand(bin, args);
-  const result = spawnSync(bin, args, { encoding: "utf8" });
+  traceCommand(DOCKER_CLI.bin, args);
+  const result = spawnSync(DOCKER_CLI.bin, args, { encoding: "utf8" });
   // The engine is missing, or could not be executed at all. The caller is already reporting a
   // different failure and must not be displaced by this one.
   if (result.error) return `(container logs could not be read: ${result.error.message})`;

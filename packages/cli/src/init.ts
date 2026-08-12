@@ -1,9 +1,7 @@
 import { existsSync, writeFileSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 import {
-  CONTAINER_RUNTIME_IDS,
   DB_PROVIDER_IDS,
-  DEFAULT_CONTAINER_RUNTIME_ID,
   DEPLOY_TARGET_IDS,
   DEFAULT_DEPLOY_TARGET_ID,
   PROVISIONABLE_DB_PROVIDER_IDS,
@@ -28,7 +26,6 @@ const WAREHOUSD_TEMPLATE =
   `project: my-app
 server:
   port: ${DEFAULT_PORT}
-#   runtime: docker               # ${CONTAINER_RUNTIME_IDS.join(" | ")}
 # database:
 #   managed: true                 # default — the CLI runs Postgres in a container
 #   provider: supabase            # optional — run their local stack instead of ours
@@ -137,12 +134,8 @@ export function initDefaults(opts: {
   prodDbHost?: string | undefined;
   prodDbRegion?: string | undefined;
   prodDbOrg?: string | undefined;
-  runtime?: string | undefined;
   manual?: boolean | undefined;
 }): { defaults: InitAnswers; fromFlags: boolean } {
-  const runtime =
-    oneOf(opts.runtime, CONTAINER_RUNTIME_IDS, "--runtime") ?? DEFAULT_CONTAINER_RUNTIME_ID;
-
   // `--dev-db` takes a provider id whose local stack should run it, or `docker` for warehousd's
   // own container, or `url` to bring your own. It decides the top-level `database:` block and
   // nothing else: a production answer must never rewrite this one, which is what made "a container
@@ -203,7 +196,6 @@ export function initDefaults(opts: {
       deployManaged: !attaching,
       dbProvider: attaching ? prodDbHost : (provisioningHost?.id ?? null),
       guided: !opts.manual,
-      runtime,
       localDbProvider,
       dbRegion: opts.prodDbRegion ?? null,
       dbOrg: opts.prodDbOrg ?? null,
@@ -277,12 +269,6 @@ export function applyAnswers(template: string, answers: InitAnswers): string {
   let out = template
     .replace(/^project: .*$/m, `project: ${answers.project}`)
     .replace(/^ {2}port: \d+$/m, `  port: ${answers.port}`);
-
-  // Written only when it is not the default, so an ordinary project's warehousd.yml stays as short
-  // as it was. A key whose value equals the default is noise in a file meant to be reviewed.
-  if (answers.runtime !== DEFAULT_CONTAINER_RUNTIME_ID) {
-    out = out.replace(/^ {2}port: \d+$/m, `  port: ${answers.port}\n  runtime: ${answers.runtime}`);
-  }
 
   // Whose local stack runs the dev database. Uncomments the same block `!managed` does, but with
   // a provider instead of a url — the two are mutually exclusive (see ConfigSchema).

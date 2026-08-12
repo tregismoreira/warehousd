@@ -196,11 +196,10 @@ Full reference, flags and the outputs contract: [cli.md](docs/cli.md) · [migrat
 
 ## Component status
 
-Everything listed in this README is implemented. Four exceptions, all tracked in [docs/status.md](docs/status.md), which gives a per-component verdict checked against the code:
+Everything listed in this README is implemented. Three exceptions, all tracked in [docs/status.md](docs/status.md), which gives a per-component verdict checked against the code:
 
 - **Multi-tenancy (`org_id`)** — *partial*. Every grant, audit event and document carries an org, isolated by a view predicate and RLS, but a single implicit org is created at bootstrap and nothing yet resolves a caller's org from their session or IdP claim.
 - **Database provisioning through a provider CLI** — *real* for Neon, *partial* for Supabase. Neon returns a connection URI; Supabase prints none, so warehousd assembles the pooler string from the ref, region and generated password, and the pre-flight's `db-reachable` is what confirms it.
-- **Container runtime selection** — *partial*. `server.runtime` selects `docker` or `podman` and every subcommand is argv-compatible, but podman is unverified here: rootless networking and volume labelling are untested.
 - **SCIM and compliance exports** — *not built*.
 
 ## Contributing

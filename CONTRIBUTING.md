@@ -13,7 +13,7 @@ Thanks for wanting to help. This file is for people changing warehousd itself. I
 - macOS or Linux. Windows is not supported yet — see [docs/roadmap.md](docs/roadmap.md).
 - Node.js 22+
 - pnpm 10+ (`corepack enable`)
-- Docker (for Postgres, and for the CLI end-to-end tests). A project can run its own stack under Podman with `server.runtime: podman`, but the test suites here assume Docker.
+- Docker (for Postgres, and for the CLI end-to-end tests).
 
 ## 1. Install
 

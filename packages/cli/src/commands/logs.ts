@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { useProject } from "./../project";
+import { resolveProject } from "./../project";
 import { containerState, logs as dockerLogs } from "./../docker";
 
 export type LogsOptions = {
@@ -14,7 +14,7 @@ export type LogsOptions = {
  * the container name should not make anyone assemble it.
  */
 export function resolveLogTarget(dir: string, service: "server" | "db" = "server"): string {
-  const p = useProject(dir);
+  const p = resolveProject(dir);
   if (service === "db") {
     if (!p.managed) {
       throw new Error(

@@ -4,14 +4,13 @@ import { join } from "node:path";
 import { loadConfig } from "@warehousd/broker";
 import {
   runtimeVersion,
-  containerRuntime,
   imageExists,
   containerOnPort,
   containerState,
   psByLabel,
   type ContainerRow,
 } from "./docker";
-import { useProject } from "./project";
+import { resolveProject } from "./project";
 import { resolveServerImage } from "./image-resolve";
 import type { Check } from "./ui/render";
 
@@ -38,21 +37,13 @@ export async function portIsFree(port: number, host = "127.0.0.1"): Promise<bool
 }
 
 export function dockerCheck(): Check {
-  const runtime = containerRuntime();
   try {
-    const version = runtimeVersion();
-    // Podman has no daemon to be reachable, so the same success reads differently for each.
-    const detail = runtime.hasDaemon
-      ? `daemon reachable, server ${version}`
-      : `${runtime.label} ${version}`;
-    return { id: runtime.id, ok: true, detail };
+    return { id: "docker", ok: true, detail: `daemon reachable, server ${runtimeVersion()}` };
   } catch {
     return {
-      id: runtime.id,
+      id: "docker",
       ok: false,
-      detail: runtime.hasDaemon
-        ? "daemon not reachable — start Docker Desktop (or `colima start`) and retry"
-        : `${runtime.cli.bin} did not run — see ${runtime.cli.docsUrl}`,
+      detail: "daemon not reachable — start Docker Desktop (or `colima start`) and retry",
     };
   }
 }
@@ -99,7 +90,7 @@ export function imageCheck(dir: string, env: NodeJS.ProcessEnv = process.env): C
 }
 
 export async function portCheck(dir: string): Promise<Check[]> {
-  const p = useProject(dir);
+  const p = resolveProject(dir);
   const checks: Check[] = [];
   for (const [label, port, owner] of [
     ["port:server", p.ports.server, p.ns.server],
@@ -132,7 +123,7 @@ export async function portCheck(dir: string): Promise<Check[]> {
 }
 
 export function containersCheck(dir: string): { check: Check; rows: ContainerRow[] } {
-  const p = useProject(dir);
+  const p = resolveProject(dir);
   const rows = psByLabel(p.ns.label);
   if (rows.length === 0) {
     return {
@@ -172,15 +163,6 @@ export async function runDoctor(
   dir: string,
   opts: { deploy?: boolean } = {},
 ): Promise<DoctorResult> {
-  // Point the container wrapper at this project's engine before asking whether it is there —
-  // otherwise a Podman project is told Docker is missing. A config that will not load is not a
-  // reason to skip the check; it just means the default, and `configCheck` reports the real
-  // problem on the next line.
-  try {
-    useProject(dir);
-  } catch {
-    // Deliberately swallowed: configCheck is what says so, and says it better.
-  }
   const checks: Check[] = [dockerCheck()];
 
   const cfg = configCheck(dir);

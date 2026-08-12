@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { DB_PROVIDER_IDS, PROVISIONABLE_DB_PROVIDER_IDS } from "../db/providers";
 import { DEPLOY_TARGET_IDS } from "./targets";
-import { CONTAINER_RUNTIME_IDS, DEFAULT_CONTAINER_RUNTIME_ID } from "./runtimes";
 // A deliberate import cycle: rules/ states its `check` signature against `RawCollection` and reads
 // this module's constants, and this module walks the registry. Both directions are used only from
 // inside a function body — the rules run when a config is parsed, never at module evaluation — so
@@ -618,12 +617,8 @@ export const ConfigSchema = z
         port: z.number(),
         // Override the published server image (CI/E2E point this at a locally built tag).
         image: z.string().optional(),
-        // Which container engine `warehousd start` drives. Defaulted here rather than in the CLI
-        // because it depends on nothing else in the config — unlike `database.port`, whose
-        // default is a sibling field away.
-        runtime: z.enum(CONTAINER_RUNTIME_IDS).default(DEFAULT_CONTAINER_RUNTIME_ID),
       })
-      .default({ port: 8722, runtime: DEFAULT_CONTAINER_RUNTIME_ID }),
+      .default({ port: 8722 }),
     taxonomies: z
       .record(z.string(), VocabularySchema)
       .default({})

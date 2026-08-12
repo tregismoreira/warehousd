@@ -20,7 +20,6 @@ const ANSWERS: InitAnswers = {
   deployManaged: true,
   dbProvider: null,
   guided: true,
-  runtime: "docker",
   localDbProvider: null,
   dbRegion: null,
   dbOrg: null,
@@ -52,9 +51,8 @@ function machine(platform: NodeJS.Platform, managers: string[] = []) {
 }
 
 describe("requiredTools", () => {
-  it("always needs the container engine, whichever database is chosen", () => {
+  it("always needs Docker, whichever database is chosen", () => {
     expect(requiredTools(ANSWERS).map((t) => t.bin)).toEqual(["docker"]);
-    expect(requiredTools({ ...ANSWERS, runtime: "podman" }).map((t) => t.bin)).toEqual(["podman"]);
   });
 
   it("adds the local stack and the production host", () => {

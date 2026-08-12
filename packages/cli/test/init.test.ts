@@ -197,7 +197,6 @@ describe("runInit", () => {
         deployManaged: true,
         dbProvider: null,
         guided: true,
-        runtime: "docker",
         localDbProvider: null,
         dbRegion: null,
         dbOrg: null,
@@ -271,13 +270,11 @@ describe("runInit", () => {
       project: "harbor",
       target: "fly",
       devDb: "supabase",
-      runtime: "podman",
     });
     await runInit(projectDir, { force: true, answers: defaults });
 
     const cfg = loadConfig(projectDir);
     expect(cfg.database).toEqual({ managed: true, provider: "supabase" });
-    expect(cfg.server.runtime).toBe("podman");
     expect(cfg.deploy?.database).toEqual({ managed: true });
   });
 
