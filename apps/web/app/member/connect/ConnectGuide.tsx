@@ -45,7 +45,7 @@ export function ConnectGuide() {
             <li>
               You&rsquo;ll be sent here to sign in
               {info.ssoProviders.length > 0
-                ? " with your organisation account."
+                ? " with your single sign-on account."
                 : " with your warehousd credentials."}
             </li>
             <li>

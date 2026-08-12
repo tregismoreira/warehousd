@@ -188,7 +188,7 @@ describe("mutate and import produce the same revisions", () => {
     expect(m[1]).toMatchObject({ _rev_op: "delete", _rev_fields: [], _current: true, title: "T" });
 
     // And neither is readable any more, by the same view predicate.
-    await admin.query(`select set_config('warehousd.org_id','default',false)`);
+    await admin.query(`select set_config('warehousd.workspace_id','default',false)`);
     const visible = await admin.query(`select id from data_live.v_notes where id = any($1)`, [
       [ID("5"), ID("6")],
     ]);

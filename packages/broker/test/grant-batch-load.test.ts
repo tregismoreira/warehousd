@@ -27,7 +27,7 @@ beforeAll(async () => {
   );
   // Superseded: an older grant that has been revoked, and the newer approved one that replaced
   // it. Two approved rows cannot coexist — `grants_one_active` is unique on
-  // (org_id, user_id, collection, env) where status='approved' — so this is what "superseded"
+  // (workspace_id, user_id, collection, env) where status='approved' — so this is what "superseded"
   // actually looks like in the table, and both loaders must ignore the dead row.
   await db.query(
     `insert into app.grants (user_id,collection,allowed_fields,env,status,expires_at,requested_at)
@@ -120,9 +120,9 @@ it("binds $self identically, including inside an in-list", async () => {
   ]);
 });
 
-it("is env- and org-scoped like the single loader", async () => {
+it("is env- and workspace-scoped like the single loader", async () => {
   await expectParity(makeCtx({ userId: "mia", env: "live" }), COLLECTIONS);
-  await expectParity(makeCtx({ userId: "mia", orgId: "other" }), COLLECTIONS);
+  await expectParity(makeCtx({ userId: "mia", workspaceId: "other" }), COLLECTIONS);
 });
 
 it("returns an empty map for an empty collection list without querying", async () => {

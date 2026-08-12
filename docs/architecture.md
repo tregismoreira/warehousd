@@ -7,7 +7,7 @@ How **warehousd** is put together and why. If you are evaluating whether to trus
 - [The broker](#the-broker)
 - [Named views](#named-views)
 - [Environments: dev and live](#environments-dev-and-live)
-- [Organizations and tenant isolation](#organizations-and-tenant-isolation)
+- [Workspaces and tenant isolation](#workspaces-and-tenant-isolation)
 - [Postures, verbs, and writability](#postures-verbs-and-writability)
 - [Revisions, and immutability by privilege](#revisions-and-immutability-by-privilege)
 - [The write path: broker.mutate](#the-write-path-brokermutate)
@@ -48,13 +48,13 @@ Two things the broker deliberately does not contain are injected by whichever ad
 | **Document**      | One governed, queryable record. For dataset collections, one table row. For file collections, one indexed segment of a parsed file.                                                                                                                                                                                                           |
 | **Field**         | A document's governed attribute. Postures and grants operate on fields.                                                                                                                                                                                                                                                                       |
 | **Field posture** | Per-field, two-axis: `{ read, write }`, each `allow` or `deny`, declared in `warehousd.yml`. `deny` means that axis can _never_ be granted. `allow` only makes a field **grantable** on that axis — it stays denied per user until a grant covers it. No posture means denied on both. A bare `posture: allow` is read-allow, **write-deny**. |
-| **Grant**         | `(org, user, collection, purpose, verbs, allowed fields ⊆ grantable fields, env, mode, expires_at, optional document filter)`. Requested by a user, approved by a manager or admin, evaluated at query time.                                                                                                                                  |
+| **Grant**         | `(workspace, user, collection, purpose, verbs, allowed fields ⊆ grantable fields, env, mode, expires_at, optional document filter)`. Requested by a user, approved by a manager or admin, evaluated at query time.                                                                                                                                  |
 | **Verb**          | `read`, `create`, `update`, `delete`, `approve`. A grant carries a set. Which verbs a collection can support at all is **structural** — it follows from its type, not from the grant.                                                                                                                                                         |
 | **Environment**   | `dev` or `live`. Dev resolves to synthetic data, live to real data. Carried in the access token, never in a request.                                                                                                                                                                                                                          |
-| **Organization**  | The tenant. Every grant, audit event and document belongs to exactly one. Derived from the authenticated user, never from a request.                                                                                                                                                                                                          |
+| **Workspace**  | The tenant. Every grant, audit event and document belongs to exactly one. Derived from the authenticated user, never from a request.                                                                                                                                                                                                          |
 | **Purpose**       | A short label plus free text, stated at request time and stamped on every audit event the grant produces.                                                                                                                                                                                                                                     |
 | **Role**          | `admin` (collections, SSO, users, clients, import, audit), `manager` (approves grants, promotes clients), `member` (requests grants, queries).                                                                                                                                                                                                |
-| **Audit event**   | Immutable record of every broker decision: who, org, env, collection, intent, fields returned, grant id, outcome, timestamp.                                                                                                                                                                                                                  |
+| **Audit event**   | Immutable record of every broker decision: who, workspace, env, collection, intent, fields returned, grant id, outcome, timestamp.                                                                                                                                                                                                                  |
 
 Configuration is declarative and lives in the consuming project's repo — see [configuration.md](configuration.md).
 
@@ -76,14 +76,14 @@ Each is enforced structurally rather than by convention, and each is covered by 
 5. **Dev never touches real data.** Two Postgres roles, two connection pools; the token's env scope selects the pool. Synthetic data is generated from the schema definition only — never sampled or derived from real rows. A bug in schema-name resolution cannot cross the wall, because the database refuses.
 6. **Env parity.** Dev and live run identical postures and grant logic. The only difference is the source schema; the response shape is the same.
 7. **Every decision passes through exactly one audit call**, before the response is returned — refusals included — and the configured sink decides whether that call lands in a row. With the trail on, which is the default, an allow whose row could not be written is downgraded to `internal_error` rather than returned unrecorded. A deployment can turn the trail off with `audit.enabled: false` for lower environments; then nothing is recorded and every `auditId` is null. Nothing ever invents an id to stand in for a row that is not there. `audit.sink` chooses the destination — `postgres`, `stdout-json` or `webhook` — and the downgrade rule is what every one of them is held to: a sink that cannot accept an event throws, and the allow it was recording becomes a refusal.
-8. **Tenants are separated by the database, not by a predicate the broker remembers.** See [Organizations](#organizations-and-tenant-isolation).
+8. **Tenants are separated by the database, not by a predicate the broker remembers.** See [Workspaces](#workspaces-and-tenant-isolation).
 
 ## The broker
 
 ```ts
 interface BrokerContext {
   userId: string;
-  orgId: string;              // from the token/session's user row, never from a request
+  workspaceId: string;              // from the token/session's user row, never from a request
   env: "dev" | "live";        // from the token, never from a request body
   allowedCollections?: string[] | null;   // the client's ceiling; null = none. Only narrows.
   via: string;                // session | oauth | token_exchange | api_key:<id>
@@ -201,9 +201,9 @@ Adapters derive the context in exactly one place:
 ```ts
 const token = await auth.verifyAccessToken(req); // signature + expiry
 const env = token.scopes.includes("env:live") ? "live" : "dev";
-const orgId = await orgOfUser(token.sub); // from the user row, not the token
-const ctx: BrokerContext = { userId: token.sub, orgId, env };
-// Any env-like or org-like value in the request body or params is ignored and never read.
+const workspaceId = await workspaceOfUser(token.sub); // from the user row, not the token
+const ctx: BrokerContext = { userId: token.sub, workspaceId, env };
+// Any env-like or workspace-like value in the request body or params is ignored and never read.
 ```
 
 ## File collections and search
@@ -234,13 +234,21 @@ The guarantee is _not_ that JavaScript reproduces Postgres's input parsing, whic
 
 Refused for that reason: a `json` field (jsonb equality is structural, and the previous string coercion made such a filter match _every_ row), a `view_join` field (computed by the view, absent from the base table the write path reads), a zone-less timestamp, and any value that is not a valid instance of its column's declared type.
 
-## Organizations and tenant isolation
+## Workspaces and tenant isolation
 
-Every deployment has at least one organization. An existing single-tenant install gets one implicit org, `default`, created at bootstrap, and behaves exactly as it did before — `org_id` defaults to it on every table.
+Every deployment has at least one workspace. One Postgres, one deployment, N workspaces — a workspace is a tenant, not a new scope level. An existing single-tenant install gets one implicit workspace, `default`, created at bootstrap, and behaves exactly as it did before — `workspace_id` defaults to it on every table.
 
-`org_id` is on `app.collections`, `app.grants`, `app.audit_events`, `app.client_policies`, Better Auth's `user`, and every data table in `data_synth` / `data_live`. Grant lookup keys on `(org_id, user_id, collection, env)`.
+`workspace_id` is on `app.collections`, `app.grants`, `app.audit_events`, `app.client_policies`, `app.client_secrets`, `app.trusted_issuers`, `app.user_groups`, `app.change_log`, `app.workspace_members`, Better Auth's `user`, and every data table in `data_synth` / `data_live`. Grant lookup keys on `(workspace_id, user_id, collection, env)`.
 
-**`ctx.orgId` is derived from the verified session or token, never from the request** — the same rule as `ctx.env`. A caller cannot name its own tenant any more than it can name its own environment.
+**A user may belong to many workspaces, with a role per workspace.** `app.workspace_members` holds one `(workspace_id, user_id) → role` row per membership — role is no longer a scalar column on the user, because an admin in one tenant is not necessarily an admin in another. A console session carries an *active* workspace (`session.activeWorkspaceId`, switchable through `POST /api/me/workspace`), and every authorization check resolves the caller's role against membership in that active workspace, never against an account-level column.
+
+**Invariant 8, restated for multi-membership.** The old absolute form — "a caller cannot name its own tenant any more than it can name its own environment" — is false once a caller can belong to more than one. It becomes:
+
+> A caller may name a workspace **it is a verified member of**. The server intersects the named workspace with membership loaded at request time; a workspace that is absent, unknown, or not a membership yields no context and no rows.
+
+This is the same shape env-as-scope already has (`apps/web/lib/env-scope.ts`, intersected with `client_policies.allowed_scopes`), with one difference: env has a safe default (`dev`); a workspace does not. Ambiguity refuses — it never picks. `resolveWorkspace` (`apps/web/lib/workspace-scope.ts`) is the one function all three data-plane auth boundaries — session, MCP/OAuth token, REST token — call to turn a requested workspace id into `ctx.workspaceId`, or into nothing at all.
+
+**`ctx.workspaceId` is derived from the verified session or token, never from the request body** — the same rule as `ctx.env`.
 
 Isolation is enforced **in the database, twice**, because two different kinds of role reach the data by two different routes:
 
@@ -248,20 +256,28 @@ Isolation is enforced **in the database, twice**, because two different kinds of
 -- the wall for the read roles, which only ever see the view
 create or replace view data_live.v_pages as
   select ... from data_live.pages base
-  where base.org_id = current_setting('warehousd.org_id', true);
+  where base.workspace_id = current_setting('warehousd.workspace_id', true);
 
 -- the wall for roles that touch base tables directly (import, and the write roles)
 alter table data_live.pages enable row level security;
-create policy org_isolation on data_live.pages
-  using      (org_id = current_setting('warehousd.org_id', true))
-  with check (org_id = current_setting('warehousd.org_id', true));
+create policy workspace_isolation on data_live.pages
+  using      (workspace_id = current_setting('warehousd.workspace_id', true))
+  with check (workspace_id = current_setting('warehousd.workspace_id', true));
 ```
 
-The broker sets `warehousd.org_id` transaction-locally from `ctx.orgId` before any data statement (`withOrg` in `db/pools.ts`); `set_config(..., true)` means a pooled connection can never leak one org's setting into another's query. **The broker's generated SQL contains no org predicate at all** — that is deliberate, and a test asserts it. A bug in the broker cannot cross the tenant wall, exactly as a bug in schema-name resolution cannot cross the env wall (invariant 5).
+The broker sets `warehousd.workspace_id` transaction-locally from `ctx.workspaceId` before any data statement (`withWorkspace` in `db/pools.ts`); `set_config(..., true)` means a pooled connection can never leak one workspace's setting into another's query. **The broker's generated SQL contains no workspace predicate at all** — that is deliberate, and a test asserts it. A bug in the broker cannot cross the tenant wall, exactly as a bug in schema-name resolution cannot cross the env wall (invariant 5).
 
-The two-argument `current_setting` returns NULL when the setting is absent, so an unset org yields no rows rather than all rows. **It fails closed.**
+The two-argument `current_setting` returns NULL when the setting is absent, so an unset workspace yields no rows rather than all rows. **It fails closed.**
 
-The control plane is the other half, and it has no view and no RLS policy behind it: `/api/grants`, `/api/audit`, `/api/me/*` and `/api/admin/users` read `app.*` directly, so each carries the org predicate itself. The grant decision functions (`approveGrant`, `denyGrant`, `revokeGrant`) scope by org as well as id; an omitted org scopes to the implicit one, which fails to find a foreign grant rather than finding one.
+**The control plane has the same two walls now**, formalizing what used to be a review checklist: `app.grants`, `app.audit_events`, `app.client_policies`, `app.client_secrets`, `app.trusted_issuers`, `app.user_groups`, `app.change_log` and `app.workspace_members` all carry a `workspace_isolation` RLS policy (`audit_events`'s is read-only, preserving its documented unconstrained-INSERT grant for data roles). Every route that reaches these tables — `/api/grants`, `/api/audit`, `/api/me/*`, `/api/admin/*` — still carries the workspace predicate itself, and that predicate remains the real protection for those routes specifically: they connect through the app pool as the schema's owning role, and Postgres does not apply RLS to a table's owner. The RLS policy is the wall for a role that is not the owner — `warehousd_dev`/`warehousd_live`, which hold direct grants on some of these tables — and the backstop if a future route ever reaches one through a connection that isn't the owner pool. `app.platform_keys` and `app.workspaces` carry no policy: a platform key is the credential presented to manage workspaces, not a row scoped to one, and `app.workspaces` is the tenant registry itself. The grant decision functions (`approveGrant`, `denyGrant`, `revokeGrant`) scope by workspace as well as id; an omitted workspace scopes to the implicit one, which fails to find a foreign grant rather than finding one.
+
+**The platform control plane sits above the workspace boundary, with no path to the data plane.** `/v1/platform/*` provisions and manages workspaces and their OAuth clients for a consuming application, authenticated by a platform key (`app.platform_keys`) rather than a session or an OAuth client. `derivePlatformCaller` (`apps/web/lib/platform-context.ts`) returns a `PlatformCaller`, deliberately not a `BrokerContext` — there is no type-level path from a platform key to `broker.query`/`broker.mutate`/any other data verb, and no `/v1/collections` or `/mcp` route ever calls `derivePlatformCaller`. A platform key can create a workspace, seed it, add members and mint OAuth clients pinned to it; it cannot read or write a single document.
+
+**`workspaces.enabled` gates the surface, never the enforcement** — the same argument invariant 5 makes for "the database itself refuses." With the flag `false`, the default, `/v1/platform/*` 404s on every route and method, `warehousd platform-key` refuses, the `admin/members` page is absent, and the console switcher never renders — but every mechanism above runs exactly the same regardless: the `workspace_id` column, RLS policies and view predicates, `withWorkspace` and the GUC, membership-based role resolution, `workspace_id` on audit events, and `resolveWorkspace` at all three data-plane auth boundaries. Turning the flag on adds no enforcement and removes none; it exposes the means to create a second workspace. See [docs/configuration.md](configuration.md) for the full gates-on table.
+
+**Connect-in-place does not generalise across workspaces.** A `postgres_fdw` foreign table has no `workspace_id` column and RLS cannot apply to it, so its live view compares the caller's active workspace against the single constant `source_ref.workspace` names in config — a connect-in-place collection is pinned to exactly one workspace, and a caller active in any other reads zero rows. This is unsupported in a multi-workspace deployment rather than silently wrong for one; see [docs/configuration.md](configuration.md), "Connect-in-place."
+
+**Hostile-tenant isolation is out of scope.** The isolation above serves cooperative tenants sharing one Postgres: no per-tenant rate limiting, no noisy-neighbour protection. See [docs/roadmap.md](roadmap.md#not-planned) and [SECURITY.md](../SECURITY.md#out-of-scope).
 
 ## Postures, verbs, and writability
 
@@ -312,16 +328,16 @@ create table data_live.pages (
   _rev_fields text[] not null,       -- which fields this revision touches
   _rev_base bigint,                  -- the _rev_seq it was derived from
   _current boolean not null default false,
-  org_id text not null,
+  workspace_id text not null,
   id uuid not null,                  -- the declared pk; no longer unique
   ...);
-create unique index on data_live.pages (org_id, id) where _current;
+create unique index on data_live.pages (workspace_id, id) where _current;
 ```
 
 - **Exactly-one-current is a database guarantee** — the partial unique index — not an ordering convention.
 - **Pending revisions have `_current = false`**, so they never contend for that index. Multiple proposals can coexist against one document, and the proposed after-state is never readable through the view.
 - **Delete is a tombstone revision.** No `DELETE` privilege is granted anywhere, and the view's `_rev_op <> 'delete'` predicate makes the document disappear from reads while the history stays.
-- **`_rev*` and `org_id` can never be granted.** They are not in `warehousd.yml`, so no grant can name them and `describe_collection` never shows them. Bookkeeping is invisible to the query surface for free, with no filtering code.
+- **`_rev*` and `workspace_id` can never be granted.** They are not in `warehousd.yml`, so no grant can name them and `describe_collection` never shows them. Bookkeeping is invisible to the query surface for free, with no filtering code.
 
 **File collections keep their existing shape.** No revision columns, no migration: a `create` appends a file row plus its derived chunks, `path` stays unique so a repeat is a `conflict`, and chunks are never re-derived — which is why the "search still returns pre-edit text" bug class cannot occur here.
 
@@ -365,7 +381,7 @@ type MutationResult =
 
 Validation order — fail fast, audit every outcome, mirroring `query`:
 
-collection exists → collection is writable → op supported for this collection type → active grant for `(org, user, collection, env)` → verb ∈ `grant.verbs` → every field exists → no field is `view_join` → every field write-allowed by posture → every field ∈ `grant.allowedFields` → coerce to declared types → target document passes the document filter → concurrency check → append revision → promote → audit → return.
+collection exists → collection is writable → op supported for this collection type → active grant for `(workspace, user, collection, env)` → verb ∈ `grant.verbs` → every field exists → no field is `view_join` → every field write-allowed by posture → every field ∈ `grant.allowedFields` → coerce to declared types → target document passes the document filter → concurrency check → append revision → promote → audit → return.
 
 **Identity is not content.** The declared pk (dataset) and `path` (file) address a document rather than describing it, so they are exempt from the write posture on `create` — a create must be able to name what it creates. Requiring `write: allow` on a pk would assert the opposite of what is true, namely that identity may later be changed. On `update` and `delete` they are refused outright: changing identity is not an edit.
 
@@ -431,7 +447,7 @@ Without a feed, every review UI polls the data. The revision history is already 
 ```sql
 create table app.change_log (
   seq         bigserial primary key,   -- the cursor
-  org_id      text not null, env text not null,
+  workspace_id      text not null, env text not null,
   collection  text not null, document_id text not null,
   rev         uuid not null, op text not null, status text not null,
   at          timestamptz not null default now(), by text not null);
@@ -443,7 +459,7 @@ create table app.change_log (
 
 **`seq` order is not commit order.** `bigserial` hands out numbers when a statement runs, not when its transaction commits, so a writer can take `seq 7` and commit after one holding `seq 8`. A reader polling in between would see 8, advance past 7, and lose it. The feed therefore returns only rows whose inserting transaction is older than the oldest still-running one (`xmin < pg_snapshot_xmin(pg_current_snapshot())`). Once a row is returned, no lower `seq` can appear afterwards. A fixed time delay was rejected: it is both laggy and still wrong for any transaction outliving the delay.
 
-`broker.changes(ctx, { since, limit })` returns entries for `(org, env)` with `seq > since`, filtered to collections the caller holds a `read` grant on. A caller with no grants gets an empty feed, not a refusal — the feed is not an existence oracle for collections.
+`broker.changes(ctx, { since, limit })` returns entries for `(workspace, env)` with `seq > since`, filtered to collections the caller holds a `read` grant on. A caller with no grants gets an empty feed, not a refusal — the feed is not an existence oracle for collections.
 
 **A grant's document filter is not applied**, because the feed holds no field data to test a predicate against. The consequence is deliberate and bounded: such a caller learns that _some_ document in that collection changed, and its id, but not which fields moved or what they hold. `getDocument` then refuses the ones outside the filter. **A per-document ACL is not applied either**, for the same reason and with the same consequence — see [Per-document ACLs](#per-document-acls).
 
@@ -510,11 +526,11 @@ An ACL never widens a grant. It only takes one document out of one.
 
 **Group membership is warehousd's own fact.** It lives in `app.user_groups` and is derived from `ctx.userId` on every call — never read from a token, a claim, or anything a caller supplies. Invariant 1 says the broker is the trust boundary, and a per-document deny that depends on an assertion minted outside it is not a deny; this is the same reasoning `grants/eval.ts` gives for refusing to bake grants into tokens. Membership arrives from an SSO login (`source: 'sso'`) or from the console (`source: 'manual'`), and each source replaces only its own rows.
 
-**Storage is one table per env data schema**, `data_synth."_acl"` / `data_live."_acl"`, shared by every collection and keyed `(org_id, collection, document_id)`. What `document_id` matches is the KIND's answer, not a fixed column: a dataset's declared primary key, a file collection's `path` (`CollectionKind.aclKeyField`). No row means public — which is the whole design: 1,000 pages with one restricted page is one row, and the other 999 cost nothing. It lives in the data schema rather than in `app` because the app pool has no data-schema privileges and the read pools have none on `app`, so an `app`-schema ACL could not be joined into a collection's view at all.
+**Storage is one table per env data schema**, `data_synth."_acl"` / `data_live."_acl"`, shared by every collection and keyed `(workspace_id, collection, document_id)`. What `document_id` matches is the KIND's answer, not a fixed column: a dataset's declared primary key, a file collection's `path` (`CollectionKind.aclKeyField`). No row means public — which is the whole design: 1,000 pages with one restricted page is one row, and the other 999 cost nothing. It lives in the data schema rather than in `app` because the app pool has no data-schema privileges and the read pools have none on `app`, so an `app`-schema ACL could not be joined into a collection's view at all.
 
 **A file collection is keyed on `path`, never on `file_id`.** Its documents are chunks, so the policy attaches to the file row and every chunk of one document shares it — and `path` is what `ingestFile` treats as a file's identity within a collection. `file_id` is stable across a re-index, which updates the row in place, but the delete sweep in `indexing/sync.ts` removes the row when a file leaves the source directory, so a file that comes back gets a fresh uuid. An ACL keyed on the surrogate would be orphaned and the returning document would be readable by everyone the grant covers — a silent widening, with nothing in the trail to say so. For the same reason the sweep deliberately **leaves the ACL row behind**: the restriction survives the round trip. The cost is one row that may outlive its file, invisible to every read path, removed when the collection is dropped.
 
-**The view carries it as a structural column.** `viewDDL` left-joins `_acl` and exposes `acl.principals as "_acl"`, exactly the way it already exposes `tsv`, `checksum` and `embedding`: it names no configured field, so no grant can carry it and `buildSelect` can never project it — the select list is drawn from the YAML field set. The name is reserved, so a collection cannot declare a field called `_acl`. Org isolation follows the usual two walls: the join carries `acl.org_id = base.org_id` explicitly, and `_acl` has the same RLS policy every other data table has.
+**The view carries it as a structural column.** `viewDDL` left-joins `_acl` and exposes `acl.principals as "_acl"`, exactly the way it already exposes `tsv`, `checksum` and `embedding`: it names no configured field, so no grant can carry it and `buildSelect` can never project it — the select list is drawn from the YAML field set. The name is reserved, so a collection cannot declare a field called `_acl`. Workspace isolation follows the usual two walls: the join carries `acl.workspace_id = base.workspace_id` explicitly, and `_acl` has the same RLS policy every other data table has.
 
 **The read path is one fixed clause**, emitted by the broker and never composed from caller input:
 
@@ -532,7 +548,7 @@ coalesce(array_length("_acl", 1), 0) = 0 or "_acl" && $n::text[]
 
 Writes go through the write pool, which holds `select, insert, update, delete` on `_acl`. That `delete` is a deliberate exception to the no-DELETE-on-data rule: an ACL is not content, it has no revision model, and removing the row is the only way to make a restricted document public again — a tombstone would force "no principals" and "no row" to mean different things, and they do not.
 
-Not supported: **connect-in-place collections** — warehousd does not own those rows, there is no local base table to join an ACL against, and the view has no `org_id` column to carry the tenant half of the predicate; config refuses `acl: true` there. Also absent by design: a **default-private** mode, **inheritance** down a tree, and **deny entries**. Positive principals only.
+Not supported: **connect-in-place collections** — warehousd does not own those rows, there is no local base table to join an ACL against, and the view has no `workspace_id` column to carry the tenant half of the predicate; config refuses `acl: true` there. Also absent by design: a **default-private** mode, **inheritance** down a tree, and **deny entries**. Positive principals only.
 
 ## Semantic search
 
@@ -546,13 +562,13 @@ The broker declares `Embedder` (`packages/broker/src/providers.ts`) and consumes
 
 ## Connect-in-place collections
 
-A collection with `source_ref` reads through a `postgres_fdw` foreign table that lives inside `data_live`. Everything downstream is unchanged — same view, same `grantViewDDL`, same `dataPool`, same `buildSelect` — because the foreign table occupies the position a base table would. A second connection pool inside the broker was the alternative, and would have needed a variant of `dataPool`, `withOrg`, the RLS policy and the org predicate: four new ways to get tenant isolation wrong.
+A collection with `source_ref` reads through a `postgres_fdw` foreign table that lives inside `data_live`. Everything downstream is unchanged — same view, same `grantViewDDL`, same `dataPool`, same `buildSelect` — because the foreign table occupies the position a base table would. A second connection pool inside the broker was the alternative, and would have needed a variant of `dataPool`, `withWorkspace`, the RLS policy and the workspace predicate: four new ways to get tenant isolation wrong.
 
 Read-only is enforced by the database. The server and the foreign table are both `updatable 'false'`, no role holds anything but `SELECT` on the wrapping view, and `mutate` refuses `not_writable` structurally in front of that.
 
 The column set is enumerated from the YAML, one `create foreign table` at a time, rather than by `import foreign schema`. A column added upstream is therefore absent from the local schema entirely — not merely ungranted — so no query, broker-built or otherwise, can reach it. `applyConfig` verifies the remote matches what was declared and fails at boot, in front of the operator, rather than letting drift surface at request time as an `internal_error` nobody can diagnose.
 
-**Tenant isolation is one wall here, not two.** Every other collection has both the view's `org_id` predicate and an RLS policy on the base table. A foreign table can carry neither: it has no `org_id` column, and RLS does not apply to it. The view instead compares the request's org against the constant `org:` the source declares. That is a real narrowing and is stated in [SECURITY.md](../SECURITY.md) as well as here.
+**Tenant isolation is one wall here, not two.** Every other collection has both the view's `workspace_id` predicate and an RLS policy on the base table. A foreign table can carry neither: it has no `workspace_id` column, and RLS does not apply to it. The view instead compares the request's workspace against the constant `workspace:` the source declares. That is a real narrowing and is stated in [SECURITY.md](../SECURITY.md) as well as here.
 
 `dev` never touches the external system: an external collection gets an ordinary generated table in `data_synth`, which is what keeps invariant 6 true.
 
@@ -564,14 +580,30 @@ A vocabulary is declared once under `taxonomies` and bound to a collection with 
 
 ```sql
 -- Better Auth manages: user, session, account, sso_provider, oauth_client
--- (user gains an orgId column via additionalFields)
-create table app.organizations (id text pk, name text, created_at timestamptz);
+-- (user gains a workspaceId column via additionalFields)
+create table app.workspaces (
+  id text pk, name text, created_at timestamptz,
+  created_by_key uuid references platform_keys      -- null: created by bootstrap, not a platform key
+);
+
+create table app.workspace_members (   -- role is per membership, not a scalar column on the user
+  workspace_id text references workspaces, user_id text,
+  role text not null default 'member' check (role in ('admin','manager','member')),
+  created_at timestamptz, primary key (workspace_id, user_id)
+);
+
+create table app.platform_keys (       -- the /v1/platform bearer credential; above the workspace boundary
+  id uuid pk, label text, prefix text, secret_hash text,   -- salted scrypt; never stored verbatim
+  managed_workspaces text[],           -- null = every workspace; a real array = an ACL, not a filter
+  created_at timestamptz, created_by text, expires_at timestamptz,
+  last_used_at timestamptz, revoked_at timestamptz
+);
 
 create table app.collections (
-  name text pk, description text, config jsonb, org_id text, updated_at timestamptz);
+  name text pk, description text, config jsonb, workspace_id text, updated_at timestamptz);
 
 create table app.grants (
-  id uuid pk, org_id text references organizations,
+  id uuid pk, workspace_id text references workspaces,
   user_id text references "user", collection text references collections,
   purpose_label text, purpose_detail text,
   allowed_fields text[],            -- ⊆ the collection's grantable fields
@@ -584,11 +616,11 @@ create table app.grants (
   requested_at timestamptz, decided_at timestamptz, decided_by text, expires_at timestamptz
 );
 create unique index grants_one_active
-  on app.grants (org_id, user_id, collection, env) where status = 'approved';
+  on app.grants (workspace_id, user_id, collection, env) where status = 'approved';
 
 create table app.client_policies (
   client_id text pk references oauth_client,
-  display_name text, org_id text references organizations,
+  display_name text, workspace_id text references workspaces,
   allowed_scopes text[] not null default '{env:dev}',
   allowed_collections text[],        -- the ceiling; null = none
   mode text not null default 'delegated',   -- delegated | headless
@@ -597,28 +629,28 @@ create table app.client_policies (
 );
 
 create table app.client_secrets (   -- only a hash; the secret is shown once, at creation
-  id uuid pk, client_id text references client_policies, org_id text,
+  id uuid pk, client_id text references client_policies, workspace_id text,
   prefix text, secret_hash text, created_at timestamptz, created_by text,
   expires_at timestamptz not null,  -- mandatory, capped at 365 days
   last_used_at timestamptz, revoked_at timestamptz
 );
 
 create table app.trusted_issuers (  -- registered IdPs for RFC 8693 token exchange
-  id uuid pk, org_id text, issuer text, jwks_uri text,
-  audience text, subject_claim text default 'sub', unique (org_id, issuer)
+  id uuid pk, workspace_id text, issuer text, jwks_uri text,
+  audience text, subject_claim text default 'sub', unique (workspace_id, issuer)
 );
 
 create table app.audit_events (
-  id uuid pk, at timestamptz, user_id text, org_id text, env text, collection text,
+  id uuid pk, at timestamptz, user_id text, workspace_id text, env text, collection text,
   intent jsonb, fields_returned text[], unmasked_fields text[],
   principals text[] not null default '{}',  -- the membership the decision was made under
   grant_id uuid, outcome text, reason text
 );
 
 create table app.user_groups (         -- warehousd's own record of group membership
-  org_id text references organizations, user_id text, group_name text,
+  workspace_id text references workspaces, user_id text, group_name text,
   source text check (source in ('sso','manual')),
-  updated_at timestamptz, primary key (org_id, user_id, group_name, source)
+  updated_at timestamptz, primary key (workspace_id, user_id, group_name, source)
 );
 
 create table app.sso_provisioned (     -- (user, provider) pairs seen once; see lib/sso.ts
@@ -626,7 +658,7 @@ create table app.sso_provisioned (     -- (user, provider) pairs seen once; see 
 );
 
 create table app.change_log (          -- the change feed; carries no field data
-  seq bigserial pk, org_id text, env text, collection text, document_id text,
+  seq bigserial pk, workspace_id text, env text, collection text, document_id text,
   rev uuid, op text, status text, at timestamptz, by text
 );
 
@@ -690,7 +722,7 @@ An adapter is thin by construction. To add one — REST, a CMS delivery API, a s
 3. Call the broker. Return `documents` and `fieldsReturned` on success; on refusal, return the reason code — never a denied value, never SQL.
 4. Do not query `data_live` or `data_synth`. The role you are given cannot anyway, and that is the point.
 
-The REST adapter (`/v1`) follows this pattern exactly. It derives context in `lib/rest-context.ts` with `deriveRestContext()` — extracting the token scope for env, looking up orgId from the user row, loading the client policy to determine `via` (how the client authenticated), and applying the collection ceiling — then translates HTTP requests into broker intents and returns reason codes on refusal. See `apps/web/lib/rest-context.ts` and `apps/web/app/v1/` for the reference implementation.
+The REST adapter (`/v1`) follows this pattern exactly. It derives context in `lib/rest-context.ts` with `deriveRestContext()` — extracting the token scope for env, looking up workspaceId from the user row, loading the client policy to determine `via` (how the client authenticated), and applying the collection ceiling — then translates HTTP requests into broker intents and returns reason codes on refusal. See `apps/web/lib/rest-context.ts` and `apps/web/app/v1/` for the reference implementation.
 
 ### The console is an adapter too
 

@@ -11,7 +11,7 @@ import {
 } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
-import { readEnvCookie, orgOf } from "../../../../../lib/session";
+import { readEnvCookie } from "../../../../../lib/session";
 import { applyStatus } from "../../../../../lib/apply-status";
 
 // One collection, everything the console's detail page needs about it: the configured shape, how
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
   if (!c) return Response.json({ error: "unknown_collection" }, { status: 404 });
 
   const env = readEnvCookie(req);
-  const orgId = orgOf(guard.user);
+  const workspaceId = guard.workspaceId;
   const app = getAppPool();
 
   const appliedRow = (
@@ -44,10 +44,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
     await app.query(
       `select id, status, allowed_fields, verbs, document_filter, expires_at
          from app.grants
-        where org_id=$1 and user_id=$2 and collection=$3 and env=$4 and status='approved'
+        where workspace_id=$1 and user_id=$2 and collection=$3 and env=$4 and status='approved'
           and (expires_at is null or expires_at > now())
         order by requested_at desc limit 1`,
-      [orgId, guard.user.id, name, env],
+      [workspaceId, guard.user.id, name, env],
     )
   ).rows[0];
 
@@ -60,10 +60,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
   let termCounts: Record<string, Record<string, number>> = {};
 
   if (status !== "not_applied") {
-    const scope = { env, orgId };
+    const scope = { env, workspaceId };
     try {
       documentCount = (await countDocumentsIn(getBroker().pools, scope, cfg, [name]))[name] ?? null;
-      bindings = await loadTaxonomyBindings(app, cfg, name, env);
+      bindings = await loadTaxonomyBindings(app, cfg, name, env, workspaceId);
       termCounts = Object.fromEntries(
         await Promise.all(
           (c.taxonomies ?? []).map(

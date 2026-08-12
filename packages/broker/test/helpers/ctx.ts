@@ -11,5 +11,5 @@ import type { BrokerContext } from "../../src/types";
 // here instead of a 230-literal sweep. Phase 4.3 adding `allowedCollections` is what proved that;
 // see the plan's 5.2.1.
 export function makeCtx(over: Partial<BrokerContext> & { userId: string }): BrokerContext {
-  return { orgId: "default", env: "dev", allowedCollections: null, via: "session", ...over };
+  return { workspaceId: "default", env: "dev", allowedCollections: null, via: "session", ...over };
 }

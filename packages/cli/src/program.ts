@@ -46,6 +46,12 @@ import { runDoctor } from "./preflight";
 import { runLogs, resolveLogTarget } from "./commands/logs";
 import { runOpen, type Target } from "./commands/open";
 import { collectSecrets, secretsJson } from "./commands/secrets";
+import {
+  runPlatformKeyCreate,
+  runPlatformKeyList,
+  runPlatformKeyRevoke,
+  PlatformDisabledError,
+} from "./commands/platform-key";
 import { resolveTheme, type Theme } from "./ui/theme";
 import { rcNoticeBlock } from "./ui/rc-notice";
 import { initIntro } from "./ui/brand";
@@ -967,6 +973,148 @@ program
         ? "Shown in full — anything on this screen is a live credential."
         : "Masked — `--show` reveals them, `--json` is for scripts.",
     );
+  });
+// A refusal here is not the generic error path: `workspaces.enabled: false` is not a mistake, it
+// is the deployment's own default, and the fix is always the same two commands — so it is said
+// once, here, rather than routed through explain()/errorOutro(), which cannot know it.
+function platformDisabledOutro(frame: ReturnType<typeof ui>["frame"], theme: Theme): never {
+  frame.block(railFail(["Platform key management is disabled."], theme));
+  frame.close("Set `workspaces.enabled: true` in warehousd.yml, then run `warehousd apply`.");
+  process.exit(1);
+}
+const platformKey = program
+  .command("platform-key")
+  .description("manage keys for the workspace provisioning API (/v1/platform)");
+platformKey
+  .command("create")
+  .description("mint a platform key")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .requiredOption("--label <label>", "what this key is for")
+  .option("--workspaces <ids>", "comma-separated workspace ids this key may manage")
+  .option("--all-workspaces", "this key may reach every workspace on the deployment", false)
+  .option("--days <n>", "lifetime in days", "90")
+  .action(async (o) => {
+    const { theme, json, frame } = ui("platform-key create");
+    if (!o.allWorkspaces && !o.workspaces) {
+      throw new Error(
+        "Pass --workspaces <ids> to scope this key, or --all-workspaces for every tenant.",
+      );
+    }
+    const db = resolveDbUrl(o.dir, o.db);
+    try {
+      const r = await runPlatformKeyCreate(o.dir, db, {
+        label: o.label,
+        allWorkspaces: Boolean(o.allWorkspaces),
+        workspaces: o.workspaces
+          ? (o.workspaces
+              .split(",")
+              .map((s: string) => s.trim())
+              .filter(Boolean) as string[])
+          : undefined,
+        days: Number(o.days),
+      });
+      if (json) {
+        emitJson({
+          id: r.id,
+          secret: r.secret,
+          managedWorkspaces: r.managedWorkspaces,
+          expiresAt: r.expiresAt.toISOString(),
+        });
+        return;
+      }
+      if (r.managedWorkspaces === null) {
+        frame.block(
+          railWarn(
+            ["This key can reach EVERY workspace on this deployment — store it accordingly."],
+            theme,
+          ),
+        );
+      }
+      frame.block(railDone([`Key id     ${r.id}`, `Secret     ${theme.c.bold(r.secret)}`], theme));
+      frame.close(
+        "Shown once — store it now. `warehousd platform-key list` shows the id again, never the secret.",
+      );
+    } catch (err) {
+      if (err instanceof PlatformDisabledError) platformDisabledOutro(frame, theme);
+      throw err;
+    }
+  });
+platformKey
+  .command("list")
+  .description("list platform keys — never their secrets")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .action(async (o) => {
+    const { theme, json, frame } = ui("platform-key list");
+    const db = resolveDbUrl(o.dir, o.db);
+    try {
+      const keys = await runPlatformKeyList(o.dir, db);
+      if (json) {
+        emitJson(
+          keys.map((k) => ({
+            ...k,
+            createdAt: k.createdAt.toISOString(),
+            expiresAt: k.expiresAt.toISOString(),
+            lastUsedAt: k.lastUsedAt?.toISOString() ?? null,
+            revokedAt: k.revokedAt?.toISOString() ?? null,
+          })),
+        );
+        return;
+      }
+      if (keys.length === 0) {
+        frame.block(railDone(["No platform keys yet."], theme));
+        frame.close("`warehousd platform-key create` mints the first one.");
+        return;
+      }
+      frame.block(
+        rail(
+          keys.map((k) => {
+            const scope =
+              k.managedWorkspaces === null
+                ? "all workspaces"
+                : k.managedWorkspaces.join(", ") || "none";
+            const status = k.revokedAt
+              ? "revoked"
+              : k.expiresAt < new Date()
+                ? "expired"
+                : "active";
+            return `${k.id}  ${k.label}  ${theme.c.dim(`${scope} · ${status}`)}`;
+          }),
+          theme,
+        ),
+      );
+      frame.close("`warehousd platform-key revoke <id>` retires one.");
+    } catch (err) {
+      if (err instanceof PlatformDisabledError) platformDisabledOutro(frame, theme);
+      throw err;
+    }
+  });
+platformKey
+  .command("revoke <id>")
+  .description("revoke a platform key")
+  .option("-d, --dir <dir>", "project dir", process.cwd())
+  .option("--db <url>", "database url")
+  .action(async (id, o) => {
+    const { theme, json, frame } = ui(`platform-key revoke ${id}`);
+    const db = resolveDbUrl(o.dir, o.db);
+    try {
+      const revoked = await runPlatformKeyRevoke(o.dir, db, id);
+      if (json) {
+        emitJson({ id, revoked });
+        return;
+      }
+      if (!revoked) {
+        frame.block(railFail([`No unrevoked key ${id}.`], theme));
+        frame.close("`warehousd platform-key list` shows what exists.");
+        process.exit(1);
+      }
+      frame.block(railDone([`Revoked ${id}`], theme));
+      frame.close("Any request already using it is refused from now on.");
+    } catch (err) {
+      if (err instanceof PlatformDisabledError) platformDisabledOutro(frame, theme);
+      throw err;
+    }
   });
 program
   .command("deploy")

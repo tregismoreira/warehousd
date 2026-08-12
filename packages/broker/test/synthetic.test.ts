@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema } from "../src/db/migrate-app";
+import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
 import { ConfigSchema } from "../src/config/schema";
@@ -41,12 +41,12 @@ it("is deterministic for a fixed seed and honors FK integrity", async () => {
   await createAppSchema(db);
   await applyConfig(db, cfg);
 
-  await generateSynthetic(db, cfg, 42);
+  await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
   const first = await db.query(`select full_name from data_synth.people order by id`);
 
   // regenerate with same seed → identical
   await db.query(`truncate data_synth.people, data_synth.salaries`);
-  await generateSynthetic(db, cfg, 42);
+  await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
   const second = await db.query(`select full_name from data_synth.people order by id`);
   expect(second.rows).toEqual(first.rows);
 
@@ -92,7 +92,7 @@ describe("synthetic: taxonomy terms", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 7);
+    await generateSynthetic(db, cfg, 7, DEFAULT_WORKSPACE_ID);
     const rows = (await db.query(`select category from data_synth.notes`)).rows;
     expect(rows.length).toBe(30);
     const valid = new Set(["hr", "finance", "legal"]);
@@ -100,7 +100,7 @@ describe("synthetic: taxonomy terms", () => {
     // determinism: regenerate with the same seed → identical multiset
     const first = rows.map((r) => r.category).sort();
     await db.query(`truncate data_synth.notes`);
-    await generateSynthetic(db, cfg, 7);
+    await generateSynthetic(db, cfg, 7, DEFAULT_WORKSPACE_ID);
     const again = (await db.query(`select category from data_synth.notes`)).rows
       .map((r) => r.category)
       .sort();
@@ -149,7 +149,7 @@ describe("synthetic: dataset-sourced taxonomy terms", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 11);
+    await generateSynthetic(db, cfg, 11, DEFAULT_WORKSPACE_ID);
 
     const expected = new Set(
       (await db.query(`select client_number from data_synth.clients`)).rows.map((r) =>
@@ -163,7 +163,7 @@ describe("synthetic: dataset-sourced taxonomy terms", () => {
 
     // Same seed → same assignment. regenerate.test.ts depends on this holding.
     await db.query(`truncate data_synth.clients, data_synth.matters`);
-    await generateSynthetic(db, cfg, 11);
+    await generateSynthetic(db, cfg, 11, DEFAULT_WORKSPACE_ID);
     const again = (await db.query(`select client from data_synth.matters order by id`)).rows;
     expect(again).toEqual(rows);
     await db.end();
@@ -176,7 +176,7 @@ describe("synthetic: dataset-sourced taxonomy terms", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 11);
+    await generateSynthetic(db, cfg, 11, DEFAULT_WORKSPACE_ID);
 
     const expected = new Set(
       (await db.query(`select client_number from data_synth.clients`)).rows.map((r) =>
@@ -217,7 +217,7 @@ describe("synthetic: gen: hints", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 42);
+    await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
     const rows = (await db.query(`select client_number from data_synth.matters`)).rows;
     const numbers = rows.map((r) => r.client_number).sort();
     const expected = [
@@ -235,7 +235,7 @@ describe("synthetic: gen: hints", () => {
     expect(numbers).toEqual(expected);
     // determinism: same seed → same multiset
     await db.query(`truncate data_synth.matters`);
-    await generateSynthetic(db, cfg, 42);
+    await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
     const again = (await db.query(`select client_number from data_synth.matters`)).rows
       .map((r) => r.client_number)
       .sort();
@@ -262,7 +262,7 @@ describe("synthetic: gen: hints", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 42);
+    await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
     const rows = (await db.query(`select matter_number from data_synth.matters`)).rows;
     const numbers = rows.map((r) => r.matter_number).sort();
     const expected = [
@@ -295,7 +295,7 @@ describe("synthetic: gen: hints", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 42);
+    await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
     const rows = (await db.query(`select invoice_number from data_synth.invoices`)).rows;
     const numbers = rows.map((r) => r.invoice_number).sort();
     const expected = [
@@ -331,7 +331,7 @@ describe("synthetic: gen: hints", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 42);
+    await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
     const rows = (await db.query(`select bar_number from data_synth.attorneys`)).rows;
     const numbers = rows.map((r) => r.bar_number).sort();
     const expected = ["BAR-000001", "BAR-000002", "BAR-000003"].sort();
@@ -361,7 +361,7 @@ describe("synthetic: self-referential and cyclic FKs", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 42);
+    await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
     const rows = (
       await db.query(`select manager_id from data_synth.people where manager_id is not null`)
     ).rows;
@@ -404,7 +404,7 @@ describe("synthetic: self-referential and cyclic FKs", () => {
     const db = new Pool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
-    await generateSynthetic(db, cfg, 42);
+    await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
     // At least one of the two FK cycles should be backfilled
     const deptHeads = (
       await db.query(

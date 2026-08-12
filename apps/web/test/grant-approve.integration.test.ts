@@ -266,7 +266,7 @@ describe("approve — self-approval", () => {
 // status code, because a route that updated nothing would return 200 just as happily.
 const UNKNOWN_ID = "00000000-0000-0000-0000-000000000000";
 
-// `grants_one_active` is unique on (org_id, user_id, collection, env) where status='approved', and
+// `grants_one_active` is unique on (workspace_id, user_id, collection, env) where status='approved', and
 // the seeded template already holds approved grants for the personas. So the owner here is a
 // synthetic id per test rather than mia or marcus: the session doing the deciding is what these
 // tests are about, and the grant's owner only has to be somebody.

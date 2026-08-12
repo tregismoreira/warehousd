@@ -203,7 +203,7 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
     );
 
     const { indexCollection } = await import("../src/indexing");
-    await indexCollection(db2, "dev", "policies", tmpDir);
+    await indexCollection(db2, "dev", "policies", tmpDir, "default");
     fs.rmSync(tmpDir, { recursive: true });
 
     // Approve grant with documentFilters excluding the restricted document

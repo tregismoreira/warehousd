@@ -40,7 +40,7 @@ export const REV_COLS: readonly string[] = Object.freeze([
   "_rev_fields",
   "_rev_base",
   "_current",
-  "org_id",
+  "workspace_id",
 ]);
 
 // A revision row as the base table stores it: the bookkeeping columns REV_COLS names, plus one
@@ -61,7 +61,7 @@ export type RevisionRow = {
   _rev_fields: string[] | null;
   _rev_base: number | string | null;
   _current: boolean;
-  org_id: string;
+  workspace_id: string;
 } & Record<string, unknown>;
 
 // Collections whose table carries revision columns: every dataset. tableDDL emits REV_COLS for

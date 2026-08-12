@@ -78,7 +78,7 @@ async function grantPair(
     userId: `proposer_${suffix}`,
     collection: "people",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "test",
     allowedFields: fields,
   });
@@ -91,7 +91,7 @@ async function grantPair(
     userId: `approver_${suffix}`,
     collection: "people",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "test",
     allowedFields: approver.allowedFields ?? fields,
   });
@@ -119,7 +119,7 @@ async function grantPair(
 async function seedDocument(dept: string, email = "seed@ex.com") {
   const res = await app.query(
     `insert into data_synth.people
-       (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+       (workspace_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
      values ('default', gen_random_uuid(), $1, 'Seed', $2, gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
      returning id`,
     [email, dept],

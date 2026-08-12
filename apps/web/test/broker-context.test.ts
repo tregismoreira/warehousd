@@ -32,7 +32,7 @@ async function mintAccessToken(scope: string) {
     const g = await requestGrant(app, {
       userId: "mia",
       collection: "people",
-      orgId: "default",
+      workspaceId: "default",
       env: "live",
       purposeLabel: "t",
       allowedFields: ["id"],
@@ -73,7 +73,7 @@ describe("deriveTokenContext", () => {
     );
     expect(ctx).toEqual({
       userId: "mia",
-      orgId: "default",
+      workspaceId: "default",
       env: "live",
       allowedCollections: null,
       via: "oauth",
@@ -90,7 +90,7 @@ describe("deriveTokenContext", () => {
     );
     expect(ctx).toEqual({
       userId: "mia",
-      orgId: "default",
+      workspaceId: "default",
       env: "dev",
       allowedCollections: null,
       via: "oauth",

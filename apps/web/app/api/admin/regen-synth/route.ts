@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import {
-  DEFAULT_ORG_ID,
   auditDestination,
   auditEnabled,
   makeAuditWriter,
@@ -19,7 +18,7 @@ export async function POST(req: NextRequest) {
 
   const app = getAppPool();
   const cfg = getConfig();
-  const { collections } = await regenerateSynthetic(app, cfg, seed ?? 42);
+  const { collections } = await regenerateSynthetic(app, cfg, guard.workspaceId, seed ?? 42);
 
   // Destroying and rebuilding a whole environment is a governance event. Audited per
   // collection so the audit browser's collection filter finds it. env is the literal 'dev':
@@ -28,13 +27,13 @@ export async function POST(req: NextRequest) {
   // Through `makeAuditWriter` like every other decision in the deployment. This used to be a
   // hand-written insert — the last one outside the writer — which meant it went to
   // `app.audit_events` whatever `audit.sink` said, and filled six of the table's columns while
-  // leaving `org_id`, `via` and `principals` to their defaults. The writer also owns the
+  // leaving `workspace_id`, `via` and `principals` to their defaults. The writer also owns the
   // `audit.enabled` gate, so the flag is honoured in one place rather than remembered here.
   const writer = makeAuditWriter(
     app,
     {
       userId: guard.user.id,
-      orgId: DEFAULT_ORG_ID,
+      workspaceId: guard.workspaceId,
       env: "dev",
       allowedCollections: null,
       via: "session",

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   if (!collection) return Response.json({ error: "collection_required" }, { status: 400 });
   const subject = url.searchParams.get("subject") ?? guard.user.id;
 
-  // The console session's context: user, org and the env cookie. `deriveContext` is the same one
+  // The console session's context: user, workspace and the env cookie. `deriveContext` is the same one
   // every other console route uses, so the environment this answer describes is the environment
   // the rest of the page is showing.
   const ctx = await deriveContext(req);

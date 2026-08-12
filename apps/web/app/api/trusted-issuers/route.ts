@@ -3,15 +3,14 @@ import { listTrustedIssuers, createTrustedIssuer } from "@warehousd/broker";
 import { getAppPool } from "../../lib/broker";
 import { requireRole } from "../../../lib/authz";
 import { readJson } from "../../../lib/rest";
-import { orgOf } from "../../../lib/session";
 
 export async function GET(req: NextRequest) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
 
-  const org = orgOf(guard.user);
+  const workspace = guard.workspaceId;
   const app = getAppPool();
-  const issuers = await listTrustedIssuers(app, org);
+  const issuers = await listTrustedIssuers(app, workspace);
 
   return Response.json({ issuers });
 }
@@ -20,7 +19,7 @@ export async function POST(req: NextRequest) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
 
-  const org = orgOf(guard.user);
+  const workspace = guard.workspaceId;
   const body = await readJson(req);
   if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
   const { issuer, jwksUri, audience, subjectClaim } = body.value as {
@@ -37,7 +36,7 @@ export async function POST(req: NextRequest) {
   const app = getAppPool();
   const created = await createTrustedIssuer(
     app,
-    org,
+    workspace,
     issuer,
     jwksUri,
     audience,

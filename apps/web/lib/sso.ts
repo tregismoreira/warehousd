@@ -4,7 +4,8 @@ import { createAuthMiddleware, getSessionFromCtx, APIError } from "better-auth/a
 import type { Pool } from "pg";
 import {
   APP_ROLES,
-  DEFAULT_ORG_ID,
+  DEFAULT_WORKSPACE_ID,
+  setMember,
   setUserGroups,
   type AppRole,
   type WarehousdConfig,
@@ -149,21 +150,30 @@ export function ssoPlugin(app: Pool, getCfg: () => WarehousdConfig) {
     // login asserted, which is worse than not offering them.
     provisionUser: async ({ user, userInfo, provider }) => {
       const cfg = getCfg();
+      const r = await app.query<{ workspaceId: string | null }>(
+        `select "workspaceId" from app."user" where id = $1`,
+        [user.id],
+      );
+      const workspaceId = r.rows[0]?.workspaceId ?? DEFAULT_WORKSPACE_ID;
+
       if (await firstProvision(app, user.id, provider.providerId)) {
         const { role, warning } = roleForSsoUser(cfg, provider.providerId, userInfo);
         // The provider id and the claim name; never the user, the email, or the claim's value.
         if (warning) console.warn(`[sso] ${warning}`);
         await app.query(`update app."user" set role = $2 where id = $1`, [user.id, role]);
+        // Authorization reads workspace membership (lib/authz.ts), not this column — the
+        // databaseHooks.user.create.after in lib/auth.ts already gave this user a 'member' row at
+        // JIT-provisioning time, before the IdP's groups were known. Kept in sync here for the
+        // same reason apps/web/app/api/admin/users/[userId]/route.ts is: a role change that
+        // stopped at app."user" would change what the console displays without changing what the
+        // user can do.
+        await setMember(app, { workspaceId, userId: user.id, role });
       }
 
       const groups = assertedGroups(cfg, provider.providerId, userInfo);
       if (groups === null) return;
-      const r = await app.query<{ orgId: string | null }>(
-        `select "orgId" from app."user" where id = $1`,
-        [user.id],
-      );
       await setUserGroups(app, {
-        orgId: r.rows[0]?.orgId ?? DEFAULT_ORG_ID,
+        workspaceId,
         userId: user.id,
         groups,
         source: "sso",

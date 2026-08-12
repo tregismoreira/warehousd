@@ -1,10 +1,10 @@
 import { it, expect, beforeAll, afterAll, describe } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema } from "../src/db/migrate-app";
+import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
-import { createPools, withOrg, type Pools } from "../src/db/pools";
+import { createPools, withWorkspace, type Pools } from "../src/db/pools";
 import { makeBroker } from "../src/broker";
 import { loadConfig } from "../src/config/load";
 import { seedLive } from "../../../examples/harbor/seed/live";
@@ -29,7 +29,7 @@ beforeAll(async () => {
   admin = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
-  await generateSynthetic(admin, cfg, 42);
+  await generateSynthetic(admin, cfg, 42, DEFAULT_WORKSPACE_ID);
   await seedLive(admin);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
 });
@@ -118,7 +118,7 @@ it("test 5 (scope clauses): full env-as-scope acceptance gate", async () => {
     const grantId = await requestGrant(app, {
       userId: "mia",
       collection: "people",
-      orgId: "default",
+      workspaceId: "default",
       env: "live",
       purposeLabel: "t",
       allowedFields: ["id"],
@@ -249,10 +249,10 @@ describe("env role grants (design §8 test 7)", () => {
       [d.rows[0].id],
     );
 
-    // Test with dev role. The view's org predicate means the read needs an org in scope —
-    // withOrg() is how the broker supplies it; here the setting is made directly.
+    // Test with dev role. The view's workspace predicate means the read needs a workspace in scope —
+    // withWorkspace() is how the broker supplies it; here the setting is made directly.
     const dev = new Pool({ connectionString: p2.urls.dev });
-    const ok = await withOrg(dev, "default", (c) =>
+    const ok = await withWorkspace(dev, "default", (c) =>
       c.query(`select title from data_synth.v_policies`),
     );
     expect(ok.rowCount).toBeGreaterThan(0);

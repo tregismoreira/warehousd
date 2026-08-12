@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import { randomBytes } from "node:crypto";
-import { DEFAULT_ORG_ID } from "../db/migrate-app";
+import { DEFAULT_WORKSPACE_ID } from "../db/migrate-app";
 
 export const DEV_CLIENT_NAME = "warehousd dev client";
 
@@ -15,12 +15,17 @@ export type ClientPolicy = {
   // caller may read, and widening who else may read something is a different act. Default false,
   // and an unregistered client gets false too — the flag is only ever granted on purpose.
   canManageAcl: boolean;
+  // The workspace this client is pinned to, or null for an unregistered client (no row at all —
+  // never for a registered one, since the column is not-null with a default). The two token
+  // context constructors (broker-context.ts, rest-context.ts) intersect this against the
+  // resolved workspace: null means "no pin, do not restrict."
+  workspaceId: string | null;
 };
 
 export async function getClientPolicy(app: Pool, clientId: string): Promise<ClientPolicy> {
   const r = await app.query(
     `select allowed_scopes, allowed_collections, mode, robot_user_id, trusted_issuer_id,
-            can_manage_acl
+            can_manage_acl, workspace_id
      from app.client_policies where client_id=$1`,
     [clientId],
   );
@@ -33,6 +38,7 @@ export async function getClientPolicy(app: Pool, clientId: string): Promise<Clie
       robotUserId: null,
       trustedIssuerId: null,
       canManageAcl: false,
+      workspaceId: null,
     };
   }
   const row = r.rows[0];
@@ -44,67 +50,82 @@ export async function getClientPolicy(app: Pool, clientId: string): Promise<Clie
     robotUserId: row.robot_user_id,
     trustedIssuerId: row.trusted_issuer_id,
     canManageAcl: row.can_manage_acl === true,
+    workspaceId: row.workspace_id,
   };
 }
 
 // Grant or withdraw a client's ability to edit document ACLs.
 //
-// Scoped to the org like every other client-policy write, and audited by the caller rather than
+// Scoped to the workspace like every other client-policy write, and audited by the caller rather than
 // here — the console route that owns this is the one holding the acting admin's identity.
 export async function setCanManageAcl(
   app: Pool,
   clientId: string,
   canManageAcl: boolean,
-  orgId = DEFAULT_ORG_ID,
+  workspaceId = DEFAULT_WORKSPACE_ID,
 ): Promise<boolean> {
   const r = await app.query(
-    `update app.client_policies set can_manage_acl=$2 where client_id=$1 and org_id=$3`,
-    [clientId, canManageAcl, orgId],
+    `update app.client_policies set can_manage_acl=$2 where client_id=$1 and workspace_id=$3`,
+    [clientId, canManageAcl, workspaceId],
   );
   return (r.rowCount ?? 0) > 0;
 }
 
+// `workspaceId` defaults to DEFAULT_WORKSPACE_ID for the three existing callers (DCR, the dev
+// client), none of which ever had a workspace to pin to. The platform API's client-creation route
+// is the first caller that passes a real one — a client created for tenant A must be pinned to A,
+// not left to land in 'default' by the column's own NOT NULL default. Not part of the ON CONFLICT
+// update: a client's workspace is set once, at creation, the same way its scopes are widened only
+// through setAllowedScopes rather than through a re-upsert.
 export async function upsertClientPolicy(
   app: Pool,
   clientId: string,
   displayName: string | null,
   allowedScopes: string[],
+  workspaceId: string = DEFAULT_WORKSPACE_ID,
 ): Promise<void> {
   await app.query(
-    `insert into app.client_policies (client_id, display_name, allowed_scopes)
-     values ($1,$2,$3)
+    `insert into app.client_policies (client_id, display_name, allowed_scopes, workspace_id)
+     values ($1,$2,$3,$4)
      on conflict (client_id) do update set display_name=$2, allowed_scopes=$3`,
-    [clientId, displayName, allowedScopes],
+    [clientId, displayName, allowedScopes, workspaceId],
   );
 }
 
+// Scoped to the workspace like setCanManageAcl: without it, any manager could promote or demote
+// another workspace's client by guessing its id — there is no other check anywhere in the call
+// chain that a client belongs to the caller's workspace. Returns whether a row matched, the same
+// shape as setCanManageAcl, so the caller can tell a wrong-workspace clientId from a real update.
 export async function setAllowedScopes(
   app: Pool,
   clientId: string,
   allowedScopes: string[],
   by: string,
-): Promise<void> {
-  await app.query(
-    `update app.client_policies set allowed_scopes=$2, promoted_at=now(), promoted_by=$3 where client_id=$1`,
-    [clientId, allowedScopes, by],
+  workspaceId = DEFAULT_WORKSPACE_ID,
+): Promise<boolean> {
+  const r = await app.query(
+    `update app.client_policies set allowed_scopes=$2, promoted_at=now(), promoted_by=$3
+     where client_id=$1 and workspace_id=$4`,
+    [clientId, allowedScopes, by, workspaceId],
   );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function hasApprovedLiveGrant(
   app: Pool,
   userId: string,
-  orgId = DEFAULT_ORG_ID,
+  workspaceId = DEFAULT_WORKSPACE_ID,
 ): Promise<boolean> {
   // NULL expires_at means "no expiry", matching loadActiveGrant (grants/eval.ts).
   // The two must agree: a grant the broker honors must also make the user
   // eligible for the env:live scope, or live access silently half-works. That includes the
-  // org predicate — loadActiveGrant keys on it, so eligibility has to as well, or a token
+  // workspace predicate — loadActiveGrant keys on it, so eligibility has to as well, or a token
   // could be issued for an env the broker will then refuse to serve.
   const r = await app.query(
     `select 1 from app.grants
-     where org_id=$2 and user_id=$1 and env='live' and status='approved'
+     where workspace_id=$2 and user_id=$1 and env='live' and status='approved'
        and (expires_at is null or expires_at > now()) limit 1`,
-    [userId, orgId],
+    [userId, workspaceId],
   );
   return (r.rowCount ?? 0) > 0;
 }

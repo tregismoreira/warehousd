@@ -2,7 +2,7 @@ import type { Pool } from "pg";
 
 export type TrustedIssuer = {
   id: string;
-  orgId: string;
+  workspaceId: string;
   issuer: string;
   jwksUri: string;
   audience: string;
@@ -12,23 +12,23 @@ export type TrustedIssuer = {
 
 export async function createTrustedIssuer(
   db: Pool,
-  orgId: string,
+  workspaceId: string,
   issuer: string,
   jwksUri: string,
   audience: string,
   subjectClaim: string = "sub",
 ): Promise<TrustedIssuer> {
   const r = await db.query(
-    `insert into app.trusted_issuers (org_id, issuer, jwks_uri, audience, subject_claim)
+    `insert into app.trusted_issuers (workspace_id, issuer, jwks_uri, audience, subject_claim)
      values ($1, $2, $3, $4, $5)
-     returning id, org_id, issuer, jwks_uri, audience, subject_claim, created_at`,
-    [orgId, issuer, jwksUri, audience, subjectClaim],
+     returning id, workspace_id, issuer, jwks_uri, audience, subject_claim, created_at`,
+    [workspaceId, issuer, jwksUri, audience, subjectClaim],
   );
 
   const row = r.rows[0];
   return {
     id: row.id,
-    orgId: row.org_id,
+    workspaceId: row.workspace_id,
     issuer: row.issuer,
     jwksUri: row.jwks_uri,
     audience: row.audience,
@@ -37,18 +37,18 @@ export async function createTrustedIssuer(
   };
 }
 
-export async function listTrustedIssuers(db: Pool, orgId: string): Promise<TrustedIssuer[]> {
+export async function listTrustedIssuers(db: Pool, workspaceId: string): Promise<TrustedIssuer[]> {
   const r = await db.query(
-    `select id, org_id, issuer, jwks_uri, audience, subject_claim, created_at
+    `select id, workspace_id, issuer, jwks_uri, audience, subject_claim, created_at
      from app.trusted_issuers
-     where org_id=$1
+     where workspace_id=$1
      order by created_at desc`,
-    [orgId],
+    [workspaceId],
   );
 
   return r.rows.map((row) => ({
     id: row.id,
-    orgId: row.org_id,
+    workspaceId: row.workspace_id,
     issuer: row.issuer,
     jwksUri: row.jwks_uri,
     audience: row.audience,
@@ -60,13 +60,13 @@ export async function listTrustedIssuers(db: Pool, orgId: string): Promise<Trust
 export async function getTrustedIssuer(
   db: Pool,
   id: string,
-  orgId: string,
+  workspaceId: string,
 ): Promise<TrustedIssuer | null> {
   const r = await db.query(
-    `select id, org_id, issuer, jwks_uri, audience, subject_claim, created_at
+    `select id, workspace_id, issuer, jwks_uri, audience, subject_claim, created_at
      from app.trusted_issuers
-     where id=$1 and org_id=$2`,
-    [id, orgId],
+     where id=$1 and workspace_id=$2`,
+    [id, workspaceId],
   );
 
   if (r.rowCount === 0) return null;
@@ -74,7 +74,7 @@ export async function getTrustedIssuer(
   const row = r.rows[0];
   return {
     id: row.id,
-    orgId: row.org_id,
+    workspaceId: row.workspace_id,
     issuer: row.issuer,
     jwksUri: row.jwks_uri,
     audience: row.audience,

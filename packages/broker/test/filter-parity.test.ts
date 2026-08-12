@@ -474,7 +474,7 @@ describe("a grant scopes read and write identically", () => {
       userId: "seeder",
       collection: "things",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "seed",
       allowedFields: FIELDS,
     });
@@ -511,7 +511,7 @@ describe("a grant scopes read and write identically", () => {
       userId,
       collection: "things",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "parity",
       allowedFields: FIELDS,
     });

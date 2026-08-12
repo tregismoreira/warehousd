@@ -1,5 +1,11 @@
 import { NextRequest } from "next/server";
-import { embedCollection, auditEnabled, kindOf } from "@warehousd/broker";
+import {
+  embedCollection,
+  auditEnabled,
+  auditDestination,
+  makeAuditWriter,
+  kindOf,
+} from "@warehousd/broker";
 import { makeEmbedder } from "@warehousd/providers";
 import { getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
@@ -46,14 +52,25 @@ export async function POST(req: NextRequest) {
   const app = getAppPool();
   const embedder = makeEmbedder(cfg.embedding);
   let embedded = 0;
-  for (const n of names) embedded += (await embedCollection(app, env, n, embedder)).embedded;
+  for (const n of names)
+    embedded += (await embedCollection(app, env, n, embedder, guard.workspaceId)).embedded;
 
-  for (const n of auditEnabled(cfg) ? names : [])
-    await app.query(
-      `insert into app.audit_events (user_id, env, collection, intent, fields_returned, outcome, reason)
-       values ($1, $2, $3, $4, '{}', 'allowed', null)`,
-      [guard.user.id, env, n, JSON.stringify({ op: "embed", embedded })],
-    );
+  // Through makeAuditWriter, not a hand-written insert — the hand-written version left
+  // workspace_id at its table default regardless of which workspace's admin pressed this,
+  // exactly the class of bug the sibling regen-synth route's own comment describes fixing.
+  const writer = makeAuditWriter(
+    app,
+    {
+      userId: guard.user.id,
+      workspaceId: guard.workspaceId,
+      env,
+      allowedCollections: null,
+      via: "session",
+    },
+    auditEnabled(cfg),
+    auditDestination(cfg),
+  );
+  for (const n of names) await writer.allow(n, { intent: { op: "embed", embedded } });
 
   return Response.json({ ok: true, embedded, collections: names });
 }

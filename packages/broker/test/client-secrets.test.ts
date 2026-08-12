@@ -25,7 +25,7 @@ afterAll(async () => {
 // IT has registered. Every test that provisions a database has to seed that parent row.
 const seedClient = (db: Pool) =>
   db.query(
-    `insert into app.client_policies (client_id, display_name, org_id)
+    `insert into app.client_policies (client_id, display_name, workspace_id)
    values ('test_client', 'Test Client', 'default') on conflict (client_id) do nothing`,
   );
 
@@ -276,7 +276,7 @@ describe("client secrets", () => {
 });
 
 describe("revokeClientSecret scope", () => {
-  it("refuses to revoke a secret belonging to another client or org", async () => {
+  it("refuses to revoke a secret belonging to another client or workspace", async () => {
     // The signature used to be (db, secretId) and matched on the id alone, so any caller holding
     // a secret id could revoke it regardless of which client or tenant owned it. The route
     // compensated with its own ownership SELECT; the library now enforces it.

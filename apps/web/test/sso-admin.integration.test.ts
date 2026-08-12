@@ -178,10 +178,16 @@ describe("SSO Admin Routes", () => {
       });
       const admin2Id = res.user.id;
 
-      // Set role to admin
+      // Set role to admin. Authorization reads app.workspace_members (lib/authz.ts), not this
+      // column, so both have to be set — the account-level role is UX-only, same as
+      // entrypoint.ts's ensureAdminUser and dev-bootstrap.ts's persona seeding.
       await appPool.query(`set session_replication_role = replica`);
       await appPool.query(`update app."user" set role='admin' where id=$1`, [admin2Id]);
       await appPool.query(`set session_replication_role = default`);
+      await appPool.query(
+        `update app.workspace_members set role='admin' where workspace_id='default' and user_id=$1`,
+        [admin2Id],
+      );
 
       // Sign in as second admin
       const admin2Cookie = await signIn(db.auth, "admin2@test.demo", "demo");

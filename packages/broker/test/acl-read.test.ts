@@ -96,14 +96,14 @@ beforeAll(async () => {
     `${CANARY} secret`,
   ]);
   await admin.query(
-    `insert into data_synth."_acl" (org_id, collection, document_id, principals, updated_by)
+    `insert into data_synth."_acl" (workspace_id, collection, document_id, principals, updated_by)
      values ('default','content',$1, array['user:owner','group:editors'],'test')`,
     [restrictedId],
   );
 
   // `editor` is in the group the ACL names; `outsider` is in none.
   await admin.query(
-    `insert into app.user_groups (org_id, user_id, group_name, source)
+    `insert into app.user_groups (workspace_id, user_id, group_name, source)
      values ('default','editor','editors','manual')`,
   );
 

@@ -62,15 +62,19 @@ export async function planUpload(
   db: Pool,
   env: "dev" | "live",
   collection: string,
+  workspaceId: string,
   entries: PlanEntry[],
 ): Promise<PlanResult[]> {
   if (entries.length === 0) return [];
   const filesT = filesTable(schemaFor(env), collection);
+  // Scoped by workspace_id: unscoped, this told a caller in workspace B that a path was
+  // "unchanged" because workspace A happened to have already uploaded it — leaking A's file
+  // existence and checksum into B's plan.
   const known = new Map<string, string | null>(
     (
       await db.query<{ path: string; blob_checksum: string | null }>(
-        `select path, blob_checksum from ${filesT} where path = any($1)`,
-        [entries.map((e) => e.path)],
+        `select path, blob_checksum from ${filesT} where path = any($1) and workspace_id = $2`,
+        [entries.map((e) => e.path), workspaceId],
       )
     ).rows.map((r) => [r.path, r.blob_checksum]),
   );
@@ -106,6 +110,7 @@ export async function uploadFile(
   db: Pool,
   env: "dev" | "live",
   collection: string,
+  workspaceId: string,
   input: UploadInput,
   deps: IngestDeps = {},
 ): Promise<UploadOutcome> {
@@ -131,6 +136,7 @@ export async function uploadFile(
       db,
       schemaFor(env),
       collection,
+      workspaceId,
       {
         path: input.path,
         bytes: input.bytes,
@@ -157,11 +163,14 @@ export async function deleteUploadedFile(
   db: Pool,
   env: "dev" | "live",
   collection: string,
+  workspaceId: string,
   fileId: string,
 ): Promise<{ deleted: boolean; path: string | null }> {
+  // fileId is caller-controlled (a URL path segment): without the workspace_id filter, an admin
+  // in one workspace could delete another workspace's file by guessing or reusing its id.
   const r = await db.query<{ path: string }>(
-    `delete from ${filesTable(schemaFor(env), collection)} where id = $1 returning path`,
-    [fileId],
+    `delete from ${filesTable(schemaFor(env), collection)} where id = $1 and workspace_id = $2 returning path`,
+    [fileId, workspaceId],
   );
   return { deleted: r.rowCount === 1, path: r.rows[0]?.path ?? null };
 }
@@ -171,11 +180,14 @@ export async function readFileBlob(
   db: Pool,
   env: "dev" | "live",
   collection: string,
+  workspaceId: string,
   fileId: string,
 ): Promise<{ bytes: Buffer; contentType: string; path: string } | null> {
+  // Same reasoning as deleteUploadedFile: fileId is caller-controlled, so the workspace filter is
+  // what stops a raw download from crossing into another workspace's file.
   const r = await db.query<{ blob: Buffer | null; content_type: string | null; path: string }>(
-    `select blob, content_type, path from ${filesTable(schemaFor(env), collection)} where id = $1`,
-    [fileId],
+    `select blob, content_type, path from ${filesTable(schemaFor(env), collection)} where id = $1 and workspace_id = $2`,
+    [fileId, workspaceId],
   );
   const row = r.rows[0];
   if (!row?.blob) return null;

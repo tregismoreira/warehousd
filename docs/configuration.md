@@ -50,6 +50,8 @@ sso:                     # optional. Absent means every SSO user is provisioned 
         wh-admins: admin
         wh-managers: manager
       default_role: member   # default member
+workspaces:
+  enabled: false        # default false. true mounts /v1/platform/* and `warehousd platform-key`
 deploy:
   target: fly          # fly | railway | compose
   app_name: harbor-warehousd   # ^[a-z0-9][a-z0-9-]{0,62}$; the Fly app, Railway project
@@ -97,6 +99,17 @@ Whatever the sink, the rule that makes the trail worth having is unchanged: a de
 Because it is synchronous, the wait is bounded: `audit.timeout_ms` (default 5000, maximum 60000) is how long the collector has to answer, and running out of time counts as a failed write like any other — so the call is refused rather than allowed, and never left hanging. A collector that accepts the connection and then goes quiet would otherwise hold every governed call open for as long as the platform allows.
 
 The `sso:` block maps an identity provider's groups to warehousd roles at JIT provisioning. It lives here rather than alongside the provider registration because a provider is registered at runtime through the admin API, while this file is operator-controlled trusted input — and a rule that decides who becomes an admin belongs in the trusted file. See [configure-sso.md](configure-sso.md#4-map-idp-groups-to-warehousd-roles).
+
+`workspaces.enabled` defaults to `false`. A single enterprise's self-hosted deployment, the primary shape of this product, has exactly one workspace (`default`) and no reason to carry a provisioning API, which is why this ships off. It gates exactly these four things, and nothing else:
+
+| Off | On |
+| --- | --- |
+| `/v1/platform/*` returns 404 on every route and method | routes mounted |
+| `warehousd platform-key create` refuses, naming the key to set | works |
+| `admin/members` page and its route are absent | present |
+| the console workspace switcher never renders | renders when membership count > 1 |
+
+What the flag never touches, in either state: the `workspace_id` column on any table, RLS policies and view predicates, `withWorkspace` and the `warehousd.workspace_id` GUC, membership-based role resolution in `authz.ts` and `acl/manage.ts`, `workspace_id` on audit events, and `resolveWorkspace` at all three auth boundaries. With the flag off, the deployment has exactly one workspace, every user is a member of it at bootstrap, and every one of those mechanisms runs exactly as it does with the flag on. **Turning it on adds no enforcement and removes none**; it exposes the means to create a second workspace.
 
 The `deploy:` block is optional and required only by `warehousd deploy`. It names the target — `fly`, `railway` or `compose` — the app name, the region, and — most critically — **exactly one** of `managed: true` or a `database.url`. An `image:` override is optional; if unset, the published image is used. `warehousd init --target <id>` scaffolds the block. `region` is optional here — Compose has none to name — and everything about it belongs to the target's pre-flight: Fly and Railway refuse its absence there, and what a region *looks* like is theirs too, which is why `us-west2` and `gru` are both valid in this file and only one of them is valid for a given target. The runbooks are [deploy-fly.md](deploy-fly.md), [deploy-railway.md](deploy-railway.md) and [deploy-compose.md](deploy-compose.md).
 
@@ -416,7 +429,7 @@ sources:
 collections:
   accounts:
     description: CRM accounts
-    source_ref: { source: crm, table: accounts, org: default }
+    source_ref: { source: crm, table: accounts, workspace: default }
     fields:
       id:   { type: uuid, posture: allow, pk: true }
       name: { type: text, posture: allow, column: acct_name }
@@ -431,9 +444,11 @@ Three consequences worth knowing before you point one at production:
 - **Columns are declared, never imported.** A column added upstream is invisible to warehousd until someone writes it into the YAML. `warehousd apply` verifies the remote actually matches and fails naming the collection if it does not.
 - **Read-only, and not by convention.** The server and the foreign table are both `updatable 'false'`, and no role is granted anything but `SELECT` on the wrapping view. `writable: true` is a config error on these collections.
 
+**Connect-in-place does not generalise to many workspaces.** A foreign table has no `workspace_id` column — the remote system knows nothing about warehousd's tenants — so RLS cannot apply to it, and the live view instead compares the caller's active workspace against the single constant `source_ref.workspace` names in config. That pins the collection to exactly one workspace: a caller active in any other workspace reads zero rows, not an error, just an empty result. This is unsupported in a multi-workspace deployment rather than silently wrong for one — a connect-in-place collection is a single-tenant source multiplexed into a multi-tenant deployment at one fixed workspace, not a per-tenant one.
+
 `dev` is unaffected: an external collection gets an ordinary synthetic table in `data_synth`, so developers never touch the remote system and env parity holds.
 
-The one genuine narrowing is tenant isolation. A foreign table cannot carry an RLS policy and has no `org_id` column, so the view compares the request's org against the `org:` the source declares — one wall instead of two. See [architecture.md](architecture.md).
+The one genuine narrowing is tenant isolation. A foreign table cannot carry an RLS policy and has no `workspace_id` column, so the view compares the request's workspace against the `workspace:` the source declares — one wall instead of two. See [architecture.md](architecture.md).
 
 ## Taxonomies
 

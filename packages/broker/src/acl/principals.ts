@@ -35,18 +35,18 @@ export function isPrincipal(p: unknown): p is string {
   return false;
 }
 
-// The caller's principal set: themselves, plus every group they are in, in this org.
+// The caller's principal set: themselves, plus every group they are in, in this workspace.
 //
 // Both sources are returned regardless of `source` — an sso-asserted membership and a
 // console-pinned one are the same fact about the caller, and which of the two put the row there
 // is an administrative question, not an access-control one.
 export async function loadPrincipals(
   db: Pool | PoolClient,
-  ctx: Pick<BrokerContext, "userId" | "orgId">,
+  ctx: Pick<BrokerContext, "userId" | "workspaceId">,
 ): Promise<string[]> {
   const r = await db.query<{ group_name: string }>(
-    `select distinct group_name from app.user_groups where org_id = $1 and user_id = $2`,
-    [ctx.orgId, ctx.userId],
+    `select distinct group_name from app.user_groups where workspace_id = $1 and user_id = $2`,
+    [ctx.workspaceId, ctx.userId],
   );
   return [userPrincipal(ctx.userId), ...r.rows.map((row) => groupPrincipal(row.group_name))];
 }

@@ -54,12 +54,12 @@ describe("token exchange (delegated flow)", () => {
     const audience = "warehousd-rest-tests";
     trustedIssuer = await createTrustedIssuer(app, "default", issuer, jwksUrl, audience);
 
-    // A second org + user for the cross-org refusal test.
+    // A second workspace + user for the cross-workspace refusal test.
     await app.query(
-      `insert into app.organizations (id, name) values ('other', 'Other') on conflict do nothing`,
+      `insert into app.workspaces (id, name) values ('other', 'Other') on conflict do nothing`,
     );
     await app.query(
-      `insert into app."user" (id, name, email, "emailVerified", "orgId", role, "createdAt", "updatedAt")
+      `insert into app."user" (id, name, email, "emailVerified", "workspaceId", role, "createdAt", "updatedAt")
        values ('bob', 'Bob', 'bob@other.example.com', true, 'other', 'member', now(), now())
        on conflict (id) do nothing`,
     );
@@ -217,10 +217,10 @@ describe("token exchange (delegated flow)", () => {
     expect(res.status).toBeLessThan(500);
   });
 
-  it("a cross-org subject is refused", async () => {
+  it("a cross-workspace subject is refused", async () => {
     const app = getAppPool();
-    const clientId = await registerClient("TE Cross Org");
-    await upsertClientPolicy(app, clientId, "TE Cross Org", ["env:dev"]);
+    const clientId = await registerClient("TE Cross Workspace");
+    await upsertClientPolicy(app, clientId, "TE Cross Workspace", ["env:dev"]);
     await app.query(
       `update app.client_policies set mode='delegated', trusted_issuer_id=$1 where client_id=$2`,
       [trustedIssuer.id, clientId],
@@ -233,7 +233,7 @@ describe("token exchange (delegated flow)", () => {
       "test",
     );
 
-    // trustedIssuer is registered under org "default"; bob belongs to org "other".
+    // trustedIssuer is registered under workspace "default"; bob belongs to workspace "other".
     const jwt = await signSubjectJwt("bob@other.example.com");
     const res = await delegatedExchange(clientId, secret, jwt);
     expect(res.status).toBeGreaterThanOrEqual(400);
@@ -547,7 +547,7 @@ describe("token exchange (delegated flow)", () => {
     const res1 = await delegatedExchange(clientId, secret, jwt);
     expect(res1.status).toBe(200);
 
-    // revokeClientSecret is scoped by client and org, so no caller can revoke across tenants with
+    // revokeClientSecret is scoped by client and workspace, so no caller can revoke across tenants with
     // a secret id alone. Its return value says whether a row matched — asserted here, because a
     // revoke that silently matched nothing would leave the key live and make the 401 below the
     // only symptom of it.
@@ -625,7 +625,7 @@ describe("token exchange (delegated flow)", () => {
       const grantId = await requestGrant(app, {
         userId: "mia",
         collection: "feedback",
-        orgId: "default",
+        workspaceId: "default",
         env: "live",
         purposeLabel: "test",
         allowedFields: ["id"],

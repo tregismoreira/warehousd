@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupWebDb, signIn } from "./helpers/web-db";
 import { authorizeAndGetCode, pkcePair } from "./helpers/oauth";
-import { upsertClientPolicy, approveGrant, requestGrant, loadConfig } from "@warehousd/broker";
+import {
+  upsertClientPolicy,
+  approveGrant,
+  requestGrant,
+  loadConfig,
+  setMember,
+} from "@warehousd/broker";
 
 // approveGrant validates verbs against the collection's config, and these fixtures grant over
 // harbor collections — so that is the config the rules have to be checked against.
@@ -14,6 +20,11 @@ let miaCookie: string;
 
 beforeAll(async () => {
   db = await setupWebDb("oauthscope");
+  const app = getAppPool();
+  await app.query(
+    `insert into app.workspaces (id, name) values ('w2', 'W2') on conflict do nothing`,
+  );
+  // Mia is a member of 'default' (bootstrap) only — 'w2' is a non-membership for rule 2j.
   miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
 }, 60_000);
 afterAll(async () => {
@@ -110,7 +121,7 @@ describe("rule 2: env:live requires an approved, unexpired live grant", () => {
     const grantId = await requestGrant(app, {
       userId: "mia",
       collection: "people",
-      orgId: "default",
+      workspaceId: "default",
       env: "live",
       purposeLabel: "test",
       allowedFields: ["id"],
@@ -145,7 +156,7 @@ describe("rule 2: env:live requires an approved, unexpired live grant", () => {
     const grantId = await requestGrant(app, {
       userId: "mia",
       collection: "col_r2_nullexp",
-      orgId: "default",
+      workspaceId: "default",
       env: "live",
       purposeLabel: "permanent",
       allowedFields: ["id"],
@@ -178,7 +189,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const grantId = await requestGrant(app, {
       userId: "mia",
       collection: "col_r3_1",
-      orgId: "default",
+      workspaceId: "default",
       env: "live",
       purposeLabel: "t",
       allowedFields: ["id"],
@@ -213,7 +224,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const grantId = await requestGrant(app, {
       userId: "mia",
       collection: "col_r3_2",
-      orgId: "default",
+      workspaceId: "default",
       env: "live",
       purposeLabel: "t",
       allowedFields: ["id"],
@@ -250,7 +261,7 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
     const grantId = await requestGrant(app, {
       userId: "mia",
       collection: "col_r3_3",
-      orgId: "default",
+      workspaceId: "default",
       env: "live",
       purposeLabel: "t",
       allowedFields: ["id"],
@@ -268,5 +279,40 @@ describe("rule 3: both env:dev and env:live survive → redirected to the env pi
       extraParams: { wh_env: "env:live env:dev" }, // attempted injection
     });
     expect(res.headers.get("location")).toContain("/oauth/env-picker");
+  });
+});
+
+// A `workspace:<id>` scope is always dropped at this boundary — not because of a membership
+// check (there is none here), but because Better Auth's mcp plugin validates the authorize
+// request's `scope` against a fixed, pre-registered enum (opts.scopes, built once from
+// oidcConfig.scopes — see the comment at the drop site in lib/oauth.ts). A per-workspace scope
+// can never be a member of that enum, since workspace ids are created at runtime; letting one
+// survive would have Better Auth's own validation reject the whole authorize request instead of
+// just the one scope. The MCP/OAuth boundary resolves the workspace per-request instead, via
+// resolveWorkspace's no-scope-requested fallback — covered by workspace-resolution.test.ts.
+describe("workspace scope (§2.4): never survives MCP authorize — see lib/oauth.ts", () => {
+  it("a requested workspace: scope is dropped from the granted set, not returned", async () => {
+    const reg = await db.auth.api.registerMcpClient({
+      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: "WS Scope Client" },
+      asResponse: true,
+    } as any);
+    const { client_id, client_secret } = await reg.json();
+    const app = getAppPool();
+    await upsertClientPolicy(app, client_id, "WS Scope Client", ["env:dev"]);
+    // Membership makes no difference to this boundary's behaviour — asserted with mia IS a
+    // member of w2, so a naive membership-based implementation would wrongly let it through.
+    await setMember(app, { workspaceId: "w2", userId: "mia", role: "member" });
+
+    const { verifier, challenge } = pkcePair();
+    const { code } = await authorizeAndGetCode(db.auth, {
+      clientId: client_id,
+      scope: "env:dev workspace:w2",
+      cookie: miaCookie,
+      challenge,
+    });
+    expect(code).toBeTruthy();
+    const scope = await exchangeCodeForScope(client_id, client_secret, code!, verifier);
+    expect(scope).not.toContain("workspace:w2");
+    expect(scope).toContain("env:dev");
   });
 });

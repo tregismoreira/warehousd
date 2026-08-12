@@ -54,7 +54,7 @@ beforeAll(async () => {
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
   await app.query(
-    `insert into data_synth.salaries (${R}, org_id, id, person, base_salary, bank_account)
+    `insert into data_synth.salaries (${R}, workspace_id, id, person, base_salary, bank_account)
      values (${RV}, 'default', gen_random_uuid(), 'Ana', 97300, 'GB33')`,
   );
 }, 60_000);
@@ -80,7 +80,7 @@ async function grant(
     userId: opts.requestedBy ?? "admin",
     collection: "salaries",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "test",
     allowedFields: opts.fields ?? ALL,
     principal,
@@ -98,7 +98,7 @@ async function grant(
 describe("a user with only a group grant can read", () => {
   it("resolves the grant through the membership, not the user id", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "paralegal-1",
       groups: ["litigation"],
       source: "manual",
@@ -128,7 +128,7 @@ describe("a user with only a group grant can read", () => {
     // The whole point: the second paralegal gets the same access without anybody approving
     // anything for them.
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "paralegal-2",
       groups: ["litigation"],
       source: "manual",
@@ -141,7 +141,7 @@ describe("a user with only a group grant can read", () => {
 describe("a personal grant wins over an inherited one", () => {
   it("takes the user: grant even when the group grant is newer and wider", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "ana",
       groups: ["corporate"],
       source: "manual",
@@ -161,7 +161,7 @@ describe("a personal grant wins over an inherited one", () => {
   // tell the two apart on its own.
   it("takes the user: grant when the group grant is OLDER and wider", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "dora",
       groups: ["tax"],
       source: "manual",
@@ -197,7 +197,7 @@ describe("a personal grant wins over an inherited one", () => {
 
   it("narrows access, and approval says so rather than refusing", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "bruno",
       groups: ["corporate"],
       source: "manual",
@@ -210,7 +210,7 @@ describe("a personal grant wins over an inherited one", () => {
 
   it("says nothing when the personal grant is not narrower", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "carla",
       groups: ["corporate"],
       source: "manual",
@@ -224,7 +224,7 @@ describe("a personal grant wins over an inherited one", () => {
       userId: "ana",
       collection: "salaries",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       principal: "group:corporate",
       allowedFields: [],
     });
@@ -235,7 +235,7 @@ describe("a personal grant wins over an inherited one", () => {
 describe("revoking the group grant removes access", () => {
   it("takes effect on the next call, with no restart", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "temp",
       groups: ["contractors"],
       source: "manual",
@@ -253,14 +253,19 @@ describe("revoking the group grant removes access", () => {
 
   it("removing the membership does the same", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "leaver",
       groups: ["litigation"],
       source: "manual",
     });
     const ctx = makeCtx({ userId: "leaver" });
     expect((await broker.query(ctx, { collection: "salaries", fields: ["person"] })).ok).toBe(true);
-    await setUserGroups(app, { orgId: "default", userId: "leaver", groups: [], source: "manual" });
+    await setUserGroups(app, {
+      workspaceId: "default",
+      userId: "leaver",
+      groups: [],
+      source: "manual",
+    });
     expect((await broker.query(ctx, { collection: "salaries", fields: ["person"] })).ok).toBe(
       false,
     );
@@ -270,7 +275,7 @@ describe("revoking the group grant removes access", () => {
 describe("the audit row names the winning grant and its principal", () => {
   it("records the group grant's id and principal", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "audited",
       groups: ["litigation"],
       source: "manual",
@@ -301,7 +306,7 @@ describe("a principal must be namespaced", () => {
         userId: "x",
         collection: "salaries",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "t",
         allowedFields: ALL,
         principal: "litigation",
@@ -314,7 +319,7 @@ describe("a principal must be namespaced", () => {
       userId: "defaulted",
       collection: "salaries",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "t",
       allowedFields: ALL,
     });
@@ -328,7 +333,7 @@ describe("a principal must be namespaced", () => {
 describe("the collection ceiling still narrows first", () => {
   it("gives nothing outside the ceiling, group grant or not", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "capped",
       groups: ["litigation"],
       source: "manual",
@@ -351,7 +356,7 @@ describe("the collection ceiling still narrows first", () => {
 describe("an expired group grant grants nothing", () => {
   it("stops resolving the moment it lapses, with no restart", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "seconded",
       groups: ["secondment"],
       source: "manual",
@@ -379,13 +384,13 @@ describe("an expired group grant grants nothing", () => {
 describe("$self in a group grant binds to the caller", () => {
   it("scopes each member of the group to their own documents", async () => {
     await app.query(
-      `insert into data_synth.salaries (${R}, org_id, id, person, base_salary, bank_account)
+      `insert into data_synth.salaries (${R}, workspace_id, id, person, base_salary, bank_account)
        values (${RV}, 'default', gen_random_uuid(), 'owner-a', 1, 'x'),
               (${RV}, 'default', gen_random_uuid(), 'owner-b', 2, 'y')`,
     );
     for (const u of ["owner-a", "owner-b"])
       await setUserGroups(app, {
-        orgId: "default",
+        workspaceId: "default",
         userId: u,
         groups: ["owners"],
         source: "manual",
@@ -415,7 +420,7 @@ describe("the resolution query is indexed", () => {
     // A realistic table: the planner is right to scan fifty rows, so fifty rows prove nothing.
     // Decided history rather than live access, which is what a mature deployment looks like.
     await app.query(
-      `insert into app.grants (user_id, collection, env, org_id, purpose_label, allowed_fields,
+      `insert into app.grants (user_id, collection, env, workspace_id, purpose_label, allowed_fields,
                                principal, status, requested_at)
        select 'bulk-' || i, 'salaries', 'dev', 'default', 'bulk', $1,
               'user:bulk-' || i, case when i % 20 = 0 then 'approved' else 'revoked' end, now()
@@ -426,7 +431,7 @@ describe("the resolution query is indexed", () => {
 
     const plan = await app.query<{ "QUERY PLAN": string }>(
       `explain select id from app.grants
-       where principal = any($1) and collection=$2 and env=$3 and org_id=$4
+       where principal = any($1) and collection=$2 and env=$3 and workspace_id=$4
          and status='approved' and (expires_at is null or expires_at > now())`,
       [["user:ana", "group:corporate"], "salaries", "dev", "default"],
     );

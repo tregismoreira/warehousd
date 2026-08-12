@@ -57,7 +57,7 @@ async function grantPeople(userId: string): Promise<void> {
     userId,
     collection: "people",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "test",
     allowedFields: ["id", "email"],
   });
@@ -123,7 +123,7 @@ describe("audit.enabled: false", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.auditId).toBeNull();
 
-    // assertRecorded throws inside withOrg when an allow could not be recorded, which rolls the
+    // assertRecorded throws inside withWorkspace when an allow could not be recorded, which rolls the
     // insert back. Auditing being off is not that case: the write is real.
     const rows = await admin.query(`select 1 from data_synth.people where email = $1`, [
       "committed@example.com",

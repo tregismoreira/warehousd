@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { provision, type Provisioned } from "./helpers/db";
 import { ConfigSchema } from "../src/config/schema";
-import { createAppSchema } from "../src/db/migrate-app";
+import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { indexCollection } from "../src/indexing";
 import { syncDatasetTerms, loadTaxonomyBindings } from "../src/taxonomy";
@@ -81,9 +81,9 @@ beforeAll(async () => {
     join(dir, "budget.md"),
     "---\ncategory: finance\n---\n# Budget\n\nVacation budget paragraph.",
   );
-  await syncDatasetTerms(admin, cfg, "dev");
-  await indexCollection(admin, "dev", "briefs", dir, {
-    taxonomies: await loadTaxonomyBindings(admin, cfg, "briefs", "dev"),
+  await syncDatasetTerms(admin, cfg, "dev", DEFAULT_WORKSPACE_ID);
+  await indexCollection(admin, "dev", "briefs", dir, DEFAULT_WORKSPACE_ID, {
+    taxonomies: await loadTaxonomyBindings(admin, cfg, "briefs", "dev", DEFAULT_WORKSPACE_ID),
   });
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
   broker = makeBroker(pools, cfg);
@@ -347,9 +347,15 @@ describe("multi-value term scoping through the broker", () => {
       join(dir, "other-client.md"),
       "---\nclient: c-0099\ntags: [litigation, discovery]\n---\n# Other\n\nVacation paragraph.",
     );
-    await syncDatasetTerms(admin3, cfg3, "dev");
-    await indexCollection(admin3, "dev", "case_files", dir, {
-      taxonomies: await loadTaxonomyBindings(admin3, cfg3, "case_files", "dev"),
+    await syncDatasetTerms(admin3, cfg3, "dev", DEFAULT_WORKSPACE_ID);
+    await indexCollection(admin3, "dev", "case_files", dir, DEFAULT_WORKSPACE_ID, {
+      taxonomies: await loadTaxonomyBindings(
+        admin3,
+        cfg3,
+        "case_files",
+        "dev",
+        DEFAULT_WORKSPACE_ID,
+      ),
     });
 
     pools3 = createPools({ app: p3.urls.admin, dev: p3.urls.dev, live: p3.urls.live });
@@ -503,8 +509,8 @@ describe("dataset-sourced vocabulary terms", () => {
       (${RV}, gen_random_uuid(), 'C-0002', 'Globex Corporation')`);
     await admin4.query(`insert into data_live.clients (${R}, id, client_number, name) values
       (${RV}, gen_random_uuid(), 'C-9001', 'Beacon Manufacturing')`);
-    await syncDatasetTerms(admin4, cfg4, "dev");
-    await syncDatasetTerms(admin4, cfg4, "live");
+    await syncDatasetTerms(admin4, cfg4, "dev", DEFAULT_WORKSPACE_ID);
+    await syncDatasetTerms(admin4, cfg4, "live", DEFAULT_WORKSPACE_ID);
   });
 
   afterAll(async () => {
@@ -513,7 +519,7 @@ describe("dataset-sourced vocabulary terms", () => {
   });
 
   it("carries the source collection's label, not just the slug", async () => {
-    const [b] = await loadTaxonomyBindings(admin4, cfg4, "cases", "dev");
+    const [b] = await loadTaxonomyBindings(admin4, cfg4, "cases", "dev", DEFAULT_WORKSPACE_ID);
     // The slug is slugified and lowercased; the label is the row's `name` verbatim.
     expect(b!.terms).toEqual([
       { slug: "c-0001", label: "Acme Manufacturing" },
@@ -523,8 +529,8 @@ describe("dataset-sourced vocabulary terms", () => {
   });
 
   it("scopes terms per env — dev and live see different clients", async () => {
-    const [dev] = await loadTaxonomyBindings(admin4, cfg4, "cases", "dev");
-    const [live] = await loadTaxonomyBindings(admin4, cfg4, "cases", "live");
+    const [dev] = await loadTaxonomyBindings(admin4, cfg4, "cases", "dev", DEFAULT_WORKSPACE_ID);
+    const [live] = await loadTaxonomyBindings(admin4, cfg4, "cases", "live", DEFAULT_WORKSPACE_ID);
     expect(dev!.slugs).toEqual(["c-0001", "c-0002"]);
     expect(live!.terms).toEqual([{ slug: "c-9001", label: "Beacon Manufacturing" }]);
   });
@@ -533,8 +539,8 @@ describe("dataset-sourced vocabulary terms", () => {
     await admin4.query(
       `update data_synth.clients set name='Acme Holdings' where client_number='C-0001'`,
     );
-    await syncDatasetTerms(admin4, cfg4, "dev");
-    const [b] = await loadTaxonomyBindings(admin4, cfg4, "cases", "dev");
+    await syncDatasetTerms(admin4, cfg4, "dev", DEFAULT_WORKSPACE_ID);
+    const [b] = await loadTaxonomyBindings(admin4, cfg4, "cases", "dev", DEFAULT_WORKSPACE_ID);
     expect(b!.terms).toHaveLength(2);
     expect(b!.terms[0]).toEqual({ slug: "c-0001", label: "Acme Holdings" });
   });
@@ -544,7 +550,7 @@ describe("dataset-sourced vocabulary terms", () => {
     await admin4.query(`insert into data_synth.clients (${R}, id, client_number, name) values
       (${RV}, gen_random_uuid(), 'Acme, Inc.', 'Acme One'),
       (${RV}, gen_random_uuid(), 'Acme Inc',   'Acme Two')`);
-    await expect(syncDatasetTerms(admin4, cfg4, "dev")).rejects.toThrow(
+    await expect(syncDatasetTerms(admin4, cfg4, "dev", DEFAULT_WORKSPACE_ID)).rejects.toThrow(
       /both slugify to "acme-inc"/,
     );
     await admin4.query(
@@ -555,7 +561,9 @@ describe("dataset-sourced vocabulary terms", () => {
   it("refuses a source value with no slug-safe characters", async () => {
     await admin4.query(`insert into data_synth.clients (${R}, id, client_number, name)
       values (${RV}, gen_random_uuid(), '!!!', 'Punctuation Only')`);
-    await expect(syncDatasetTerms(admin4, cfg4, "dev")).rejects.toThrow(/no slug-safe characters/);
+    await expect(syncDatasetTerms(admin4, cfg4, "dev", DEFAULT_WORKSPACE_ID)).rejects.toThrow(
+      /no slug-safe characters/,
+    );
     await admin4.query(`delete from data_synth.clients where client_number='!!!'`);
   });
 });

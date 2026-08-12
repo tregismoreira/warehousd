@@ -16,15 +16,17 @@ export default function AdminOverview() {
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [pendingGrantCount, setPendingGrantCount] = useState(0);
   const [auditTotal, setAuditTotal] = useState(0);
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
 
   useEffect(() => {
     // No try/finally: it existed only to clear a `loading` flag nothing rendered.
     async function load() {
-      const [collectionsRes, usersRes, grantsRes, auditRes] = await Promise.all([
+      const [collectionsRes, usersRes, grantsRes, auditRes, workspaceRes] = await Promise.all([
         fetch("/api/admin/collections"),
         fetch("/api/admin/users"),
         fetch("/api/grants"),
         fetch("/api/audit?limit=1"),
+        fetch("/api/me/workspace"),
       ]);
 
       if (collectionsRes.ok) {
@@ -46,6 +48,14 @@ export default function AdminOverview() {
         const data = await auditRes.json();
         setAuditTotal(data.total ?? 0);
       }
+
+      if (workspaceRes.ok) {
+        const data = await workspaceRes.json();
+        const active = data.memberships?.find(
+          (m: { workspaceId: string }) => m.workspaceId === data.active,
+        );
+        setWorkspaceName(active?.name ?? data.active ?? null);
+      }
     }
 
     void load();
@@ -60,7 +70,11 @@ export default function AdminOverview() {
     <div>
       <PageHeader
         title="Overview"
-        description="Collections, identity and audit for this deployment."
+        description={
+          workspaceName
+            ? `Collections, identity and audit for ${workspaceName}.`
+            : "Collections, identity and audit for this deployment."
+        }
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

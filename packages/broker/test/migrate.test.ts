@@ -37,7 +37,7 @@ describe("migrateApp", () => {
     );
     const names = tables.rows.map((r) => r.table_name);
     for (const t of [
-      "organizations",
+      "workspaces",
       "collections",
       "grants",
       "audit_events",

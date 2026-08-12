@@ -65,7 +65,7 @@ describe("broker proposal authorization", () => {
       userId: "proposer_noread",
       collection: "sensitive",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "public"],
     });
@@ -78,7 +78,7 @@ describe("broker proposal authorization", () => {
       userId: "approver_noread",
       collection: "sensitive",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "public"],
     });
@@ -86,7 +86,7 @@ describe("broker proposal authorization", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.sensitive (org_id, id, public, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.sensitive (workspace_id, id, public, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'public_val', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -114,7 +114,7 @@ describe("broker proposal authorization", () => {
       userId: "proposer_partial",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -127,7 +127,7 @@ describe("broker proposal authorization", () => {
       userId: "approver_partial",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -135,7 +135,7 @@ describe("broker proposal authorization", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'partial@ex.com', 'Partial', 'HR', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -166,7 +166,7 @@ describe("broker proposal authorization", () => {
       userId: "proposer_filter",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -179,7 +179,7 @@ describe("broker proposal authorization", () => {
       userId: "approver_filter",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -190,7 +190,7 @@ describe("broker proposal authorization", () => {
 
     // Create document with dept != Engineering
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'filter@ex.com', 'Filter', 'Sales', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -221,7 +221,7 @@ describe("broker proposal authorization", () => {
       userId: "proposer_noapprove",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -234,7 +234,7 @@ describe("broker proposal authorization", () => {
       userId: "non_approver",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -242,7 +242,7 @@ describe("broker proposal authorization", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'noapprove@ex.com', 'No Approve', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -273,7 +273,7 @@ describe("broker proposal authorization", () => {
       userId: "proposer_list",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -286,7 +286,7 @@ describe("broker proposal authorization", () => {
       userId: "approver_list",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -294,7 +294,7 @@ describe("broker proposal authorization", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'secret_value@ex.com', 'Secret Name', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -333,7 +333,7 @@ describe("broker proposal authorization", () => {
       userId: "proposer_noread2",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -346,7 +346,7 @@ describe("broker proposal authorization", () => {
       userId: "no_read_grant",
       collection: "sensitive",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id"],
     });
@@ -354,7 +354,7 @@ describe("broker proposal authorization", () => {
 
     // Create document and proposal
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'noread@ex.com', 'No Read', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -389,11 +389,11 @@ describe("broker proposal authorization", () => {
 describe("four eyes: a proposer cannot decide on their own proposal", () => {
   // One identity holding both verbs, in proposal_only mode: the exact grant that made
   // self-approval reachable. loadActiveGrant picks one active grant per (user, collection, env,
-  // org), so the proposer and the reviewer have to be different users by construction.
+  // workspace), so the proposer and the reviewer have to be different users by construction.
   async function seedDoc(email: string): Promise<string> {
     const r = await app.query(
       `insert into data_synth.people
-         (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+         (workspace_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), $1, 'Seed', 'HR', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
       [email],
@@ -406,7 +406,7 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
       userId,
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -414,12 +414,15 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
   }
 
   async function propose(userId: string, docId: string, values: Record<string, unknown>) {
-    const res = await broker.mutate({ userId, env: "dev", orgId: "default" } as BrokerContext, {
-      collection: "people",
-      op: "update",
-      id: docId,
-      values,
-    });
+    const res = await broker.mutate(
+      { userId, env: "dev", workspaceId: "default" } as BrokerContext,
+      {
+        collection: "people",
+        op: "update",
+        id: docId,
+        values,
+      },
+    );
     expect(res.ok).toBe(true);
     if (!res.ok || res.status !== "pending") throw new Error("expected a pending proposal");
     return res.proposalId;
@@ -431,7 +434,7 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
     const proposalId = await propose("selfapprover", docId, { name: "Renamed By Me" });
 
     const res = await broker.approveProposal(
-      { userId: "selfapprover", env: "dev", orgId: "default" } as BrokerContext,
+      { userId: "selfapprover", env: "dev", workspaceId: "default" } as BrokerContext,
       proposalId,
     );
     expect(res.ok).toBe(false);
@@ -448,7 +451,7 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
     const proposalId = await propose("selfapprover2", docId, { name: "Should Not Land" });
 
     await broker.approveProposal(
-      { userId: "selfapprover2", env: "dev", orgId: "default" } as BrokerContext,
+      { userId: "selfapprover2", env: "dev", workspaceId: "default" } as BrokerContext,
       proposalId,
     );
 
@@ -469,7 +472,7 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
     const proposalId = await propose("selfrejecter", docId, { name: "Withdraw Me" });
 
     const res = await broker.rejectProposal(
-      { userId: "selfrejecter", env: "dev", orgId: "default" } as BrokerContext,
+      { userId: "selfrejecter", env: "dev", workspaceId: "default" } as BrokerContext,
       proposalId,
     );
     expect(res.ok).toBe(false);
@@ -489,7 +492,7 @@ describe("four eyes: a proposer cannot decide on their own proposal", () => {
     const proposalId = await propose("proposer_fe", docId, { name: "Renamed By Reviewer" });
 
     const res = await broker.approveProposal(
-      { userId: "reviewer_fe", env: "dev", orgId: "default" } as BrokerContext,
+      { userId: "reviewer_fe", env: "dev", workspaceId: "default" } as BrokerContext,
       proposalId,
     );
     expect(res.ok).toBe(true);

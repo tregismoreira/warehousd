@@ -62,7 +62,7 @@ export function aclColumnSql(
   const schema = dataSchema(env);
   return (
     `, (select a.principals from ${schema}.${ident(ACL_TABLE)} a` +
-    ` where a.org_id = ${alias}.org_id and a.collection = ${literal(collection)}` +
+    ` where a.workspace_id = ${alias}.workspace_id and a.collection = ${literal(collection)}` +
     ` and a.document_id = ${alias}.${ident(key)}::text) as ${ident(ACL_COLUMN)}`
   );
 }

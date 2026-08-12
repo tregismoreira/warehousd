@@ -16,7 +16,7 @@ import { captureLogs } from "./helpers/log-capture";
 // The design claim under test is that a foreign table inside data_live needs NO new enforcement
 // path — the collection's view, its grant, its field postures and `dataPool` all work on it
 // unchanged. So most of this file asserts that the ordinary rules still apply, and the rest
-// asserts the two things that are genuinely new: the org predicate that replaces RLS, and the
+// asserts the two things that are genuinely new: the workspace predicate that replaces RLS, and the
 // column set that upstream cannot widen.
 
 // See the note in SourceSchema: `sources[].url` is dialled by the database server, so a test
@@ -28,7 +28,8 @@ let p: Provisioned, remote: Provisioned;
 let admin: Pool, remoteAdmin: Pool, pools: Pools;
 let broker: ReturnType<typeof makeBroker>;
 
-const ctx = (userId: string, orgId = "default") => makeCtx({ userId, orgId, env: "live" as const });
+const ctx = (userId: string, workspaceId = "default") =>
+  makeCtx({ userId, workspaceId, env: "live" as const });
 
 // The remote's own column is `acct_name`; warehousd calls the field `name`. Exercising the
 // rename in the happy path means the mapping cannot rot unnoticed.
@@ -43,7 +44,7 @@ const cfgFor = (over: Record<string, unknown> = {}) =>
     collections: {
       accounts: {
         description: "CRM accounts",
-        source_ref: { source: "crm", table: "accounts", org: "default" },
+        source_ref: { source: "crm", table: "accounts", workspace: "default" },
         fields: {
           id: { type: "uuid", posture: "allow", pk: true },
           name: { type: "text", posture: "allow", column: "acct_name" },
@@ -88,12 +89,12 @@ beforeAll(async () => {
      values ('mia','accounts',$1,'live','approved')`,
     [["id", "name", "tier"]],
   );
-  // Same grant, a different tenant. The remote has no org column, so this is the case the
+  // Same grant, a different tenant. The remote has no workspace column, so this is the case the
   // constant predicate has to answer.
-  await admin.query(`insert into app.organizations (id, name) values ('other-org','Other')`);
+  await admin.query(`insert into app.workspaces (id, name) values ('other-workspace','Other')`);
   await admin.query(
-    `insert into app.grants (user_id, collection, allowed_fields, env, status, org_id)
-     values ('other','accounts',$1,'live','approved','other-org')`,
+    `insert into app.grants (user_id, collection, allowed_fields, env, status, workspace_id)
+     values ('other','accounts',$1,'live','approved','other-workspace')`,
     [["id", "name", "tier"]],
   );
 }, 120_000);
@@ -196,10 +197,10 @@ describe("what upstream cannot reach into", () => {
 });
 
 describe("tenant isolation without RLS", () => {
-  it("returns nothing to a context whose org the source is not bound to", async () => {
+  it("returns nothing to a context whose workspace the source is not bound to", async () => {
     // A foreign table cannot carry an RLS policy, so the view's constant predicate is the only
     // wall. This is the assertion that it is actually load-bearing.
-    const r = await broker.query(ctx("other", "other-org"), {
+    const r = await broker.query(ctx("other", "other-workspace"), {
       collection: "accounts",
       fields: ["id", "name"],
     });
@@ -209,7 +210,7 @@ describe("tenant isolation without RLS", () => {
     expect(JSON.stringify(r)).not.toContain(EXTERNAL_CANARY);
   });
 
-  it("fails closed when no org is in scope at all", async () => {
+  it("fails closed when no workspace is in scope at all", async () => {
     const direct = new Pool({ connectionString: p.urls.live });
     try {
       const r = await direct.query(`select * from data_live.v_accounts`);
@@ -248,7 +249,7 @@ describe("read-only, enforced by the database", () => {
       await expect(live.query(`select 1 from data_live."_ext_accounts" limit 1`)).rejects.toThrow(
         /permission denied/i,
       );
-      await live.query(`select set_config('warehousd.org_id','default',false)`);
+      await live.query(`select set_config('warehousd.workspace_id','default',false)`);
       await expect(live.query(`select 1 from data_live.v_accounts limit 1`)).resolves.toBeDefined();
     } finally {
       await live.end();

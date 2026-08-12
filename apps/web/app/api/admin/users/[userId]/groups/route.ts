@@ -3,7 +3,6 @@ import { listUserGroups, setUserGroups } from "@warehousd/broker";
 import { getAppPool } from "../../../../../lib/broker";
 import { requireRole } from "../../../../../../lib/authz";
 import { readJson } from "../../../../../../lib/rest";
-import { orgOf } from "../../../../../../lib/session";
 
 // Console-managed group membership.
 //
@@ -22,15 +21,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
   if (!guard.ok) return guard.response;
   const { userId } = await params;
   const app = getAppPool();
-  const org = orgOf(guard.user);
+  const workspace = guard.workspaceId;
 
-  // Scoped to the acting admin's org, and a user outside it reads as unknown rather than
+  // Scoped to the acting admin's workspace, and a user outside it reads as unknown rather than
   // forbidden — the same rule the sibling role route states: which ids exist elsewhere is not
   // this admin's to learn.
-  const cur = await app.query(`select 1 from app."user" where id=$1 and "orgId"=$2`, [userId, org]);
+  const cur = await app.query(`select 1 from app."user" where id=$1 and "workspaceId"=$2`, [
+    userId,
+    workspace,
+  ]);
   if (cur.rowCount === 0) return Response.json({ error: "unknown_user" }, { status: 404 });
 
-  return Response.json({ groups: await listUserGroups(app, { orgId: org, userId }) });
+  return Response.json({ groups: await listUserGroups(app, { workspaceId: workspace, userId }) });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
@@ -44,10 +46,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ user
     return Response.json({ error: "invalid_groups" }, { status: 400 });
 
   const app = getAppPool();
-  const org = orgOf(guard.user);
-  const cur = await app.query(`select 1 from app."user" where id=$1 and "orgId"=$2`, [userId, org]);
+  const workspace = guard.workspaceId;
+  const cur = await app.query(`select 1 from app."user" where id=$1 and "workspaceId"=$2`, [
+    userId,
+    workspace,
+  ]);
   if (cur.rowCount === 0) return Response.json({ error: "unknown_user" }, { status: 404 });
 
-  await setUserGroups(app, { orgId: org, userId, groups: groups as string[], source: "manual" });
-  return Response.json({ groups: await listUserGroups(app, { orgId: org, userId }) });
+  await setUserGroups(app, {
+    workspaceId: workspace,
+    userId,
+    groups: groups as string[],
+    source: "manual",
+  });
+  return Response.json({ groups: await listUserGroups(app, { workspaceId: workspace, userId }) });
 }

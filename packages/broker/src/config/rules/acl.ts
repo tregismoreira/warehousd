@@ -12,7 +12,7 @@ export const aclPreconditions: CollectionRule = {
   check(c, ctx) {
     if (!c.acl) return;
     // An external collection's rows live in someone else's database. There is no local base table
-    // to join an ACL against, and its view has no org_id column to carry the tenant half of the
+    // to join an ACL against, and its view has no workspace_id column to carry the tenant half of the
     // join predicate.
     if (c.source_ref)
       ctx.addIssue({

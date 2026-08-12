@@ -59,7 +59,7 @@ async function ask(allowedFields: string[]): Promise<string> {
   return requestGrant(admin, {
     userId: `asker-${requester++}`,
     collection: "people",
-    orgId: "default",
+    workspaceId: "default",
     env: "dev",
     purposeLabel: "t",
     allowedFields,

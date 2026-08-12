@@ -6,6 +6,25 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 
 ## [Unreleased]
 
+### Security
+
+- **Per-workspace role.** A user's role (`admin`/`manager`/`member`) was a scalar column on `app.user`, so an admin in one tenant was an admin in every tenant that user belonged to. `app.workspace_members` now holds one role per `(workspace, user)`, and every authorization check (`apps/web/lib/authz.ts`) reads the ACTIVE workspace's membership rather than the account-level column.
+- **Taxonomy terms derived from one workspace's rows were visible to every workspace.** `syncDatasetTerms` materialised a dataset-backed vocabulary's terms — e.g. a client list — straight from `data_synth`/`data_live` with no tenant column on `app.terms`, so workspace B's grant-authoring term picker and `describeCollection` listed workspace A's client numbers and names. `app.terms` now carries `workspace_id` (`'*'` for config-declared, deployment-global terms; a real id for terms derived from one workspace's data), and every read and write site is scoped to it.
+- **`regenerateSynthetic` truncated every workspace's dev data, not just the one being regenerated.** `truncate data_synth.<name> cascade` is a cross-tenant destructive statement; a `delete from data_synth.<name>` scoped by `withWorkspace` replaces it, so RLS confines the blast radius to the workspace that asked.
+- **A file collection's `path` was unique deployment-wide, not per workspace.** Two tenants indexing a file at the same relative path — an ordinary name collision, not an adversarial one — hit a database-level conflict even though `ingestFile`'s own existence check (`indexing/ingest.ts`) is workspace-scoped and expected the insert to succeed. The constraint is now `unique (workspace_id, path)`.
+
+### Added
+
+- **Multi-workspace tenancy.** One deployment now hosts many workspaces instead of one implicit `'default'` tenant: a user may belong to several with a role per workspace, and every write path that used to default silently to `'default'` (synthetic generation, file ingestion, taxonomy sync) now takes an explicit workspace id and is rejected by RLS rather than mis-filed if it omits one.
+- **`/v1/platform/*`** — a control plane above the workspace boundary, for a consuming application to provision and manage workspaces and their OAuth clients programmatically. Authenticated by a platform key (`warehousd platform-key create`), not a session or an OAuth client, and gated off entirely (404) unless `workspaces.enabled: true`.
+- **The console workspace switcher and a per-workspace Members page** (`/admin/members`). A member of more than one workspace can switch the active one from the header; the collections list, audit trail, grants queue and every other console view scope to whichever workspace is active. Managing membership and role stays admin-only, per workspace.
+- **`warehousd platform-key create|list|revoke`.** Mints, lists and revokes the bearer credential `/v1/platform/*` authenticates with. Refuses with an explanatory message when `workspaces.enabled` is `false`.
+- Row-level security policies on the control-plane tables (`app.grants`, `app.audit_events`, `app.client_policies`, `app.client_secrets`, `app.trusted_issuers`, `app.user_groups`, `app.change_log`, `app.workspace_members`), mirroring the wall the data plane has had since rc.1 — formalization and defense-in-depth alongside the explicit `workspace_id` predicate every control-plane route already carries.
+
+### Changed
+
+- **`organization`/`org`/`orgId`/`org_id` renamed to `workspace`/`workspaceId`/`workspace_id` throughout** — config, code, database columns, docs. Breaking under the pre-1.0 [versioning policy](docs/releasing.md#versioning-policy): the one config key affected is `source_ref.org`, now `source_ref.workspace`.
+
 ### Removed
 
 - **`server.runtime`, `warehousd init --runtime`, and the wizard's "Which container engine?" question.** Docker is the container engine, and the CLI now says so rather than offering a choice it had never verified: podman was selectable and checkable but nothing in this repository had ever run a container under it. An unverified option in `warehousd.yml` is worse than no option, because that file is the one the product asks you to review in git. Podman moves to [docs/roadmap.md](docs/roadmap.md#planned) with what verifying it would actually take. A leftover `runtime:` key is ignored rather than rejected.

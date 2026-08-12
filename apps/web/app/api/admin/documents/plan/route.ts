@@ -50,6 +50,6 @@ export async function POST(req: NextRequest) {
   if (!c) return Response.json({ error: "unknown_collection" }, { status: 404 });
   if (!kindOf(c).chunked) return Response.json({ error: "not_a_file_collection" }, { status: 400 });
 
-  const plan = await planUpload(getAppPool(), env, collection, entries);
+  const plan = await planUpload(getAppPool(), env, collection, guard.workspaceId, entries);
   return Response.json({ ok: true, plan });
 }

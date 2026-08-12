@@ -17,6 +17,7 @@ import {
   syncDatasetTerms,
   loadTaxonomyBindings,
   fileMetadataFields,
+  DEFAULT_WORKSPACE_ID,
   type ApplyProgress,
   type EmbedProgress,
   type IndexProgress,
@@ -113,9 +114,10 @@ export async function runSeed(
   projectDir: string,
   dbUrl: string,
   seed = 42,
-  opts: { reindex?: boolean; reporter?: Reporter } = {},
+  opts: { reindex?: boolean; reporter?: Reporter; workspaceId?: string } = {},
 ): Promise<{ seed: number; reindexed: string[] }> {
   const reporter = opts.reporter ?? silentReporter;
+  const workspaceId = opts.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const cfg = loadConfig(projectDir);
   const db = new Pool({ connectionString: dbUrl });
   // Dataset-backed vocabularies read their terms out of the rows just generated, so the sync
@@ -129,13 +131,13 @@ export async function runSeed(
       "Synthetic data regenerated",
     );
     try {
-      await regenerateSynthetic(db, cfg, seed, { onProgress: gen.onProgress });
+      await regenerateSynthetic(db, cfg, workspaceId, seed, { onProgress: gen.onProgress });
       gen.step.done(`seed ${seed}`);
     } catch (e) {
       gen.step.fail();
       throw e;
     }
-    await syncDatasetTerms(db, cfg, "dev");
+    await syncDatasetTerms(db, cfg, "dev", workspaceId);
     if (opts.reindex === false) return { seed, reindexed: [] };
     const reindexed: string[] = [];
     for (const [name, c] of Object.entries(cfg.collections)) {
@@ -143,14 +145,21 @@ export async function runSeed(
       // `metadata` is not optional in practice: every other index call site passes it, and
       // omitting it here would re-index a changed file with its declared metadata columns left
       // null — the exact drift fileMetadataFields exists to prevent.
-      const taxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
+      const taxonomies = await loadTaxonomyBindings(db, cfg, name, "dev", workspaceId);
       const t = indexTracker(reporter, name);
       try {
-        const r = await indexCollection(db, "dev", name, resolve(projectDir, c.source!), {
-          taxonomies,
-          metadata: fileMetadataFields(c),
-          onProgress: t.onProgress,
-        });
+        const r = await indexCollection(
+          db,
+          "dev",
+          name,
+          resolve(projectDir, c.source!),
+          workspaceId,
+          {
+            taxonomies,
+            metadata: fileMetadataFields(c),
+            onProgress: t.onProgress,
+          },
+        );
         t.step.done(`${r.indexed.toLocaleString("en-US")} files, ${r.skipped} unchanged`);
       } catch (e) {
         t.step.fail();
@@ -186,9 +195,11 @@ export async function runIndex(
     source?: string;
     embed?: boolean;
     reporter?: Reporter;
+    workspaceId?: string;
   } = {},
 ): Promise<{ indexed: number; skipped: number; deleted: number }> {
   const reporter = opts.reporter ?? silentReporter;
+  const workspaceId = opts.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const cfg = loadConfig(projectDir);
   const c = cfg.collections[collection];
   if (!c) throw new Error(`Unknown collection: ${collection}`);
@@ -201,8 +212,8 @@ export async function runIndex(
   const db = new Pool({ connectionString: dbUrl });
   try {
     // Sync dataset-sourced vocabulary terms before indexing
-    await syncDatasetTerms(db, cfg, env);
-    const taxonomies = await loadTaxonomyBindings(db, cfg, collection, env);
+    await syncDatasetTerms(db, cfg, env, workspaceId);
+    const taxonomies = await loadTaxonomyBindings(db, cfg, collection, env, workspaceId);
     const metadata = fileMetadataFields(c);
     // PDF/DOCX support and embedding are both injected rather than reached for by the broker:
     // the parsers and the model live in @warehousd/providers. Passing the extractor is what
@@ -212,7 +223,7 @@ export async function runIndex(
       cfg.embedding && opts.embed !== false ? makeEmbedder(cfg.embedding) : undefined;
     const t = indexTracker(reporter, collection);
     try {
-      const r = await indexCollection(db, env, collection, resolve(projectDir, dir), {
+      const r = await indexCollection(db, env, collection, resolve(projectDir, dir), workspaceId, {
         extractor,
         ...(embedder ? { embedder } : {}),
         taxonomies,
@@ -243,9 +254,15 @@ export async function runIndex(
 export async function runEmbed(
   projectDir: string,
   dbUrl: string,
-  opts: { collection?: string; env?: "dev" | "live"; reporter?: Reporter } = {},
+  opts: {
+    collection?: string;
+    env?: "dev" | "live";
+    reporter?: Reporter;
+    workspaceId?: string;
+  } = {},
 ): Promise<{ embedded: number; collections: string[] }> {
   const reporter = opts.reporter ?? silentReporter;
+  const workspaceId = opts.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const cfg = loadConfig(projectDir);
   if (!cfg.embedding)
     throw new Error(
@@ -278,7 +295,9 @@ export async function runEmbed(
         `Embedded ${n}`,
       );
       try {
-        const r = await embedCollection(db, env, n, embedder, { onProgress: t.onProgress });
+        const r = await embedCollection(db, env, n, embedder, workspaceId, {
+          onProgress: t.onProgress,
+        });
         embedded += r.embedded;
         t.step.done(`${r.embedded.toLocaleString("en-US")} chunks`);
       } catch (e) {

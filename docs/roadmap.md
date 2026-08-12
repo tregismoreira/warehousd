@@ -21,8 +21,6 @@ None of that removes anything from the open-source side. The test is simple: if 
 
 - **Aggregate-only postures** with inference-leak protection — computing `avg(base_salary)` without row access. This needs minimum-group-size or differential-privacy machinery to be safe, which is why it is not built: aggregation is currently permitted only over fields the caller could already read row by row, so an aggregate can never reveal anything new.
 
-- **Org resolution at the auth boundary.** `org_id` is already threaded through every table, every query and `withOrg`, and tenant isolation is enforced by row-level security rather than by a predicate the broker remembers — but the value is always `'default'`. What is missing is the step that decides which org a caller belongs to, from their session, token or IdP claim. The expensive and security-relevant half is paid for; this is the cheap half, and it is deliberately not the same thing as the hostile-tenant isolation listed under [Not planned](#not-planned).
-
 - **Streaming imports.** `validateImportRows` is synchronous and pure by design — which is what makes it testable without a database — so it materialises the whole payload in memory, and `DEFAULT_MAX_ROWS` caps a single import at 10,000 rows. For a spreadsheet-heavy deployment the answer is to chunk the file into batches in the CLI, not to raise the constant: the ceiling is what keeps one import from being one very large transaction.
 
 - **Audit retention and export.** `audit.sink` now chooses where a decision goes (`postgres`, `stdout-json`, `webhook`), which covers forwarding to a SIEM. What it does not cover is the other two halves of the same question: a retention policy for `app.audit_events`, and an export the console can produce for an auditor who wants the trail as a file rather than as a table.
@@ -42,3 +40,5 @@ Not planned, not rejected — the shape of the answer is the open question.
 ## Not planned
 
 See [SECURITY.md](../SECURITY.md#out-of-scope) for what is deliberately out of scope, including the ones easily mistaken for gaps: distributed rate limiting, defence against a malicious administrator, and hostile-tenant isolation.
+
+- **Hostile-tenant isolation.** Multi-workspace tenancy is real and database-enforced — RLS plus a view predicate on the data plane, RLS plus an explicit predicate on the control plane — but it serves *cooperative* tenants, not hostile ones. For a consuming application provisioning a workspace per customer, that means: one shared Postgres, so a workspace with a runaway query affects every other workspace's latency; no per-tenant rate limiting, so `/v1/token` and the query paths cap cost per process, not per workspace; and no noisy-neighbour protection, so nothing here reserves capacity for one tenant against another. A deployment that needs those guarantees puts them in front of warehousd — a proxy quota, per-tenant connection pools, or separate deployments — not inside it.

@@ -31,8 +31,8 @@ beforeAll(async () => {
   const sessionToken = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   await appPool.query(
-    `insert into app."session" (id, token, "userId", "expiresAt", "createdAt", "updatedAt") values ($1, $2, $3, $4, $5, $6)`,
-    [sessionId, sessionToken, adminId, expiresAt, new Date(), new Date()],
+    `insert into app."session" (id, token, "userId", "expiresAt", "createdAt", "updatedAt", "activeWorkspaceId") values ($1, $2, $3, $4, $5, $6, $7)`,
+    [sessionId, sessionToken, adminId, expiresAt, new Date(), new Date(), "default"],
   );
 
   // Register the SSO provider directly in the database (bypassing the admin-only HTTP route)

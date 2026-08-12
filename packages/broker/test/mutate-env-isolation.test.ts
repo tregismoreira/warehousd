@@ -53,7 +53,7 @@ describe("broker.mutate env isolation", () => {
       userId: "env_user",
       collection: "data",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "value"],
     });
@@ -95,7 +95,7 @@ describe("broker.mutate env isolation", () => {
       userId: "live_user",
       collection: "data",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "value"],
     });
@@ -136,7 +136,7 @@ describe("broker.mutate env isolation", () => {
       userId: "nopool_user",
       collection: "data",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "value"],
     });
@@ -172,7 +172,7 @@ describe("broker.mutate env isolation", () => {
       userId: "isolation_user",
       collection: "data",
       env: "live",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "value"],
     });

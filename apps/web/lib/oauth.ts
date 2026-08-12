@@ -6,7 +6,7 @@ import {
   getClientPolicy,
   hasApprovedLiveGrant,
   upsertClientPolicy,
-  DEFAULT_ORG_ID,
+  DEFAULT_WORKSPACE_ID,
   resolveEnvScopes,
   recomputeEnvScope,
   pickEnvScope,
@@ -92,8 +92,10 @@ export function envScopePlugin(app: Pool) {
 
             const policy = await getClientPolicy(app, clientId);
             const userId = session?.user?.id;
-            const orgId = session?.user?.orgId ?? DEFAULT_ORG_ID;
-            const liveEligible = userId ? await hasApprovedLiveGrant(app, userId, orgId) : false;
+            const workspaceId = session?.user?.workspaceId ?? DEFAULT_WORKSPACE_ID;
+            const liveEligible = userId
+              ? await hasApprovedLiveGrant(app, userId, workspaceId)
+              : false;
 
             // Resolve env scopes using rules 1-2
             let survivors = resolveEnvScopes({
@@ -116,12 +118,29 @@ export function envScopePlugin(app: Pool) {
               }
             }
 
+            // §2.4: a `workspace:<id>` scope was meant to be intersected against the subject's
+            // actual membership here, the same way env is — but Better Auth's mcp plugin
+            // validates the authorize request's `scope` against a FIXED, pre-registered enum
+            // (`opts.scopes`, built once from `oidcConfig.scopes` at plugin construction —
+            // node_modules/better-auth/dist/plugins/mcp/authorize.mjs's `invalidScopes` check).
+            // `env:dev`/`env:live` pass because they're the two literal strings registered
+            // there; a per-workspace scope cannot be, since workspace ids are created at runtime
+            // and the enum is fixed at process start. Any `workspace:` scope a client requests is
+            // therefore dropped unconditionally here — surviving it would have Better Auth's own
+            // validation reject the entire authorize request with invalid_scope, which is worse
+            // than never granting the claim. The MCP/OAuth boundary instead resolves purely
+            // through resolveWorkspace's no-scope-requested fallback (lib/workspace-scope.ts):
+            // exactly one membership, or refuse — which lib/broker-context.ts and
+            // lib/rest-context.ts apply on every request regardless of what a token's scope says.
+            const others = requested.filter(
+              (s) => !["env:dev", "env:live"].includes(s) && !s.startsWith("workspace:"),
+            );
+
             // Mutate the existing ctx.query object's property in place — `ctx.query = {...}`
             // (reassigning to a new object) silently stops propagating to the endpoint handler
             // once this hook does another await after the reassignment site's first tick;
             // Better Auth's dispatch holds a reference to the original query object, and only
             // in-place mutation of that object is guaranteed visible downstream.
-            const others = requested.filter((s) => !["env:dev", "env:live"].includes(s));
             query.scope = [...others, ...survivors].join(" ");
           }),
         },
@@ -161,9 +180,11 @@ export function envScopePlugin(app: Pool) {
             // only gate: it preserves "never touch a token that never engaged with env scopes
             // at all," matching the before-hook's requestedEnv.length===0 gate.
             const policy = await getClientPolicy(app, row.clientId);
-            const u = await app.query(`select "orgId" from app."user" where id=$1`, [row.userId]);
-            const orgId = u.rows[0]?.orgId ?? DEFAULT_ORG_ID;
-            const liveEligible = await hasApprovedLiveGrant(app, row.userId, orgId);
+            const u = await app.query(`select "workspaceId" from app."user" where id=$1`, [
+              row.userId,
+            ]);
+            const workspaceId = u.rows[0]?.workspaceId ?? DEFAULT_WORKSPACE_ID;
+            const liveEligible = await hasApprovedLiveGrant(app, row.userId, workspaceId);
 
             // Re-derive rather than narrow — see recomputeEnvScope. Passing currentEnv as
             // `requested` would make a promotion permanently invisible to an existing token.

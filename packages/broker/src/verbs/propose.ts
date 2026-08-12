@@ -15,7 +15,7 @@ import { ACL_COLUMN } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
 import { loadActiveGrant, loadActiveGrants } from "../grants/eval";
 import { admits, validateDocumentFilters } from "../grants/filters";
-import { withOrg, writePool } from "../db/pools";
+import { withWorkspace, writePool } from "../db/pools";
 import { insertRevision, demoteRevision } from "../db/revisions";
 import { findCollection, maskedFieldsFor } from "../config/load";
 import {
@@ -76,7 +76,7 @@ export async function proposeDataset(
   if (!pool) return audit.refuseMutation(intent, grant, "not_writable");
 
   try {
-    return await withOrg(pool, ctx.orgId, async (client) => {
+    return await withWorkspace(pool, ctx.workspaceId, async (client) => {
       if (intent.op === "create") {
         let docId = coerced[pk];
         if (docId === undefined && c.fields[pk]!.type === "uuid") {
@@ -109,7 +109,7 @@ export async function proposeDataset(
             base: null,
             current: false,
             by: ctx.userId,
-            orgId: ctx.orgId,
+            workspaceId: ctx.workspaceId,
           },
           coerced,
         );
@@ -163,7 +163,7 @@ export async function proposeDataset(
           base: Number(current._rev_seq),
           current: false,
           by: ctx.userId,
-          orgId: ctx.orgId,
+          workspaceId: ctx.workspaceId,
         },
         next,
       );
@@ -243,7 +243,7 @@ export function mergeRevision(
 }
 
 // Write the merged state and retire what it replaces. Demote first, then promote: the partial
-// unique index on (org_id, pk) where _current refuses two current rows, so the order is not a
+// unique index on (workspace_id, pk) where _current refuses two current rows, so the order is not a
 // preference.
 export async function commitRevision(
   client: PoolClient,
@@ -277,7 +277,7 @@ export async function commitRevision(
       base: proposal._rev_base === null ? null : Number(proposal._rev_base),
       current: true,
       by: proposal._rev_by,
-      orgId: ctx.orgId,
+      workspaceId: ctx.workspaceId,
     },
     merged,
   );
@@ -340,7 +340,7 @@ export function makeProposeVerbs(d: VerbDeps) {
     if (!pool) return audit.refuse("*", "not_writable");
 
     try {
-      return await withOrg(pool, ctx.orgId, async (client): Promise<DecisionResult> => {
+      return await withWorkspace(pool, ctx.workspaceId, async (client): Promise<DecisionResult> => {
         const found = await loadPending(client, ctx.env, schema, proposalId);
         if (!found) return audit.refuse("*", "not_found");
         const { collection: name, row: proposal } = found;
@@ -374,7 +374,7 @@ export function makeProposeVerbs(d: VerbDeps) {
         return { ok: true as const, documentId: docId, rev: newRevId, auditId: rec.auditId };
       });
     } catch (err) {
-      // 23505 here is the partial unique index on (org_id, pk) where _current (apply/ddl.ts):
+      // 23505 here is the partial unique index on (workspace_id, pk) where _current (apply/ddl.ts):
       // another revision became current between this transaction's demote and its insert, so two
       // rows claimed _current at once. That is a lost race against a concurrent writer — the same
       // situation `expect` reports on the direct path — not a server fault. mutateFile already
@@ -502,7 +502,7 @@ export function makeProposeVerbs(d: VerbDeps) {
     if (!pool) return audit.refuse("*", "not_writable");
 
     try {
-      return await withOrg(pool, ctx.orgId, async (client) => {
+      return await withWorkspace(pool, ctx.workspaceId, async (client) => {
         const found = await loadPending(client, ctx.env, schema, proposalId);
         if (!found) return audit.refuse("*", "not_found");
         const { collection: collectionName, row: proposal } = found;
@@ -598,7 +598,7 @@ export function makeProposeVerbs(d: VerbDeps) {
       // itself a disclosure.
       const grants = await loadActiveGrants(app, ctx, names);
 
-      const proposals = await withOrg(pool, ctx.orgId, async (client) => {
+      const proposals = await withWorkspace(pool, ctx.workspaceId, async (client) => {
         const out: ProposalSummary[] = [];
         for (const name of names) {
           const c = findCollection(cfg, name);
@@ -686,7 +686,7 @@ export function makeProposeVerbs(d: VerbDeps) {
     const schema = dataSchema(ctx.env);
 
     try {
-      const found = await withOrg(pool, ctx.orgId, (client) =>
+      const found = await withWorkspace(pool, ctx.workspaceId, (client) =>
         loadPending(client, ctx.env, schema, proposalId),
       );
 

@@ -22,7 +22,7 @@ A thin HTTP adapter for programmatic access to collections, governed by the same
 | GET | `/v1/proposals` | `listProposals` | List pending/approved/rejected proposals (query params: `status`, `collection`) | 200 |
 | POST | `/v1/proposals/{id}/approve` | `approveProposal` | Approve a proposal | 200, 409 (conflict) |
 | POST | `/v1/proposals/{id}/reject` | `rejectProposal` | Reject a proposal | 200 |
-| GET | `/v1/changes` | `changes` | Change feed: document mutations for this org/env (query params: `since`, `limit`) | 200 |
+| GET | `/v1/changes` | `changes` | Change feed: document mutations for this workspace/env (query params: `since`, `limit`) | 200 |
 | GET | `/v1/grants` | (custom) | List grants for the authenticated user | 200 |
 | POST | `/v1/grants` | (custom) | Request access to a collection | 201 |
 
@@ -56,7 +56,7 @@ All refusals return a `reason` code; never a denied field value, never SQL. `/v1
 | 200 | — | Token issued. |
 | 400 | `invalid_request` | Malformed request (missing/duplicate parameters, both Basic and form-field client auth present). |
 | 400 | `unauthorized_client` | Grant type doesn't match the client's mode (e.g. a `delegated` client using `client_credentials`). |
-| 400 | `invalid_grant` | Subject token invalid, issuer unregistered, or subject unresolvable/cross-org. |
+| 400 | `invalid_grant` | Subject token invalid, issuer unregistered, or subject unresolvable/cross-workspace. |
 | 400 | `unsupported_grant_type` | `grant_type` is neither `client_credentials` nor the token-exchange URN. |
 | 401 | `invalid_client` | Client authentication failed. |
 | 500 | `server_error` | Token could not be minted; reason code only — no details exposed. |
@@ -138,10 +138,32 @@ grant_type=urn:ietf:params:oauth:grant-type:token-exchange
 **Requirements:**
 
 - The delegated client's policy must have a `trustedIssuerId` registered, pointing to a trusted issuer configuration with the IdP's JWKS URI, issuer identifier, and audience.
-- The subject token's subject claim (default `sub`, customizable per issuer) must match a user email in the organization.
+- The subject token's subject claim (default `sub`, customizable per issuer) must match a user email in the workspace.
 - The user must hold a live grant to receive `env:live` scope; otherwise only `env:dev` is issued.
 
 **`via` derivation:** Delegated clients that have registered secrets use `token_exchange` in the broker context. Those without secrets and using interactive OAuth flows use `oauth`.
+
+## Platform API (/v1/platform)
+
+A control plane above the workspace boundary, for a consuming application to provision and manage workspaces and their OAuth clients programmatically — not part of the data plane, and not reachable with a session cookie or an OAuth/MCP token. Every route is mounted only when `workspaces.enabled: true`; with the flag off, every path and method under `/v1/platform` returns a body-less **404**, indistinguishable from a route that does not exist, so a probe against the namespace cannot tell "not mounted" from "no such workspace."
+
+**Authentication:** `Authorization: Bearer <platform key secret>`, minted by `warehousd platform-key create` (see [cli.md](cli.md)). Not a session, not an OAuth client — a platform key is its own credential, verified against `app.platform_keys` (salted, hashed with `scrypt`). A key is either unrestricted (`managed_workspaces: null`, every workspace) or scoped to specific workspace ids; a call naming a workspace outside that scope gets the same 404 a nonexistent workspace would, so a scoped key cannot enumerate tenants it does not manage. A missing or invalid bearer token gets `401 {"error":"unauthenticated"}` instead — the only way to tell "not mounted" (404) from "mounted, but you're not who you say you are" (401).
+
+| Method | Path | Description | Success status |
+|---|---|---|---|
+| POST | `/v1/platform/workspaces` | Create a workspace (`{id, name, admin: {userId}}`); the named user becomes its first admin. `409 workspace_exists` if the id is taken. | 201 |
+| GET | `/v1/platform/workspaces` | List workspaces the key manages (every one, if unrestricted) | 200 |
+| GET | `/v1/platform/workspaces/{id}` | Fetch one workspace | 200 |
+| DELETE | `/v1/platform/workspaces/{id}` | Delete a workspace: every declared table's rows in both `data_synth` and `data_live`, then the `app.workspaces` row itself. Grants and client policies cascade from the row; `app.audit_events` does not — a deleted workspace's audit trail survives it, naming an id nothing else references any more. | 204 |
+| POST | `/v1/platform/workspaces/{id}/seed` | Regenerate `dev` synthetic data for the workspace (`{seed?}`, default 42) — the same operation `warehousd seed` performs, scoped to this one workspace. `dev` only; there is no `live` counterpart, by the same reasoning `warehousd seed` never touches `live`. | 200 |
+| POST | `/v1/platform/workspaces/{id}/clients` | Provision an OAuth client pinned to this workspace and mint its first secret in one call (`{displayName?, env?, days?}`) — the platform counterpart to the console's "new client" flow, for a caller with no console to click through. The secret is returned once and never again. | 201 |
+| GET | `/v1/platform/workspaces/{id}/members` | List the workspace's members and roles | 200 |
+| POST | `/v1/platform/workspaces/{id}/members` | Set a member's role (`{userId, role}`); creates the membership if absent | 200 |
+| DELETE | `/v1/platform/workspaces/{id}/members?userId=…` | Remove a member. `409 last_admin` if they are the workspace's only admin. | 204 |
+
+Every mutation is audited through the same `makeAuditWriter` every other decision in the deployment uses — never a hand-written insert — with `userId: "platform:<keyId>"`, `via: "platform_key:<keyId>"`, and `collection: null` marking it an operational rather than a data event.
+
+A caller that names a workspace the key does not manage — unknown id, or outside a scoped key's `managed_workspaces` — gets the same `404 {"error":"not_found"}` a nonexistent workspace would, never a 403: confirming a workspace exists is exactly the enumeration a scoped key must not be able to do against a tenant that isn't its own.
 
 ## What this is not
 

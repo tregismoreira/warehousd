@@ -31,10 +31,16 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ fileId: 
   if (!kindOf(c).chunked) return Response.json({ error: "not_a_file_collection" }, { status: 400 });
 
   const app = getAppPool();
-  const { deleted, path } = await deleteUploadedFile(app, env, collection, fileId);
+  const { deleted, path } = await deleteUploadedFile(
+    app,
+    env,
+    collection,
+    guard.workspaceId,
+    fileId,
+  );
   if (!deleted) return Response.json({ error: "not_found" }, { status: 404 });
 
-  await auditDocument(app, cfg, guard.user.id, env, collection, {
+  await auditDocument(app, cfg, guard.user.id, guard.workspaceId, env, collection, {
     op: "document:delete",
     fileId,
     path,

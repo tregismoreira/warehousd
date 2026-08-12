@@ -78,7 +78,7 @@ beforeAll(async () => {
     "# Benefits\n\nHealth insurance and remote work stipends.",
   );
 
-  await indexCollection(db, "dev", "policies", tmpDir);
+  await indexCollection(db, "dev", "policies", tmpDir, "default");
   rmSync(tmpDir, { recursive: true });
 
   // Approve grants for broker user (no path — it's posture: deny)
@@ -179,7 +179,7 @@ it("document_filter applies to search too (design test 3 over the search path)",
     "# Expenses\n\nRemote work expenses are reimbursed.",
   );
 
-  await indexCollection(db, "dev", "policies", tmpDir);
+  await indexCollection(db, "dev", "policies", tmpDir, "default");
   rmSync(tmpDir, { recursive: true });
 
   // Approve grant with documentFilters limiting to hr/pto.md only for user u3

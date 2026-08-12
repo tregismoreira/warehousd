@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
-import { onPoolError, loadConfig } from "@warehousd/broker";
+import { onPoolError, loadConfig, setMember, DEFAULT_WORKSPACE_ID } from "@warehousd/broker";
 import { mcpPlugin, envScopePlugin } from "./oauth";
 import { ssoPlugin, ssoAdminPlugin, trustedOrigins } from "./sso";
 import { lockoutPlugin } from "./lockout";
@@ -50,7 +50,27 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       role: { type: "string", defaultValue: "member", input: false },
-      orgId: { type: "string", defaultValue: "default", input: false },
+      workspaceId: { type: "string", defaultValue: "default", input: false },
+    },
+  },
+  // Authorization reads workspace membership (lib/authz.ts), never app.user.role — so every path
+  // that creates a user has to give them a membership row, or they are authenticated and locked
+  // out of their own workspace in the same breath. `additionalFields` above only ever pushed
+  // `role`/`workspaceId` onto the user row itself; this is the equivalent push onto the
+  // membership table, for every creation path (signup, SSO JIT-provisioning, dynamic OAuth
+  // registration) at once, since they all end up at Better Auth's own user-create hook rather
+  // than at N application call sites that could each forget it.
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (user: { id: string; role?: string; workspaceId?: string }) => {
+          await setMember(appPool, {
+            workspaceId: user.workspaceId ?? DEFAULT_WORKSPACE_ID,
+            userId: user.id,
+            role: (user.role as "admin" | "manager" | "member" | undefined) ?? "member",
+          });
+        },
+      },
     },
   },
   session: {
@@ -58,6 +78,13 @@ export const auth = betterAuth({
     // reads governed data is a long time for a walked-away-from laptop to stay live.
     expiresIn: 60 * 60 * 8,
     updateAge: 60 * 60,
+    additionalFields: {
+      // The workspace the current session acts in — session state, not user state, so switching
+      // workspaces in one tab never touches another tab's session. `input: false` is what stops
+      // a sign-in payload from setting it; only POST /api/me/workspace may, after verifying
+      // membership.
+      activeWorkspaceId: { type: "string", defaultValue: "default", input: false },
+    },
   },
   advanced: {
     useSecureCookies: IS_HTTPS,
@@ -99,5 +126,5 @@ export type SessionUser = {
   email: string;
   name: string;
   role: "admin" | "manager" | "member";
-  orgId?: string;
+  workspaceId?: string;
 };

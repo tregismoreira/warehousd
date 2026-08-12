@@ -19,8 +19,9 @@ export function generateSecret(env: "dev" | "live", id: string): string {
 }
 
 // CRC-like checksum over prefix and random, so obviously-malformed keys are rejected
-// before any database work.
-function computeChecksum(s: string): string {
+// before any database work. Exported for platform-keys.ts, which mints a differently-prefixed
+// key (`whd_plat_...`) through the same checksum — not a second hashing path.
+export function computeChecksum(s: string): string {
   let crc = 0xffffffff;
   for (let i = 0; i < s.length; i++) {
     crc ^= s.charCodeAt(i);
@@ -87,7 +88,7 @@ export type ClientSecretInfo = {
 export async function createClientSecret(
   db: Pool,
   clientId: string,
-  orgId: string,
+  workspaceId: string,
   expiresAt: Date,
   createdBy: string,
   env: "dev" | "live" = "dev",
@@ -122,10 +123,10 @@ export async function createClientSecret(
   const prefix = getPrefixFromSecret(secret);
   const r = await db.query(
     `insert into app.client_secrets
-       (client_id, org_id, prefix, secret_hash, created_at, created_by, expires_at)
+       (client_id, workspace_id, prefix, secret_hash, created_at, created_by, expires_at)
      values ($1, $2, $3, $4, now(), $5, $6)
      returning id`,
-    [clientId, orgId, prefix, secretHash, createdBy, expiresAt],
+    [clientId, workspaceId, prefix, secretHash, createdBy, expiresAt],
   );
 
   return { secret, id: r.rows[0].id };
@@ -138,13 +139,13 @@ export async function createClientSecret(
 export async function verifyClientSecret(
   db: Pool,
   secret: string,
-): Promise<{ clientId: string; orgId: string; id: string; env: "dev" | "live" } | null> {
+): Promise<{ clientId: string; workspaceId: string; id: string; env: "dev" | "live" } | null> {
   // Fast path: reject obviously malformed secrets without a database round trip
   if (!validateSecretFormat(secret)) return null;
 
   const prefix = getPrefixFromSecret(secret);
   const r = await db.query(
-    `select id, client_id, org_id, prefix, secret_hash, revoked_at, expires_at
+    `select id, client_id, workspace_id, prefix, secret_hash, revoked_at, expires_at
      from app.client_secrets where prefix=$1 limit 1`,
     [prefix],
   );
@@ -177,7 +178,7 @@ export async function verifyClientSecret(
   // The format regex above guarantees the prefix carries one of the two.
   return {
     clientId: row.client_id,
-    orgId: row.org_id,
+    workspaceId: row.workspace_id,
     id: row.id,
     env: envFromSecret(row.prefix) ?? "dev",
   };
@@ -194,15 +195,15 @@ export async function verifyClientSecret(
 export async function rotateClientSecret(
   db: Pool,
   clientId: string,
-  orgId: string,
+  workspaceId: string,
   oldSecretId: string,
   expiresAt: Date,
   createdBy: string,
 ): Promise<{ secret: string; id: string }> {
   const old = await db.query(
     `select prefix from app.client_secrets
-     where id=$1 and client_id=$2 and org_id=$3 and revoked_at is null`,
-    [oldSecretId, clientId, orgId],
+     where id=$1 and client_id=$2 and workspace_id=$3 and revoked_at is null`,
+    [oldSecretId, clientId, workspaceId],
   );
   if (old.rowCount === 0) throw new Error("Old secret not found or already revoked");
 
@@ -211,16 +212,16 @@ export async function rotateClientSecret(
   return createClientSecret(
     db,
     clientId,
-    orgId,
+    workspaceId,
     expiresAt,
     createdBy,
     envFromSecret(old.rows[0].prefix) ?? "dev",
   );
 }
 
-// Scoped by client and org, not by secret id alone.
+// Scoped by client and workspace, not by secret id alone.
 //
-// A secret id is a uuid the caller supplies, so `where id=$1` revokes any secret in any org for
+// A secret id is a uuid the caller supplies, so `where id=$1` revokes any secret in any workspace for
 // anyone who can guess or observe one. The revoke route did check ownership first — but as its own
 // SELECT, which is a guarantee the caller provides rather than one this function enforces, and the
 // next caller is the one that forgets. Requiring the scope makes the safe call the only call.
@@ -230,12 +231,12 @@ export async function revokeClientSecret(
   db: Pool,
   secretId: string,
   clientId: string,
-  orgId: string,
+  workspaceId: string,
 ): Promise<boolean> {
   const r = await db.query(
     `update app.client_secrets set revoked_at=now()
-     where id=$1 and client_id=$2 and org_id=$3`,
-    [secretId, clientId, orgId],
+     where id=$1 and client_id=$2 and workspace_id=$3`,
+    [secretId, clientId, workspaceId],
   );
   return (r.rowCount ?? 0) > 0;
 }
@@ -256,12 +257,12 @@ export async function revokeClientSecret(
 export async function clientKeyEnvs(
   db: Pool,
   clientId: string,
-  orgId: string,
+  workspaceId: string,
 ): Promise<{ hasSecrets: boolean; liveCapable: boolean }> {
   const r = await db.query(
     `select prefix from app.client_secrets
-     where client_id=$1 and org_id=$2 and revoked_at is null and expires_at > now()`,
-    [clientId, orgId],
+     where client_id=$1 and workspace_id=$2 and revoked_at is null and expires_at > now()`,
+    [clientId, workspaceId],
   );
   return {
     hasSecrets: (r.rowCount ?? 0) > 0,
@@ -272,14 +273,14 @@ export async function clientKeyEnvs(
 export async function listClientSecrets(
   db: Pool,
   clientId: string,
-  orgId: string,
+  workspaceId: string,
 ): Promise<ClientSecretInfo[]> {
   const r = await db.query(
     `select id, prefix, created_at, created_by, expires_at, last_used_at, revoked_at
      from app.client_secrets
-     where client_id=$1 and org_id=$2
+     where client_id=$1 and workspace_id=$2
      order by created_at desc`,
-    [clientId, orgId],
+    [clientId, workspaceId],
   );
 
   return r.rows.map((row) => ({

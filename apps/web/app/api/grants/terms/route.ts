@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const env = readEnvCookie(req);
   const db = getAppPool();
-  const bindings = await loadTaxonomyBindings(db, cfg, collection, env);
+  const bindings = await loadTaxonomyBindings(db, cfg, collection, env, guard.workspaceId);
 
   return Response.json({
     vocabularies: bindings.map((b) => ({

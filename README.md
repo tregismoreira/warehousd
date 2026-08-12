@@ -18,10 +18,8 @@
 
 ---
 
-> [!WARNING]
-> **0.1.0-rc.1 is a release candidate, and is not meant to be used in production.** The code is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](SECURITY.md).
->
-> [docs/status.md](docs/status.md) gives a per-component verdict checked against the code.
+> [!WARNING] **0.1.0-rc.1 is a release candidate, and is not meant to be used in production.** The code is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](SECURITY.md).
+>[docs/status.md](docs/status.md) gives a per-component verdict checked against the code.
 
 Connecting an LLM to real company data usually means handing it a database connection and hoping the prompt holds — **warehousd** replaces hope with enforcement: every request from an assistant is a **proposal** that a server-side broker re-validates against deny-by-default field postures and purpose-bound, expiring grants before a single row is read.
 
@@ -196,11 +194,12 @@ Full reference, flags and the outputs contract: [cli.md](docs/cli.md) · [migrat
 
 ## Component status
 
-Everything listed in this README is implemented. Three exceptions, all tracked in [docs/status.md](docs/status.md), which gives a per-component verdict checked against the code:
+Everything listed in this README is implemented. Two exceptions, tracked in [docs/status.md](docs/status.md), which gives a per-component verdict checked against the code:
 
-- **Multi-tenancy (`org_id`)** — *partial*. Every grant, audit event and document carries an org, isolated by a view predicate and RLS, but a single implicit org is created at bootstrap and nothing yet resolves a caller's org from their session or IdP claim.
 - **Database provisioning through a provider CLI** — *real* for Neon, *partial* for Supabase. Neon returns a connection URI; Supabase prints none, so warehousd assembles the pooler string from the ref, region and generated password, and the pre-flight's `db-reachable` is what confirms it.
 - **SCIM and compliance exports** — *not built*.
+
+**Multi-tenancy (`workspace_id`)** is `real`: a deployment hosts many workspaces, a user may belong to several with a role per workspace resolved from the session, the console has a switcher and a per-workspace Members page, and a consuming application can provision workspaces and clients through `/v1/platform/*`, behind a platform key and off by default.
 
 ## Contributing
 
@@ -246,7 +245,7 @@ Consumers never need this. To work on warehousd itself, [CONTRIBUTING.md](CONTRI
 
 ## Roadmap
 
-Aggregate-only postures with inference-leak protection · org resolution at the auth boundary · streaming imports · audit retention and export · grant expiry notifications.
+Aggregate-only postures with inference-leak protection · workspace resolution at the auth boundary · streaming imports · audit retention and export · grant expiry notifications.
 
 [docs/roadmap.md](docs/roadmap.md) has the detail, and states where the open-source line sits: everything shipped is Apache 2.0 and stays Apache 2.0.
 

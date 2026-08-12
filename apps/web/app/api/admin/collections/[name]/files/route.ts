@@ -8,7 +8,7 @@ import {
 } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../../../../../lib/broker";
 import { requireRole } from "../../../../../../lib/authz";
-import { readEnvCookie, orgOf } from "../../../../../../lib/session";
+import { readEnvCookie } from "../../../../../../lib/session";
 
 // The fixed file fields that carry a posture and appear in a FileSummary. `id`, `checksum` and
 // `documentCount` are structural — they name no configured field, so no posture applies to them
@@ -37,16 +37,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
   if (!kindOf(c).chunked) return Response.json({ error: "not_a_file_collection" }, { status: 400 });
 
   const env = readEnvCookie(req);
-  const orgId = orgOf(guard.user);
+  const workspaceId = guard.workspaceId;
 
   const granted: string[] =
     (
       await getAppPool().query(
         `select allowed_fields from app.grants
-        where org_id=$1 and user_id=$2 and collection=$3 and env=$4 and status='approved'
+        where workspace_id=$1 and user_id=$2 and collection=$3 and env=$4 and status='approved'
           and (expires_at is null or expires_at > now())
         order by requested_at desc limit 1`,
-        [orgId, guard.user.id, name, env],
+        [workspaceId, guard.user.id, name, env],
       )
     ).rows[0]?.allowed_fields ?? [];
 
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
 
   let files: FileSummary[];
   try {
-    files = await listFiles(getBroker().pools, { env, orgId }, cfg, name);
+    files = await listFiles(getBroker().pools, { env, workspaceId }, cfg, name);
   } catch (err) {
     // A collection declared but not applied to this environment has no view to read. That is a
     // state of the stack rather than a fault in the request, which is the same distinction the

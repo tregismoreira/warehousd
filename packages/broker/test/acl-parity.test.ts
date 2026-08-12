@@ -177,7 +177,7 @@ describe("one ACL scopes read and write identically", () => {
     );
     for (const g of groups)
       await admin.query(
-        `insert into app.user_groups (org_id,user_id,group_name,source) values ('default',$1,$2,'manual')`,
+        `insert into app.user_groups (workspace_id,user_id,group_name,source) values ('default',$1,$2,'manual')`,
         [userId, g],
       );
 
@@ -189,7 +189,7 @@ describe("one ACL scopes read and write identically", () => {
     ).rows[0]!.id;
     if (acl !== null)
       await admin.query(
-        `insert into data_synth."_acl" (org_id, collection, document_id, principals, updated_by)
+        `insert into data_synth."_acl" (workspace_id, collection, document_id, principals, updated_by)
          values ('default','content',$1,$2,'test')`,
         [docId, acl],
       );

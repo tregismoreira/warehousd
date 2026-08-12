@@ -3,7 +3,6 @@ import { getAppPool } from "../../../../lib/broker";
 import { setAllowedScopes, setCanManageAcl, clientKeyEnvs } from "@warehousd/broker";
 import { requireRole } from "../../../../../lib/authz";
 import { readJson } from "../../../../../lib/rest";
-import { orgOf } from "../../../../../lib/session";
 
 export async function POST(
   req: NextRequest,
@@ -23,8 +22,8 @@ export async function POST(
   // caller's own grants*, while this lets it change who those grants reach at all. Handled before
   // the scope branch so the two can never be set by one request.
   if (action === "grant_acl" || action === "revoke_acl") {
-    if (guard.user.role !== "admin") return Response.json({ error: "forbidden" }, { status: 403 });
-    const ok = await setCanManageAcl(app, clientId, action === "grant_acl", orgOf(sessionUser));
+    if (guard.role !== "admin") return Response.json({ error: "forbidden" }, { status: 403 });
+    const ok = await setCanManageAcl(app, clientId, action === "grant_acl", guard.workspaceId);
     if (!ok) return Response.json({ error: "unknown_client" }, { status: 404 });
     return Response.json({ ok: true });
   }
@@ -39,12 +38,13 @@ export async function POST(
   //
   // Demotion is never refused: narrowing is always meaningful and always safe.
   if (action === "promote") {
-    const keys = await clientKeyEnvs(app, clientId, orgOf(sessionUser));
+    const keys = await clientKeyEnvs(app, clientId, guard.workspaceId);
     if (keys.hasSecrets && !keys.liveCapable)
       return Response.json({ error: "no_live_capable_key" }, { status: 409 });
   }
 
   const scopes = action === "promote" ? ["env:dev", "env:live"] : ["env:dev"];
-  await setAllowedScopes(app, clientId, scopes, sessionUser.id);
+  const ok = await setAllowedScopes(app, clientId, scopes, sessionUser.id, guard.workspaceId);
+  if (!ok) return Response.json({ error: "unknown_client" }, { status: 404 });
   return Response.json({ ok: true });
 }

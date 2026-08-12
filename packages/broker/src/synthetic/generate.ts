@@ -3,6 +3,7 @@ import { kindOf } from "../config/kinds";
 import type { Pool } from "pg";
 import type { WarehousdConfig } from "../config/schema";
 import { loadTaxonomyBindings, syncDatasetTerms } from "../taxonomy";
+import { withWorkspace } from "../db/pools";
 import { makeRng, genValue } from "./generators";
 
 // Generated rows are revisions like any other: every dataset table carries REV_COLS, so a plain
@@ -19,8 +20,9 @@ const REV_INSERT_COLS = [
   `"_rev_status"`,
   `"_rev_fields"`,
   `"_current"`,
+  `"workspace_id"`,
 ];
-const revInsertValues = (fields: string[]): unknown[] => [
+const revInsertValues = (fields: string[], workspaceId: string): unknown[] => [
   randomUUID(),
   1,
   SYNTHETIC_AUTHOR,
@@ -28,6 +30,7 @@ const revInsertValues = (fields: string[]): unknown[] => [
   "approved",
   fields,
   true,
+  workspaceId,
 ];
 
 // Which collection the generator is on, in the shape EmbedProgress already had. The total is the
@@ -40,6 +43,7 @@ export async function generateSynthetic(
   db: Pool,
   cfg: WarehousdConfig,
   seed: number,
+  workspaceId: string,
   opts: { onProgress?: ((p: SyntheticProgress) => void) | undefined } = {},
 ): Promise<void> {
   const rng = makeRng(seed);
@@ -100,9 +104,11 @@ export async function generateSynthetic(
         params.push(...row);
         return `(${holes.join(",")})`;
       });
-      await db.query(
-        `insert into data_synth.${name} (${allCols.join(",")}) values ${tuples.join(",")}`,
-        params,
+      await withWorkspace(db, workspaceId, (client) =>
+        client.query(
+          `insert into data_synth.${name} (${allCols.join(",")}) values ${tuples.join(",")}`,
+          params,
+        ),
       );
       pending.length = 0;
     };
@@ -176,7 +182,13 @@ export async function generateSynthetic(
       }
       // Revision bookkeeping ahead of the data columns, matching the column list built beside it.
       pendingCols = cols;
-      pending.push([...revInsertValues(cols.map((c2) => c2.replace(/"/g, ""))), ...vals]);
+      pending.push([
+        ...revInsertValues(
+          cols.map((c2) => c2.replace(/"/g, "")),
+          workspaceId,
+        ),
+        ...vals,
+      ]);
       // Postgres caps a statement at 65535 bound parameters, so the batch is bounded by row
       // width rather than by a fixed row count — a wide collection would otherwise blow the
       // limit at a size that worked for a narrow one.
@@ -190,18 +202,27 @@ export async function generateSynthetic(
   }
 
   // Second pass: backfill deferred FKs
+  //
+  // Every update below carries `and workspace_id=$3` alongside the pk. The pk alone is not
+  // enough: `rng` is seeded purely from the numeric `seed` argument, with no workspace mixed
+  // in, so calling this function twice with the same seed for two different workspaces (the
+  // common case — every caller defaults to 42) produces byte-identical ids for corresponding
+  // rows. The unique index is (workspace_id, pk), which permits exactly that collision, so an
+  // update addressed by pk alone would silently touch the other workspace's row too.
   for (const d of deferred) {
     const parentIds = idsByCollection[d.parent] ?? [];
     const rowIds = idsByCollection[d.collection] ?? [];
     if (!parentIds.length || !rowIds.length) continue;
-    for (const rowId of rowIds) {
-      const pick = parentIds[Math.floor(rng() * parentIds.length)];
-      if (!pick || pick === rowId) continue; // nobody is their own manager/head
-      await db.query(`update data_synth.${d.collection} set "${d.column}"=$1 where "${d.pk}"=$2`, [
-        pick,
-        rowId,
-      ]);
-    }
+    await withWorkspace(db, workspaceId, async (client) => {
+      for (const rowId of rowIds) {
+        const pick = parentIds[Math.floor(rng() * parentIds.length)];
+        if (!pick || pick === rowId) continue; // nobody is their own manager/head
+        await client.query(
+          `update data_synth.${d.collection} set "${d.column}"=$1 where "${d.pk}"=$2 and workspace_id=$3`,
+          [pick, rowId, workspaceId],
+        );
+      }
+    });
   }
 
   // Third pass: dataset-sourced vocabularies. Their terms are distinct values of a column on
@@ -221,10 +242,10 @@ export async function generateSynthetic(
     );
   });
   if (datasetSourced.length) {
-    await syncDatasetTerms(db, cfg, "dev");
+    await syncDatasetTerms(db, cfg, "dev", workspaceId);
     for (const name of datasetSourced) {
       const rowIds = idsByCollection[name] ?? [];
-      const bindings = await loadTaxonomyBindings(db, cfg, name, "dev");
+      const bindings = await loadTaxonomyBindings(db, cfg, name, "dev", workspaceId);
       for (const b of bindings) {
         if (!cfg.taxonomies[b.field]?.source) continue; // YAML terms were filled in pass one
         const pk = pkByCollection[name];
@@ -235,24 +256,26 @@ export async function generateSynthetic(
             `collection "${name}" needs a pk to back-fill the dataset-sourced vocabulary "${b.field}"`,
           );
         if (!b.slugs.length || !rowIds.length) continue;
-        for (const rowId of rowIds) {
-          let value: string | string[];
-          if (b.multiple) {
-            // Same draw as the first pass: a fixed number of rolls so the rng stream is
-            // stable for a seed, with repeats dropped rather than re-rolled.
-            const count = Math.floor(rng() * 3) + 1;
-            const selected = new Set<string>();
-            for (let j = 0; j < count; j++)
-              selected.add(b.slugs[Math.floor(rng() * b.slugs.length)]!);
-            value = [...selected];
-          } else {
-            value = b.slugs[Math.floor(rng() * b.slugs.length)]!;
+        await withWorkspace(db, workspaceId, async (client) => {
+          for (const rowId of rowIds) {
+            let value: string | string[];
+            if (b.multiple) {
+              // Same draw as the first pass: a fixed number of rolls so the rng stream is
+              // stable for a seed, with repeats dropped rather than re-rolled.
+              const count = Math.floor(rng() * 3) + 1;
+              const selected = new Set<string>();
+              for (let j = 0; j < count; j++)
+                selected.add(b.slugs[Math.floor(rng() * b.slugs.length)]!);
+              value = [...selected];
+            } else {
+              value = b.slugs[Math.floor(rng() * b.slugs.length)]!;
+            }
+            await client.query(
+              `update data_synth.${name} set "${b.field}"=$1 where "${pk}"=$2 and workspace_id=$3`,
+              [value, rowId, workspaceId],
+            );
           }
-          await db.query(`update data_synth.${name} set "${b.field}"=$1 where "${pk}"=$2`, [
-            value,
-            rowId,
-          ]);
-        }
+        });
       }
     }
   }

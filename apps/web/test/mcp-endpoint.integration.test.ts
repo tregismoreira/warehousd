@@ -151,7 +151,7 @@ describe("/mcp endpoint", () => {
     const g = await requestGrant(app, {
       userId: "mia",
       collection: "people",
-      orgId: "default",
+      workspaceId: "default",
       env: "dev",
       purposeLabel: "t",
       allowedFields: ["id"],
