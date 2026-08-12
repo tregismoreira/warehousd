@@ -106,6 +106,24 @@ git push --delete origin v0.2.0
 git tag -d v0.2.0
 ```
 
+## When a publish fails
+
+The opposite recovery. `image` and `npm` push to real registries, so a red job there means part of the release may already be out — deleting the tag would strand it. The tag stays; re-run the failed jobs:
+
+```bash
+gh run rerun <run-id> --failed
+```
+
+Every job in the workflow is safe to repeat. `draft` leaves an existing draft alone, the image push overwrites its own tags, `npm pack` writes to `$RUNNER_TEMP`, `npm dist-tag add` is idempotent, and `gh release upload --clobber` replaces an asset rather than failing on its name. The one step that is not repeatable is `npm publish`, because npm refuses a version it already holds — so a re-run after a publish that *succeeded* and then failed later fails there instead. At that point the version is out and the only move forward is another version.
+
+## The npm credential
+
+`NPM_TOKEN` is a granular access token on the `npm-publish` environment, and it has to be one that **bypasses 2FA**. A token without that setting authenticates perfectly well — well enough to build the tarball, exchange the OIDC token and sign a provenance attestation — and then the publish itself comes back `EOTP`, _"This operation requires a one-time password from your authenticator"_, which no unattended job can answer. It reads like a broken or expired token and is neither.
+
+That token type is being withdrawn. Since 31 July 2026 a 2FA-bypass token can no longer create tokens or change package access, maintainers or trusted-publishing configuration, and [around January 2027 it loses direct publish as well](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/). Its replacement is [trusted publishing](https://docs.npmjs.com/trusted-publishers): OIDC, no stored secret, which is what the `id-token: write` permission on the `npm` job is already there for.
+
+Trusted publishing is configured per package in the package's own settings on npmjs.com, so it cannot be set up for a name the registry does not have yet. **The first release therefore publishes with a token, and no release after it should.** Once `warehousd` exists on npm, add the trusted publisher — repository `tregismoreira/warehousd`, workflow `release.yml`, environment `npm-publish` — and delete the secret. One thing to confirm on the first tag after that, because it is the part OIDC does not obviously cover: the `latest` step runs `npm dist-tag add` as a *second* npm command, after the publish that obtained the credential.
+
 ## Prereleases
 
 Any version containing a `-` is treated as a prerelease. It does **not** move the `:latest` image tag, it publishes to npm under the `next` dist-tag rather than `latest`, and the GitHub Release is marked as a prerelease:
@@ -157,7 +175,7 @@ Provenance should show as a "Built and signed on GitHub Actions" badge on
 Three properties of the publishing setup, stated here because a failing release usually means one of them has drifted rather than that the code is wrong:
 
 - **The repository is public.** npm dropped provenance support for private repositories in 2023, so the `--provenance` flag in the `npm` job hard-fails otherwise.
-- **The `warehousd` npm package publishes over OIDC**, using the `id-token: write` permission on that job. Where a `NPM_TOKEN` secret is configured instead, it lives on the `npm-publish` environment rather than on the repository, and that environment admits only `v*` tags. A repository secret is readable from any ref by any workflow; an environment secret is not.
+- **The `npm` job can authenticate to the registry.** Until the package exists that means a 2FA-bypassing `NPM_TOKEN`, and afterwards it should mean trusted publishing — see [The npm credential](#the-npm-credential) for why the distinction has its own section. Either way the secret lives on the `npm-publish` environment rather than on the repository, and that environment admits only `v*` tags: a repository secret is readable from any ref by any workflow, an environment secret is not.
 - **The GHCR package is public**, and grants the repository write access under _Manage Actions access_. A container package inherits neither from the repository automatically, and an image that is not anonymously pullable breaks `warehousd start` for every user rather than just for the release.
 
 ## Moving the GHCR namespace
