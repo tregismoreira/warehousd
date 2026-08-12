@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
-import type { BrokerContext, AuditId, RefusalReason } from "../types";
+import type { BrokerContext, AuditId } from "../types";
+import { REFUSAL_REASONS } from "../types";
 import { ACL_TABLE } from "../config/schema";
 import { findCollection } from "../config/load";
 import { dataSchema } from "../config/collection";
@@ -38,7 +39,8 @@ export type DocumentAcl = {
   updatedBy: string | null;
 };
 
-export type AclRefusalReason = RefusalReason | "acl_denied" | "not_writable";
+export const ACL_REFUSAL_REASONS = [...REFUSAL_REASONS, "acl_denied", "not_writable"] as const;
+export type AclRefusalReason = (typeof ACL_REFUSAL_REASONS)[number];
 
 export type GetAclResult =
   | { ok: true; acl: DocumentAcl; auditId: AuditId }

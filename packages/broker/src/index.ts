@@ -102,6 +102,7 @@ export {
   type GroupSource,
   type GetAclResult,
   type SetAclResult,
+  ACL_REFUSAL_REASONS,
   type AclRefusalReason,
 } from "./acl/manage";
 export {

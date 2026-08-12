@@ -58,15 +58,17 @@ export type DocSearchIntent = {
 export type GetDocumentIntent =
   { collection: string; id: string } | { collection: string; path: string };
 
-export type RefusalReason =
-  | "no_grant"
-  | "expired_grant"
-  | "field_denied"
-  | "unknown_collection"
-  | "unknown_field"
-  | "invalid_intent"
-  | "internal_error"
-  | "not_found";
+export const REFUSAL_REASONS = [
+  "no_grant",
+  "expired_grant",
+  "field_denied",
+  "unknown_collection",
+  "unknown_field",
+  "invalid_intent",
+  "internal_error",
+  "not_found",
+] as const;
+export type RefusalReason = (typeof REFUSAL_REASONS)[number];
 
 // `auditId` is null on exactly two paths, and a caller can tell them apart without inspecting it.
 // On a *refusal* it means the audit insert itself failed; the refusal stands regardless, because
@@ -132,18 +134,23 @@ export type MutationIntent =
     }
   | { collection: string; op: "delete"; id: string; expect?: string | undefined };
 
-export type MutationRefusalReason =
-  | RefusalReason
-  | "verb_denied"
-  | "verb_not_supported"
-  | "field_not_writable"
-  | "conflict"
-  | "invalid_value"
-  | "not_writable"
+export const MUTATION_ONLY_REFUSAL_REASONS = [
+  "verb_denied",
+  "verb_not_supported",
+  "field_not_writable",
+  "conflict",
+  "invalid_value",
+  "not_writable",
   // Distinct from verb_denied on purpose: the caller does hold the approve verb, so telling them
   // "denied" would send them asking for a grant they already have. What they need is a second
   // person. See approveProposal.
-  | "self_approval_denied";
+  "self_approval_denied",
+] as const;
+export const MUTATION_REFUSAL_REASONS = [
+  ...REFUSAL_REASONS,
+  ...MUTATION_ONLY_REFUSAL_REASONS,
+] as const;
+export type MutationRefusalReason = (typeof MUTATION_REFUSAL_REASONS)[number];
 
 export type MutationResult =
   | {
