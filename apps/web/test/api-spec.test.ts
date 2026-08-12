@@ -10,10 +10,12 @@ import {
   type MutationRefusalReason,
 } from "@warehousd/broker";
 import { buildOpenApiDoc } from "../lib/api-schema/generate";
+import { buildMcpManifest } from "../lib/api-schema/mcp-manifest";
 import { OPERATIONS } from "../lib/api-schema/routes";
 import { restStatus } from "../lib/rest";
 import { GET as openapiRoute } from "../app/v1/openapi.json/route";
 import openapiCommitted from "../../../docs/openapi.json";
+import mcpToolsCommitted from "../../../docs/mcp-tools.json";
 
 // No database, no setupWebDb — this suite is pure and must stay fast: it checks that the
 // generator, the routes it describes, and the reason/status table all still agree with each
@@ -25,6 +27,10 @@ const V1_APP_DIR = path.resolve(REPO_ROOT, "apps/web/app/v1");
 describe("api-spec: regeneration", () => {
   it("docs/openapi.json is byte-for-byte what the generator produces", () => {
     expect(openapiCommitted).toEqual(buildOpenApiDoc());
+  });
+
+  it("docs/mcp-tools.json is byte-for-byte what the generator produces", () => {
+    expect(mcpToolsCommitted).toEqual(buildMcpManifest());
   });
 });
 
@@ -119,12 +125,21 @@ describe("api-spec: status table", () => {
 });
 
 describe("api-spec: leak", () => {
-  it("no collection name from examples/harbor appears in the spec", () => {
+  it("no collection name from examples/harbor appears in the OpenAPI spec", () => {
     const cfg = loadConfig(path.resolve(REPO_ROOT, "examples/harbor"));
     const names = Object.keys(cfg.collections);
     expect(names.length).toBeGreaterThan(0);
 
     const serialized = JSON.stringify(buildOpenApiDoc());
+    const hits = names.filter((name) => serialized.includes(name));
+    expect(hits).toEqual([]);
+  });
+
+  it("no collection name from examples/harbor appears in the MCP manifest", () => {
+    const cfg = loadConfig(path.resolve(REPO_ROOT, "examples/harbor"));
+    const names = Object.keys(cfg.collections);
+
+    const serialized = JSON.stringify(buildMcpManifest());
     const hits = names.filter((name) => serialized.includes(name));
     expect(hits).toEqual([]);
   });

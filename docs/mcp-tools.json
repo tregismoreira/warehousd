@@ -1,0 +1,216 @@
+{
+  "tools": [
+    {
+      "name": "list_collections",
+      "description": "List collections, each with YOUR OWN access to it: `access` is \"granted\" when you hold a read grant and \"none\" when you do not, and `grantedFields` counts the fields that grant carries. Start here — a collection marked \"none\" will refuse every call, so there is no reason to describe or query it; ask for it with request_access instead. Governance is deny-by-default and purpose-bound: this list confers no access to any data or schema.",
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "describe_collection",
+      "description": "Schema of fields VISIBLE UNDER THE CALLER'S GRANTS in the current env. No grant → refusal (with a request_access hint). Always call this before query_collection or search_documents on a collection you haven't described yet — it tells you exactly which field names are usable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "name": { "type": "string" } },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "query_collection",
+      "description": "Run a structured QueryIntent. The broker re-validates every field against the caller's grant; denied fields are never returned, and referencing one anywhere (fields, filters, orderBy, aggregate, groupBy) refuses the whole call — you are an untrusted proposer, the broker is the source of truth. Two mutually exclusive shapes: (1) document fetch — use \"fields\", never combine with \"aggregate\"/\"groupBy\"; (2) aggregation (counts, sums, averages, breakdowns \"by X\") — use \"aggregate\" + \"groupBy\", never set \"fields\". Example aggregation: aggregate=[{\"fn\":\"count\",\"field\":\"id\"}], groupBy=[\"department_name\"]. Refusals are deny-by-default and purpose-bound; a refusal includes a request_access hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Collection name, from list_collections."
+          },
+          "fields": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+            "description": "Document-fetch shape only. Field names to return; omit for aggregation."
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+                "op": {
+                  "type": "string",
+                  "enum": ["eq", "neq", "gt", "lt", "gte", "lte", "like", "in"]
+                },
+                "value": {}
+              },
+              "required": ["field", "op", "value"]
+            }
+          },
+          "orderBy": {
+            "type": "object",
+            "properties": {
+              "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+              "dir": { "type": "string", "enum": ["asc", "desc"] }
+            },
+            "required": ["field", "dir"]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Default 100, max 500."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Pagination offset, paired with limit."
+          },
+          "aggregate": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fn": { "type": "string", "enum": ["avg", "sum", "count", "min", "max"] },
+                "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+              },
+              "required": ["fn", "field"]
+            },
+            "description": "Aggregation shape only. e.g. count/sum/avg per group."
+          },
+          "groupBy": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+            "description": "Aggregation shape only. Field names to group by."
+          }
+        },
+        "required": ["collection"]
+      }
+    },
+    {
+      "name": "search_documents",
+      "description": "Search documents. OMIT `collection` to search every collection you hold a read grant on at once — results are merged by reciprocal-rank fusion and each document carries a `_collection` field saying where it came from, which is what get_document needs. Name a collection to search just that one. Access is deny-by-default and purpose-bound: results contain only fields covered by your approved grant, restricted to documents your grant allows. Three modes: \"text\" (default) matches words; \"semantic\" matches meaning and will find a document that shares no words with your query; \"hybrid\" fuses both rankings and is usually the best default when you are exploring. Semantic and hybrid need the deployment to have embeddings configured, and work on file collections only — asking for one where it is unavailable refuses rather than quietly running a text search. Refusals include a request_access hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Optional. Omit to search every collection you hold a read grant on and merge the results."
+          },
+          "q": { "type": "string" },
+          "fields": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["text", "semantic", "hybrid"],
+            "description": "Ranking strategy. Defaults to text."
+          },
+          "limit": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+          "offset": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Pagination offset, paired with limit."
+          }
+        },
+        "required": ["q"]
+      }
+    },
+    {
+      "name": "get_document",
+      "description": "Fetch a single document by id or path (file collections). Governance is deny-by-default and field-scoped: returned fields are restricted to your active grant. Refusal includes a request_access hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": { "type": "string", "description": "Collection name." },
+          "id": {
+            "type": "string",
+            "description": "Document id (pk for datasets, file_id for files). Mutually exclusive with path."
+          },
+          "path": {
+            "type": "string",
+            "description": "Source file path (file collections only). Mutually exclusive with id."
+          }
+        },
+        "required": ["collection"]
+      }
+    },
+    {
+      "name": "create_document",
+      "description": "Create a document in a writable collection. Governance is deny-by-default: the operation requires an active create grant. A write may return status:pending (invisible to everyone until a human approves it); the model cannot approve its own proposal. Refusals include a request_access hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+          "values": {
+            "type": "object",
+            "propertyNames": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+            "additionalProperties": {},
+            "description": "Field values for the new document."
+          }
+        },
+        "required": ["collection", "values"]
+      }
+    },
+    {
+      "name": "update_document",
+      "description": "Update an existing document. Governance is deny-by-default: the operation requires an active update grant. A write may return status:pending (invisible to everyone until a human approves it); the model cannot approve its own proposal. Refusals include a request_access hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+          "id": { "type": "string", "description": "Document id (pk)." },
+          "expect": {
+            "type": "string",
+            "description": "Optional revision to enforce optimistic concurrency."
+          },
+          "values": {
+            "type": "object",
+            "propertyNames": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+            "additionalProperties": {},
+            "description": "Fields to update."
+          }
+        },
+        "required": ["collection", "id", "values"]
+      }
+    },
+    {
+      "name": "delete_document",
+      "description": "Delete a document. Governance is deny-by-default: the operation requires an active delete grant. A write may return status:pending (invisible to everyone until a human approves it); the model cannot approve its own proposal. Refusals include a request_access hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+          "id": { "type": "string", "description": "Document id (pk)." },
+          "expect": {
+            "type": "string",
+            "description": "Optional revision to enforce optimistic concurrency."
+          }
+        },
+        "required": ["collection", "id"]
+      }
+    },
+    {
+      "name": "request_access",
+      "description": "Request access to a collection you currently can't see, or can't fully see. Creates a pending request a manager or admin can approve; returns the request id. Use this whenever another tool refuses with no_grant or field_denied.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": { "type": "string" },
+          "purpose": {
+            "type": "string",
+            "description": "Why you need this access — shown to the approver."
+          },
+          "fields": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Fields you need. Omit to let the approver decide scope from the purpose."
+          }
+        },
+        "required": ["collection", "purpose"]
+      }
+    }
+  ]
+}

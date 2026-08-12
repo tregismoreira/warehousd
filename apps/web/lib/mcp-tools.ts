@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { BrokerContext } from "@warehousd/broker";
 import {
   requestGrant,
@@ -14,6 +15,46 @@ export type JsonSchema = {
   properties: Record<string, unknown>;
   required?: string[];
 };
+
+// The advertised schema, derived from the schema the handler enforces, with this tool's
+// model-facing prose merged back in.
+//
+// Why derive at all: these two used to be written twice and had already drifted — the advertised
+// query and search schemas were missing `offset`, so a model reading them could not paginate
+// against a broker that would have accepted it. The prose is the part worth writing by hand;
+// the shape is not.
+export function advertise(
+  schema: z.ZodType,
+  descriptions: Record<string, string>,
+  opts: { omit?: string[] } = {},
+): JsonSchema {
+  const raw = z.toJSONSchema(schema, { target: "draft-2020-12", io: "input" }) as {
+    type: "object";
+    properties: Record<string, Record<string, unknown>>;
+    required?: string[];
+  };
+  const omit = new Set(opts.omit ?? []);
+
+  const properties: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw.properties)) {
+    if (omit.has(key)) continue;
+    properties[key] = value;
+  }
+
+  for (const [key, description] of Object.entries(descriptions)) {
+    if (!(key in raw.properties)) {
+      throw new Error(
+        `advertise(): description given for a property that does not exist: "${key}"`,
+      );
+    }
+    properties[key] = { ...(properties[key] as Record<string, unknown>), description };
+  }
+
+  const required = raw.required?.filter((key) => !omit.has(key));
+  return required?.length
+    ? { type: "object", properties, required }
+    : { type: "object", properties };
+}
 
 export type ToolDef = {
   name: string;
@@ -81,52 +122,14 @@ export const TOOLS: ToolDef[] = [
       'Example aggregation: aggregate=[{"fn":"count","field":"id"}], ' +
       'groupBy=["department_name"]. Refusals are deny-by-default and purpose-bound; a refusal ' +
       "includes a request_access hint.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        collection: { type: "string", description: "Collection name, from list_collections." },
-        fields: {
-          type: "array",
-          items: { type: "string" },
-          description: "Document-fetch shape only. Field names to return; omit for aggregation.",
-        },
-        filters: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              field: { type: "string" },
-              op: { type: "string", enum: ["eq", "neq", "gt", "lt", "gte", "lte", "like", "in"] },
-              value: {},
-            },
-            required: ["field", "op", "value"],
-          },
-        },
-        orderBy: {
-          type: "object",
-          properties: { field: { type: "string" }, dir: { type: "string", enum: ["asc", "desc"] } },
-        },
-        limit: { type: "number", description: "Default 100, max 500." },
-        aggregate: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              fn: { type: "string", enum: ["avg", "sum", "count", "min", "max"] },
-              field: { type: "string" },
-            },
-            required: ["fn", "field"],
-          },
-          description: "Aggregation shape only. e.g. count/sum/avg per group.",
-        },
-        groupBy: {
-          type: "array",
-          items: { type: "string" },
-          description: "Aggregation shape only. Field names to group by.",
-        },
-      },
-      required: ["collection"],
-    },
+    inputSchema: advertise(QueryIntentSchema, {
+      collection: "Collection name, from list_collections.",
+      fields: "Document-fetch shape only. Field names to return; omit for aggregation.",
+      limit: "Default 100, max 500.",
+      offset: "Pagination offset, paired with limit.",
+      aggregate: "Aggregation shape only. e.g. count/sum/avg per group.",
+      groupBy: "Aggregation shape only. Field names to group by.",
+    }),
     handler: async (ctx, input) => {
       // inputSchema above is advertised to the client, not enforced by it: the SDK's low-level
       // setRequestHandler(CallToolRequestSchema) validates the JSON-RPC envelope and passes
@@ -151,26 +154,12 @@ export const TOOLS: ToolDef[] = [
       "to have embeddings configured, and work on file collections only — asking for one where " +
       "it is unavailable refuses rather than quietly running a text search. Refusals include a " +
       "request_access hint.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        collection: {
-          type: "string",
-          description:
-            "Optional. Omit to search every collection you hold a read grant on and merge the " +
-            "results.",
-        },
-        q: { type: "string" },
-        fields: { type: "array", items: { type: "string" } },
-        mode: {
-          type: "string",
-          enum: ["text", "semantic", "hybrid"],
-          description: "Ranking strategy. Defaults to text.",
-        },
-        limit: { type: "number" },
-      },
-      required: ["q"],
-    },
+    inputSchema: advertise(DocSearchIntentSchema, {
+      collection:
+        "Optional. Omit to search every collection you hold a read grant on and merge the results.",
+      mode: "Ranking strategy. Defaults to text.",
+      offset: "Pagination offset, paired with limit.",
+    }),
     handler: async (ctx, input) => {
       const parsed = DocSearchIntentSchema.safeParse(input);
       if (!parsed.success) return withHint({ ok: false, reason: "invalid_intent" });
@@ -183,6 +172,11 @@ export const TOOLS: ToolDef[] = [
       "Fetch a single document by id or path (file collections). Governance is deny-by-default " +
       "and field-scoped: returned fields are restricted to your active grant. Refusal includes " +
       "a request_access hint.",
+    // Hand-written, not derived, and deliberately so: GetDocumentIntentSchema is a union of two
+    // object shapes (id XOR path), which z.toJSONSchema renders as `anyOf` — advertising that to
+    // a model degrades tool-call quality for a constraint the handler enforces anyway via
+    // safeParse below. mcp-schema-parity.test.ts pins this flat shape against the union of both
+    // branches' properties so it cannot rot silently.
     inputSchema: {
       type: "object",
       properties: {
@@ -218,14 +212,11 @@ export const TOOLS: ToolDef[] = [
       "operation requires an active create grant. A write may return status:pending (invisible " +
       "to everyone until a human approves it); the model cannot approve its own proposal. " +
       "Refusals include a request_access hint.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        collection: { type: "string" },
-        values: { type: "object", description: "Field values for the new document." },
-      },
-      required: ["collection", "values"],
-    },
+    inputSchema: advertise(
+      MutationIntentSchema.options[0],
+      { values: "Field values for the new document." },
+      { omit: ["op"] },
+    ),
     handler: async (ctx, input) => mutateChecked(ctx, { ...input, op: "create" }),
   },
   {
@@ -235,19 +226,15 @@ export const TOOLS: ToolDef[] = [
       "active update grant. A write may return status:pending (invisible to everyone until a " +
       "human approves it); the model cannot approve its own proposal. Refusals include a " +
       "request_access hint.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        collection: { type: "string" },
-        id: { type: "string", description: "Document id (pk)." },
-        values: { type: "object", description: "Fields to update." },
-        expect: {
-          type: "string",
-          description: "Optional revision to enforce optimistic concurrency.",
-        },
+    inputSchema: advertise(
+      MutationIntentSchema.options[1],
+      {
+        id: "Document id (pk).",
+        values: "Fields to update.",
+        expect: "Optional revision to enforce optimistic concurrency.",
       },
-      required: ["collection", "id", "values"],
-    },
+      { omit: ["op"] },
+    ),
     handler: async (ctx, input) => mutateChecked(ctx, { ...input, op: "update" }),
   },
   {
@@ -257,18 +244,14 @@ export const TOOLS: ToolDef[] = [
       "delete grant. A write may return status:pending (invisible to everyone until a human " +
       "approves it); the model cannot approve its own proposal. Refusals include a " +
       "request_access hint.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        collection: { type: "string" },
-        id: { type: "string", description: "Document id (pk)." },
-        expect: {
-          type: "string",
-          description: "Optional revision to enforce optimistic concurrency.",
-        },
+    inputSchema: advertise(
+      MutationIntentSchema.options[2],
+      {
+        id: "Document id (pk).",
+        expect: "Optional revision to enforce optimistic concurrency.",
       },
-      required: ["collection", "id"],
-    },
+      { omit: ["op"] },
+    ),
     handler: async (ctx, input) => mutateChecked(ctx, { ...input, op: "delete" }),
   },
   {
