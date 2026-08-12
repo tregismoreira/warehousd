@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { REFUSAL_REASONS, MUTATION_REFUSAL_REASONS, ACL_REFUSAL_REASONS } from "@warehousd/broker";
+import {
+  REFUSAL_REASONS,
+  MUTATION_REFUSAL_REASONS,
+  ACL_REFUSAL_REASONS,
+  GRANT_REQUEST_ERRORS,
+} from "@warehousd/broker";
 
 // A document's fields are per-deployment config. A spec cannot enumerate them, and must not try:
 // the field names of a deployment are exactly what a grant decides who may see.
@@ -199,6 +204,11 @@ export const GrantRequestBodySchema = z.object({
   fields: z.array(z.string()).optional(),
 });
 export const GrantRequestCreatedSchema = z.object({ ok: z.literal(true), requestId: z.string() });
+
+// requestGrant's own validation errors (grants/manage.ts's GrantRequestError) — a distinct type
+// from the broker's refusal reasons, never routed through restStatus(). See routes.ts's
+// grantRequestErrors flag.
+export const GrantRequestErrorSchema = z.object({ error: z.enum(GRANT_REQUEST_ERRORS) });
 
 // PUT /v1/collections/{c}/documents/{id}/acl
 export const SetAclBodySchema = z.object({ principals: z.array(z.string()) });

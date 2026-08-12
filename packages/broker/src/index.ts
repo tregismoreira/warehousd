@@ -13,6 +13,7 @@ export {
   FILTER_OPS,
   AGGREGATE_FNS,
   describeIntentError,
+  Ident,
 } from "./intents/schema";
 export { createPools, onPoolError, type Pools, withOrg, writePool } from "./db/pools";
 export {

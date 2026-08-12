@@ -12,8 +12,13 @@ import { DEFAULT_ORG_ID } from "../db/migrate-app";
 import { isPrincipal, userPrincipal, GROUP_PREFIX, USER_PREFIX } from "../acl/principals";
 import { validateGrantFilters } from "./filters";
 
-export type GrantRequestError =
-  "unknown_collection" | "purpose_required" | "field_not_grantable" | "invalid_principal";
+export const GRANT_REQUEST_ERRORS = [
+  "unknown_collection",
+  "purpose_required",
+  "field_not_grantable",
+  "invalid_principal",
+] as const;
+export type GrantRequestError = (typeof GRANT_REQUEST_ERRORS)[number];
 
 export const GRANT_VERBS = ["read", "create", "update", "delete", "approve"] as const;
 export type GrantVerb = (typeof GRANT_VERBS)[number];
