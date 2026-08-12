@@ -236,7 +236,7 @@ Refused for that reason: a `json` field (jsonb equality is structural, and the p
 
 ## Workspaces and tenant isolation
 
-Every deployment has at least one workspace. One Postgres, one deployment, N workspaces — a workspace is a tenant, not a new scope level. An existing single-tenant install gets one implicit workspace, `default`, created at bootstrap, and behaves exactly as it did before — `workspace_id` defaults to it on every table.
+Every deployment has at least one workspace. One Postgres, one deployment, N workspaces — a workspace is a tenant, not a new scope level. An existing single-tenant install gets one implicit workspace, `default`, created at bootstrap, and behaves exactly as it did before — `workspace_id` defaults to it on every table. For provisioning workspaces from a consuming application rather than by hand, see [multi-tenancy.md](multi-tenancy.md).
 
 `workspace_id` is on `app.collections`, `app.grants`, `app.audit_events`, `app.client_policies`, `app.client_secrets`, `app.trusted_issuers`, `app.user_groups`, `app.change_log`, `app.workspace_members`, Better Auth's `user`, and every data table in `data_synth` / `data_live`. Grant lookup keys on `(workspace_id, user_id, collection, env)`.
 

@@ -18,8 +18,7 @@
 
 ---
 
-> [!WARNING] **0.1.0-rc.1 is a release candidate, and is not meant to be used in production.** The code is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](SECURITY.md).
->[docs/status.md](docs/status.md) gives a per-component verdict checked against the code.
+> [!WARNING] **0.1.0-rc.1 is a release candidate, and is not meant to be used in production.** The code is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](SECURITY.md). [docs/status.md](docs/status.md) gives a per-component verdict checked against the code.
 
 Connecting an LLM to real company data usually means handing it a database connection and hoping the prompt holds — **warehousd** replaces hope with enforcement: every request from an assistant is a **proposal** that a server-side broker re-validates against deny-by-default field postures and purpose-bound, expiring grants before a single row is read.
 
@@ -53,7 +52,7 @@ npx warehousd start     # starts Postgres + server, applies config, seeds synthe
 
 Then connect an assistant: in Claude, **Settings → Connectors → Add custom connector**, paste the MCP URL, and complete the OAuth flow. With SSO configured, that login step delegates to your IdP — connecting Claude is "log in with your company account," never a new password.
 
-Walkthroughs: [connect-claude.md](docs/connect-claude.md) · [configure-sso.md](docs/configure-sso.md) · [CLI reference](docs/cli.md) · [configuration reference](docs/configuration.md)
+Walkthroughs: [connect-claude.md](docs/connect-claude.md) · [configure-sso.md](docs/configure-sso.md) · [multi-tenancy.md](docs/multi-tenancy.md) · [CLI reference](docs/cli.md) · [configuration reference](docs/configuration.md)
 
 ## Configuration
 
@@ -199,7 +198,7 @@ Everything listed in this README is implemented. Two exceptions, tracked in [doc
 - **Database provisioning through a provider CLI** — *real* for Neon, *partial* for Supabase. Neon returns a connection URI; Supabase prints none, so warehousd assembles the pooler string from the ref, region and generated password, and the pre-flight's `db-reachable` is what confirms it.
 - **SCIM and compliance exports** — *not built*.
 
-**Multi-tenancy (`workspace_id`)** is `real`: a deployment hosts many workspaces, a user may belong to several with a role per workspace resolved from the session, the console has a switcher and a per-workspace Members page, and a consuming application can provision workspaces and clients through `/v1/platform/*`, behind a platform key and off by default.
+**Multi-tenancy (`workspace_id`)** is `real`: a deployment hosts many workspaces, a user may belong to several with a role per workspace resolved from the session, the console has a switcher and a per-workspace Members page, and a consuming application can provision workspaces and clients through `/v1/platform/*`, behind a platform key and off by default. Provisioning walkthrough: [multi-tenancy.md](docs/multi-tenancy.md).
 
 ## Contributing
 
@@ -221,6 +220,7 @@ Consumers never need this. To work on warehousd itself, [CONTRIBUTING.md](CONTRI
 | [docs/configuration.md](docs/configuration.md) | Every key in `warehousd.yml` |
 | [docs/connect-claude.md](docs/connect-claude.md) | Adding the MCP connector end to end |
 | [docs/configure-sso.md](docs/configure-sso.md) | Registering an OIDC or SAML IdP |
+| [docs/multi-tenancy.md](docs/multi-tenancy.md) | Provisioning workspaces, clients and members from `/v1/platform/*` |
 | [docs/rest-api.md](docs/rest-api.md) | `/v1` endpoints, auth flows, status codes |
 | [docs/migrations.md](docs/migrations.md) | Schema changes `apply` will not make on its own |
 | [docs/deploy-fly.md](docs/deploy-fly.md) · [railway](docs/deploy-railway.md) · [compose](docs/deploy-compose.md) | End-to-end deployment runbooks |
