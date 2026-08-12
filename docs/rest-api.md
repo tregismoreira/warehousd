@@ -4,33 +4,42 @@ A thin HTTP adapter for programmatic access to collections, governed by the same
 
 ## Endpoints
 
-| Method | Path | Broker call | Description | Success status |
-|---|---|---|---|---|
-| POST | `/v1/token` | (auth, not a broker call) | Mint access & refresh tokens via `client_credentials` or token exchange | 200 |
-| GET | `/v1/collections` | `listCollections` | List collection names and descriptions only | 200 |
-| GET | `/v1/collections/{c}` | `describeCollection` | Full schema of one collection, granted fields only | 200 |
-| POST | `/v1/collections/{c}/documents` | `mutate` (create) | Create a document | 201 (direct), 202 (pending) |
-| GET | `/v1/collections/{c}/documents/{id}` | `getDocument` | Fetch one document, full granted field set | 200 |
-| PUT | `/v1/collections/{c}/documents/{id}` | `mutate` (update) | Update a document; `If-Match: "{rev}"` for optimistic concurrency | 200 (direct), 202 (pending), 409/412 (conflict) |
-| DELETE | `/v1/collections/{c}/documents/{id}` | `mutate` (delete) | Delete a document | 204 (direct), 202 (pending) |
-| GET | `/v1/collections/{c}/documents/{id}/revisions` | `listRevisions` | Revision history of one document | 200 |
-| GET | `/v1/collections/{c}/documents/{id}/acl` | `getDocumentAcl` | The document's ACL; empty principals means public within the grant. `{id}` is the primary key on a dataset and the url-encoded `path` on a file collection | 200 |
-| PUT | `/v1/collections/{c}/documents/{id}/acl` | `setDocumentAcl` | Replace the ACL (`{"principals":["user:…","group:…"]}`); an empty list removes it | 200 |
-| DELETE | `/v1/collections/{c}/documents/{id}/acl` | `setDocumentAcl` | Remove the ACL — the document is public within the grant again | 200 |
-| POST | `/v1/collections/{c}/query` | `query` | Structured query: filters, ordering, aggregation, grouping | 200 |
-| GET | `/v1/collections/{c}/search` | `searchDocuments` | Full-text search over a file collection (query params: `q`, `limit`, `offset`, `fields`) | 200 |
-| GET | `/v1/proposals` | `listProposals` | List pending/approved/rejected proposals (query params: `status`, `collection`) | 200 |
-| POST | `/v1/proposals/{id}/approve` | `approveProposal` | Approve a proposal | 200, 409 (conflict) |
-| POST | `/v1/proposals/{id}/reject` | `rejectProposal` | Reject a proposal | 200 |
-| GET | `/v1/changes` | `changes` | Change feed: document mutations for this org/env (query params: `since`, `limit`) | 200 |
-| GET | `/v1/grants` | (custom) | List grants for the authenticated user | 200 |
-| POST | `/v1/grants` | (custom) | Request access to a collection | 201 |
+The machine-readable contract is [`docs/openapi.json`](openapi.json), generated from the same zod schemas the routes below enforce and served live at `GET /v1/openapi.json` — request bodies, every documented status, and the reason code behind each 4xx/5xx belong there, not in this table. This table stays as an at-a-glance index.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/v1/token` | Mint access & refresh tokens via `client_credentials` or token exchange |
+| GET | `/v1/collections` | List collection names and descriptions only |
+| GET | `/v1/collections/{c}` | Full schema of one collection, granted fields only |
+| POST | `/v1/collections/{c}/documents` | Create a document |
+| GET | `/v1/collections/{c}/documents/{id}` | Fetch one document, full granted field set |
+| PUT | `/v1/collections/{c}/documents/{id}` | Update a document; `If-Match: "{rev}"` for optimistic concurrency |
+| DELETE | `/v1/collections/{c}/documents/{id}` | Delete a document |
+| GET | `/v1/collections/{c}/documents/{id}/revisions` | Revision history of one document |
+| GET | `/v1/collections/{c}/documents/{id}/acl` | The document's ACL; empty principals means public within the grant. `{id}` is the primary key on a dataset and the url-encoded `path` on a file collection |
+| PUT | `/v1/collections/{c}/documents/{id}/acl` | Replace the ACL (`{"principals":["user:…","group:…"]}`); an empty list removes it |
+| DELETE | `/v1/collections/{c}/documents/{id}/acl` | Remove the ACL — the document is public within the grant again |
+| POST | `/v1/collections/{c}/query` | Structured query: filters, ordering, aggregation, grouping |
+| GET | `/v1/collections/{c}/search` | Full-text search over a file collection (query params: `q`, `limit`, `offset`, `fields`) |
+| GET | `/v1/proposals` | List pending/approved/rejected proposals (query params: `status`, `collection`) |
+| POST | `/v1/proposals/{id}/approve` | Approve a proposal |
+| POST | `/v1/proposals/{id}/reject` | Reject a proposal |
+| GET | `/v1/changes` | Change feed: document mutations for this org/env (query params: `since`, `limit`) |
+| GET | `/v1/grants` | List grants for the authenticated user |
+| POST | `/v1/grants` | Request access to a collection |
 
 **There is deliberately no `GET /v1/proposals/{id}`.** `listProposals` returns no field values, so reading the *proposed content* of a single proposal is a separate, more privileged call — `broker.getProposal`, reachable only through the console's session route `GET /api/proposals/{id}`. Reviewing proposed content is a console-only surface. Exposing it over `/v1` would be a new public API commitment rather than a gap to close, so it is left to its own decision.
 
+## Known warts
+
+The spec documents these two shapes faithfully rather than prettying them up, so they are recorded here as known rather than surprising.
+
+- **`GET /v1/collections/{c}/search` accepts no `mode`.** The route builds its search intent without one (`apps/web/app/v1/collections/[c]/search/route.ts`), so semantic and hybrid search are reachable over MCP's `search_documents` only, never over `/v1`. The query parameters the route actually reads are `q`, `fields`, `limit`, `offset`.
+- **`GET /v1/grants` is a `select *` from `app.grants`.** The response is every column that table has today, plus three computed fields (`effectiveStatus`, `collectionType`, `taxonomyFields`), and the spec's schema deliberately leaves `additionalProperties: true` open on it — a future migration that adds a column widens this response with no code change and no spec change to catch it.
+
 ## Status codes and reasons
 
-All refusals return a `reason` code; never a denied field value, never SQL. `/v1/token` uses a separate, OAuth-standard error-code scheme (`invalid_request`, `invalid_client`, `unauthorized_client`, `invalid_grant`, `unsupported_grant_type`, `server_error`) rather than the broker refusal reasons below — the two tables do not share a mapping function.
+All refusals return a `reason` code; never a denied field value, never SQL. `/v1/token` uses a separate, OAuth-standard error-code scheme (`invalid_request`, `invalid_client`, `unauthorized_client`, `invalid_grant`, `unsupported_grant_type`, `slow_down`, `invalid_scope`, `server_error`) rather than the broker refusal reasons below — the two tables do not share a mapping function.
 
 **Data routes** (`/v1/collections/...`, `/v1/proposals/...`, `/v1/grants`, `/v1/changes`) — mapped by `restStatus()`:
 
@@ -58,7 +67,9 @@ All refusals return a `reason` code; never a denied field value, never SQL. `/v1
 | 400 | `unauthorized_client` | Grant type doesn't match the client's mode (e.g. a `delegated` client using `client_credentials`). |
 | 400 | `invalid_grant` | Subject token invalid, issuer unregistered, or subject unresolvable/cross-org. |
 | 400 | `unsupported_grant_type` | `grant_type` is neither `client_credentials` nor the token-exchange URN. |
+| 400 | `invalid_scope` | The client's policy allows no environment the caller can be issued. |
 | 401 | `invalid_client` | Client authentication failed. |
+| 429 | `slow_down` | Too many attempts for this `client_id`; `retry-after` names the wait in seconds. |
 | 500 | `server_error` | Token could not be minted; reason code only — no details exposed. |
 
 **Special case: conflict detection.** A mutation with an `If-Match: "{rev}"` header that conflicts returns 412 (Precondition Failed), while a conflict without the header returns 409 (Conflict). Both carry `reason: "conflict"` in the JSON response body.

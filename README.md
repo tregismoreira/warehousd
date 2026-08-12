@@ -169,7 +169,7 @@ One OAuth-protected endpoint at `/mcp`, streamable HTTP, nine tools:
 
 **There is deliberately no `approve` or `reject` tool.** The untrusted model may propose; only an authenticated human may approve. A write under a `proposal_only` grant returns `pending`, and pending content is invisible to everyone — including its own author — until a human approves it.
 
-Refusals return reason codes (`no_grant`, `field_denied`, …) plus a request-access hint — never a denied value, never SQL.
+Refusals return reason codes (`no_grant`, `field_denied`, …) plus a request-access hint — never a denied value, never SQL. Full tool reference, transport details and what is deliberately absent: [mcp.md](docs/mcp.md).
 
 ## REST surface
 
@@ -223,6 +223,7 @@ Consumers never need this. To work on warehousd itself, [CONTRIBUTING.md](CONTRI
 | [docs/connect-claude.md](docs/connect-claude.md) | Adding the MCP connector end to end |
 | [docs/configure-sso.md](docs/configure-sso.md) | Registering an OIDC or SAML IdP |
 | [docs/rest-api.md](docs/rest-api.md) | `/v1` endpoints, auth flows, status codes |
+| [docs/mcp.md](docs/mcp.md) | The nine MCP tools, refusal reasons, what is deliberately absent |
 | [docs/migrations.md](docs/migrations.md) | Schema changes `apply` will not make on its own |
 | [docs/deploy-fly.md](docs/deploy-fly.md) · [railway](docs/deploy-railway.md) · [compose](docs/deploy-compose.md) | End-to-end deployment runbooks |
 | [docs/deploy-database.md](docs/deploy-database.md) | Having warehousd create the database on Supabase or Neon, or pointing a deployment at one you already run |
