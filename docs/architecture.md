@@ -210,7 +210,7 @@ const ctx: BrokerContext = { userId: token.sub, workspaceId, env };
 
 A `type: file` collection points at a directory of `.md`/`.txt` files. Its grantable schema includes five fixed fields — `title`, `content`, `path`, `owner`, `updated_at` (plus any bound taxonomy fields) — and additional metadata fields declared in the YAML `fields` block. Metadata fields are populated from frontmatter in the source files.
 
-**Storage.** Per environment and collection: a `{collection}__files` table (one row per source file, `path` unique as the upsert key, `checksum` for idempotent re-index) and a `{collection}__documents` table (segments of ~500–1000 characters with overlap, a generated `tsv` column with a GIN index, and a reserved `embedding vector(1536)` column that nothing populates yet). The queryable surface is, as always, the view `v_{collection}` — one row per document with file metadata joined on. Collection names may not contain `__`, which is reserved for these tables.
+**Storage.** Per environment and collection: a `{collection}__files` table (one row per source file, `(workspace_id, path)` unique as the upsert key — two tenants may index a file at the same path — `checksum` for idempotent re-index) and a `{collection}__documents` table (segments of ~500–1000 characters with overlap, a generated `tsv` column with a GIN index, and a reserved `embedding vector(1536)` column that nothing populates yet). The queryable surface is, as always, the view `v_{collection}` — one row per document with file metadata joined on. Collection names may not contain `__`, which is reserved for these tables.
 
 **Indexing.** The indexer scans the environment-appropriate source directory, extracts text (title from the first heading or the filename, owner from frontmatter, updated_at from mtime), segments it into documents, and upserts — skipping unchanged files by checksum and deleting rows for files removed from disk. `source` is _dev_ content by definition; live content is indexed only by an explicit `--env live` with `source_live` or `--source`. The CLI never indexes one directory into both environments.
 
@@ -339,7 +339,7 @@ create unique index on data_live.pages (workspace_id, id) where _current;
 - **Delete is a tombstone revision.** No `DELETE` privilege is granted anywhere, and the view's `_rev_op <> 'delete'` predicate makes the document disappear from reads while the history stays.
 - **`_rev*` and `workspace_id` can never be granted.** They are not in `warehousd.yml`, so no grant can name them and `describe_collection` never shows them. Bookkeeping is invisible to the query surface for free, with no filtering code.
 
-**File collections keep their existing shape.** No revision columns, no migration: a `create` appends a file row plus its derived chunks, `path` stays unique so a repeat is a `conflict`, and chunks are never re-derived — which is why the "search still returns pre-edit text" bug class cannot occur here.
+**File collections keep their existing shape.** No revision columns, no migration: a `create` appends a file row plus its derived chunks, `path` stays unique within the workspace so a repeat is a `conflict`, and chunks are never re-derived — which is why the "search still returns pre-edit text" bug class cannot occur here.
 
 Turning `writable: true` on over a collection that already has a plain table **fails the apply** with an operator-facing error. Migrating existing rows into revisions is deferred, and silently emitting a table that cannot hold a revision would be worse than refusing.
 
