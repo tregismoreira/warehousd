@@ -26,7 +26,11 @@ export const SERIAL_TESTS = [
 
 export default defineConfig({
   test: {
-    include: ["packages/**/test/**/*.test.ts", "apps/**/test/**/*.test.ts"],
+    include: [
+      "packages/**/test/**/*.test.ts",
+      "apps/**/test/**/*.test.ts",
+      "scripts/**/test/**/*.test.ts",
+    ],
     exclude: ["**/e2e/**", "**/node_modules/**", ...SERIAL_TESTS],
     globalSetup: ["./vitest.global-setup.ts"],
     // Options only — `coverage.enabled` stays false until `--coverage` is passed, so a plain

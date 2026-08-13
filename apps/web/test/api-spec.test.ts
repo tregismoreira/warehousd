@@ -35,6 +35,47 @@ describe("api-spec: regeneration", () => {
   });
 });
 
+describe("api-spec: integer parameter bounds", () => {
+  // z.number().int() with no explicit bound renders minimum/maximum at the JS safe-integer range —
+  // an artifact of the type, not a declared business bound. limit/offset/since are all clamped by
+  // buildSelect (Math.min/Math.max, 500), never rejected, so a "maximum" in the schema would imply
+  // an oversized value is a validation error, which it is not. This pins the strip: it fails the
+  // moment stripIncidentalIntBounds regresses or a new integer param picks up the bound unnoticed.
+  it("limit, offset, and since carry no minimum or maximum", () => {
+    const doc = buildOpenApiDoc() as {
+      paths: Record<
+        string,
+        Record<string, { parameters?: { name: string; schema: Record<string, unknown> }[] }>
+      >;
+    };
+
+    const bounded: string[] = [];
+    for (const [pathName, methods] of Object.entries(doc.paths)) {
+      for (const [method, operation] of Object.entries(methods)) {
+        for (const param of operation.parameters ?? []) {
+          if (!["limit", "offset", "since"].includes(param.name)) continue;
+          if ("minimum" in param.schema || "maximum" in param.schema) {
+            bounded.push(`${method.toUpperCase()} ${pathName} (${param.name})`);
+          }
+        }
+      }
+    }
+    expect(bounded).toEqual([]);
+
+    // The check above is only meaningful if it actually found these parameters somewhere — an
+    // empty result could otherwise mean nothing matched at all.
+    const names = new Set<string>();
+    for (const methods of Object.values(doc.paths)) {
+      for (const operation of Object.values(methods)) {
+        for (const param of operation.parameters ?? []) names.add(param.name);
+      }
+    }
+    expect(names.has("limit")).toBe(true);
+    expect(names.has("offset")).toBe(true);
+    expect(names.has("since")).toBe(true);
+  });
+});
+
 describe("api-spec: coverage", () => {
   function routeFiles(dir: string): string[] {
     const out: string[] = [];
