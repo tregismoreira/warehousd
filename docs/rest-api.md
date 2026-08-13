@@ -4,7 +4,7 @@ A thin HTTP adapter for programmatic access to collections, governed by the same
 
 ## Endpoints
 
-The machine-readable contract is [`docs/openapi.json`](openapi.json), generated from the same zod schemas the routes below enforce and served live at `GET /v1/openapi.json` — request bodies, every documented status, and the reason code behind each 4xx/5xx belong there, not in this table. This table stays as an at-a-glance index.
+The machine-readable contract is [`docs/openapi.json`](openapi.json), generated from the same zod schemas the routes below enforce and served live at `GET /v1/openapi.json` — request bodies, every documented status, and the reason code behind each 4xx/5xx belong there, not in this table. Browse it rendered at `GET /v1/docs` (a [Scalar](https://github.com/scalar/scalar) reference, unauthenticated like the raw document). This table stays as an at-a-glance index.
 
 | Method | Path | Description |
 |---|---|---|

@@ -14,6 +14,7 @@ import { buildMcpManifest } from "../lib/api-schema/mcp-manifest";
 import { OPERATIONS } from "../lib/api-schema/routes";
 import { restStatus } from "../lib/rest";
 import { GET as openapiRoute } from "../app/v1/openapi.json/route";
+import { GET as docsRoute } from "../app/v1/docs/route";
 import openapiCommitted from "../../../docs/openapi.json";
 import mcpToolsCommitted from "../../../docs/mcp-tools.json";
 
@@ -159,5 +160,13 @@ describe("api-spec: served route", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual(openapiCommitted);
+  });
+
+  it("/v1/docs renders the reference UI with no Authorization header", async () => {
+    const res = docsRoute();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain("/v1/openapi.json");
   });
 });
