@@ -8,7 +8,7 @@
 # 24 is the active LTS line, maintained to 2028-04-30. Majors are chosen by hand rather than
 # followed — dependabot offered 25, which is a six-month release that went end-of-life on
 # 2026-06-01, so taking it would have moved the published image onto an unmaintained line.
-FROM node:24-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7 AS builder
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS builder
 # Not `corepack enable`: node 25 stopped distributing corepack entirely (nodejs/node#57617), and
 # it is deprecated in 24. Installing pnpm the same way the runner stage does keeps the two stages
 # on one mechanism and takes the next major bump off the critical path.
@@ -17,7 +17,7 @@ WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm --filter @warehousd/web build
 
-FROM node:24-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7 AS runner
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runner
 RUN npm install -g pnpm@10.33.0
 WORKDIR /app
 
