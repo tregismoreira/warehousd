@@ -39,14 +39,14 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "pg": "^8.13.0",
+    "pg": "^8.23.0",
     "unpdf": "^1.8.0",
-    "mammoth": "^1.12.0"
+    "mammoth": "^1.12.1"
   },
   "devDependencies": {
     "@clack/prompts": "^1.7.0",
     "@types/node": "^26.1.2",
-    "@types/pg": "^8.20.3",
+    "@types/pg": "^8.21.0",
     "@warehousd/broker": "workspace:*",
     "@warehousd/providers": "workspace:*",
     "commander": "^15.0.0",
