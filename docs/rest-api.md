@@ -36,6 +36,7 @@ The spec documents these two shapes faithfully rather than prettying them up, so
 
 - **`GET /v1/collections/{c}/search` accepts no `mode`.** The route builds its search intent without one (`apps/web/app/v1/collections/[c]/search/route.ts`), so semantic and hybrid search are reachable over MCP's `search_documents` only, never over `/v1`. The query parameters the route actually reads are `q`, `fields`, `limit`, `offset`.
 - **`GET /v1/grants` is a `select *` from `app.grants`.** The response is every column that table has today, plus three computed fields (`effectiveStatus`, `collectionType`, `taxonomyFields`), and the spec's schema deliberately leaves `additionalProperties: true` open on it — a future migration that adds a column widens this response with no code change and no spec change to catch it.
+- **`/v1/platform/workspaces/...` is entirely absent from the spec.** It is a separate control-plane API — bearer-token auth via `derivePlatformCaller`, not OAuth; hand-rolled JSON error bodies, not `RefusalReason`; no zod schema anywhere in the five routes under `apps/web/app/v1/platform/`. This generator only derives a schema from a route's own enforced validation, so there is nothing to source from without hand-writing shapes that would drift from the routes instead of being generated from them.
 
 ## Status codes and reasons
 

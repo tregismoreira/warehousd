@@ -58,10 +58,17 @@ describe("api-spec: coverage", () => {
     // Excluded by name, not by a pattern that could silently swallow a future route: this route
     // serves the spec itself and documents nothing about itself.
     const EXCLUDED = path.join(V1_APP_DIR, "openapi.json", "route.ts");
+    // Excluded by directory, deliberately: platform/ is a separate control-plane API (bearer-token
+    // auth via derivePlatformCaller, hand-rolled JSON error bodies) with no zod schema anywhere in
+    // it, so this generator — which only derives a schema from a route's own enforced validation —
+    // has nothing to source from. Hand-writing shapes for it here would duplicate the routes rather
+    // than being generated from them, the exact drift this generator exists to prevent. Tracked as
+    // follow-up work, not silently dropped.
+    const PLATFORM_DIR = path.join(V1_APP_DIR, "platform") + path.sep;
 
     const fromRoutes = new Set<string>();
     for (const file of routeFiles(V1_APP_DIR)) {
-      if (file === EXCLUDED) continue;
+      if (file === EXCLUDED || file.startsWith(PLATFORM_DIR)) continue;
       const source = readFileSync(file, "utf8");
       const methods = [
         ...source.matchAll(/export\s+(?:async\s+)?function\s+(GET|POST|PUT|DELETE|PATCH)\b/g),
