@@ -13,6 +13,7 @@ export {
   FILTER_OPS,
   AGGREGATE_FNS,
   describeIntentError,
+  Ident,
 } from "./intents/schema";
 export { createPools, onPoolError, type Pools, withWorkspace, writePool } from "./db/pools";
 export {
@@ -104,6 +105,7 @@ export {
   type GroupSource,
   type GetAclResult,
   type SetAclResult,
+  ACL_REFUSAL_REASONS,
   type AclRefusalReason,
 } from "./acl/manage";
 export {

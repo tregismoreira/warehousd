@@ -92,6 +92,8 @@ list_collections
 
 **Expected:** returns collection names + descriptions the signed-in user has at least some visibility into (deny-by-default still applies — a fresh member with zero grants sees names only, no data).
 
+For the full tool reference — all nine tools, their refusal reasons, and what is deliberately absent — see [mcp.md](mcp.md).
+
 ## 5. Denied-field probe
 
 Ask Claude to query a field the signed-in user does **not** have a grant for (e.g. a `people` query requesting `email` when the grant excludes it).

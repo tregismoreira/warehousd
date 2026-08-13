@@ -18,6 +18,7 @@ WAREHOUSD_PROJECT_DIR=examples/harbor pnpm test    # parallel pass, then serial 
 pnpm lint
 pnpm typecheck                                     # src + test + e2e + scripts
 pnpm format:check                                  # Prettier, code only
+pnpm spec                                          # regenerate docs/openapi.json, docs/mcp-tools.json
 pnpm build                                         # production build
 pnpm e2e                                           # Playwright, real browser
 ```

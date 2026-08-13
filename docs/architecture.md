@@ -685,19 +685,11 @@ Collection DDL is **not** versioned, and that distinction matters. Re-applying c
 
 ## The MCP surface
 
-One OAuth-protected endpoint at `/mcp`, streamable HTTP.
-
-| Tool                  | Behavior                                                              |
-| --------------------- | --------------------------------------------------------------------- |
-| `list_collections`    | Names, descriptions, and whether the CALLER holds a read grant (plus how many fields it carries). No schema, no counts, no other caller's access. |
-| `describe_collection` | Only the fields visible under the caller's grants.                    |
-| `query_collection`    | Filters, ordering, limits, aggregation — re-validated, then executed. |
-| `search_documents`    | Ranked search, grant-filtered. Naming a collection searches it; omitting one fans out across every collection the caller may read and merges by reciprocal-rank fusion — one audit row per collection, refusals included. |
-| `request_access`      | Opens a pending grant request for a manager to approve.               |
+One OAuth-protected endpoint at `/mcp`, streamable HTTP. The full tool table — all nine tools, their refusal reasons, and what is deliberately absent and why — lives in one place, [`docs/mcp.md`](mcp.md), so it stays a single list rather than two that drift.
 
 Refusals return a reason code plus a request-access hint — never a denied value, never SQL. Tool descriptions state the governance model plainly: the model reading them is the first consumer of the security posture.
 
-Absent from the table on purpose, alongside `approve`/`reject`: **there is no tool for editing a document's ACL.** The model may propose a write and may ask for access; it may not decide who else can read something. See [Per-document ACLs](#per-document-acls).
+There is no tool for editing a document's ACL, and none for `approve`/`reject`. The model may propose a write and may ask for access; it may not decide who else can read something. See [Per-document ACLs](#per-document-acls).
 
 Clients find the authorization server through the standard discovery documents under `app/.well-known/`: `oauth-authorization-server` (RFC 8414) and `oauth-protected-resource` (RFC 9728). A connector needs only the `/mcp` URL — the rest is discovered.
 

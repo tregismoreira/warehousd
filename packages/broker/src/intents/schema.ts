@@ -27,7 +27,9 @@ import { z } from "zod";
 // identifier is a 400 naming the field rather than an internal_error: that quoting function
 // throws, and a throw is indistinguishable from a broker bug by design.
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
-const Ident = z.string().regex(IDENT, "must match [a-z_][a-z0-9_]*");
+// Exported so the OpenAPI generator can source the `c` path parameter's schema from here rather
+// than retyping the pattern — see apps/web/lib/api-schema/routes.ts.
+export const Ident = z.string().regex(IDENT, "must match [a-z_][a-z0-9_]*");
 
 // Deliberately unconstrained: a filter compares against real column values, which may be a
 // string, a number, a boolean, a date literal or null. It is always a bound parameter, never

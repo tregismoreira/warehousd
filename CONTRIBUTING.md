@@ -111,6 +111,7 @@ Then:
 
 - One focused change per pull request; describe what invariant or behavior it affects.
 - Use the terminology in [docs/glossary.md](docs/glossary.md) — collection, document, field. Not table, row, item.
+- Run `pnpm spec` if you touched a `/v1` route, an intent schema, or an MCP tool, and commit the regenerated `docs/openapi.json` / `docs/mcp-tools.json` — `pnpm test` fails otherwise, since both are checked against the code that generates them.
 - Do not report security vulnerabilities through a pull request or issue. See [SECURITY.md](SECURITY.md).
 
 ## Repository layout

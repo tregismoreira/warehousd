@@ -16,6 +16,7 @@ HTML = re.compile(r"^\s*<")
 LINKREF = re.compile(r"^\s{0,3}\[[^\]]+\]:\s")
 BULLET = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+")
 QUOTE = re.compile(r"^(\s*>\s?)")
+ALERT = re.compile(r"^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$")
 
 
 def is_structural(line: str) -> bool:
@@ -66,9 +67,22 @@ def unwrap(text: str) -> str:
         # A blockquote folds within itself, keeping one prefix.
         if QUOTE.match(line):
             prefix = QUOTE.match(line).group(1)
-            buf = [line[len(prefix):].strip()]
+            content = line[len(prefix):].strip()
+            # A GFM alert marker (`> [!WARNING]`) and a bare `>` separator must stay
+            # alone on their own line — folding either into the next line breaks the
+            # alert's rendering or erases the paragraph break within the quote.
+            if not content or ALERT.match(content):
+                out.append(line.rstrip())
+                i += 1
+                continue
+            buf = [content]
             i += 1
-            while i < n and QUOTE.match(lines[i]) and lines[i].strip() not in (">", ""):
+            while (
+                i < n
+                and QUOTE.match(lines[i])
+                and lines[i].strip() not in (">", "")
+                and not ALERT.match(QUOTE.sub("", lines[i], count=1).strip())
+            ):
                 buf.append(QUOTE.sub("", lines[i], count=1).strip())
                 i += 1
             out.append(prefix + " ".join(b for b in buf if b))

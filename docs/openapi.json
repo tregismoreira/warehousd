@@ -1,0 +1,2406 @@
+{
+  "openapi": "3.1.1",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "REST API (/v1)",
+    "version": "0.1.0-rc.1",
+    "description": "A thin HTTP adapter for programmatic access to collections, governed by the same broker that powers the MCP server and web UI.",
+    "license": { "name": "Apache-2.0", "identifier": "Apache-2.0" }
+  },
+  "servers": [
+    {
+      "url": "{baseUrl}",
+      "variables": {
+        "baseUrl": {
+          "default": "http://localhost:8722",
+          "description": "This deployment's BETTER_AUTH_URL."
+        }
+      }
+    }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "tags": [
+    { "name": "auth", "description": "Minting an access token." },
+    { "name": "collections", "description": "Discovering what a caller may read." },
+    { "name": "data", "description": "Reading, searching, and mutating documents." },
+    { "name": "history", "description": "Revisions and the org/env change feed." },
+    {
+      "name": "acl",
+      "description": "Per-document access control. Authorised against the caller's standing, not a grant."
+    },
+    {
+      "name": "proposals",
+      "description": "Deciding on a pending write. There is deliberately no GET /v1/proposals/{id} — reviewing a proposal's proposed content is a console-only surface, not part of this public commitment."
+    },
+    { "name": "grants", "description": "Requesting and listing access grants." }
+  ],
+  "paths": {
+    "/v1/changes": {
+      "get": {
+        "operationId": "listChanges",
+        "summary": "Change feed",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Sequence number to start after.",
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Capped, not rejected: default 100, max 500.",
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document mutations for this org/env.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ChangesResponse" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["expired_grant", "no_grant"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["unknown_collection"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections": {
+      "get": {
+        "operationId": "listCollections",
+        "summary": "List collections visible to the caller",
+        "tags": ["collections"],
+        "responses": {
+          "200": {
+            "description": "Names and descriptions of every collection within the caller's ceiling.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": { "type": "string" },
+                      "description": { "type": "string" },
+                      "access": { "type": "string", "enum": ["granted", "none"] },
+                      "grantedFields": { "type": "number" }
+                    },
+                    "required": ["name", "description", "access"],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["expired_grant", "no_grant"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["unknown_collection"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections/{c}": {
+      "get": {
+        "operationId": "describeCollection",
+        "summary": "Describe one collection's granted fields",
+        "tags": ["collections"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The collection's visible schema.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VisibleSchema" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, field_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_denied", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["unknown_collection"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections/{c}/documents": {
+      "post": {
+        "operationId": "createDocument",
+        "summary": "Create a document",
+        "tags": ["data"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A free-form map of field name to value — not a { values: … } wrapper, not a MutationIntent. Field names must match ^[a-z_][a-z0-9_]*$.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "propertyNames": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Applied immediately.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MutationApplied" } }
+            },
+            "headers": {
+              "Location": {
+                "description": "The created document's URL.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "202": {
+            "description": "Stored as a pending proposal.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MutationPending" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent, invalid_value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["invalid_intent", "invalid_value"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, verb_denied, field_not_writable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_not_writable", "no_grant", "verb_denied"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["unknown_collection"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Refusal: not_writable, verb_not_supported.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_writable", "verb_not_supported"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — no If-Match header was sent. reason: conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["conflict"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections/{c}/documents/{id}": {
+      "get": {
+        "operationId": "getDocument",
+        "summary": "Fetch one document",
+        "tags": ["data"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document, at its full granted field set.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GetDocumentResultOk" }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The document's rev, quoted per RFC 7232 (e.g. \"abc123\").",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, field_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_denied", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateDocument",
+        "summary": "Update a document",
+        "tags": ["data"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A free-form map of field name to value — not a { values: … } wrapper, not a MutationIntent. Field names must match ^[a-z_][a-z0-9_]*$. If-Match: \"{rev}\" selects optimistic concurrency.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "propertyNames": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied immediately.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MutationApplied" } }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The document's rev, quoted per RFC 7232 (e.g. \"abc123\").",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "202": {
+            "description": "Stored as a pending proposal.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MutationPending" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent, invalid_value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["invalid_intent", "invalid_value"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, verb_denied, field_not_writable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_not_writable", "no_grant", "verb_denied"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Refusal: not_writable, verb_not_supported.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_writable", "verb_not_supported"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — no If-Match header was sent. reason: conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["conflict"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Optimistic concurrency mismatch — If-Match did not match the document's current rev. reason: conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["conflict"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDocument",
+        "summary": "Delete a document",
+        "tags": ["data"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Stored as a pending proposal.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MutationPending" } }
+            }
+          },
+          "204": { "description": "Deleted immediately. No response body (RFC 7231 §6.3.5)." },
+          "400": {
+            "description": "Refusal: invalid_intent, invalid_value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["invalid_intent", "invalid_value"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, verb_denied, field_not_writable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_not_writable", "no_grant", "verb_denied"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Refusal: not_writable, verb_not_supported.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_writable", "verb_not_supported"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — no If-Match header was sent. reason: conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["conflict"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections/{c}/documents/{id}/acl": {
+      "get": {
+        "operationId": "getDocumentAcl",
+        "summary": "Read a document's ACL",
+        "tags": ["acl"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document's ACL.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/AclResultOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, acl_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["acl_denied", "expired_grant", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Refusal: not_writable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["not_writable"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setDocumentAcl",
+        "summary": "Replace a document's ACL",
+        "tags": ["acl"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "An empty principals list removes the ACL.",
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SetAclBody" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The document's ACL.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/AclResultOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent, invalid_value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["invalid_intent", "invalid_value"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, acl_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["acl_denied", "expired_grant", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Refusal: not_writable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["not_writable"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearDocumentAcl",
+        "summary": "Remove a document's ACL",
+        "tags": ["acl"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document is public within the grant again.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/AclResultOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, acl_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["acl_denied", "expired_grant", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Refusal: not_writable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["not_writable"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections/{c}/documents/{id}/revisions": {
+      "get": {
+        "operationId": "listRevisions",
+        "summary": "List a document's revision history",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document's revisions.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/RevisionsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["expired_grant", "no_grant"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections/{c}/query": {
+      "post": {
+        "operationId": "queryCollection",
+        "summary": "Structured query: filters, ordering, aggregation, grouping",
+        "tags": ["data"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The collection comes from the path, never the body.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fields": {
+                    "type": "array",
+                    "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+                  },
+                  "filters": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+                        "op": {
+                          "type": "string",
+                          "enum": ["eq", "neq", "gt", "lt", "gte", "lte", "like", "in"]
+                        },
+                        "value": {}
+                      },
+                      "required": ["field", "op", "value"]
+                    }
+                  },
+                  "orderBy": {
+                    "type": "object",
+                    "properties": {
+                      "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+                      "dir": { "type": "string", "enum": ["asc", "desc"] }
+                    },
+                    "required": ["field", "dir"]
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "aggregate": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fn": { "type": "string", "enum": ["avg", "sum", "count", "min", "max"] },
+                        "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+                      },
+                      "required": ["fn", "field"]
+                    }
+                  },
+                  "groupBy": {
+                    "type": "array",
+                    "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Matching documents.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BrokerResultOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, field_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_denied", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, unknown_field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["unknown_collection", "unknown_field"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections/{c}/search": {
+      "get": {
+        "operationId": "searchCollection",
+        "summary": "Full-text search over a collection",
+        "tags": ["data"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Search text.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "description": "Repeatable. Fields to return; defaults to every granted field.",
+            "schema": { "type": "array", "items": { "type": "string" } },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Capped, not rejected: default 100, max 500. An oversized limit succeeds and is clamped.",
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Pagination offset.",
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching documents.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BrokerResultOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, field_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_denied", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, unknown_field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["unknown_collection", "unknown_field"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/grants": {
+      "get": {
+        "operationId": "listGrants",
+        "summary": "List the caller's grants",
+        "tags": ["grants"],
+        "responses": {
+          "200": {
+            "description": "select * from app.grants for this caller, plus computed effectiveStatus/collectionType/taxonomyFields. additionalProperties is open on purpose — see docs/rest-api.md known warts.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GrantsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["expired_grant", "no_grant"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["unknown_collection"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "requestGrant",
+        "summary": "Request access to a collection",
+        "tags": ["grants"],
+        "requestBody": {
+          "required": true,
+          "description": "Validated by validateGrantRequest, not by the broker's intent schemas.",
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/GrantRequestBody" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Grant request recorded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GrantRequestCreated" }
+              }
+            }
+          },
+          "400": {
+            "description": "The request could not be validated.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GrantRequestError" } }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The collection does not exist.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GrantRequestError" } }
+            }
+          }
+        }
+      }
+    },
+    "/v1/proposals": {
+      "get": {
+        "operationId": "listProposals",
+        "summary": "List proposals",
+        "tags": ["proposals"],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by decision status.",
+            "schema": { "type": "string", "enum": ["pending", "approved", "rejected"] }
+          },
+          {
+            "name": "collection",
+            "in": "query",
+            "required": false,
+            "description": "Filter by collection.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching proposals.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProposalsResponse" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["expired_grant", "no_grant"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["unknown_collection"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/proposals/{id}/approve": {
+      "post": {
+        "operationId": "approveProposal",
+        "summary": "Approve a proposal",
+        "tags": ["proposals"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Proposal id.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document as written.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DecisionResultOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, self_approval_denied, verb_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "no_grant", "self_approval_denied", "verb_denied"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — no If-Match header was sent. reason: conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["conflict"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/proposals/{id}/reject": {
+      "post": {
+        "operationId": "rejectProposal",
+        "summary": "Reject a proposal",
+        "tags": ["proposals"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Proposal id.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rejected proposal's outcome.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DecisionResultOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, verb_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "no_grant", "verb_denied"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/token": {
+      "post": {
+        "operationId": "mintToken",
+        "summary": "Mint an access token",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "description": "application/x-www-form-urlencoded. Client authenticates with HTTP Basic (Authorization: Basic base64(client_id:client_secret)) OR the client_id/client_secret form fields above, never both.",
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "grant_type": {
+                    "type": "string",
+                    "enum": [
+                      "client_credentials",
+                      "urn:ietf:params:oauth:grant-type:token-exchange"
+                    ]
+                  },
+                  "scope": { "type": "string" },
+                  "client_id": { "type": "string" },
+                  "client_secret": { "type": "string" },
+                  "subject_token": { "type": "string" },
+                  "subject_token_type": {
+                    "type": "string",
+                    "const": "urn:ietf:params:oauth:token-type:jwt"
+                  }
+                },
+                "required": ["grant_type"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token issued.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/TokenResponse" } }
+            }
+          },
+          "400": {
+            "description": "OAuth-standard error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OAuthError" } }
+            }
+          },
+          "401": {
+            "description": "OAuth-standard error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OAuthError" } }
+            }
+          },
+          "429": {
+            "description": "Rate limited. `retry-after` names the wait in seconds.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OAuthError" } }
+            }
+          },
+          "500": {
+            "description": "OAuth-standard error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OAuthError" } }
+            }
+          }
+        },
+        "security": [{ "basicAuth": [] }]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AclResultOk": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "acl": {
+            "type": "object",
+            "properties": {
+              "collection": { "type": "string" },
+              "documentId": { "type": "string" },
+              "principals": { "type": "array", "items": { "type": "string" } },
+              "updatedAt": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "updatedBy": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+            },
+            "required": ["collection", "documentId", "principals", "updatedAt", "updatedBy"],
+            "additionalProperties": false
+          },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "acl", "auditId"],
+        "additionalProperties": false
+      },
+      "BrokerResultOk": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {}
+            }
+          },
+          "fieldsReturned": { "type": "array", "items": { "type": "string" } },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "collections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "collection": { "type": "string" },
+                "matched": { "type": "number" },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "no_grant",
+                        "expired_grant",
+                        "field_denied",
+                        "unknown_collection",
+                        "unknown_field",
+                        "invalid_intent",
+                        "internal_error",
+                        "not_found"
+                      ]
+                    },
+                    { "type": "null" }
+                  ]
+                },
+                "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+              },
+              "required": ["collection", "matched", "reason", "auditId"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["ok", "documents", "fieldsReturned", "auditId"],
+        "additionalProperties": false
+      },
+      "ChangesResponse": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "seq": { "type": "number" },
+                "collection": { "type": "string" },
+                "documentId": { "type": "string" },
+                "rev": { "type": "string" },
+                "op": { "type": "string" },
+                "status": { "type": "string" },
+                "at": { "type": "string" },
+                "by": { "type": "string" }
+              },
+              "required": ["seq", "collection", "documentId", "rev", "op", "status", "at", "by"],
+              "additionalProperties": false
+            }
+          },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "entries", "auditId"],
+        "additionalProperties": false
+      },
+      "DecisionResultOk": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "documentId": { "type": "string" },
+          "rev": { "type": "string" },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "documentId", "rev", "auditId"],
+        "additionalProperties": false
+      },
+      "GetDocumentResultOk": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "document": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {}
+          },
+          "fieldsReturned": { "type": "array", "items": { "type": "string" } },
+          "rev": { "type": "string" },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "document", "fieldsReturned", "auditId"],
+        "additionalProperties": false
+      },
+      "GrantRequestBody": {
+        "type": "object",
+        "properties": {
+          "collection": { "type": "string" },
+          "purposeLabel": { "type": "string" },
+          "purposeDetail": { "type": "string" },
+          "fields": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["collection", "purposeLabel"]
+      },
+      "GrantRequestCreated": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "requestId": { "type": "string" }
+        },
+        "required": ["ok", "requestId"],
+        "additionalProperties": false
+      },
+      "GrantRequestError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "unknown_collection",
+              "purpose_required",
+              "field_not_grantable",
+              "invalid_principal"
+            ]
+          }
+        },
+        "required": ["error"],
+        "additionalProperties": false
+      },
+      "GrantsResponse": {
+        "type": "object",
+        "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "user_id": { "type": "string" },
+                "collection": { "type": "string" },
+                "purpose_label": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "purpose_detail": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "allowed_fields": {
+                  "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }]
+                },
+                "org_id": { "type": "string" },
+                "env": { "type": "string", "enum": ["dev", "live"] },
+                "status": {
+                  "type": "string",
+                  "enum": ["pending", "approved", "denied", "revoked"]
+                },
+                "requested_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "decided_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "decided_by": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "expires_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "document_filter": { "anyOf": [{}, { "type": "null" }] },
+                "verbs": { "type": "array", "items": { "type": "string" } },
+                "mode": { "type": "string", "enum": ["direct", "proposal_only"] },
+                "unmasked_fields": { "type": "array", "items": { "type": "string" } },
+                "principal": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "effectiveStatus": { "type": "string" },
+                "collectionType": { "type": "string" },
+                "taxonomyFields": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": [
+                "id",
+                "user_id",
+                "collection",
+                "purpose_label",
+                "purpose_detail",
+                "allowed_fields",
+                "org_id",
+                "env",
+                "status",
+                "requested_at",
+                "decided_at",
+                "decided_by",
+                "expires_at",
+                "document_filter",
+                "verbs",
+                "mode",
+                "unmasked_fields",
+                "principal",
+                "effectiveStatus",
+                "collectionType",
+                "taxonomyFields"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": ["grants"],
+        "additionalProperties": false
+      },
+      "MutationApplied": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "status": { "type": "string", "const": "applied" },
+          "documentId": { "type": "string" },
+          "rev": { "type": "string" },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "status", "documentId", "rev", "auditId"],
+        "additionalProperties": false
+      },
+      "MutationPending": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "status": { "type": "string", "const": "pending" },
+          "proposalId": { "type": "string" },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "status", "proposalId", "auditId"],
+        "additionalProperties": false
+      },
+      "OAuthError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "invalid_request",
+              "invalid_client",
+              "unauthorized_client",
+              "invalid_grant",
+              "unsupported_grant_type",
+              "server_error"
+            ]
+          }
+        },
+        "required": ["error"],
+        "additionalProperties": false
+      },
+      "ProposalsResponse": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "proposals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "proposalId": { "type": "string" },
+                "collection": { "type": "string" },
+                "op": { "type": "string" },
+                "fields": { "type": "array", "items": { "type": "string" } },
+                "proposedBy": { "type": "string" },
+                "proposedAt": { "type": "string" },
+                "documentId": { "type": "string" }
+              },
+              "required": [
+                "proposalId",
+                "collection",
+                "op",
+                "fields",
+                "proposedBy",
+                "proposedAt",
+                "documentId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "proposals", "auditId"],
+        "additionalProperties": false
+      },
+      "RevisionsResponse": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "revisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "rev": { "type": "string" },
+                "seq": { "type": "number" },
+                "at": { "type": "string" },
+                "by": { "type": "string" },
+                "op": { "type": "string" },
+                "status": { "type": "string" },
+                "fields": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["rev", "seq", "at", "by", "op", "status", "fields"],
+              "additionalProperties": false
+            }
+          },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "revisions", "auditId"],
+        "additionalProperties": false
+      },
+      "SetAclBody": {
+        "type": "object",
+        "properties": { "principals": { "type": "array", "items": { "type": "string" } } },
+        "required": ["principals"]
+      },
+      "TokenResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": { "type": "string" },
+          "token_type": { "type": "string", "const": "Bearer" },
+          "expires_in": { "type": "number" },
+          "scope": { "type": "string" },
+          "issued_token_type": { "type": "string" }
+        },
+        "required": ["access_token", "token_type", "expires_in", "scope", "issued_token_type"],
+        "additionalProperties": false
+      },
+      "VisibleSchema": {
+        "type": "object",
+        "properties": {
+          "collection": { "type": "string" },
+          "description": { "type": "string" },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "type": { "type": "string" },
+                "pk": { "type": "boolean" },
+                "masked": { "type": "boolean", "const": true }
+              },
+              "required": ["name", "type"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["collection", "description", "fields"],
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" },
+      "basicAuth": { "type": "http", "scheme": "basic" }
+    }
+  }
+}
