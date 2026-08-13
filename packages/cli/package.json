@@ -45,7 +45,7 @@
   },
   "devDependencies": {
     "@clack/prompts": "^1.7.0",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "@types/pg": "^8.20.3",
     "@warehousd/broker": "workspace:*",
     "@warehousd/providers": "workspace:*",
