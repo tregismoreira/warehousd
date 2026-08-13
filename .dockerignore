@@ -3,7 +3,9 @@ node_modules
 examples
 .next
 **/.next
-docs
+# Not `docs` wholesale: docs/openapi.json is imported by apps/web/app/v1/openapi.json/route.ts and
+# has to be in the build context. `*.md` below already excludes every markdown file under docs/,
+# which is everything else in there.
 *.md
 .git
 .github
