@@ -46,22 +46,14 @@
             "in": "query",
             "required": false,
             "description": "Sequence number to start after.",
-            "schema": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
+            "schema": { "type": "integer" }
           },
           {
             "name": "limit",
             "in": "query",
             "required": false,
             "description": "Capped, not rejected: default 100, max 500.",
-            "schema": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
+            "schema": { "type": "integer" }
           }
         ],
         "responses": {
@@ -1471,22 +1463,14 @@
             "in": "query",
             "required": false,
             "description": "Capped, not rejected: default 100, max 500. An oversized limit succeeds and is clamped.",
-            "schema": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
+            "schema": { "type": "integer" }
           },
           {
             "name": "offset",
             "in": "query",
             "required": false,
             "description": "Pagination offset.",
-            "schema": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
+            "schema": { "type": "integer" }
           }
         ],
         "responses": {

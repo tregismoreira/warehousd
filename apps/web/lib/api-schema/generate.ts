@@ -175,13 +175,25 @@ function buildResponses(op: Operation): Record<string, unknown> {
   return responses;
 }
 
+// z.number().int() with no explicit bound renders minimum/maximum at the JS safe-integer range
+// (±9007199254740991) — an incidental type-safety artifact, not a declared business bound. None
+// of this API's integer query parameters (limit, offset, since) has a real one: the actual cap
+// (buildSelect's Math.min/Math.max, 500) clamps rather than rejects, and is stated in prose, never
+// enforced as a schema "maximum" that would make an oversized value look like a validation error.
+const SAFE_INT_BOUND = 9007199254740991;
+function stripIncidentalIntBounds(schema: Record<string, unknown>): Record<string, unknown> {
+  const { minimum, maximum, ...rest } = schema;
+  const isSafeIntBound = minimum === -SAFE_INT_BOUND && maximum === SAFE_INT_BOUND;
+  return isSafeIntBound ? rest : schema;
+}
+
 function buildParameters(op: Operation): Record<string, unknown>[] {
   return (op.params ?? []).map((p) => ({
     name: p.name,
     in: p.in,
     required: p.in === "path" ? true : (p.required ?? false),
     description: p.description,
-    schema: toSchema(p.schema, "input"),
+    schema: stripIncidentalIntBounds(toSchema(p.schema, "input")),
     ...(p.style ? { style: p.style } : {}),
     ...(p.explode !== undefined ? { explode: p.explode } : {}),
   }));
