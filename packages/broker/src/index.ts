@@ -15,7 +15,7 @@ export {
   describeIntentError,
   Ident,
 } from "./intents/schema";
-export { createPools, onPoolError, type Pools, withOrg, writePool } from "./db/pools";
+export { createPools, onPoolError, type Pools, withWorkspace, writePool } from "./db/pools";
 export {
   loadConfig,
   grantableFields,
@@ -24,6 +24,7 @@ export {
   findCollection,
   envRefs,
   auditEnabled,
+  workspacesEnabled,
 } from "./config/load";
 // The one audit writer. Exported because the console's regen route records an operational event
 // of its own, and it must reach the configured sink like everything else — see audit/decision.ts.
@@ -45,6 +46,7 @@ export { embedCollection, embedChunks, type EmbedProgress } from "./embedding/sy
 export { DEFAULT_EMBEDDING_DIMENSIONS } from "./apply/ddl";
 export { EmbeddingSchema, type EmbeddingConfig } from "./config/schema";
 export { AuditSchema, type AuditConfig } from "./config/schema";
+export { WorkspacesSchema, type WorkspacesConfig } from "./config/schema";
 export {
   auditSinks,
   auditSink,
@@ -135,9 +137,25 @@ export {
 } from "./db/project-migrations";
 export { generateSynthetic, type SyntheticProgress } from "./synthetic/generate";
 export { regenerateSynthetic } from "./synthetic/regenerate";
-export { migrateApp, createAppSchema, DEFAULT_ORG_ID, migrateUserOrg } from "./db/migrate-app";
+export {
+  migrateApp,
+  createAppSchema,
+  DEFAULT_WORKSPACE_ID,
+  migrateUserWorkspace,
+} from "./db/migrate-app";
 export { MIGRATIONS, type Migration } from "./db/migrations";
 export { redact, redactString } from "./log/redact";
+export {
+  WORKSPACE_ROLES,
+  type WorkspaceRole,
+  type WorkspaceMembership,
+  LastAdminRemoval,
+  memberRole,
+  listMemberships,
+  setMember,
+  removeMember,
+  listMembers,
+} from "./workspaces/members";
 export * from "./grants/manage";
 export {
   getClientPolicy,
@@ -263,6 +281,7 @@ export {
   type SheetOptions,
 } from "./import/sheet";
 export * from "./credentials/keys";
+export * from "./credentials/platform-keys";
 export {
   createTrustedIssuer,
   listTrustedIssuers,

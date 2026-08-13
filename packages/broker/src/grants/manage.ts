@@ -8,7 +8,7 @@ import {
   unmaskableFields,
   supportedVerbs,
 } from "../config/load";
-import { DEFAULT_ORG_ID } from "../db/migrate-app";
+import { DEFAULT_WORKSPACE_ID } from "../db/migrate-app";
 import { isPrincipal, userPrincipal, GROUP_PREFIX, USER_PREFIX } from "../acl/principals";
 import { validateGrantFilters } from "./filters";
 
@@ -100,16 +100,16 @@ export function validateGrantRequest(
   return { ok: true, fields: requested };
 }
 
-// orgId is optional so a single-org deployment — every deployment that existed before the
-// org dimension — keeps working: an omitted org lands in the implicit one rather than
-// failing the insert. Every real call site passes ctx.orgId.
+// workspaceId is optional so a single-workspace deployment — every deployment that existed before the
+// workspace dimension — keeps working: an omitted workspace lands in the implicit one rather than
+// failing the insert. Every real call site passes ctx.workspaceId.
 export async function requestGrant(
   app: Pool,
   i: {
     userId: string;
     collection: string;
     env: "dev" | "live";
-    orgId?: string | undefined;
+    workspaceId?: string | undefined;
     purposeLabel: string;
     purposeDetail?: string | undefined;
     allowedFields: string[];
@@ -134,13 +134,13 @@ export async function requestGrant(
       `invalid grant principal "${i.principal ?? ""}" — spell it user:<id> or group:<name>`,
     );
   const r = await app.query(
-    `insert into app.grants (user_id,collection,env,org_id,purpose_label,purpose_detail,allowed_fields,principal,status)
+    `insert into app.grants (user_id,collection,env,workspace_id,purpose_label,purpose_detail,allowed_fields,principal,status)
      values ($1,$2,$3,$4,$5,$6,$7,$8,'pending') returning id`,
     [
       i.userId,
       i.collection,
       i.env,
-      i.orgId ?? DEFAULT_ORG_ID,
+      i.workspaceId ?? DEFAULT_WORKSPACE_ID,
       i.purposeLabel,
       i.purposeDetail ?? null,
       i.allowedFields,
@@ -166,7 +166,7 @@ export async function narrowerThanInherited(
     userId: string;
     collection: string;
     env: "dev" | "live";
-    orgId?: string | undefined;
+    workspaceId?: string | undefined;
     principal: string;
     allowedFields: string[];
   },
@@ -177,14 +177,21 @@ export async function narrowerThanInherited(
 
   const groups = await app.query<{ principal: string; allowed_fields: string[] | null }>(
     `select principal, allowed_fields from app.grants
-     where collection=$1 and env=$2 and org_id=$3 and status='approved'
+     where collection=$1 and env=$2 and workspace_id=$3 and status='approved'
        and (expires_at is null or expires_at > now())
        and principal like $4
        and principal in (
-         select $5 || group_name from app.user_groups where org_id=$3 and user_id=$6
+         select $5 || group_name from app.user_groups where workspace_id=$3 and user_id=$6
        )
      order by requested_at desc limit 1`,
-    [i.collection, i.env, i.orgId ?? DEFAULT_ORG_ID, `${GROUP_PREFIX}%`, GROUP_PREFIX, i.userId],
+    [
+      i.collection,
+      i.env,
+      i.workspaceId ?? DEFAULT_WORKSPACE_ID,
+      `${GROUP_PREFIX}%`,
+      GROUP_PREFIX,
+      i.userId,
+    ],
   );
   const inherited = groups.rows[0];
   if (!inherited) return null;
@@ -200,10 +207,10 @@ export type ApproveGrantError =
   | "field_not_grantable"
   | "self_approval_denied";
 
-// Every decision is scoped to the grant's org as well as its id. A grant id is a uuid, so
+// Every decision is scoped to the grant's workspace as well as its id. A grant id is a uuid, so
 // this is a backstop rather than the primary gate — but it is the difference between a
-// cross-tenant decision being impossible and being merely unlikely. An omitted orgId scopes
-// to the implicit org, which fails to find a foreign grant rather than finding one: the
+// cross-tenant decision being impossible and being merely unlikely. An omitted workspaceId scopes
+// to the implicit workspace, which fails to find a foreign grant rather than finding one: the
 // forgetful path is closed, not open.
 //
 // cfg is required, not optional. Verb rules are only rules if every approval runs them, and
@@ -224,17 +231,17 @@ export async function approveGrant(
     // declared `unmask: allow` in the config — a manager can only widen a mask the YAML offered
     // to widen, which is what keeps the posture the ceiling rather than the starting point.
     unmaskedFields?: string[];
-    orgId?: string;
+    workspaceId?: string;
   } = {},
 ): Promise<
   | { ok: true; warning?: { principal: string; losing: string[] } }
   | { ok: false; error: ApproveGrantError; detail?: string }
 > {
-  const orgId = opts.orgId ?? DEFAULT_ORG_ID;
+  const workspaceId = opts.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const grantRes = await app.query(
     `select collection, allowed_fields, verbs, mode, user_id, env, principal from app.grants
-     where id=$1 and org_id=$2`,
-    [id, orgId],
+     where id=$1 and workspace_id=$2`,
+    [id, workspaceId],
   );
   if (grantRes.rowCount === 0) return { ok: false, error: "unknown_grant" };
   const grant = grantRes.rows[0];
@@ -308,7 +315,7 @@ export async function approveGrant(
     userId: grant.user_id,
     collection,
     env: grant.env,
-    orgId,
+    workspaceId,
     principal: grant.principal ?? userPrincipal(grant.user_id),
     allowedFields,
   });
@@ -317,7 +324,7 @@ export async function approveGrant(
     `update app.grants set status='approved', decided_by=$2, decided_at=now(),
        allowed_fields=coalesce($3, allowed_fields), expires_at=$4, document_filter=$5,
        verbs=$6, mode=$7, unmasked_fields=$9
-     where id=$1 and org_id=$8 and status='pending'`,
+     where id=$1 and workspace_id=$8 and status='pending'`,
     [
       id,
       by,
@@ -328,7 +335,7 @@ export async function approveGrant(
         : null,
       verbs,
       mode,
-      orgId,
+      workspaceId,
       unmaskedFields,
     ],
   );
@@ -369,7 +376,7 @@ export function resolveExpiry(
  */
 export async function expiringGrants(
   app: Pool,
-  opts: { orgId?: string; within?: number } = {},
+  opts: { workspaceId?: string; within?: number } = {},
 ): Promise<
   {
     id: string;
@@ -382,12 +389,12 @@ export async function expiringGrants(
 > {
   const r = await app.query(
     `select id, user_id, collection, env, principal, expires_at from app.grants
-     where org_id = $1 and status = 'approved'
+     where workspace_id = $1 and status = 'approved'
        and expires_at is not null
        and expires_at > now()
        and expires_at < now() + ($2 || ' days')::interval
      order by expires_at asc`,
-    [opts.orgId ?? DEFAULT_ORG_ID, String(opts.within ?? 7)],
+    [opts.workspaceId ?? DEFAULT_WORKSPACE_ID, String(opts.within ?? 7)],
   );
   return r.rows.map((row) => ({
     id: row.id,
@@ -413,7 +420,7 @@ export async function expiringGrants(
  */
 export async function accessReview(
   app: Pool,
-  opts: { orgId?: string; olderThanDays?: number } = {},
+  opts: { workspaceId?: string; olderThanDays?: number } = {},
 ): Promise<
   {
     id: string;
@@ -436,11 +443,11 @@ export async function accessReview(
             count(a.id)::int as uses
      from app.grants g
      left join app.audit_events a on a.grant_id = g.id
-     where g.org_id = $1 and g.status = 'approved'
+     where g.workspace_id = $1 and g.status = 'approved'
        and g.decided_at < now() - ($2 || ' days')::interval
      group by g.id
      order by last_used_at asc nulls first, g.decided_at asc`,
-    [opts.orgId ?? DEFAULT_ORG_ID, String(opts.olderThanDays ?? 90)],
+    [opts.workspaceId ?? DEFAULT_WORKSPACE_ID, String(opts.olderThanDays ?? 90)],
   );
   return r.rows.map((row) => ({
     id: row.id,
@@ -460,12 +467,12 @@ export async function denyGrant(
   app: Pool,
   id: string,
   by: string,
-  orgId = DEFAULT_ORG_ID,
+  workspaceId = DEFAULT_WORKSPACE_ID,
 ): Promise<boolean> {
   const result = await app.query(
     `update app.grants set status='denied', decided_by=$2, decided_at=now()
-    where id=$1 and org_id=$3 and status='pending'`,
-    [id, by, orgId],
+    where id=$1 and workspace_id=$3 and status='pending'`,
+    [id, by, workspaceId],
   );
   return (result.rowCount ?? 0) > 0;
 }
@@ -474,12 +481,12 @@ export async function revokeGrant(
   app: Pool,
   id: string,
   by: string,
-  orgId = DEFAULT_ORG_ID,
+  workspaceId = DEFAULT_WORKSPACE_ID,
 ): Promise<boolean> {
   const result = await app.query(
     `update app.grants set status='revoked', decided_by=$2, decided_at=now()
-    where id=$1 and org_id=$3 and status='approved'`,
-    [id, by, orgId],
+    where id=$1 and workspace_id=$3 and status='approved'`,
+    [id, by, workspaceId],
   );
   return (result.rowCount ?? 0) > 0;
 }

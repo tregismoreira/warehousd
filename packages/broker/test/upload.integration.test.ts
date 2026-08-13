@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema } from "../src/db/migrate-app";
+import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { ConfigSchema } from "../src/config/schema";
 import { indexCollection } from "../src/indexing";
@@ -90,6 +90,7 @@ async function put(
     db,
     "dev",
     collection,
+    DEFAULT_WORKSPACE_ID,
     { path, bytes, maxBytes: MAX, ...extra },
     { extractor, ...(collection === "policies" ? { taxonomies: bindings } : {}) },
   );
@@ -100,7 +101,7 @@ beforeAll(async () => {
   db = new Pool({ connectionString: p.urls.admin });
   await createAppSchema(db);
   await applyConfig(db, cfg);
-  bindings = await loadTaxonomyBindings(db, cfg, "policies", "dev");
+  bindings = await loadTaxonomyBindings(db, cfg, "policies", "dev", DEFAULT_WORKSPACE_ID);
 }, 120_000);
 
 afterAll(async () => {
@@ -118,7 +119,7 @@ describe("planUpload — the whole of resume", () => {
     const bytes = md("# A\n\nAlpha.");
     await put("notes", "a.md", bytes);
 
-    const plan = await planUpload(db, "dev", "notes", [
+    const plan = await planUpload(db, "dev", "notes", DEFAULT_WORKSPACE_ID, [
       { path: "a.md", checksum: blobChecksum(bytes) },
       { path: "a.md", checksum: blobChecksum(md("# A\n\nEdited.")) },
       { path: "never-seen.md", checksum: blobChecksum(md("x")) },
@@ -143,6 +144,7 @@ describe("planUpload — the whole of resume", () => {
       db,
       "dev",
       "notes",
+      DEFAULT_WORKSPACE_ID,
       files.map((f) => ({ path: f.path, checksum: blobChecksum(f.bytes) })),
     );
     expect(plan.filter((x) => x.status === "unchanged")).toHaveLength(3);
@@ -150,7 +152,7 @@ describe("planUpload — the whole of resume", () => {
   });
 
   it("costs nothing on an empty list and does not go to the database", async () => {
-    expect(await planUpload(db, "dev", "notes", [])).toEqual([]);
+    expect(await planUpload(db, "dev", "notes", DEFAULT_WORKSPACE_ID, [])).toEqual([]);
   });
 
   it("matches on the stored bytes, not on the extracted text", async () => {
@@ -166,7 +168,9 @@ describe("planUpload — the whole of resume", () => {
     expect(row.rows[0]!.blob_checksum).toBe(blobChecksum(bytes));
     expect(row.rows[0]!.checksum).not.toBe(row.rows[0]!.blob_checksum);
     expect(
-      await planUpload(db, "dev", "notes", [{ path: "s.pdf", checksum: blobChecksum(bytes) }]),
+      await planUpload(db, "dev", "notes", DEFAULT_WORKSPACE_ID, [
+        { path: "s.pdf", checksum: blobChecksum(bytes) },
+      ]),
     ).toEqual([{ path: "s.pdf", status: "unchanged" }]);
   });
 });
@@ -210,7 +214,7 @@ describe("uploadFile", () => {
       reason: "empty",
     });
     expect(
-      await uploadFile(db, "dev", "notes", {
+      await uploadFile(db, "dev", "notes", DEFAULT_WORKSPACE_ID, {
         path: "a.md",
         bytes: md("hello there"),
         maxBytes: 4,
@@ -293,7 +297,7 @@ describe("uploads and directory indexing coexist", () => {
     // silently destroy it, and nothing would say so.
     await put("notes", "uploaded.md", md("# Uploaded\n\nBody."));
     writeFileSync(join(dir, "from-disk.md"), "# Disk\n\nBody.");
-    const r = await indexCollection(db, "dev", "notes", dir);
+    const r = await indexCollection(db, "dev", "notes", dir, DEFAULT_WORKSPACE_ID);
     expect(r.deleted).toBe(0);
     const paths = await db.query<{ path: string }>(
       `select path from data_synth."notes__files" order by path`,
@@ -303,9 +307,9 @@ describe("uploads and directory indexing coexist", () => {
 
   it("still sweeps a file that left the source directory", async () => {
     writeFileSync(join(dir, "a.md"), "# A\n\nBody.");
-    await indexCollection(db, "dev", "notes", dir);
+    await indexCollection(db, "dev", "notes", dir, DEFAULT_WORKSPACE_ID);
     rmSync(join(dir, "a.md"));
-    expect((await indexCollection(db, "dev", "notes", dir)).deleted).toBe(1);
+    expect((await indexCollection(db, "dev", "notes", dir, DEFAULT_WORKSPACE_ID)).deleted).toBe(1);
   });
 
   it("produces the same stored row whichever path a file arrives by", async () => {
@@ -313,7 +317,7 @@ describe("uploads and directory indexing coexist", () => {
     // other does not have — and which one applies would depend on how the file was uploaded.
     const body = "---\nowner: ana@harbor.demo\n---\n# Parity\n\nIdentical body text.";
     writeFileSync(join(dir, "same.md"), body);
-    await indexCollection(db, "dev", "notes", dir);
+    await indexCollection(db, "dev", "notes", dir, DEFAULT_WORKSPACE_ID);
     const indexed = (
       await db.query(
         `select title, owner, checksum from data_synth."notes__files" where path='same.md'`,
@@ -352,7 +356,7 @@ describe("delete and raw download", () => {
   it("removes the file and its chunks, and reports the path it removed", async () => {
     const r = await put("notes", "gone.md", md("# Gone\n\nBody."));
     if (!r.ok) throw new Error("unreachable");
-    const del = await deleteUploadedFile(db, "dev", "notes", r.fileId);
+    const del = await deleteUploadedFile(db, "dev", "notes", DEFAULT_WORKSPACE_ID, r.fileId);
     expect(del).toEqual({ deleted: true, path: "gone.md" });
     expect(
       (await db.query(`select 1 from data_synth."notes__documents" where file_id=$1`, [r.fileId]))
@@ -365,6 +369,7 @@ describe("delete and raw download", () => {
       db,
       "dev",
       "notes",
+      DEFAULT_WORKSPACE_ID,
       "00000000-0000-4000-8000-000000000000",
     );
     expect(del).toEqual({ deleted: false, path: null });
@@ -374,7 +379,7 @@ describe("delete and raw download", () => {
     const bytes = pdfBytes();
     const r = await put("notes", "raw.pdf", bytes);
     if (!r.ok) throw new Error("unreachable");
-    const stored = await readFileBlob(db, "dev", "notes", r.fileId);
+    const stored = await readFileBlob(db, "dev", "notes", DEFAULT_WORKSPACE_ID, r.fileId);
     expect(stored).not.toBeNull();
     expect(Buffer.compare(stored!.bytes, bytes)).toBe(0);
     expect(stored!.contentType).toBe("application/pdf");

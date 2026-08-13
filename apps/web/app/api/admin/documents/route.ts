@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
 
   const app = getAppPool();
   const cfg = getConfig();
-  const deps = await ingestDepsFor(app, cfg, collection, env);
+  const deps = await ingestDepsFor(app, cfg, collection, env, guard.workspaceId);
   if (!deps.ok)
     return Response.json(
       { error: deps.error },
@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
     app,
     env,
     collection,
+    guard.workspaceId,
     {
       path,
       bytes,
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
 
   // A skipped file is not a no-op worth hiding: the client counts it as done, and the audit
   // trail records that the upload happened and changed nothing.
-  await auditDocument(app, cfg, guard.user.id, env, collection, {
+  await auditDocument(app, cfg, guard.user.id, guard.workspaceId, env, collection, {
     op: "document:upload",
     path,
     fileId: result.fileId,

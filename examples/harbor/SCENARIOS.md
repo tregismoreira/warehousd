@@ -307,6 +307,6 @@ CSV, JSON and XLSX. `import map` is deny-by-default on anything that looks sensi
 | **Token exchange (RFC 8693)** | Needs an IdP-issued JWT and a registered trusted issuer, so it follows SSO — [rest-api.md](../../docs/rest-api.md) |
 | **Semantic and hybrid search** | Off unless `warehousd.yml` declares an `embedding:` block. Add one, then `warehousd embed` — [configuration.md](../../docs/configuration.md#semantic-search) |
 | **Connect-in-place** | Reading an external database through `postgres_fdw` needs an external database to point at — [configuration.md](../../docs/configuration.md#connect-in-place) |
-| **Multiple organizations** | `org_id` is threaded through every table and enforced by RLS, but a single implicit org is created at bootstrap and there is no UI for switching — [status.md](../../docs/status.md) |
+| **Multiple workspaces** | `workspace_id` is threaded through every table and enforced by RLS, but a single implicit workspace is created at bootstrap and there is no UI for switching — [status.md](../../docs/status.md) |
 | **PDF/DOCX and console upload** | Both work; Harbor's seed corpus is Markdown, so bring your own files via **Admin → Documents** — [configuration.md](../../docs/configuration.md#pdf-and-docx) |
 | **SCIM, compliance exports** | Not built — [roadmap.md](../../docs/roadmap.md) |

@@ -15,7 +15,7 @@ import {
 } from "@warehousd/broker";
 import { requireSession, requireRole, atLeast } from "../../../lib/authz";
 import { readJson } from "../../../lib/rest";
-import { readEnvCookie, orgOf } from "../../../lib/session";
+import { readEnvCookie } from "../../../lib/session";
 import { buildApproval } from "../../../lib/approve";
 
 // The window the manager inbox calls "soon". A week is long enough to act on and short enough
@@ -28,37 +28,37 @@ export async function GET(req: NextRequest) {
   const user = guard.user;
   const app = getAppPool();
   const cfg = getConfig();
-  const org = orgOf(user);
+  const workspace = guard.workspaceId;
   // A member's own grants are now the ones held for THEM — their personal grants plus every
   // group grant they inherit. Keyed on user_id it would have shown a group grant only to whoever
   // happened to request it, and shown nothing to the people it actually gives access to.
   const principals = await app.query<{ group_name: string }>(
-    `select distinct group_name from app.user_groups where org_id=$1 and user_id=$2`,
-    [org, user.id],
+    `select distinct group_name from app.user_groups where workspace_id=$1 and user_id=$2`,
+    [workspace, user.id],
   );
   const mineFor = [
     userPrincipal(user.id),
     ...principals.rows.map((r) => `${GROUP_PREFIX}${r.group_name}`),
   ];
   const mine = await app.query(
-    `select * from app.grants where org_id=$1 and (principal = any($2) or user_id=$3)
+    `select * from app.grants where workspace_id=$1 and (principal = any($2) or user_id=$3)
      order by requested_at desc`,
-    [org, mineFor, user.id],
+    [workspace, mineFor, user.id],
   );
   // The pending queue is approver-only data: it names who asked for what, and why. A member
-  // calling this endpoint directly used to receive the whole organisation's queue. It is also
-  // org-scoped: a manager approves for their own tenant, never another's.
-  const pending = atLeast(user.role, "manager")
+  // calling this endpoint directly used to receive the whole workspace's queue. It is also
+  // workspace-scoped: a manager approves for their own tenant, never another's.
+  const pending = atLeast(guard.role, "manager")
     ? await app.query(
-        `select * from app.grants where org_id=$1 and status='pending' order by requested_at desc`,
-        [org],
+        `select * from app.grants where workspace_id=$1 and status='pending' order by requested_at desc`,
+        [workspace],
       )
     : { rows: [] as typeof mine.rows };
 
-  const active = atLeast(user.role, "manager")
+  const active = atLeast(guard.role, "manager")
     ? await app.query(
-        `select * from app.grants where org_id=$1 and status='approved' order by decided_at desc nulls last`,
-        [org],
+        `select * from app.grants where workspace_id=$1 and status='approved' order by decided_at desc nulls last`,
+        [workspace],
       )
     : { rows: [] as typeof mine.rows };
 
@@ -75,8 +75,8 @@ export async function GET(req: NextRequest) {
 
   // §P7. Approved, live, and about to lapse. An approver renewing access before it stops working
   // is making a decision; finding out because a query started refusing is not.
-  const expiring = atLeast(user.role, "manager")
-    ? await expiringGrants(app, { orgId: org, within: EXPIRING_SOON_DAYS })
+  const expiring = atLeast(guard.role, "manager")
+    ? await expiringGrants(app, { workspaceId: workspace, within: EXPIRING_SOON_DAYS })
     : [];
 
   return Response.json({
@@ -134,14 +134,14 @@ export async function POST(req: NextRequest) {
     // make it for everyone. A member asking gets their own principal, as they always did.
     let principal = userPrincipal(user.id);
     if (typeof body.principal === "string" && body.principal !== principal) {
-      if (!atLeast(user.role, "manager"))
+      if (!atLeast(guard.role, "manager"))
         return Response.json({ error: "forbidden" }, { status: 403 });
       if (!isPrincipal(body.principal))
         return Response.json({ error: "invalid_principal" }, { status: 400 });
       // A group that nobody is in is a grant that gives nobody anything, and reads as though it
       // did — the most common way a typed group name goes unnoticed.
       if (body.principal.startsWith(GROUP_PREFIX)) {
-        const known = await listGroups(app, orgOf(user));
+        const known = await listGroups(app, guard.workspaceId);
         const name = principalName(body.principal);
         if (!known.includes(name))
           return Response.json({ error: "unknown_group" }, { status: 400 });
@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       collection,
       env: readEnvCookie(req),
-      orgId: orgOf(user),
+      workspaceId: guard.workspaceId,
       purposeLabel: (purposeLabel as string).trim(),
       purposeDetail: typeof purposeDetail === "string" ? purposeDetail.trim() : undefined,
       allowedFields: validation.fields,
@@ -167,7 +167,7 @@ export async function POST(req: NextRequest) {
   if (!priv.ok) return priv.response;
   const by = user.id; // decided_by comes from the session, never the request body
 
-  const org = orgOf(user);
+  const workspace = priv.workspaceId;
 
   if (action !== "approve" && action !== "deny" && action !== "revoke")
     return Response.json({ error: "unknown_action" }, { status: 400 });
@@ -179,8 +179,8 @@ export async function POST(req: NextRequest) {
 
   if (action === "approve") {
     const cur = await app.query(
-      `select collection, allowed_fields, status from app.grants where id=$1 and org_id=$2`,
-      [id, org],
+      `select collection, allowed_fields, status from app.grants where id=$1 and workspace_id=$2`,
+      [id, workspace],
     );
     const row = cur.rows[0];
     if (!row) return Response.json({ error: "unknown_grant" }, { status: 404 });
@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
     const approved = await approveGrant(app, cfg, id, by, {
       ...built.opts,
       ...(body.verbs !== undefined ? { verbs: body.verbs } : {}),
-      orgId: org,
+      workspaceId: workspace,
     });
     if (!approved.ok) {
       // 403 for self-approval, not 400: the request is well-formed and the grant is fine, it is
@@ -219,12 +219,12 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, ...(approved.warning ? { warning: approved.warning } : {}) });
   }
   if (action === "deny") {
-    const denied = await denyGrant(app, id, by, org);
+    const denied = await denyGrant(app, id, by, workspace);
     if (!denied) return Response.json({ error: "unknown_grant" }, { status: 404 });
     return Response.json({ ok: true });
   }
   // revoke: the only action left, checked off above rather than tested again here.
-  const revoked = await revokeGrant(app, id, by, org);
+  const revoked = await revokeGrant(app, id, by, workspace);
   if (!revoked) return Response.json({ error: "unknown_grant" }, { status: 404 });
   return Response.json({ ok: true });
 }

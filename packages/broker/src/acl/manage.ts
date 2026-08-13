@@ -6,9 +6,10 @@ import { findCollection } from "../config/load";
 import { dataSchema } from "../config/collection";
 import { kindOf } from "../config/kinds";
 import { ident } from "../sql/ident";
-import { withOrg, writePool } from "../db/pools";
+import { withWorkspace, writePool } from "../db/pools";
 import { makeAuditWriter } from "../audit/decision";
 import { isPrincipal } from "./principals";
+import { memberRole } from "../workspaces/members";
 import type { VerbDeps } from "../verbs/deps";
 
 // Reading and writing a document's ACL.
@@ -58,16 +59,12 @@ const CONSOLE_ROLES = new Set(["admin", "manager"]);
 
 async function mayManage(app: Pool, ctx: BrokerContext, who: AclManager): Promise<boolean> {
   if (who.kind === "console") {
-    const r = await app.query<{ role: string | null }>(
-      `select role from app."user" where id = $1 and "orgId" = $2`,
-      [ctx.userId, ctx.orgId],
-    );
-    const role = r.rows[0]?.role;
-    return typeof role === "string" && CONSOLE_ROLES.has(role);
+    const role = await memberRole(app, ctx.workspaceId, ctx.userId);
+    return role !== null && CONSOLE_ROLES.has(role);
   }
   const r = await app.query<{ can_manage_acl: boolean }>(
-    `select can_manage_acl from app.client_policies where client_id = $1 and org_id = $2`,
-    [who.clientId, ctx.orgId],
+    `select can_manage_acl from app.client_policies where client_id = $1 and workspace_id = $2`,
+    [who.clientId, ctx.workspaceId],
   );
   // No policy row is not "no ceiling" here the way it is for scopes: an unknown client has not
   // been granted anything, and the flag defaults false for a known one too.
@@ -121,11 +118,11 @@ export function makeAclVerbs(d: VerbDeps) {
       const pool = writePool(pools, ctx);
       if (!pool) return audit.refuse(args.collection, "not_writable");
 
-      const row = await withOrg(pool, ctx.orgId, async (client) => {
+      const row = await withWorkspace(pool, ctx.workspaceId, async (client) => {
         const r = await client.query(
           `select principals, updated_at, updated_by from ${g.schema}.${ident(ACL_TABLE)}
-           where org_id = $1 and collection = $2 and document_id = $3`,
-          [ctx.orgId, args.collection, args.id],
+           where workspace_id = $1 and collection = $2 and document_id = $3`,
+          [ctx.workspaceId, args.collection, args.id],
         );
         return r.rows[0] ?? null;
       });
@@ -172,7 +169,7 @@ export function makeAclVerbs(d: VerbDeps) {
       const pool = writePool(pools, ctx);
       if (!pool) return audit.refuse(args.collection, "not_writable");
 
-      const written = await withOrg(pool, ctx.orgId, async (client) => {
+      const written = await withWorkspace(pool, ctx.workspaceId, async (client) => {
         // An empty list is how a document becomes public again, and the way to say that is to
         // remove the row — not to store an empty array. The read predicate treats a zero-length
         // ACL as public either way, but leaving rows behind would make "is this document
@@ -183,21 +180,21 @@ export function makeAclVerbs(d: VerbDeps) {
         if (principals.length === 0) {
           await client.query(
             `delete from ${g.schema}.${ident(ACL_TABLE)}
-             where org_id = $1 and collection = $2 and document_id = $3`,
-            [ctx.orgId, args.collection, args.id],
+             where workspace_id = $1 and collection = $2 and document_id = $3`,
+            [ctx.workspaceId, args.collection, args.id],
           );
           return null;
         }
         const r = await client.query(
           `insert into ${g.schema}.${ident(ACL_TABLE)}
-             (org_id, collection, document_id, principals, updated_by)
+             (workspace_id, collection, document_id, principals, updated_by)
            values ($1,$2,$3,$4,$5)
-           on conflict (org_id, collection, document_id) do update
+           on conflict (workspace_id, collection, document_id) do update
              set principals = excluded.principals,
                  updated_at = now(),
                  updated_by = excluded.updated_by
            returning principals, updated_at, updated_by`,
-          [ctx.orgId, args.collection, args.id, principals, ctx.userId],
+          [ctx.workspaceId, args.collection, args.id, principals, ctx.userId],
         );
         return r.rows[0];
       });
@@ -238,12 +235,12 @@ export type GroupSource = "sso" | "manual";
 
 export async function listUserGroups(
   app: Pool,
-  i: { orgId: string; userId: string },
+  i: { workspaceId: string; userId: string },
 ): Promise<{ group: string; source: GroupSource }[]> {
   const r = await app.query<{ group_name: string; source: GroupSource }>(
     `select group_name, source from app.user_groups
-     where org_id = $1 and user_id = $2 order by group_name, source`,
-    [i.orgId, i.userId],
+     where workspace_id = $1 and user_id = $2 order by group_name, source`,
+    [i.workspaceId, i.userId],
   );
   return r.rows.map((row) => ({ group: row.group_name, source: row.source }));
 }
@@ -257,23 +254,22 @@ export async function listUserGroups(
  */
 export async function setUserGroups(
   app: Pool,
-  i: { orgId: string; userId: string; groups: string[]; source: GroupSource },
+  i: { workspaceId: string; userId: string; groups: string[]; source: GroupSource },
 ): Promise<void> {
   const groups = [...new Set(i.groups.filter((g) => typeof g === "string" && g.length > 0))];
   const client = await app.connect();
   try {
     await client.query("begin");
-    await client.query(`delete from app.user_groups where org_id=$1 and user_id=$2 and source=$3`, [
-      i.orgId,
-      i.userId,
-      i.source,
-    ]);
+    await client.query(
+      `delete from app.user_groups where workspace_id=$1 and user_id=$2 and source=$3`,
+      [i.workspaceId, i.userId, i.source],
+    );
     if (groups.length)
       await client.query(
-        `insert into app.user_groups (org_id, user_id, group_name, source)
+        `insert into app.user_groups (workspace_id, user_id, group_name, source)
          select $1, $2, g, $3 from unnest($4::text[]) as g
-         on conflict (org_id, user_id, group_name, source) do update set updated_at = now()`,
-        [i.orgId, i.userId, i.source, groups],
+         on conflict (workspace_id, user_id, group_name, source) do update set updated_at = now()`,
+        [i.workspaceId, i.userId, i.source, groups],
       );
     await client.query("commit");
   } catch (err) {
@@ -287,25 +283,25 @@ export async function setUserGroups(
 /**
  * Everyone in a group, for the console's ACL editor.
  *
- * Read-only and org-scoped. It answers "who would `group:editors` admit?" — which is the question
+ * Read-only and workspace-scoped. It answers "who would `group:editors` admit?" — which is the question
  * somebody adding a group to an ACL is actually asking.
  */
 export async function listGroupMembers(
   app: Pool,
-  i: { orgId: string; group: string },
+  i: { workspaceId: string; group: string },
 ): Promise<string[]> {
   const r = await app.query<{ user_id: string }>(
-    `select distinct user_id from app.user_groups where org_id=$1 and group_name=$2 order by user_id`,
-    [i.orgId, i.group],
+    `select distinct user_id from app.user_groups where workspace_id=$1 and group_name=$2 order by user_id`,
+    [i.workspaceId, i.group],
   );
   return r.rows.map((row) => row.user_id);
 }
 
-/** Every group name in use in an org, from either source. */
-export async function listGroups(app: Pool, orgId: string): Promise<string[]> {
+/** Every group name in use in a workspace, from either source. */
+export async function listGroups(app: Pool, workspaceId: string): Promise<string[]> {
   const r = await app.query<{ group_name: string }>(
-    `select distinct group_name from app.user_groups where org_id=$1 order by group_name`,
-    [orgId],
+    `select distinct group_name from app.user_groups where workspace_id=$1 order by group_name`,
+    [workspaceId],
   );
   return r.rows.map((row) => row.group_name);
 }

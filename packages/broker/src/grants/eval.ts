@@ -53,10 +53,10 @@ const SPECIFICITY = `order by (principal like '${USER_PREFIX}%') desc, requested
 // is now required on BrokerContext, so it cannot be dropped from the context either.
 export async function loadActiveGrant(
   db: Pool,
-  ctx: Pick<BrokerContext, "userId" | "orgId" | "env" | "allowedCollections">,
+  ctx: Pick<BrokerContext, "userId" | "workspaceId" | "env" | "allowedCollections">,
   collection: string,
 ): Promise<ActiveGrant | null> {
-  const { userId, orgId, env, allowedCollections } = ctx;
+  const { userId, workspaceId, env, allowedCollections } = ctx;
 
   // The client's collection ceiling. It only ever narrows: a collection outside it returns null,
   // so every verb refuses `no_grant` uniformly. A distinguishable code would tell an app exactly
@@ -90,10 +90,10 @@ export async function loadActiveGrant(
     `select id, allowed_fields, unmasked_fields, document_filter, verbs, mode, principal,
        expires_at
      from app.grants
-     where principal = any($1) and collection=$2 and env=$3 and org_id=$4
+     where principal = any($1) and collection=$2 and env=$3 and workspace_id=$4
        and status='approved' and (expires_at is null or expires_at > now())
      ${SPECIFICITY} limit 1`,
-    [principals, collection, env, orgId],
+    [principals, collection, env, workspaceId],
   );
   if (r.rowCount === 0) return null;
   return toActiveGrant(r.rows[0], userId, principals);
@@ -105,10 +105,10 @@ export async function loadActiveGrant(
 // single-collection loader returns, so neither caller has to learn a second convention.
 export async function loadActiveGrants(
   db: Pool,
-  ctx: Pick<BrokerContext, "userId" | "orgId" | "env" | "allowedCollections">,
+  ctx: Pick<BrokerContext, "userId" | "workspaceId" | "env" | "allowedCollections">,
   collections: string[],
 ): Promise<Map<string, ActiveGrant>> {
-  const { userId, orgId, env, allowedCollections } = ctx;
+  const { userId, workspaceId, env, allowedCollections } = ctx;
 
   // The ceiling is applied to the input list rather than inside the query, so it stays the same
   // narrowing rule the single loader states above rather than a second copy of it in SQL.
@@ -129,10 +129,10 @@ export async function loadActiveGrants(
     `select distinct on (collection) collection, id, allowed_fields, unmasked_fields,
        document_filter, verbs, mode, principal, expires_at
      from app.grants
-     where principal = any($1) and collection = any($2) and env=$3 and org_id=$4
+     where principal = any($1) and collection = any($2) and env=$3 and workspace_id=$4
        and status='approved' and (expires_at is null or expires_at > now())
      order by collection, (principal like '${USER_PREFIX}%') desc, requested_at desc`,
-    [principals, asked, env, orgId],
+    [principals, asked, env, workspaceId],
   );
 
   if (r.rowCount === 0) return out;

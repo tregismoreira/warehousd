@@ -1,7 +1,8 @@
 import type { BrokerContext } from "@warehousd/broker";
-import { DEFAULT_ORG_ID } from "@warehousd/broker";
+import { getClientPolicy, DEFAULT_WORKSPACE_ID } from "@warehousd/broker";
 import { auth } from "./auth";
 import { envFromScopes, scopesOf } from "./env-scope";
+import { resolveWorkspace, workspaceFromScopes } from "./workspace-scope";
 import { getAppPool } from "../app/lib/broker";
 
 // The ONLY place BrokerContext is constructed for REST API (`/v1/*`) token-authenticated
@@ -10,9 +11,16 @@ import { getAppPool } from "../app/lib/broker";
 // deriveTokenContext is for MCP/OAuth paths. Each handles exactly one auth boundary, never
 // a shared one.
 //
-// Tokens carry only sub/client/env scope (§6.1); any env-like value in the request body/params
-// is ignored and never read here. Environment is read from token scopes, orgId from the
-// token's userId's user row, allowedCollections from the client policy's collection ceiling.
+// Tokens carry only sub/client/env/workspace scope (§6.1); any env-like or workspace-like value
+// in the request body/params is ignored and never read here. Environment is read from token
+// scopes, allowedCollections from the client policy's collection ceiling.
+//
+// workspaceId, per invariant 8, is never trusted from the token subject's row — a delegated
+// client resolves it the same way deriveTokenContext does (resolveWorkspace against the
+// `workspace:<id>` scope, intersected with the client policy's own pin). A headless client has
+// no interactive holder to name a workspace at all: it stays pinned to client_policies.workspace_id
+// outright and ignores any scope, matching how its userId is the policy's robot user rather than
+// a signed-in session's.
 //
 // via derivation: look up client_policies.mode for the clientId, then:
 // - headless → api_key:<clientId>
@@ -38,23 +46,38 @@ export async function deriveRestCaller(
   const env = envFromScopes(scopesOf(session.scopes));
   const pool = getAppPool();
 
-  // Derive orgId from token's userId's user record
-  const r = await pool.query(`select "orgId" from app."user" where id=$1`, [session.userId]);
-  const orgId = r.rows[0]?.orgId ?? DEFAULT_ORG_ID;
+  const policy = await getClientPolicy(pool, session.clientId || "");
 
-  // Load client policy to get mode (for via derivation) and collection ceiling
-  const cp = await pool.query(
-    `select mode, allowed_collections from app.client_policies where client_id=$1`,
-    [session.clientId || ""],
-  );
-  const policy = cp.rows[0];
-  const allowedCollections = policy?.allowed_collections ?? null;
+  let workspaceId: string | null;
+  if (policy.mode === "headless") {
+    // No interactive holder to name a workspace — pinned to the policy outright, any scope
+    // ignored. policy.workspaceId is only null for an unregistered client, which a headless
+    // session cannot be (getMcpSession already required a real client_policies row to mint the
+    // token), so this is a lookup rather than a runtime possibility.
+    workspaceId = policy.workspaceId;
+  } else {
+    workspaceId = await resolveWorkspace(
+      pool,
+      session.userId,
+      workspaceFromScopes(scopesOf(session.scopes)),
+    );
+    // See the matching comment in lib/broker-context.ts: DEFAULT_WORKSPACE_ID is the column's
+    // NOT NULL default, not a deliberate pin, so it is treated as unpinned here too.
+    const pinned =
+      policy.workspaceId !== null && policy.workspaceId !== DEFAULT_WORKSPACE_ID
+        ? policy.workspaceId
+        : null;
+    if (workspaceId !== null && pinned !== null && workspaceId !== pinned) {
+      workspaceId = null;
+    }
+  }
+  if (workspaceId === null) return null;
 
   // Derive via from client mode + whether delegated client has secrets
   let via: string;
-  if (policy?.mode === "headless") {
+  if (policy.mode === "headless") {
     via = `api_key:${session.clientId}`;
-  } else if (policy?.mode === "delegated") {
+  } else {
     // Delegated clients with registered secrets are configured to authenticate via /v1/token
     // (token-exchange). Those without secrets can only get tokens through the interactive
     // OAuth/MCP flow.
@@ -63,16 +86,14 @@ export async function deriveRestCaller(
       [session.clientId || ""],
     );
     via = (secrets.rowCount ?? 0) > 0 ? "token_exchange" : "oauth";
-  } else {
-    via = "oauth";
   }
 
   return {
     ctx: {
       userId: session.userId,
-      orgId,
+      workspaceId,
       env,
-      allowedCollections,
+      allowedCollections: policy.allowedCollections,
       via,
     },
     clientId: session.clientId || "",

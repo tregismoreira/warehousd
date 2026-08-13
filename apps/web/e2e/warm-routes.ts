@@ -74,7 +74,7 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   }
 
   // Four at a time. `next dev` serialises the compiles themselves, so more concurrency buys
-  // nothing and this machine may well be running another workspace's suite next to this one.
+  // nothing and this machine may well be running another checkout's suite next to this one.
   const started = Date.now();
   const queue = targets.slice();
   const misses: string[] = [];

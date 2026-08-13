@@ -70,7 +70,7 @@ beforeAll(async () => {
   // stands in the two columns the console-role check reads.
   await admin.query(
     `create table if not exists app."user" (
-       id text primary key, role text, "orgId" text not null default 'default')`,
+       id text primary key, role text, "workspaceId" text not null default 'default')`,
   );
 
   await admin.query(
@@ -86,12 +86,12 @@ beforeAll(async () => {
   ).rows[0]!.id;
 
   await admin.query(
-    `insert into data_synth."_acl" (org_id, collection, document_id, principals, updated_by)
+    `insert into data_synth."_acl" (workspace_id, collection, document_id, principals, updated_by)
      values ('default','content',$1, array['user:owner','group:reviewers'],'test')`,
     [restrictedId],
   );
   await admin.query(
-    `insert into app.user_groups (org_id, user_id, group_name, source) values
+    `insert into app.user_groups (workspace_id, user_id, group_name, source) values
        ('default','reviewer_in','reviewers','sso'),
        ('default','proposer','reviewers','manual')`,
   );
@@ -254,7 +254,7 @@ describe("the proposal path", () => {
       ])
     ).rows[0]!.id;
     await admin.query(
-      `insert into data_synth."_acl" (org_id, collection, document_id, principals, updated_by)
+      `insert into data_synth."_acl" (workspace_id, collection, document_id, principals, updated_by)
        values ('default','content',$1, array['user:owner'],'test')`,
       [newId],
     );
@@ -317,11 +317,11 @@ describe("ACL management authorization", () => {
   it("admits a client the flag was set on, and the write takes effect on the read path", async () => {
     await admin.query(
       `insert into app.client_policies (client_id, display_name, can_manage_acl)
-       values ('cortex','Cortex',true)`,
+       values ('acme-app','Acme App',true)`,
     );
     const set = await broker.setDocumentAcl(
       makeCtx({ userId: "acl_manager" }),
-      { kind: "client", clientId: "cortex" },
+      { kind: "client", clientId: "acme-app" },
       { collection: "content", id: publicId, principals: ["user:owner", "user:owner"] },
     );
     expect(set.ok, JSON.stringify(set)).toBe(true);
@@ -339,7 +339,7 @@ describe("ACL management authorization", () => {
   it("an empty list removes the row, and the document is public again", async () => {
     const cleared = await broker.setDocumentAcl(
       makeCtx({ userId: "acl_manager" }),
-      { kind: "client", clientId: "cortex" },
+      { kind: "client", clientId: "acme-app" },
       { collection: "content", id: publicId, principals: [] },
     );
     expect(cleared.ok, JSON.stringify(cleared)).toBe(true);
@@ -359,7 +359,7 @@ describe("ACL management authorization", () => {
     for (const bad of [["owner"], ["role:admin"], ["user:"], [42], "user:owner"]) {
       const r = await broker.setDocumentAcl(
         makeCtx({ userId: "acl_manager" }),
-        { kind: "client", clientId: "cortex" },
+        { kind: "client", clientId: "acme-app" },
         { collection: "content", id: publicId, principals: bad },
       );
       expect(r.ok, JSON.stringify(bad)).toBe(false);
@@ -369,8 +369,12 @@ describe("ACL management authorization", () => {
 
   it("admits a console manager and refuses a console member", async () => {
     await admin.query(
-      `insert into app."user" (id, role, "orgId") values
+      `insert into app."user" (id, role, "workspaceId") values
          ('mgr','manager','default'), ('mem','member','default')`,
+    );
+    await admin.query(
+      `insert into app.workspace_members (workspace_id, user_id, role) values
+         ('default','mgr','manager'), ('default','mem','member')`,
     );
     const ok = await broker.getDocumentAcl(makeCtx({ userId: "mgr" }), console_, {
       collection: "content",
@@ -390,7 +394,7 @@ describe("ACL management authorization", () => {
   it("refuses a collection that does not declare acl: true", async () => {
     const r = await broker.getDocumentAcl(
       makeCtx({ userId: "acl_manager" }),
-      { kind: "client", clientId: "cortex" },
+      { kind: "client", clientId: "acme-app" },
       { collection: "nope", id: publicId },
     );
     expect(r.ok).toBe(false);
@@ -403,7 +407,7 @@ describe("ACL management authorization", () => {
     );
     const allowed = await broker.getDocumentAcl(
       makeCtx({ userId: "acl_manager" }),
-      { kind: "client", clientId: "cortex" },
+      { kind: "client", clientId: "acme-app" },
       { collection: "content", id: publicId },
     );
     expect(allowed.ok).toBe(true);

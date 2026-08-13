@@ -141,6 +141,29 @@ describe("POST /api/admin/documents", () => {
     );
     expect(rows.rowCount).toBe(1);
   });
+
+  // PR 7's control-plane audit found auditDocument's hand-written insert leaving workspace_id at
+  // its table default regardless of which workspace's admin acted — every document audit row
+  // read as workspace A's, even when the acting admin's active workspace was something else.
+  // Fails without the fix: the row's workspace_id would read 'default' no matter what is passed.
+  it("audits a document operation under the caller's actual workspace, not the column default", async () => {
+    const { loadConfig } = await import("@warehousd/broker");
+    const { auditDocument } = await import("../lib/documents");
+    const cfg = loadConfig(process.env.WAREHOUSD_PROJECT_DIR!);
+    const app = getAppPool();
+    await app.query(
+      `insert into app.workspaces (id, name) values ('docs-other','Other') on conflict do nothing`,
+    );
+    await auditDocument(app, cfg, "ana", "docs-other", "dev", "policies", {
+      op: "document:upload",
+      path: "workspace-scoped.md",
+    });
+    const row = await app.query(
+      `select workspace_id from app.audit_events
+        where intent->>'op'='document:upload' and intent->>'path'='workspace-scoped.md'`,
+    );
+    expect(row.rows[0].workspace_id).toBe("docs-other");
+  });
 });
 
 describe("POST /api/admin/documents/plan", () => {

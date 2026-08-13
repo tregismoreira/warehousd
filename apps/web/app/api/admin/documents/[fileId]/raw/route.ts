@@ -36,10 +36,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ fileId: str
   if (!kindOf(c).chunked) return Response.json({ error: "not_a_file_collection" }, { status: 400 });
 
   const app = getAppPool();
-  const stored = await readFileBlob(app, env, collection, fileId);
+  const stored = await readFileBlob(app, env, collection, guard.workspaceId, fileId);
   if (!stored) return Response.json({ error: "not_found" }, { status: 404 });
 
-  await auditDocument(app, cfg, guard.user.id, env, collection, {
+  await auditDocument(app, cfg, guard.user.id, guard.workspaceId, env, collection, {
     op: "document:download",
     fileId,
     path: stored.path,

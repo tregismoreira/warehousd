@@ -263,11 +263,11 @@ export const SourceRefSchema = z
   .object({
     source: z.string(),
     table: z.string().regex(IDENT),
-    // The org every row of the remote table belongs to. A foreign table has no org_id column to
-    // filter on, so the view compares this constant against the request's org instead — see
+    // The workspace every row of the remote table belongs to. A foreign table has no workspace_id column to
+    // filter on, so the view compares this constant against the request's workspace instead — see
     // viewDDL. Declaring it is what keeps an external collection inside the tenant model rather
     // than beside it.
-    org: z.string().default("default"),
+    workspace: z.string().default("default"),
   })
   .strict();
 export type SourceRefConfig = z.infer<typeof SourceRefSchema>;
@@ -569,6 +569,22 @@ export const AuditSchema = z
   });
 export type AuditConfig = z.infer<typeof AuditSchema>;
 
+/**
+ * The platform provisioning API (`/v1/platform/*`, `warehousd platform-key`).
+ *
+ * Off by default. A single enterprise's self-hosted deployment — the primary shape of this
+ * product — has exactly one workspace and no reason to carry a provisioning API. Turning this on
+ * adds no enforcement and removes none: workspace isolation (RLS, view predicates, withWorkspace,
+ * membership-based role resolution, resolveWorkspace) runs unconditionally in both states. What
+ * the flag gates is documented beside `workspacesEnabled()` in config/load.ts.
+ */
+export const WorkspacesSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+  })
+  .strict();
+export type WorkspacesConfig = z.infer<typeof WorkspacesSchema>;
+
 export const ConfigSchema = z
   .object({
     project: z.string(),
@@ -665,6 +681,7 @@ export const ConfigSchema = z
       .default({ documents_per_collection: {} }),
     embedding: EmbeddingSchema.optional(),
     sso: SsoSchema.optional(),
+    workspaces: WorkspacesSchema.default({ enabled: false }),
     deploy: DeploySchema.optional(),
   })
   .strict()

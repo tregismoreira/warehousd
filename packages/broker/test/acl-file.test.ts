@@ -52,15 +52,20 @@ const CONSOLE = { kind: "console" } as const;
 
 async function user(id: string, role: string) {
   await admin.query(
-    `insert into app."user" (id, name, email, "emailVerified", role, "orgId", "createdAt", "updatedAt")
+    `insert into app."user" (id, name, email, "emailVerified", role, "workspaceId", "createdAt", "updatedAt")
      values ($1,$1,$1||'@t.local',true,$2,'default',now(),now())
      on conflict (id) do update set role=excluded.role`,
+    [id, role],
+  );
+  await admin.query(
+    `insert into app.workspace_members (workspace_id, user_id, role) values ('default',$1,$2)
+     on conflict (workspace_id, user_id) do update set role=excluded.role`,
     [id, role],
   );
 }
 
 async function reindex() {
-  return indexCollection(admin, "dev", "policies", dir);
+  return indexCollection(admin, "dev", "policies", dir, "default");
 }
 
 beforeAll(async () => {
@@ -81,7 +86,7 @@ beforeAll(async () => {
 
   await admin.query(`create table if not exists app."user" (
     id text primary key, name text, email text, "emailVerified" boolean,
-    role text, "orgId" text not null default 'default',
+    role text, "workspaceId" text not null default 'default',
     "createdAt" timestamptz, "updatedAt" timestamptz)`);
   await user("boss", "manager");
   await user("ana", "member");
@@ -99,7 +104,7 @@ beforeAll(async () => {
       userId: who,
       collection: "policies",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "t",
       allowedFields: ["title", "content", "owner"],
     });
@@ -110,7 +115,7 @@ beforeAll(async () => {
   }
 
   await setUserGroups(admin, {
-    orgId: "default",
+    workspaceId: "default",
     userId: "ana",
     groups: ["legal"],
     source: "manual",

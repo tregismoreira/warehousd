@@ -1,11 +1,11 @@
 import type { PoolClient } from "pg";
 import type { WarehousdConfig } from "../config/schema";
 import type { Pools } from "../db/pools";
-import { withOrg } from "../db/pools";
+import { withWorkspace } from "../db/pools";
 import { insertRevision, currentRevision, reviseDocument } from "../db/revisions";
 import { pkOf, dataColsOf } from "../config/collection";
 import { ident } from "../sql/ident";
-import { DEFAULT_ORG_ID } from "../db/migrate-app";
+import { DEFAULT_WORKSPACE_ID } from "../db/migrate-app";
 import { makeAuditWriter, auditDestination } from "../audit/decision";
 import type { BrokerContext } from "../types";
 import { writeChangeLog } from "../verbs/history";
@@ -59,7 +59,7 @@ export type ImportResult =
       auditId: string | null;
     };
 
-// Thrown to unwind the import transaction on a dry run. withOrg rolls back on any throw, which
+// Thrown to unwind the import transaction on a dry run. withWorkspace rolls back on any throw, which
 // is the whole mechanism: a preview runs the real statements against the real table and then
 // declines to keep them, so what it reports is what would happen rather than a second guess at it.
 class DryRunRollback extends Error {
@@ -95,7 +95,7 @@ export async function importCollection(
   opts: {
     mode?: ImportMode;
     dryRun?: boolean;
-    orgId?: string;
+    workspaceId?: string;
     onProgress?: ((p: ImportProgress) => void) | undefined;
     // Which credential drove this, for the audit row — `session` from the console, `cli` from
     // `warehousd import run`. Defaults to `session`, which is where imports came from first.
@@ -106,7 +106,7 @@ export async function importCollection(
 ): Promise<ImportResult> {
   const mode: ImportMode = opts.mode ?? "append";
   const dryRun = opts.dryRun ?? false;
-  const orgId = opts.orgId ?? DEFAULT_ORG_ID;
+  const workspaceId = opts.workspaceId ?? DEFAULT_WORKSPACE_ID;
 
   // Through `makeAuditWriter` like every broker decision, not through a direct insert.
   //
@@ -115,14 +115,14 @@ export async function importCollection(
   // directly it always landed in `app.audit_events`, which meant a deployment forwarding its trail
   // to a SIEM (`audit.sink: webhook`) silently lost the highest-volume event it has. Going through
   // the writer also brings the rest of it for free: `audit.enabled` honoured in one place, the
-  // redacted operator log line on a failed write, and `org_id`/`via`/`principals` filled from the
+  // redacted operator log line on a failed write, and `workspace_id`/`via`/`principals` filled from the
   // context rather than from a hand-written column list.
   //
   // `env` is the literal 'live'. An import cannot touch data_synth, so there is no caller
   // environment to read here.
   const auditCtx: BrokerContext = {
     userId: actor,
-    orgId,
+    workspaceId,
     env: "live",
     allowedCollections: null,
     via: opts.via ?? "session",
@@ -189,7 +189,7 @@ export async function importCollection(
   // grant on this data will be matched against.
   let taxonomies: TaxonomyBinding[] | undefined;
   try {
-    taxonomies = await loadTaxonomyBindings(pools.app, cfg, collection, "live");
+    taxonomies = await loadTaxonomyBindings(pools.app, cfg, collection, "live", workspaceId);
   } catch (e) {
     // Two very different failures reach here, and they must not collapse into one.
     //
@@ -256,12 +256,12 @@ export async function importCollection(
       base: null,
       current: true,
       by: actor,
-      orgId,
+      workspaceId,
     }) as const;
 
   let counts: ImportCounts;
   try {
-    counts = await withOrg(pools.imp, orgId, async (client) => {
+    counts = await withWorkspace(pools.imp, workspaceId, async (client) => {
       const n: ImportCounts = { inserted: 0, updated: 0, deleted: 0 };
 
       // A delete file naming documents that are not there is almost always the wrong file, and
@@ -305,7 +305,7 @@ export async function importCollection(
               op: "delete",
               status: "approved",
               by: actor,
-              orgId,
+              workspaceId,
             },
           );
           n.deleted++;
@@ -330,7 +330,7 @@ export async function importCollection(
             op: "update",
             status: "approved",
             by: actor,
-            orgId,
+            workspaceId,
           });
           n.updated++;
           feed.push({ documentId: idOf(doc), rev, op: "update" });
@@ -399,8 +399,8 @@ export async function importCollection(
   // Imported rows may be the source of a dataset-backed vocabulary, so the live term set is
   // stale the moment the transaction commits. Refreshing here — rather than at each call site —
   // is what keeps a later `indexCollection` from throwing on an unknown term.
-  await syncDatasetTerms(pools.app, cfg, "live");
-  await appendToFeed(pools, actor, orgId, collection, feed);
+  await syncDatasetTerms(pools.app, cfg, "live", workspaceId);
+  await appendToFeed(pools, actor, workspaceId, collection, feed);
 
   const auditId = await audit("allowed", null, {
     rows: v.values.length,
@@ -417,20 +417,20 @@ export async function importCollection(
 async function appendToFeed(
   pools: Pools,
   actor: string,
-  orgId: string,
+  workspaceId: string,
   collection: string,
   feed: { documentId: string; rev: string; op: string }[],
 ): Promise<void> {
   if (!feed.length) return;
   const ctx = {
     userId: actor,
-    orgId,
+    workspaceId,
     env: "live" as const,
     allowedCollections: null,
     via: "session",
   };
   try {
-    await withOrg(pools.app, orgId, async (client: PoolClient) => {
+    await withWorkspace(pools.app, workspaceId, async (client: PoolClient) => {
       for (const e of feed)
         await writeChangeLog(client, ctx, collection, e.documentId, e.rev, e.op, "approved");
     });

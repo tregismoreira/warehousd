@@ -68,7 +68,7 @@ describe("broker.mutate proposals", () => {
       userId: "proposer",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -79,7 +79,7 @@ describe("broker.mutate proposals", () => {
 
     // Create a document to propose against
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'old@ex.com', 'Old Name', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -122,7 +122,7 @@ describe("broker.mutate proposals", () => {
       userId: "proposer2",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -135,7 +135,7 @@ describe("broker.mutate proposals", () => {
       userId: "reader",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -143,7 +143,7 @@ describe("broker.mutate proposals", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'first@ex.com', 'First', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -180,7 +180,7 @@ describe("broker.mutate proposals", () => {
       userId: "proposer3",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -193,7 +193,7 @@ describe("broker.mutate proposals", () => {
       userId: "approver",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -201,7 +201,7 @@ describe("broker.mutate proposals", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'second@ex.com', 'Second', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id, _rev`,
     );
@@ -247,7 +247,7 @@ describe("broker.mutate proposals", () => {
       userId: "proposer4",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -260,7 +260,7 @@ describe("broker.mutate proposals", () => {
       userId: "approver2",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -268,7 +268,7 @@ describe("broker.mutate proposals", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'third@ex.com', 'Third', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -319,7 +319,7 @@ describe("broker.mutate proposals", () => {
       userId: "proposer5",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -332,7 +332,7 @@ describe("broker.mutate proposals", () => {
       userId: "approver3",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -340,7 +340,7 @@ describe("broker.mutate proposals", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'fourth@ex.com', 'Fourth', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -395,7 +395,7 @@ describe("broker.mutate proposals", () => {
 
 describe("approveProposal reports a lost race as a conflict", () => {
   it("maps a unique-violation on the current-revision index to conflict, not internal_error", async () => {
-    // The partial unique index is (org_id, pk) where _current (apply/ddl.ts). A create proposal
+    // The partial unique index is (workspace_id, pk) where _current (apply/ddl.ts). A create proposal
     // does not demote anything — there is nothing current yet — so if the document comes into
     // existence between propose and approve, the merged insert collides. That is a race lost to
     // another writer, which is what `conflict` means; it was reported as internal_error, telling
@@ -406,7 +406,7 @@ describe("approveProposal reports a lost race as a conflict", () => {
         userId: u,
         collection: "people",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "email", "name", "owner"],
       });
@@ -436,7 +436,7 @@ describe("approveProposal reports a lost race as a conflict", () => {
     // the pending create is holding.
     await app.query(
       `insert into data_synth.people
-         (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+         (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', $1, 'other@ex.com', 'Other', gen_random_uuid(), 1, now(), 'someone', 'create', 'approved', '{}', true)`,
       [pk],
     );

@@ -4,7 +4,7 @@ import { DEFAULT_LIMIT, MAX_LIMIT } from "../types";
 import type { ActiveGrant } from "../grants/eval";
 import { loadActiveGrant, loadActiveGrants } from "../grants/eval";
 import { admits, validateDocumentFilters } from "../grants/filters";
-import { dataPool, withOrg, writePool } from "../db/pools";
+import { dataPool, withWorkspace, writePool } from "../db/pools";
 import { findCollection } from "../config/load";
 import { pkOf, dataSchema } from "../config/collection";
 import { ident } from "../sql/ident";
@@ -67,17 +67,21 @@ export function makeHistoryVerbs(d: VerbDeps) {
       // transaction has finished. Once a row passes this test, no lower `seq` can appear later.
       // The alternative — a fixed time delay — is both laggy and still wrong for any
       // transaction that outlives the delay.
-      const entries = await withOrg(dataPool(pools, ctx), ctx.orgId, async (client: PoolClient) => {
-        const q = await client.query(
-          `select seq, collection, document_id, rev, op, status, at, by
+      const entries = await withWorkspace(
+        dataPool(pools, ctx),
+        ctx.workspaceId,
+        async (client: PoolClient) => {
+          const q = await client.query(
+            `select seq, collection, document_id, rev, op, status, at, by
            from app.change_log
-           where org_id = $1 and env = $2 and seq > $3
+           where workspace_id = $1 and env = $2 and seq > $3
              and xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
            order by seq asc limit $4`,
-          [ctx.orgId, ctx.env, since, limit],
-        );
-        return q.rows;
-      });
+            [ctx.workspaceId, ctx.env, since, limit],
+          );
+          return q.rows;
+        },
+      );
 
       // Grant-filtered by collection only. A grant's document_filter is NOT applied: the feed
       // carries no field data, so there is nothing here to test a field predicate against. The
@@ -150,13 +154,13 @@ export function makeHistoryVerbs(d: VerbDeps) {
       if (Object.hasOwn(c.fields, f.field) && !cols.includes(f.field)) cols.push(f.field);
 
     try {
-      const revisions = await withOrg(pool, ctx.orgId, async (client) => {
+      const revisions = await withWorkspace(pool, ctx.workspaceId, async (client) => {
         // Fetch current row, with its ACL, to apply the document filter and the ACL against
         const currentQ = await client.query(
           `select ${cols.map((col) => `t.${ident(col)}`).join(", ")}${aclColumnSql(ctx.env, name, c, "t")}
            from ${schema}.${ident(name)} t
-           where t.org_id=$1 and t.${ident(pk)}=$2 and t._current`,
-          [ctx.orgId, opts.id],
+           where t.workspace_id=$1 and t.${ident(pk)}=$2 and t._current`,
+          [ctx.workspaceId, opts.id],
         );
 
         if (currentQ.rows.length === 0) {
@@ -175,9 +179,9 @@ export function makeHistoryVerbs(d: VerbDeps) {
         // that replaced them, so `order by _rev_seq` could not even put the pair in a stable order.
         const q = await client.query(
           `select ${cols.map(ident).join(", ")} from ${schema}.${ident(name)}
-           where org_id=$1 and ${ident(pk)}=$2 and _rev_status <> 'superseded'
+           where workspace_id=$1 and ${ident(pk)}=$2 and _rev_status <> 'superseded'
            order by _rev_seq asc`,
-          [ctx.orgId, opts.id],
+          [ctx.workspaceId, opts.id],
         );
 
         return q.rows.map((row) => ({
@@ -206,7 +210,7 @@ export function makeHistoryVerbs(d: VerbDeps) {
 }
 
 // Write a change log entry in the same transaction as the revision. Must be called inside
-// withOrg on the write pool. This binds the feed to revisions: if the tx rolls back,
+// withWorkspace on the write pool. This binds the feed to revisions: if the tx rolls back,
 // so does the feed entry, keeping them consistent.
 export async function writeChangeLog(
   client: PoolClient,
@@ -218,7 +222,7 @@ export async function writeChangeLog(
   status: string,
 ): Promise<void> {
   await client.query(
-    `insert into app.change_log (org_id, env, collection, document_id, rev, op, status, by) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [ctx.orgId, ctx.env, collection, documentId, rev, op, status, ctx.userId],
+    `insert into app.change_log (workspace_id, env, collection, document_id, rev, op, status, by) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [ctx.workspaceId, ctx.env, collection, documentId, rev, op, status, ctx.userId],
   );
 }

@@ -440,6 +440,26 @@ Fill the embedding column for file collections, so `search_documents` can answer
 
 Requires an `embedding:` block in `warehousd.yml`; without one the command says so rather than doing nothing. It only ever touches chunks that have no embedding, so it is safe to re-run and cheap to resume after an interruption — which matters when a remote provider rate-limits halfway through a corpus.
 
+### `platform-key create|list|revoke`
+
+Mint, list and revoke the bearer credential `/v1/platform/*` authenticates with — a consuming application's key for provisioning workspaces programmatically, not a session and not an OAuth client. All three subcommands refuse the same way when `workspaces.enabled` is `false` in `warehousd.yml`: "Platform key management is disabled.", closing on "Set `workspaces.enabled: true` in warehousd.yml, then run `warehousd apply`."
+
+**`create`**
+
+| Flag                    |                                                              |
+| ----------------------- | ------------------------------------------------------------ |
+| `--db <url>`            | Database URL.                                                |
+| `--label <label>`       | What this key is for. Required.                              |
+| `--workspaces <ids>`    | Comma-separated workspace ids this key may manage.            |
+| `--all-workspaces`      | This key may reach every workspace on the deployment.         |
+| `--days <n>`            | Lifetime in days (default `90`).                              |
+
+One of `--workspaces` or `--all-workspaces` is required — there is no default scope, because a key that reaches everything by omission is the mistake this flag exists to prevent. The secret is printed once, in the command's own output; `platform-key list` shows the id again but never the secret.
+
+**`list`** — every key's id, label, scope (`all workspaces` or the comma-joined list) and status (`active`/`expired`/`revoked`). Never a secret.
+
+**`revoke <id>`** — revokes a key; any request already using it is refused from that point on.
+
 ### `deploy`
 
 Provisions a warehousd stack from the same `warehousd.yml` to whichever `deploy.target` names. Three exist, and they differ enough to have a runbook each:

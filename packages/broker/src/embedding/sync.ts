@@ -23,6 +23,7 @@ export async function embedCollection(
   env: "dev" | "live",
   collection: string,
   embedder: Embedder,
+  workspaceId: string,
   opts: { batch?: number; onProgress?: (p: EmbedProgress) => void } = {},
 ): Promise<{ embedded: number }> {
   const schema = env === "dev" ? "data_synth" : "data_live";
@@ -31,9 +32,14 @@ export async function embedCollection(
   let embedded = 0;
 
   for (;;) {
+    // Scanning "any row with no embedding" with no workspace filter used to reach every
+    // workspace's pending chunks at once — the admin who pressed the button paid the provider
+    // bill for other tenants' backlog, and the ids it wrote back could collide with another
+    // workspace's under the same shared-seed synthetic id (see generate.ts's regeneration fix).
     const pending = await db.query<{ id: string; content: string }>(
-      `select id, content from ${documents} where embedding is null order by id limit $1`,
-      [batch],
+      `select id, content from ${documents} where embedding is null and workspace_id = $1
+       order by id limit $2`,
+      [workspaceId, batch],
     );
     if (!pending.rowCount) break;
 
@@ -44,8 +50,11 @@ export async function embedCollection(
       );
 
     // One statement per batch rather than per row: `update ... from (values ...)` keeps the
-    // round trips proportional to batches, which matters at a few thousand chunks.
-    const params: unknown[] = [];
+    // round trips proportional to batches, which matters at a few thousand chunks. workspace_id
+    // is bound once and matched on the base table, not per tuple — the ids just came from a
+    // workspace-scoped select, but a shared-seed pk collision means the pk alone cannot be
+    // trusted to name a row in only one workspace.
+    const params: unknown[] = [workspaceId];
     const tuples = pending.rows.map((r, i) => {
       params.push(r.id, toVector(vectors[i]!));
       return `($${params.length - 1}::uuid, $${params.length}::vector)`;
@@ -53,14 +62,15 @@ export async function embedCollection(
     await db.query(
       `update ${documents} as d set embedding = v.embedding
        from (values ${tuples.join(",")}) as v(id, embedding)
-       where d.id = v.id`,
+       where d.id = v.id and d.workspace_id = $1`,
       params,
     );
 
     embedded += pending.rows.length;
     if (opts.onProgress) {
       const left = await db.query<{ n: string }>(
-        `select count(*) as n from ${documents} where embedding is null`,
+        `select count(*) as n from ${documents} where embedding is null and workspace_id = $1`,
+        [workspaceId],
       );
       opts.onProgress({ embedded, remaining: Number(left.rows[0]?.n ?? 0) });
     }

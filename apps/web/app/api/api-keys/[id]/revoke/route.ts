@@ -3,14 +3,13 @@ import { revokeClientSecret } from "@warehousd/broker";
 import { getAppPool } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
 import { readJson } from "../../../../../lib/rest";
-import { orgOf } from "../../../../../lib/session";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireRole(req, "admin");
   if (!guard.ok) return guard.response;
 
   const clientId = (await params).id;
-  const org = orgOf(guard.user);
+  const workspace = guard.workspaceId;
   const body = await readJson(req);
   if (!body.ok) return Response.json({ error: "invalid_body" }, { status: 400 });
   const { secretId } = body.value as { secretId?: string };
@@ -19,9 +18,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return Response.json({ error: "missing_secret_id" }, { status: 400 });
   }
 
-  // revokeClientSecret takes the client and org and matches on all three, so ownership is
+  // revokeClientSecret takes the client and workspace and matches on all three, so ownership is
   // enforced by the update itself rather than by a check this route has to remember to do.
-  const revoked = await revokeClientSecret(getAppPool(), secretId, clientId, org);
+  const revoked = await revokeClientSecret(getAppPool(), secretId, clientId, workspace);
   if (!revoked) return Response.json({ error: "not_found" }, { status: 404 });
 
   return Response.json({ ok: true });

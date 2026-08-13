@@ -161,14 +161,14 @@ describe("mcp-tools: request_access", () => {
 
     const { getAppPool } = await import("../app/lib/broker");
     const row = await getAppPool().query(
-      `select status, user_id, collection, env, org_id, allowed_fields from app.grants where id = $1`,
+      `select status, user_id, collection, env, workspace_id, allowed_fields from app.grants where id = $1`,
       [out.requestId],
     );
     expect(row.rows[0]).toMatchObject({
       status: "pending",
       user_id: "mia",
       collection: "people",
-      org_id: "default",
+      workspace_id: "default",
       env: "dev",
       allowed_fields: ["id", "department_name"],
     });

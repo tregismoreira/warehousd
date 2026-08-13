@@ -11,7 +11,7 @@ export default function AdminUsersPage() {
     <div>
       <PageHeader
         title="Users & roles"
-        description="Manage user roles and access levels across your organization."
+        description="Manage user roles and access levels across your workspace."
       />
       <UsersTable />
     </div>

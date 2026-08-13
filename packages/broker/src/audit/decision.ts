@@ -71,11 +71,12 @@ export type AuditedRefusal<R extends string> = { ok: false; reason: R; auditId: 
 export type AuditWriter = {
   // Record a successful decision. The caller MUST branch on `ok` — an allow whose audit row could
   // not be written is a refusal, and returning the result object directly propagates that.
-  allow(collection: string, detail?: AuditDetail): Promise<AuditedAllow>;
+  // `collection` is null for an operational, platform-level event with no associated collection.
+  allow(collection: string | null, detail?: AuditDetail): Promise<AuditedAllow>;
   // Record a refusal. The refusal stands whether or not the row was written — there is nothing to
   // withhold — so this yields the reason the caller asked for, with a null id if the log failed.
   refuse<R extends string>(
-    collection: string,
+    collection: string | null,
     reason: R,
     detail?: AuditDetail,
   ): Promise<AuditedRefusal<R>>;
@@ -97,7 +98,7 @@ export type AuditWriter = {
 
 // Raised to abort a data transaction whose decision could not be recorded.
 //
-// `allow` inside `withOrg` is the one place returning the refusal is not enough: withOrg commits
+// `allow` inside `withWorkspace` is the one place returning the refusal is not enough: withWorkspace commits
 // on a normal return, so the write would land with no audit row and the caller would be told
 // internal_error — the worst of both. Throwing rolls the transaction back, and the verb's existing
 // catch turns it into the same controlled refusal (and re-attempts the refusal's own audit row,
@@ -159,7 +160,7 @@ export function makeAuditWriter(
   destination: AuditDestination = {},
 ): AuditWriter {
   async function record(
-    collection: string,
+    collection: string | null,
     outcome: "allowed" | "refused",
     reason: string | null,
     detail: AuditDetail,
@@ -174,7 +175,7 @@ export function makeAuditWriter(
           userId: ctx.userId,
           env: ctx.env,
           collection,
-          orgId: ctx.orgId,
+          workspaceId: ctx.workspaceId,
           intent: detail.intent ?? null,
           fieldsReturned: detail.fieldsReturned ?? [],
           unmaskedFields: detail.unmaskedFields ?? [],
@@ -202,7 +203,7 @@ export function makeAuditWriter(
           outcome,
           reason,
           userId: ctx.userId,
-          orgId: ctx.orgId,
+          workspaceId: ctx.workspaceId,
           env: ctx.env,
           // Spread separately from name/message: those two are non-enumerable on an Error, while
           // a driver's own fields (detail, table, column) are enumerable and are what redact()

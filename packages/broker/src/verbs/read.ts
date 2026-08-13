@@ -16,7 +16,7 @@ import { MAX_LIMIT } from "../types";
 import type { CollectionListing } from "../types";
 import { buildSelect, UnsupportedFilter } from "../sql/build";
 import { ident } from "../sql/ident";
-import { dataPool, withOrg, writePool } from "../db/pools";
+import { dataPool, withWorkspace, writePool } from "../db/pools";
 import { findCollection } from "../config/load";
 import { kindOf } from "../config/kinds";
 import type { CollectionConfig } from "../config/schema";
@@ -73,7 +73,7 @@ export function makeReadVerbs(d: VerbDeps) {
       intent.fields && intent.fields.length
         ? intent.fields
         : grant.allowedFields.filter((f) => all.includes(f));
-    // 5. build + execute on the env-scoped pool through withOrg transaction
+    // 5. build + execute on the env-scoped pool through withWorkspace transaction
     try {
       const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, {
         documentFilters: grant.documentFilter,
@@ -85,9 +85,9 @@ export function makeReadVerbs(d: VerbDeps) {
         // what exists and then a shortfall that reports the difference.
         ...g.aclOpts,
       });
-      const documents = await withOrg(
+      const documents = await withWorkspace(
         dataPool(pools, ctx),
-        ctx.orgId,
+        ctx.workspaceId,
         async (client: PoolClient) => {
           return (await client.query(text, values)).rows;
         },
@@ -308,9 +308,9 @@ export function makeReadVerbs(d: VerbDeps) {
           ...g.aclOpts,
         },
       );
-      const documents = await withOrg(
+      const documents = await withWorkspace(
         dataPool(pools, ctx),
-        ctx.orgId,
+        ctx.workspaceId,
         async (client: PoolClient) => {
           return (await client.query(text, values)).rows;
         },
@@ -456,9 +456,9 @@ export function makeReadVerbs(d: VerbDeps) {
         maskFor: plan.maskFor,
         ...g.aclOpts,
       });
-      const rows = await withOrg(
+      const rows = await withWorkspace(
         dataPool(pools, ctx),
-        ctx.orgId,
+        ctx.workspaceId,
         async (client: PoolClient) => (await client.query(text, values)).rows,
       );
 
@@ -515,7 +515,7 @@ async function currentRev(
   const pk = pkOf(c);
   if (!pk) return undefined;
   const schema = dataSchema(ctx.env);
-  return withOrg(pool, ctx.orgId, async (client: PoolClient) => {
+  return withWorkspace(pool, ctx.workspaceId, async (client: PoolClient) => {
     const r = await client.query(
       `select _rev from ${schema}.${ident(collection)} where ${ident(pk)} = $1 and _current`,
       [id],

@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
 
   // Authenticate the client. `env` is the ceiling the presented key carries in its own prefix; it
   // is read from the stored prefix rather than from the string the caller sent.
-  let clientAuth: { clientId: string; orgId: string; env: "dev" | "live" } | null = null;
+  let clientAuth: { clientId: string; workspaceId: string; env: "dev" | "live" } | null = null;
 
   if (hasBasicAuth) {
     const encoded = authHeader!.slice(6);
@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
         headers: { "content-type": "application/json", "cache-control": "no-store" },
       });
     }
-    clientAuth = { clientId, orgId: verified.orgId, env: verified.env };
+    clientAuth = { clientId, workspaceId: verified.workspaceId, env: verified.env };
   } else {
     const clientId = params.get("client_id");
     const clientSecret = params.get("client_secret");
@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
           headers: { "content-type": "application/json", "cache-control": "no-store" },
         });
       }
-      clientAuth = { clientId, orgId: verified.orgId, env: verified.env };
+      clientAuth = { clientId, workspaceId: verified.workspaceId, env: verified.env };
     }
   }
 
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const issuer = await getTrustedIssuer(pool, policy.trustedIssuerId, clientAuth.orgId);
+    const issuer = await getTrustedIssuer(pool, policy.trustedIssuerId, clientAuth.workspaceId);
     if (!issuer) {
       return new Response(JSON.stringify({ error: "invalid_grant" }), {
         status: 400,
@@ -225,10 +225,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Look up user by email within the org
+    // Look up user by email within the workspace
     const userResult = await pool.query(
-      `select id from app."user" where email=$1 and "orgId"=$2 limit 1`,
-      [subject, clientAuth.orgId],
+      `select id from app."user" where email=$1 and "workspaceId"=$2 limit 1`,
+      [subject, clientAuth.workspaceId],
     );
 
     if (userResult.rowCount === 0) {
@@ -267,7 +267,7 @@ export async function POST(req: NextRequest) {
   // issued at all: the env a token reaches has to be a property of the token, not a default
   // applied by whichever context constructor reads it later.
   const requestedScopes = (params.get("scope") ?? "").split(" ").filter(Boolean);
-  const liveEligible = await hasApprovedLiveGrant(pool, userId, clientAuth.orgId);
+  const liveEligible = await hasApprovedLiveGrant(pool, userId, clientAuth.workspaceId);
 
   // Three gates, ANDed, and the key's own prefix is the first of them: a `whd_dev_` key has
   // `env:live` struck from the policy before anything else is considered, so it cannot reach real

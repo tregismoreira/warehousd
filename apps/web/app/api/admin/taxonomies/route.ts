@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { countTermUsage } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
-import { readEnvCookie, orgOf } from "../../../../lib/session";
+import { readEnvCookie } from "../../../../lib/session";
 
 // Every vocabulary in the configuration, with the terms that actually exist in this environment
 // and how many documents carry each of them.
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   const cfg = getConfig();
   const env = readEnvCookie(req);
-  const orgId = orgOf(guard.user);
+  const workspaceId = guard.workspaceId;
   const app = getAppPool();
 
   const stored = new Map(
@@ -44,8 +44,9 @@ export async function GET(req: NextRequest) {
     const termRows = vocabularyId
       ? (
           await app.query<{ slug: string; label: string | null }>(
-            `select slug, label from app.terms where vocabulary_id=$1 and env=$2 order by slug`,
-            [vocabularyId, vocab.terms ? "all" : env],
+            `select slug, label from app.terms
+             where vocabulary_id=$1 and env=$2 and workspace_id in ('*', $3) order by slug`,
+            [vocabularyId, vocab.terms ? "all" : env, workspaceId],
           )
         ).rows
       : [];
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
       try {
         const counts = await countTermUsage(
           getBroker().pools,
-          { env, orgId },
+          { env, workspaceId },
           cfg,
           collection,
           slug,

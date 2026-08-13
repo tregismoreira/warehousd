@@ -9,8 +9,8 @@ export const BASE = "postgres://postgres:postgres@127.0.0.1:54330";
 const repoRoot = new URL("../../../../", import.meta.url).pathname;
 
 // Databases are cluster-global and sibling checkouts share this Postgres — see docs/testing.md,
-// "Running two checkouts at once". Without a per-checkout suffix one workspace's globalSetup
-// would drop the template another workspace is mid-run cloning from, which surfaces as the
+// "Running two checkouts at once". Without a per-checkout suffix one checkout's globalSetup
+// would drop the template another checkout is mid-run cloning from, which surfaces as the
 // second suite's schema vanishing rather than as a collision.
 export const SUFFIX = createHash("sha256").update(repoRoot).digest("hex").slice(0, 8);
 

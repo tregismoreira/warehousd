@@ -254,7 +254,7 @@ describe("a destructive change with nothing to lose", () => {
         where schemaname='data_live' and indexname='orders_current_idx'`,
     );
     expect(rows[0]?.indexdef).toContain("amount");
-    expect(rows[0]?.indexdef).not.toContain("(org_id, id)");
+    expect(rows[0]?.indexdef).not.toContain("(workspace_id, id)");
     await db.end();
   });
 

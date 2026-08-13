@@ -5,5 +5,5 @@ import type { BrokerContext } from "@warehousd/broker";
 // published surface, so reaching into the broker's test helpers from here would couple two
 // tsconfig programs together for four lines.
 export function makeCtx(over: Partial<BrokerContext> & { userId: string }): BrokerContext {
-  return { orgId: "default", env: "dev", allowedCollections: null, via: "session", ...over };
+  return { workspaceId: "default", env: "dev", allowedCollections: null, via: "session", ...over };
 }

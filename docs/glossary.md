@@ -9,11 +9,11 @@ The words **warehousd** uses, and the ones it deliberately does not. The core mo
 | **Field** | A document's governed attribute. Postures and grants operate on fields. |
 | **File** | An ingested source (`.md`/`.txt`) parsed into one or more documents. A file is not a document; it *contains* them. |
 | **Posture** | A field's declared setting in `warehousd.yml`, on two axes: `read` and `write`, each `allow` (grantable) or `deny` (never grantable). Absent means denied on both. A bare `allow`/`deny` sets `read` and leaves `write` denied. |
-| **Grant** | `(org, user, collection, purpose, verbs, allowed fields, environment, mode, expiry)`, optionally narrowed via document filter (array of predicates on any field, including metadata and taxonomy fields). Requested, approved, evaluated fresh on every query. |
+| **Grant** | `(workspace, user, collection, purpose, verbs, allowed fields, environment, mode, expiry)`, optionally narrowed via document filter (array of predicates on any field, including metadata and taxonomy fields). Requested, approved, evaluated fresh on every query. |
 | **Verb** | What a grant permits: `read`, `create`, `update`, `delete`, `approve`. Which verbs a collection can support at all follows from its type, not from the grant. |
 | **Purpose** | The short label and free text a user states when requesting access. Stored on the grant and stamped on every audit event it produces. |
 | **Environment** | `dev` (synthetic data) or `live` (real data). Carried as an OAuth scope, never as a request parameter. |
-| **Organization** | The tenant a user, grant, audit event and document belong to. Derived from the authenticated identity, never from a request. |
+| **Workspace** | The tenant a user, grant, audit event and document belong to. A user may belong to several, with a role per workspace. Derived from the authenticated identity and its membership, never named freely by a request. |
 | **Intent** | A structured query *proposal* from a client. The broker re-validates it and builds the SQL itself. |
 | **Refusal** | A denial carrying a reason code (`no_grant`, `field_denied`, …) and nothing else — no denied value, no SQL. |
 | **Broker** | The library that turns `(identity, grants, intent)` into documents or a refusal. The only thing that reads collection data. |

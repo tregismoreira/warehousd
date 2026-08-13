@@ -53,6 +53,7 @@ export async function indexCollection(
   env: "dev" | "live",
   collection: string,
   sourceDir: string,
+  workspaceId: string,
   opts: {
     taxonomies?: TaxonomyBinding[];
     metadata?: MetadataField[];
@@ -72,11 +73,14 @@ export async function indexCollection(
   const schema = env === "dev" ? "data_synth" : "data_live";
   const filesT = filesTable(schema, collection);
   // Only the rows this indexer put there. An uploaded document has `origin = 'upload'` and is
-  // deliberately absent from the sweep below — see the note on it.
+  // deliberately absent from the sweep below — see the note on it. Scoped to workspace_id too:
+  // without it, this sweep would collect another workspace's file ids and the prune loop below
+  // would delete rows that never left this workspace's source directory.
   const existing = new Map<string, string>(
     (
       await db.query<{ id: string; path: string }>(
-        `select id, path from ${filesT} where origin = 'index'`,
+        `select id, path from ${filesT} where origin = 'index' and workspace_id = $1`,
+        [workspaceId],
       )
     ).rows.map((r) => [r.path, r.id]),
   );
@@ -104,6 +108,7 @@ export async function indexCollection(
       db,
       schema,
       collection,
+      workspaceId,
       {
         path: rel,
         bytes: readFileSync(abs),

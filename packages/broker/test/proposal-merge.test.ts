@@ -57,7 +57,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "proposer_disjoint",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -70,7 +70,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "approver_disjoint",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -78,7 +78,7 @@ describe("broker.approveProposal merge logic", () => {
 
     // Create document with initial values
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'test@ex.com', 'Test', 'Engineering', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -136,7 +136,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "proposer_overlap",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -149,7 +149,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "approver_overlap",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -157,7 +157,7 @@ describe("broker.approveProposal merge logic", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'overlap@ex.com', 'Overlap', 'Sales', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -204,7 +204,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "proposer_stale",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -217,7 +217,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "direct_update",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -227,7 +227,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "approver_stale",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -235,7 +235,7 @@ describe("broker.approveProposal merge logic", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'stale@ex.com', 'Stale', 'HR', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -277,7 +277,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "proposer_stale_ok",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -290,7 +290,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "direct_update2",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -300,7 +300,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "approver_stale_ok",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name", "dept"],
     });
@@ -308,7 +308,7 @@ describe("broker.approveProposal merge logic", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, dept, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'stale_ok@ex.com', 'Stale OK', 'Finance', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -362,7 +362,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "proposer_rev_by",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -375,7 +375,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "approver_rev_by",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -383,7 +383,7 @@ describe("broker.approveProposal merge logic", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'rev_by@ex.com', 'Rev By', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -421,7 +421,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "proposer_seq",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -434,7 +434,7 @@ describe("broker.approveProposal merge logic", () => {
       userId: "approver_seq",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -442,7 +442,7 @@ describe("broker.approveProposal merge logic", () => {
 
     // Create document
     const createRes = await app.query(
-      `insert into data_synth.people (org_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+      `insert into data_synth.people (workspace_id, id, email, name, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'seq@ex.com', 'Seq', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true)
        returning id`,
     );
@@ -509,7 +509,7 @@ describe("approval writes one revision, not two", () => {
         userId,
         collection: "people",
         env: "dev",
-        orgId: "default",
+        workspaceId: "default",
         purposeLabel: "test",
         allowedFields: ["id", "email", "name", "dept"],
       });

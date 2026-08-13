@@ -12,6 +12,7 @@ import {
   fileMetadataFields,
   ensureSchemasAndRoles,
   grantableFields,
+  DEFAULT_WORKSPACE_ID,
 } from "@warehousd/broker";
 import { seedLive } from "../examples/harbor/seed/live";
 import { auth } from "../apps/web/lib/auth";
@@ -54,6 +55,16 @@ async function seedPersonaUsers(db: Pool) {
     await db.query(`delete from app."session" where "userId"=$1`, [generatedId]);
     await db.query(`delete from app."account" where "userId"=$1`, [generatedId]);
     await db.query(`update app."user" set id=$1, role=$2 where id=$3`, [p.id, p.role, generatedId]);
+    // databaseHooks.user.create.after (lib/auth.ts) already gave `generatedId` a 'member' row in
+    // app.workspace_members for 'default' — workspace_members.user_id carries no FK to app.user,
+    // so renaming the user above left that row pointing at an id nothing references any more,
+    // and the persona itself with no membership row at all. Re-key it rather than insert a
+    // second one, and correct the role while at it: the hook's default is always 'member'.
+    await db.query(`update app.workspace_members set user_id=$1, role=$2 where user_id=$3`, [
+      p.id,
+      p.role,
+      generatedId,
+    ]);
     if (account.rowCount && account.rowCount > 0) {
       const a = account.rows[0];
       await db.query(
@@ -88,27 +99,33 @@ async function main() {
   await seedPersonaUsers(db);
   await applyConfig(db, cfg);
   // truncate before regenerating so re-running bootstrap (e.g. container restart) is idempotent
-  await regenerateSynthetic(db, cfg, 42);
+  await regenerateSynthetic(db, cfg, DEFAULT_WORKSPACE_ID, 42);
   // Sync dataset-sourced vocabulary terms for dev
-  await syncDatasetTerms(db, cfg, "dev");
+  await syncDatasetTerms(db, cfg, "dev", DEFAULT_WORKSPACE_ID);
   await seedLive(db);
   // Sync dataset-sourced vocabulary terms for live
-  await syncDatasetTerms(db, cfg, "live");
+  await syncDatasetTerms(db, cfg, "live", DEFAULT_WORKSPACE_ID);
   // Index file collections from seed docs (dev and live environments)
   const indexed: string[] = [];
   for (const [name, c] of Object.entries(cfg.collections)) {
     if (c.type !== "file") continue;
     const metadata = fileMetadataFields(c);
-    const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev");
-    const dev = await indexCollection(db, "dev", name, `${dir}/${c.source}`, {
+    const devTaxonomies = await loadTaxonomyBindings(db, cfg, name, "dev", DEFAULT_WORKSPACE_ID);
+    const dev = await indexCollection(db, "dev", name, `${dir}/${c.source}`, DEFAULT_WORKSPACE_ID, {
       taxonomies: devTaxonomies,
       metadata,
     });
     let live = 0;
     if (c.source_live) {
-      const liveTaxonomies = await loadTaxonomyBindings(db, cfg, name, "live");
+      const liveTaxonomies = await loadTaxonomyBindings(
+        db,
+        cfg,
+        name,
+        "live",
+        DEFAULT_WORKSPACE_ID,
+      );
       live = (
-        await indexCollection(db, "live", name, `${dir}/${c.source_live}`, {
+        await indexCollection(db, "live", name, `${dir}/${c.source_live}`, DEFAULT_WORKSPACE_ID, {
           taxonomies: liveTaxonomies,
           metadata,
         })

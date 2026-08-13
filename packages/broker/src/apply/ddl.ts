@@ -73,7 +73,7 @@ export function fileDeclaredTables(collection: string, cfg: WarehousdConfig): De
       columns,
       structural: [
         "id",
-        "org_id",
+        "workspace_id",
         "title",
         "path",
         "owner",
@@ -94,7 +94,7 @@ export function fileDeclaredTables(collection: string, cfg: WarehousdConfig): De
     {
       table: `${collection}__documents`,
       columns: [],
-      structural: ["id", "org_id", "file_id", "document_seq", "content", "tsv", "embedding"],
+      structural: ["id", "workspace_id", "file_id", "document_seq", "content", "tsv", "embedding"],
     },
   ];
 }
@@ -109,7 +109,7 @@ export function datasetDeclaredTables(collection: string, cfg: WarehousdConfig):
   // Unconditional, matching tableDDL. Gating this on `writable` would make the planner read
   // every non-writable dataset's `_rev*` columns as data the operator deleted, and refuse to
   // apply a config that had not changed at all.
-  const structural: string[] = ["org_id", ...REV_COLS];
+  const structural: string[] = ["workspace_id", ...REV_COLS];
   for (const [name, f] of Object.entries(c.fields)) {
     // Join columns are resolved in the view and stored nowhere, so nothing can be stranded in one.
     if (f.view_join) continue;
@@ -208,13 +208,14 @@ export function fileTableDDL(
   return `
       create table if not exists ${schema}."${collection}__files" (
         id uuid primary key,
-        org_id text not null default 'default',
+        workspace_id text not null default 'default',
         title text,
-        path text not null unique,${termCol}${metadataCol}
+        path text not null,${termCol}${metadataCol}
         owner text,
         checksum text not null,
-        updated_at timestamptz not null);
-      alter table ${schema}."${collection}__files" add column if not exists org_id text not null default 'default';${termAlter}${metadataAlter}
+        updated_at timestamptz not null,
+        unique (workspace_id, path));
+      alter table ${schema}."${collection}__files" add column if not exists workspace_id text not null default 'default';${termAlter}${metadataAlter}
       alter table ${schema}."${collection}__files" add column if not exists content_type text;
       alter table ${schema}."${collection}__files" add column if not exists byte_size integer;
       alter table ${schema}."${collection}__files" add column if not exists blob bytea;
@@ -225,14 +226,14 @@ export function fileTableDDL(
         on ${schema}."${collection}__files" (blob_checksum);
       create table if not exists ${schema}."${collection}__documents" (
         id uuid primary key,
-        org_id text not null default 'default',
+        workspace_id text not null default 'default',
         file_id uuid not null references ${schema}."${collection}__files"(id) on delete cascade,
         document_seq int not null,
         content text not null,
         tsv tsvector generated always as (to_tsvector('english', content)) stored,
         embedding vector(${dims}),
         unique (file_id, document_seq));
-      alter table ${schema}."${collection}__documents" add column if not exists org_id text not null default 'default';
+      alter table ${schema}."${collection}__documents" add column if not exists workspace_id text not null default 'default';
       create index if not exists "${collection}__documents_tsv_idx"
         on ${schema}."${collection}__documents" using gin (tsv);
       create index if not exists "${collection}__documents_embedding_idx"
@@ -330,18 +331,18 @@ export function datasetTableDDL(
         _rev_fields text[]      not null,
         _rev_base   bigint,
         _current    boolean     not null default false,
-        org_id      text        not null default 'default',`;
+        workspace_id      text        not null default 'default',`;
   // Remove pk constraint from data columns
   const dataColsNoPk = cols.map((col) => col.replace(/ primary key$/, ""));
   let ddl = `create table if not exists ${schema}.${collection} (${revCols} ${dataColsNoPk.join(", ")});`;
-  ddl += ` alter table ${schema}.${collection} add column if not exists org_id text not null default 'default';`;
+  ddl += ` alter table ${schema}.${collection} add column if not exists workspace_id text not null default 'default';`;
   // `create table if not exists` is a no-op on a table that predates a value being added to the
   // check, so the constraint is re-asserted explicitly. Naming it means the drop/add pair is
   // idempotent whether the constraint was created inline here or auto-named by Postgres — the
   // generated name for this column is the same string.
   ddl += ` alter table ${schema}.${collection} drop constraint if exists "${statusCheck}";`;
   ddl += ` alter table ${schema}.${collection} add constraint "${statusCheck}" check (_rev_status in (${statusValues}));`;
-  ddl += ` create unique index if not exists "${collection}_current_idx" on ${schema}.${collection} (org_id, "${pkField}") where _current;`;
+  ddl += ` create unique index if not exists "${collection}_current_idx" on ${schema}.${collection} (workspace_id, "${pkField}") where _current;`;
   ddl += fieldAlters.join("");
   ddl += vocabAlters;
   ddl += searchAlters;
@@ -358,8 +359,8 @@ export function datasetTableDDL(
 // the read pools hold none on `app` (db/pools.ts), so an ACL kept in `app` could not be joined
 // into a collection's view — and the view is the only place the rule can be enforced for a read.
 //
-// Org isolation follows the existing two-wall model (see rlsDDL): the view's join carries
-// `acl.org_id = base.org_id` explicitly, and the table itself gets the same RLS policy every other
+// Workspace isolation follows the existing two-wall model (see rlsDDL): the view's join carries
+// `acl.workspace_id = base.workspace_id` explicitly, and the table itself gets the same RLS policy every other
 // data table has, for the roles that reach it directly.
 //
 // Read roles are granted NOTHING here, deliberately. A view runs with its owner's privileges
@@ -370,18 +371,19 @@ export function aclTableDDL(env: "dev" | "live"): string {
   const t = `${schema}."${ACL_TABLE}"`;
   return `
     create table if not exists ${t} (
-      org_id      text not null,
+      workspace_id      text not null,
       collection  text not null,
       document_id text not null,
       principals  text[] not null,
       updated_at  timestamptz not null default now(),
       updated_by  text not null,
-      primary key (org_id, collection, document_id));
+      primary key (workspace_id, collection, document_id));
     alter table ${t} enable row level security;
     drop policy if exists org_isolation on ${t};
-    create policy org_isolation on ${t}
-      using (org_id = current_setting('warehousd.org_id', true))
-      with check (org_id = current_setting('warehousd.org_id', true));
+    drop policy if exists workspace_isolation on ${t};
+    create policy workspace_isolation on ${t}
+      using (workspace_id = current_setting('warehousd.workspace_id', true))
+      with check (workspace_id = current_setting('warehousd.workspace_id', true));
   `;
 }
 
@@ -407,8 +409,8 @@ export function grantAclWriteDDL(env: "dev" | "live"): string {
 // view is never briefly absent, and applyConfig re-issues grantViewDDL straight afterwards —
 // which is the only thing that grants on these views.
 //
-// Views filter by current_setting('warehousd.org_id') — the database enforces org isolation,
-// so broker-built SQL never carries an org predicate (see Phase 1 acceptance criterion).
+// Views filter by current_setting('warehousd.workspace_id') — the database enforces workspace isolation,
+// so broker-built SQL never carries a workspace predicate (see Phase 1 acceptance criterion).
 // For writable datasets, the view also filters to _current=true and _rev_op<>'delete' —
 // pending revisions never appear, so unapproved agent output cannot leak into ordinary queries.
 export function viewDDL(env: "dev" | "live", collection: string, cfg: WarehousdConfig): string {
@@ -451,7 +453,7 @@ export function fileViewDDL(env: "dev" | "live", collection: string, cfg: Wareho
   const aclKey = kindOf(c).aclKeyField(c);
   const aclJoin =
     c.acl && aclKey
-      ? ` left join ${schema}."${ACL_TABLE}" acl on acl.org_id = d.org_id` +
+      ? ` left join ${schema}."${ACL_TABLE}" acl on acl.workspace_id = d.workspace_id` +
         ` and acl.collection = ${literal(collection)}` +
         ` and acl.document_id = d.${ident(aclKey)}::text`
       : "";
@@ -461,8 +463,8 @@ export function fileViewDDL(env: "dev" | "live", collection: string, cfg: Wareho
       select c.id as document_id, c.document_seq, c.content, c.tsv, c.embedding,
              d.id as file_id, d.title, d.path, d.owner, d.updated_at, d.checksum${termSels}${metadataSels}${aclSel}
       from ${schema}."${collection}__documents" c
-      join ${schema}."${collection}__files" d on d.id = c.file_id and d.org_id = c.org_id${aclJoin}
-      where d.org_id = current_setting('warehousd.org_id', true);`;
+      join ${schema}."${collection}__files" d on d.id = c.file_id and d.workspace_id = c.workspace_id${aclJoin}
+      where d.workspace_id = current_setting('warehousd.workspace_id', true);`;
 }
 
 /** The `type: dataset` half of viewDDL, including the source_ref form. Registered by kinds/dataset.ts. */
@@ -477,9 +479,9 @@ export function datasetViewDDL(
   const recreate = `drop view if exists ${schema}.v_${collection};
     create view ${schema}.v_${collection} as`;
 
-  // An external collection's live view reads the foreign table. It has no org_id column — the
+  // An external collection's live view reads the foreign table. It has no workspace_id column — the
   // remote system knows nothing about warehousd's tenants — so the predicate compares the
-  // request's org against the constant the config declared for this source. That is a genuine
+  // request's workspace against the constant the config declared for this source. That is a genuine
   // narrowing of the two-wall model: RLS cannot apply to a foreign table, so this predicate is
   // the only wall. It is stated in docs/architecture.md and SECURITY.md rather than left implicit.
   if (c.source_ref && env === "live") {
@@ -488,7 +490,7 @@ export function datasetViewDDL(
       .map(([name]) => `base."${name}"`);
     return `${recreate}
       select ${cols.join(", ")} from ${schema}."_ext_${collection}" base
-      where current_setting('warehousd.org_id', true) = '${c.source_ref.org.replace(/'/g, "''")}';`;
+      where current_setting('warehousd.workspace_id', true) = '${c.source_ref.workspace.replace(/'/g, "''")}';`;
   }
 
   const selects: string[] = [];
@@ -514,12 +516,12 @@ export function datasetViewDDL(
   //
   // LEFT join: no row means public, and that is what makes 999 of 1,000 documents cost nothing.
   //
-  // `acl.org_id = base.org_id` is carried explicitly. The base table's own RLS policy is the other
+  // `acl.workspace_id = base.workspace_id` is carried explicitly. The base table's own RLS policy is the other
   // wall, and neither is redundant — see rlsDDL.
   const aclKey = kindOf(c).aclKeyField(c);
   if (c.acl && aclKey) {
     joins.push(
-      `left join ${schema}."${ACL_TABLE}" acl on acl.org_id = base.org_id` +
+      `left join ${schema}."${ACL_TABLE}" acl on acl.workspace_id = base.workspace_id` +
         ` and acl.collection = ${literal(collection)}` +
         ` and acl.document_id = base.${ident(aclKey)}::text`,
     );
@@ -530,7 +532,7 @@ export function datasetViewDDL(
   // revision and nothing else. Pending revisions never appear — unapproved agent output cannot
   // leak into an ordinary query — and neither does a document a delete revision retired, whether
   // that delete came from the write path or from an admin import.
-  const whereClause = `where base.org_id = current_setting('warehousd.org_id', true) and base._current and base._rev_op <> 'delete'`;
+  const whereClause = `where base.workspace_id = current_setting('warehousd.workspace_id', true) and base._current and base._rev_op <> 'delete'`;
 
   return `${recreate}
     select ${selects.join(", ")} from ${schema}.${collection} base ${joins.join(" ")}
@@ -612,7 +614,7 @@ export function grantViewDDL(env: "dev" | "live", collection: string): string {
   return `grant select on ${schema}.v_${collection} to ${role};`;
 }
 
-// Org isolation has two walls, and neither is redundant. The read roles only ever see the
+// Workspace isolation has two walls, and neither is redundant. The read roles only ever see the
 // view, whose WHERE predicate is the wall for them. Roles that touch base tables directly —
 // warehousd_import today, the write roles later — bypass the view entirely, so RLS is their
 // wall. Both live in the database, so a broker bug cannot cross the tenant boundary either way.
@@ -622,7 +624,7 @@ export function rlsDDL(env: "dev" | "live", collection: string, cfg: WarehousdCo
   if (!c) throw new Error(`Unknown collection: ${collection}`);
 
   // A foreign table cannot carry an RLS policy, and there is no local row to police. The view's
-  // constant org predicate is the wall for these — see viewDDL.
+  // constant workspace predicate is the wall for these — see viewDDL.
   if (c.source_ref && env === "live") return "";
 
   // Which TABLES a kind stores its rows in — one for a dataset, two for a file. The policy is
@@ -633,9 +635,10 @@ export function rlsDDL(env: "dev" | "live", collection: string, cfg: WarehousdCo
       (t: string) => `
     alter table ${t} enable row level security;
     drop policy if exists org_isolation on ${t};
-    create policy org_isolation on ${t}
-      using (org_id = current_setting('warehousd.org_id', true))
-      with check (org_id = current_setting('warehousd.org_id', true));
+    drop policy if exists workspace_isolation on ${t};
+    create policy workspace_isolation on ${t}
+      using (workspace_id = current_setting('warehousd.workspace_id', true))
+      with check (workspace_id = current_setting('warehousd.workspace_id', true));
   `,
     )
     .join("");

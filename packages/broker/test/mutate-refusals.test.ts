@@ -91,7 +91,7 @@ describe("broker.mutate refusals", () => {
       userId: "user1",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -118,7 +118,7 @@ describe("broker.mutate refusals", () => {
       userId: "read_only_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -140,7 +140,7 @@ describe("broker.mutate refusals", () => {
       userId: "proposal_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -180,7 +180,7 @@ describe("broker.mutate refusals", () => {
       userId: "unknown_field_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -202,7 +202,7 @@ describe("broker.mutate refusals", () => {
       userId: "not_writable_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "name"],
     });
@@ -225,7 +225,7 @@ describe("broker.mutate refusals", () => {
       userId: "field_denied_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -247,7 +247,7 @@ describe("broker.mutate refusals", () => {
       userId: "invalid_value_user",
       collection: "testcol",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "value"],
     });
@@ -270,7 +270,7 @@ describe("broker.mutate refusals", () => {
       userId: "not_found_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "owner"],
     });
@@ -293,7 +293,7 @@ describe("broker.mutate refusals", () => {
       userId: "filter_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "owner"],
     });
@@ -305,7 +305,7 @@ describe("broker.mutate refusals", () => {
     // Insert a document not owned by filter_user
     const otherId = (
       await app.query(
-        `insert into data_synth.people (org_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+        `insert into data_synth.people (workspace_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'x@ex.com', 'other', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true) returning id`,
       )
     ).rows[0].id;
@@ -327,7 +327,7 @@ describe("broker.mutate refusals", () => {
       userId: "conflict_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email", "owner"],
     });
@@ -336,7 +336,7 @@ describe("broker.mutate refusals", () => {
     // Insert a document
     const id = (
       await app.query(
-        `insert into data_synth.people (org_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+        `insert into data_synth.people (workspace_id, id, email, owner, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'x@ex.com', 'owner1', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true) returning id`,
       )
     ).rows[0].id;
@@ -357,7 +357,7 @@ describe("broker.mutate refusals", () => {
       userId: "concurrency_user",
       collection: "people",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "email"],
     });
@@ -365,7 +365,7 @@ describe("broker.mutate refusals", () => {
 
     const rev = (
       await app.query(
-        `insert into data_synth.people (org_id, id, email, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
+        `insert into data_synth.people (workspace_id, id, email, _rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _current)
        values ('default', gen_random_uuid(), 'x@ex.com', gen_random_uuid(), 1, now(), 'admin', 'create', 'approved', '{}', true) returning _rev`,
       )
     ).rows[0]._rev;
@@ -410,7 +410,7 @@ describe("broker.mutate refusals", () => {
       userId: "emptycreate_user",
       collection: "testcol",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "value"],
     });
@@ -435,7 +435,7 @@ describe("broker.mutate refusals", () => {
       userId: "auditshape_user",
       collection: "testcol",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "test",
       allowedFields: ["id", "value"],
     });

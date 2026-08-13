@@ -295,7 +295,10 @@ describe("acl rules", () => {
   });
 
   it("acl/preconditions refuses a source_ref collection", () => {
-    const c = coll({ acl: true, source_ref: { source: "hr", table: "people", org: "default" } });
+    const c = coll({
+      acl: true,
+      source_ref: { source: "hr", table: "people", workspace: "default" },
+    });
     fires(aclPreconditions, c, "source_ref collection");
   });
 
@@ -311,7 +314,10 @@ describe("acl rules", () => {
   // warehousd does not own its rows — and naming a missing key alongside it would send the author
   // to add one to a table they do not control.
   it("acl/preconditions reports one reason, not two", () => {
-    const c = coll({ acl: true, source_ref: { source: "hr", table: "people", org: "default" } });
+    const c = coll({
+      acl: true,
+      source_ref: { source: "hr", table: "people", workspace: "default" },
+    });
     expect(messagesFrom(aclPreconditions, c)).toHaveLength(1);
   });
 
@@ -321,7 +327,7 @@ describe("acl rules", () => {
 });
 
 describe("source_ref rules", () => {
-  const ref = { source: "hr", table: "people", org: "default" };
+  const ref = { source: "hr", table: "people", workspace: "default" };
 
   it("source-ref/not-on-file", () => {
     fires(sourceRefNotOnFile, coll({ type: "file", source_ref: ref }), "dataset collections");

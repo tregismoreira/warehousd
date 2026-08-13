@@ -42,7 +42,7 @@ beforeAll(async () => {
   await createAppSchema(app);
   await applyConfig(app, cfgWith({ enabled: true }));
   await app.query(
-    `insert into data_synth.people (${R}, org_id, id, email)
+    `insert into data_synth.people (${R}, workspace_id, id, email)
      values (${RV}, 'default', gen_random_uuid(), 'seed@ex.com')`,
   );
 }, 60_000);
@@ -57,7 +57,7 @@ async function grantFor(userId: string, cfg: WarehousdConfig) {
     userId,
     collection: "people",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "t",
     allowedFields: ["id", "email"],
   });

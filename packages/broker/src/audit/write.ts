@@ -26,8 +26,10 @@ export type AuditIntent =
 export type AuditEvent = {
   userId: string;
   env: "dev" | "live";
-  collection: string;
-  orgId: string;
+  // null for an operational event with no associated collection — a platform action
+  // (workspace_created, member_set, …), which the app.audit_events column already allows.
+  collection: string | null;
+  workspaceId: string;
   intent: AuditIntent;
   fieldsReturned: string[];
   // Which of fieldsReturned came back RAW rather than transformed. Names only, like
@@ -64,14 +66,14 @@ export async function insertAuditEvent(app: Pool, e: AuditEvent): Promise<string
   // regen) carry their own reason codes.
   const r = await app.query(
     `insert into app.audit_events
-       (user_id, env, collection, org_id, intent, fields_returned, unmasked_fields, principals,
+       (user_id, env, collection, workspace_id, intent, fields_returned, unmasked_fields, principals,
         grant_id, grant_principal, outcome, reason, via)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
     [
       e.userId,
       e.env,
       e.collection,
-      e.orgId,
+      e.workspaceId,
       e.intent ? JSON.stringify(e.intent) : null,
       e.fieldsReturned,
       e.unmaskedFields ?? [],

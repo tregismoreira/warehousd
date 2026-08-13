@@ -10,8 +10,8 @@ export async function GET(req: NextRequest) {
 
   const app = getAppPool();
   const r = await app.query(
-    `select * from app.grants where org_id=$1 and user_id=$2 order by requested_at desc`,
-    [ctx.orgId, ctx.userId],
+    `select * from app.grants where workspace_id=$1 and user_id=$2 order by requested_at desc`,
+    [ctx.workspaceId, ctx.userId],
   );
 
   const now = Date.now();
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     userId: ctx.userId,
     collection,
     env: ctx.env,
-    orgId: ctx.orgId,
+    workspaceId: ctx.workspaceId,
     purposeLabel: (purposeLabel as string).trim(),
     purposeDetail: typeof purposeDetail === "string" ? purposeDetail.trim() : undefined,
     allowedFields: validation.fields,

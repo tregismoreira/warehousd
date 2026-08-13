@@ -290,7 +290,7 @@ export const TOOLS: ToolDef[] = [
         userId: ctx.userId,
         collection: input.collection as string,
         env: ctx.env,
-        orgId: ctx.orgId,
+        workspaceId: ctx.workspaceId,
         purposeLabel: input.purpose as string,
         allowedFields: validation.fields,
       });

@@ -38,10 +38,10 @@ describe("sources and source_ref: what parses", () => {
     expect(r.success).toBe(true);
   });
 
-  it("defaults the schema, the org and read_only", () => {
+  it("defaults the schema, the workspace and read_only", () => {
     const cfg = ConfigSchema.parse(base());
     expect(cfg.sources.crm).toMatchObject({ schema: "public", read_only: true });
-    expect(cfg.collections.accounts!.source_ref).toMatchObject({ org: "default" });
+    expect(cfg.collections.accounts!.source_ref).toMatchObject({ workspace: "default" });
   });
 
   it("accepts a remote column rename", () => {
@@ -214,11 +214,11 @@ describe("the SQL an external collection generates", () => {
     expect(rlsDDL("dev", "accounts", cfg)).toContain("row level security");
   });
 
-  it("builds the live view over the foreign table with a constant org predicate", () => {
+  it("builds the live view over the foreign table with a constant workspace predicate", () => {
     const v = viewDDL("live", "accounts", cfg);
     expect(v).toContain(`from data_live."_ext_accounts" base`);
-    // A foreign table has no org_id to compare, so the request's org is compared to the source's.
-    expect(v).toContain(`current_setting('warehousd.org_id', true) = 'default'`);
+    // A foreign table has no workspace_id to compare, so the request's workspace is compared to the source's.
+    expect(v).toContain(`current_setting('warehousd.workspace_id', true) = 'default'`);
   });
 
   it("never grants the import role anything on it", () => {

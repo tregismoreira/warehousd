@@ -42,7 +42,7 @@ describe("web bootstrap against a virgin database", () => {
       `select table_name from information_schema.tables where table_schema = 'app'`,
     );
     const names = tables.rows.map((r) => r.table_name);
-    for (const t of ["organizations", "collections", "grants", "audit_events", "client_policies"]) {
+    for (const t of ["workspaces", "collections", "grants", "audit_events", "client_policies"]) {
       expect(names).toContain(t);
     }
     for (const t of ["user", "session", "account"]) {
@@ -50,23 +50,25 @@ describe("web bootstrap against a virgin database", () => {
     }
   });
 
-  it("migrateUserOrg puts the org default on user.orgId", async () => {
+  it("migrateUserWorkspace puts the workspace default on user.workspaceId", async () => {
     const col = await db.query(
       `select column_default from information_schema.columns
-       where table_schema = 'app' and table_name = 'user' and column_name = 'orgId'`,
+       where table_schema = 'app' and table_name = 'user' and column_name = 'workspaceId'`,
     );
     expect(col.rows[0]?.column_default).toContain("default");
 
-    const fk = await db.query(`select 1 from pg_constraint where conname = 'user_org_fk'`);
+    const fk = await db.query(`select 1 from pg_constraint where conname = 'user_workspace_fk'`);
     expect(fk.rowCount).toBe(1);
   });
 
   it("seeds the personas with their fixed ids and roles", async () => {
-    const users = await db.query(`select id, email, role, "orgId" from app."user" order by id`);
+    const users = await db.query(
+      `select id, email, role, "workspaceId" from app."user" order by id`,
+    );
     expect(users.rows).toEqual(
       [...PERSONAS]
         .sort((a, b) => a.id.localeCompare(b.id))
-        .map((p) => ({ id: p.id, email: p.email, role: p.role, orgId: "default" })),
+        .map((p) => ({ id: p.id, email: p.email, role: p.role, workspaceId: "default" })),
     );
   });
 });

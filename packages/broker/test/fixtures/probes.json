@@ -24,7 +24,7 @@
 
   { "surface": "mcp", "name": "forged env in query args",          "tool": "query_collection",  "args": { "collection": "people", "fields": ["id","full_name"], "limit": 500, "env": "live" }, "expect": "allowed", "assertDevOnly": true },
   { "surface": "mcp", "name": "forged env in search args",         "tool": "search_documents",  "args": { "collection": "policies", "q": "policy", "env": "live" }, "expect": "allowed", "assertDevOnly": true },
-  { "surface": "mcp", "name": "forged orgId in args",              "tool": "query_collection",  "args": { "collection": "people", "fields": ["id"], "orgId": "other-org" }, "expect": "allowed", "assertDevOnly": true },
+  { "surface": "mcp", "name": "forged workspaceId in args",        "tool": "query_collection",  "args": { "collection": "people", "fields": ["id"], "workspaceId": "other-workspace" }, "expect": "allowed", "assertDevOnly": true },
   { "surface": "mcp", "name": "forged userId cannot reach an ungranted collection", "tool": "query_collection", "args": { "collection": "metrics", "fields": ["id"], "userId": "ana" }, "expect": "refused", "expectReason": "no_grant" },
   { "surface": "mcp", "name": "denied field via tool args",        "tool": "query_collection",  "args": { "collection": "people", "fields": ["id","home_address"] }, "expect": "refused", "expectReason": "field_denied" },
   { "surface": "mcp", "name": "unknown tool",                      "tool": "drop_everything",   "args": {}, "expect": "refused" },

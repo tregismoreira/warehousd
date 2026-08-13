@@ -44,6 +44,33 @@ describe("GET /api/admin/users", () => {
     expect(body.users.find((u: any) => u.id === "ana").role).toBe("admin");
     expect(body.users.find((u: any) => u.id === "mia").role).toBe("member");
   });
+
+  // 6g: membership in the active workspace is what makes this listing, not the account's single
+  // home workspace (u."workspaceId") — a user homed elsewhere but added as a member of THIS
+  // workspace must appear, with THIS workspace's role. Fails without the fix — the old query
+  // filtered `where u."workspaceId" = $1`, so bob (homed in 'ws6g-other') was invisible to
+  // 'default's listing even after being made a 'default' admin.
+  it("lists a member added from another workspace, with their role in this one", async () => {
+    const app = getAppPool();
+    await app.query(
+      `insert into app.workspaces (id, name) values ('ws6g-other','Other') on conflict do nothing`,
+    );
+    await app.query(
+      `insert into app."user" (id, name, email, "emailVerified", "workspaceId", role, "createdAt", "updatedAt")
+       values ('ws6g-bob', 'Bob', 'ws6g-bob@other.example.com', true, 'ws6g-other', 'member', now(), now())
+       on conflict (id) do nothing`,
+    );
+    await app.query(
+      `insert into app.workspace_members (workspace_id, user_id, role) values ('default','ws6g-bob','admin')
+       on conflict (workspace_id, user_id) do update set role='admin'`,
+    );
+    const { GET } = await import("../app/api/admin/users/route");
+    const res = await GET(req("/api/admin/users", { cookie: anaCookie }) as any);
+    const body = await res.json();
+    const bob = body.users.find((u: any) => u.id === "ws6g-bob");
+    expect(bob).toBeDefined();
+    expect(bob.role).toBe("admin");
+  });
 });
 
 describe("PATCH /api/admin/users/[userId]", () => {
@@ -73,6 +100,16 @@ describe("PATCH /api/admin/users/[userId]", () => {
     );
     expect(res.status).toBe(200);
     expect(await roleOf("mia")).toBe("manager");
+  });
+
+  // Authorization reads app.workspace_members, not app.user.role — a promotion that only wrote
+  // the latter would leave the promoted user unable to actually reach a manager-gated route.
+  // Fails without the setMember sync in the route.
+  it("the promotion actually changes what the promoted user can do", async () => {
+    const { requireRole } = await import("../lib/authz");
+    const miaCookie = await signIn(db.auth, "mia@harbor.demo", "demo");
+    const guard = await requireRole(req("/x", { cookie: miaCookie }), "manager");
+    expect(guard.ok).toBe(true);
   });
 
   it("rejects a role outside the three", async () => {

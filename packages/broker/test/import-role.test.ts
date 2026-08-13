@@ -4,7 +4,7 @@ import { provision, type Provisioned } from "./helpers/db";
 import {
   createAppSchema,
   applyConfig,
-  withOrg,
+  withWorkspace,
   SEED_REV_COLUMNS,
   SEED_REV_VALUES,
 } from "../src/index";
@@ -27,10 +27,10 @@ afterAll(async () => {
 });
 
 // The import role writes base tables directly, so RLS — not the view predicate — is what
-// confines it to one org. Every insert therefore has to declare the org it is writing into,
-// and the policy's WITH CHECK refuses a mismatch. `withOrg` is how the real import path does it.
-const asOrg = (orgId: string, sql: string, params: unknown[] = []) =>
-  withOrg(imp, orgId, (c) => c.query(sql, params));
+// confines it to one workspace. Every insert therefore has to declare the workspace it is writing into,
+// and the policy's WITH CHECK refuses a mismatch. `withWorkspace` is how the real import path does it.
+const asWorkspace = (workspaceId: string, sql: string, params: unknown[] = []) =>
+  withWorkspace(imp, workspaceId, (c) => c.query(sql, params));
 
 // Every dataset is revisioned, so a bare insert has to fill the NOT NULL bookkeeping columns.
 const R = SEED_REV_COLUMNS;
@@ -44,19 +44,19 @@ const RV = SEED_REV_VALUES;
 describe("warehousd_import privileges", () => {
   it("can INSERT into a data_live base table", async () => {
     await expect(
-      asOrg(
+      asWorkspace(
         "default",
-        `insert into data_live.departments (${R}, org_id, id, name)
+        `insert into data_live.departments (${R}, workspace_id, id, name)
          values (${RV}, 'default', gen_random_uuid(), 'Imported')`,
       ),
     ).resolves.toBeDefined();
   });
 
-  it("cannot INSERT a row belonging to another org — RLS refuses, not the broker", async () => {
+  it("cannot INSERT a row belonging to another workspace — RLS refuses, not the broker", async () => {
     await expect(
-      asOrg(
+      asWorkspace(
         "default",
-        `insert into data_live.departments (${R}, org_id, id, name)
+        `insert into data_live.departments (${R}, workspace_id, id, name)
          values (${RV}, 'other', gen_random_uuid(), 'Smuggled')`,
       ),
     ).rejects.toThrow(/row-level security/i);
@@ -64,7 +64,7 @@ describe("warehousd_import privileges", () => {
 
   it("can SELECT a data_live base table — upsert has to find the revision it supersedes", async () => {
     await expect(
-      asOrg("default", `select 1 from data_live.departments limit 1`),
+      asWorkspace("default", `select 1 from data_live.departments limit 1`),
     ).resolves.toBeDefined();
   });
 
@@ -78,38 +78,38 @@ describe("warehousd_import privileges", () => {
     // The privilege is `update (_current, _rev_status)`, so naming any other column is refused
     // by the grant itself. This is the assertion that stops an import silently overwriting real
     // data: there is no code path to it, because there is no privilege for it.
-    await expect(asOrg("default", `update data_live.departments set name='x'`)).rejects.toThrow(
-      /permission denied/i,
-    );
-    await expect(asOrg("default", `update data_live.people set home_address='x'`)).rejects.toThrow(
-      /permission denied/i,
-    );
+    await expect(
+      asWorkspace("default", `update data_live.departments set name='x'`),
+    ).rejects.toThrow(/permission denied/i);
+    await expect(
+      asWorkspace("default", `update data_live.people set home_address='x'`),
+    ).rejects.toThrow(/permission denied/i);
     // Even alongside a column it IS allowed to set.
     await expect(
-      asOrg("default", `update data_live.departments set _current=false, name='x'`),
+      asWorkspace("default", `update data_live.departments set _current=false, name='x'`),
     ).rejects.toThrow(/permission denied/i);
   });
 
   it("can UPDATE only the two promotion columns", async () => {
     await expect(
-      asOrg("default", `update data_live.departments set _current=_current`),
+      asWorkspace("default", `update data_live.departments set _current=_current`),
     ).resolves.toBeDefined();
     await expect(
-      asOrg("default", `update data_live.departments set _rev_status=_rev_status`),
+      asWorkspace("default", `update data_live.departments set _rev_status=_rev_status`),
     ).resolves.toBeDefined();
   });
 
   it("cannot DELETE, ever — a delete import is a tombstone revision", async () => {
-    await expect(asOrg("default", `delete from data_live.departments`)).rejects.toThrow(
+    await expect(asWorkspace("default", `delete from data_live.departments`)).rejects.toThrow(
       /permission denied/i,
     );
-    await expect(asOrg("default", `delete from data_live.people`)).rejects.toThrow(
+    await expect(asWorkspace("default", `delete from data_live.people`)).rejects.toThrow(
       /permission denied/i,
     );
   });
 
   it("cannot TRUNCATE either — the blunter way to lose everything", async () => {
-    await expect(asOrg("default", `truncate data_live.departments`)).rejects.toThrow(
+    await expect(asWorkspace("default", `truncate data_live.departments`)).rejects.toThrow(
       /permission denied|must be owner/i,
     );
   });
@@ -134,7 +134,7 @@ describe("warehousd_import privileges", () => {
     // precisely because this fails. The writer of data is not the writer of its own trail.
     await expect(
       imp.query(
-        `insert into app.change_log (org_id, env, collection, document_id, rev, op, status, by)
+        `insert into app.change_log (workspace_id, env, collection, document_id, rev, op, status, by)
          values ('default','live','departments','x','y','create','approved','imp')`,
       ),
     ).rejects.toThrow(/permission denied/i);
@@ -142,16 +142,16 @@ describe("warehousd_import privileges", () => {
 
   it("can insert multiple rows into the same table sequentially", async () => {
     await expect(
-      asOrg(
+      asWorkspace(
         "default",
-        `insert into data_live.departments (${R}, org_id, id, name)
+        `insert into data_live.departments (${R}, workspace_id, id, name)
          values (${RV}, 'default', gen_random_uuid(), 'Sales')`,
       ),
     ).resolves.toBeDefined();
     await expect(
-      asOrg(
+      asWorkspace(
         "default",
-        `insert into data_live.departments (${R}, org_id, id, name)
+        `insert into data_live.departments (${R}, workspace_id, id, name)
          values (${RV}, 'default', gen_random_uuid(), 'Engineering')`,
       ),
     ).resolves.toBeDefined();

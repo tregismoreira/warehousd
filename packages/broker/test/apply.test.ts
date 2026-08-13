@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { Pool } from "pg";
 import { provision, type Provisioned } from "./helpers/db";
-import { createAppSchema } from "../src/db/migrate-app";
+import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
 import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
@@ -135,11 +135,11 @@ describe("file collection apply", () => {
     );
     const search = `select content from data_synth.v_policies
       where tsv @@ websearch_to_tsquery('english','remote work')`;
-    // The view carries the org predicate, so reading it needs an org in scope — the setting
-    // withOrg() makes on the broker's behalf. Unset means no rows: the wall fails closed.
+    // The view carries the workspace predicate, so reading it needs a workspace in scope — the setting
+    // withWorkspace() makes on the broker's behalf. Unset means no rows: the wall fails closed.
     expect((await db.query(search)).rowCount).toBe(0);
 
-    await db.query(`select set_config('warehousd.org_id','default',false)`);
+    await db.query(`select set_config('warehousd.workspace_id','default',false)`);
     expect((await db.query(search)).rowCount).toBe(1);
     await db.end();
   });
@@ -195,12 +195,12 @@ describe("apply: additive field on an existing dataset collection", () => {
          where table_schema=$1 and table_name='people' order by column_name`,
         [schema],
       );
-      // `org_id` is on every base table for tenant isolation; it is not a declared field, so
+      // `workspace_id` is on every base table for tenant isolation; it is not a declared field, so
       // it appears here and deliberately not on the view below. The `_rev*` bookkeeping is
       // filtered out for the same reason — every dataset carries it, and this test is about
       // whether a field added to the YAML reached an already-created table.
       expect(cols.rows.map((r) => r.column_name).filter((c: string) => !c.startsWith("_"))).toEqual(
-        ["email", "hire_date", "id", "org_id", "role"],
+        ["email", "hire_date", "id", "role", "workspace_id"],
       );
       // The view has to carry them too, or the broker can never read them.
       const view = await db.query(
@@ -211,7 +211,7 @@ describe("apply: additive field on an existing dataset collection", () => {
       expect(view.rows.map((r) => r.column_name)).toEqual(["email", "hire_date", "id", "role"]);
     }
     // The generator builds its insert from the config, so a missing column fails here.
-    await generateSynthetic(db, after, 42);
+    await generateSynthetic(db, after, 42, DEFAULT_WORKSPACE_ID);
     const n = (
       await db.query(`select count(*)::int as n from data_synth.people where role is not null`)
     ).rows[0].n;

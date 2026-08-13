@@ -189,6 +189,10 @@ jobs:
     # package exists and Trusted Publishing replaces it. Binding it here is what keeps that window
     # narrow: the token is unreadable from every ref that is not a release tag.
     #
+    # That token must also bypass 2FA. One that does not authenticates far enough to sign a
+    # provenance attestation and then fails the publish itself with EOTP, asking for a one-time
+    # password no unattended job can give — see docs/releasing.md, "The npm credential".
+    #
     # Conditional, and it has to be. A job that names an environment whose deployment rule excludes
     # the current ref does not skip — it fails, with "Branch is not allowed to deploy". Naming it
     # unconditionally would mean every rehearsal ended red on the one job it most needs to exercise.

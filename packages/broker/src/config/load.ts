@@ -96,6 +96,21 @@ export function auditEnabled(cfg: WarehousdConfig): boolean {
   return cfg.audit?.enabled ?? true;
 }
 
+// Whether the platform provisioning API (`/v1/platform/*`, `warehousd platform-key`) is mounted
+// at all. Off by default — the `??` mirrors auditEnabled's, for the same reason: most of the test
+// suite hand-builds a config and casts it rather than going through zod, so `workspaces` is
+// genuinely absent for those callers.
+//
+// This flag gates exactly four things — the platform routes (404 when off), `platform-key create`
+// (refuses, naming the fix), the admin/members page and route, and the console workspace
+// switcher's render condition. It gates NOTHING about isolation: RLS, view predicates,
+// withWorkspace, membership-based role resolution and resolveWorkspace all run unconditionally
+// whether this is true or false. Turning it on adds no enforcement and removes none — it exposes
+// the means to create a second workspace. See docs/configuration.md.
+export function workspacesEnabled(cfg: WarehousdConfig): boolean {
+  return cfg.workspaces?.enabled ?? false;
+}
+
 // Collection names arrive from request bodies and MCP tool calls, and `cfg.collections[name]`
 // is a property read, not a membership test: every object literal already answers to
 // `constructor`, `toString`, `__proto__` and friends. Those names returned a truthy

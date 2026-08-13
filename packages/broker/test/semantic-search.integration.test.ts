@@ -85,17 +85,17 @@ async function seed(docs: typeof DOCS) {
   for (const d of docs) {
     const fileId = randomUUID();
     await admin.query(
-      `insert into data_synth."notes__files" (id, org_id, title, path, checksum, updated_at)
+      `insert into data_synth."notes__files" (id, workspace_id, title, path, checksum, updated_at)
        values ($1,'default',$2,$3,$4, now())`,
       [fileId, d.title, d.path, d.path],
     );
     await admin.query(
-      `insert into data_synth."notes__documents" (id, org_id, file_id, document_seq, content)
+      `insert into data_synth."notes__documents" (id, workspace_id, file_id, document_seq, content)
        values ($1,'default',$2,0,$3)`,
       [randomUUID(), fileId, `a note about ${d.word} matters`],
     );
   }
-  await embedCollection(admin, "dev", "notes", stubEmbedder());
+  await embedCollection(admin, "dev", "notes", stubEmbedder(), "default");
 }
 
 beforeAll(async () => {
@@ -277,11 +277,11 @@ describe("what the modes refuse", () => {
 
 describe("embedCollection", () => {
   it("fills only null embeddings and is safe to re-run", async () => {
-    const first = await embedCollection(admin, "dev", "notes", stubEmbedder());
+    const first = await embedCollection(admin, "dev", "notes", stubEmbedder(), "default");
     expect(first.embedded).toBe(0); // seed() already embedded everything
 
     await admin.query(`update data_synth."notes__documents" set embedding = null`);
-    const second = await embedCollection(admin, "dev", "notes", stubEmbedder());
+    const second = await embedCollection(admin, "dev", "notes", stubEmbedder(), "default");
     expect(second.embedded).toBe(DOCS.length);
 
     const left = await admin.query(
@@ -292,7 +292,7 @@ describe("embedCollection", () => {
 
   it("respects the batch size without losing rows", async () => {
     await admin.query(`update data_synth."notes__documents" set embedding = null`);
-    const r = await embedCollection(admin, "dev", "notes", stubEmbedder(), { batch: 1 });
+    const r = await embedCollection(admin, "dev", "notes", stubEmbedder(), "default", { batch: 1 });
     expect(r.embedded).toBe(DOCS.length);
   });
 });

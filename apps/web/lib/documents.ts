@@ -3,6 +3,8 @@ import {
   loadTaxonomyBindings,
   fileMetadataFields,
   auditEnabled,
+  auditDestination,
+  makeAuditWriter,
   type WarehousdConfig,
   type TaxonomyBinding,
   type MetadataField,
@@ -33,6 +35,7 @@ export async function ingestDepsFor(
   cfg: WarehousdConfig,
   collection: string,
   env: "dev" | "live",
+  workspaceId: string,
 ): Promise<
   | { ok: true; taxonomies: TaxonomyBinding[]; metadata: MetadataField[]; embedder?: Embedder }
   | { ok: false; error: "unknown_collection" | "not_a_file_collection" }
@@ -42,7 +45,7 @@ export async function ingestDepsFor(
   if (c.type !== "file") return { ok: false, error: "not_a_file_collection" };
   return {
     ok: true,
-    taxonomies: await loadTaxonomyBindings(app, cfg, collection, env),
+    taxonomies: await loadTaxonomyBindings(app, cfg, collection, env, workspaceId),
     metadata: fileMetadataFields(c),
     // Absent `embedding:` leaves chunks with a null embedding, exactly as the indexer does.
     // `warehousd embed` can fill them in later; nothing is lost, and the upload does not fail
@@ -59,19 +62,26 @@ export const binaryExtractor = makeBinaryExtractor();
  * An admin deciding what live content exists is a governance event on the same footing as an
  * import, and the audit browser's collection filter has to find it. Written through the app
  * pool because this is an operator action, not a governed read.
+ *
+ * Through `makeAuditWriter`, not a hand-written insert — the hand-written version left
+ * workspace_id at its table default regardless of which workspace's admin uploaded, downloaded
+ * or deleted the document, the same class of bug the regen-synth and embed routes' own comments
+ * describe fixing.
  */
 export async function auditDocument(
   app: Pool,
   cfg: WarehousdConfig,
   userId: string,
+  workspaceId: string,
   env: "dev" | "live",
   collection: string,
-  intent: Record<string, unknown>,
+  intent: { op: string } & Record<string, unknown>,
 ): Promise<void> {
-  if (!auditEnabled(cfg)) return;
-  await app.query(
-    `insert into app.audit_events (user_id, env, collection, intent, fields_returned, outcome, reason)
-     values ($1, $2, $3, $4, '{}', 'allowed', null)`,
-    [userId, env, collection, JSON.stringify(intent)],
+  const writer = makeAuditWriter(
+    app,
+    { userId, workspaceId, env, allowedCollections: null, via: "session" },
+    auditEnabled(cfg),
+    auditDestination(cfg),
   );
+  await writer.allow(collection, { intent });
 }

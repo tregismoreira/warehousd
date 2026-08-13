@@ -201,8 +201,8 @@ async function reflectPk(db: Queryable): Promise<Map<string, string>> {
       where schemaname in ('data_synth','data_live') and indexname like '%\\_current\\_idx'`,
   );
   for (const r of idx.rows) {
-    // create unique index … on … (org_id, "field") where _current
-    const m = /\(\s*org_id\s*,\s*"?([a-z0-9_]+)"?\s*\)/i.exec(r.indexdef);
+    // create unique index … on … (workspace_id, "field") where _current
+    const m = /\(\s*workspace_id\s*,\s*"?([a-z0-9_]+)"?\s*\)/i.exec(r.indexdef);
     if (m?.[1]) out.set(`${r.schemaname}.${r.tablename}`, m[1]);
   }
   return out;

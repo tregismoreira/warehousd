@@ -58,14 +58,14 @@ describe("Control-plane API routes", () => {
 
     it("creates a new API key with delegated mode", async () => {
       const app = getAppPool();
-      const org = "default";
+      const workspace = "default";
       // Create a trusted issuer first
       const issuerRes = await app.query(
-        `insert into app.trusted_issuers (org_id, issuer, jwks_uri, audience, subject_claim)
+        `insert into app.trusted_issuers (workspace_id, issuer, jwks_uri, audience, subject_claim)
          values ($1, $2, $3, $4, $5)
          returning id`,
         [
-          org,
+          workspace,
           "https://issuer.example.com",
           "https://issuer.example.com/.well-known/jwks.json",
           "my-app",

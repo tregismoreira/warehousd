@@ -22,7 +22,7 @@ describe("mcp-tools: create_document under a proposal_only grant", () => {
     const grantId = await requestGrant(app, {
       userId: "mia",
       collection: "feedback",
-      orgId: "default",
+      workspaceId: "default",
       env: "dev",
       purposeLabel: "test",
       allowedFields: ["id", "title", "message", "submitted_by", "created_at"],

@@ -6,8 +6,8 @@ const __dirname = resolve(fileURLToPath(import.meta.url), "..");
 const ROOT = resolve(__dirname, "../..");
 
 // Sibling checkouts share the one Postgres container on 54330, so a fixed database name lets a
-// suite in the next workspace drop this one's schema out from under it mid-run. Scope it to the
-// workspace directory; `scripts/e2e-setup.ts` derives the same slug, so what this connects to is
+// suite in the next checkout drop this one's schema out from under it mid-run. Scope it to the
+// checkout directory; `scripts/e2e-setup.ts` derives the same slug, so what this connects to is
 // what that script provisioned.
 const SLUG = basename(ROOT)
   .toLowerCase()
@@ -37,6 +37,9 @@ export default defineConfig({
   // Runs after the webServer below is answering, and builds every page and route handler before
   // the first assertion starts its clock. See the file for why that beats a longer timeout.
   globalSetup: "./e2e/warm-routes.ts",
+  // Removes the workspaces.enabled override scripts/e2e-setup.ts writes into examples/harbor —
+  // see that file's comment on it. Runs on every exit path, so a failed run still cleans up.
+  globalTeardown: "./e2e/teardown-workspace-flag.ts",
   timeout: 120_000,
   fullyParallel: false, // one database, one dev server
   workers: 1,

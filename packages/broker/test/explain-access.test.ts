@@ -39,7 +39,7 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
 
 async function user(id: string, role: string) {
   await app.query(
-    `insert into app."user" (id, name, email, "emailVerified", role, "orgId", "createdAt", "updatedAt")
+    `insert into app."user" (id, name, email, "emailVerified", role, "workspaceId", "createdAt", "updatedAt")
      values ($1,$1,$1||'@t.local',true,$2,'default',now(),now())
      on conflict (id) do update set role=excluded.role`,
     [id, role],
@@ -58,7 +58,7 @@ beforeAll(async () => {
   // is under test is the role check reading them.
   await app.query(`create table if not exists app."user" (
     id text primary key, name text, email text, "emailVerified" boolean,
-    role text, "orgId" text not null default 'default',
+    role text, "workspaceId" text not null default 'default',
     "createdAt" timestamptz, "updatedAt" timestamptz)`);
   await user("boss", "manager");
   await user("ana", "member");
@@ -66,7 +66,7 @@ beforeAll(async () => {
 
   for (const dept of ["Legal", "Legal", "Engineering"])
     await app.query(
-      `insert into data_synth.salaries (${R}, org_id, id, person, dept, salary_band, bank_account)
+      `insert into data_synth.salaries (${R}, workspace_id, id, person, dept, salary_band, bank_account)
        values (${RV}, 'default', gen_random_uuid(), 'P', $1, 97300, 'GB33')`,
       [dept],
     );
@@ -83,7 +83,7 @@ async function grantTo(principal: string, fields: string[], opts: { unmasked?: s
     userId: "boss",
     collection: "salaries",
     env: "dev",
-    orgId: "default",
+    workspaceId: "default",
     purposeLabel: "t",
     allowedFields: fields,
     principal,
@@ -172,7 +172,7 @@ describe("it names the first rule that said no", () => {
 describe("it makes §P1's specificity rule legible", () => {
   it("names the grant, its principal, and every principal the subject holds", async () => {
     await setUserGroups(app, {
-      orgId: "default",
+      workspaceId: "default",
       userId: "carl",
       groups: ["legal"],
       source: "manual",
@@ -194,7 +194,7 @@ describe("it counts the documents the grant actually reaches", () => {
       userId: "boss",
       collection: "salaries",
       env: "dev",
-      orgId: "default",
+      workspaceId: "default",
       purposeLabel: "t",
       allowedFields: ["id", "person", "dept"],
       principal: "user:scoped",
