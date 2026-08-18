@@ -11,6 +11,11 @@ type AnyRefusalReason = RefusalReason | MutationRefusalReason | AclRefusalReason
 export function restStatus(reason: AnyRefusalReason, ifMatchProvided: boolean = false): number {
   if (reason === "conflict") return ifMatchProvided ? 412 : 409;
 
+  // The batch did not commit — some proposal in it refused, and the whole transaction rolled
+  // back. Not the caller's malformed request (400) and not a lock the caller holds (403): the
+  // batch may simply be retried once the named failure (`failedProposalId`) is resolved.
+  if (reason === "batch_aborted") return 409;
+
   // Access denial: no grant, expired grant, field/verb denial, field not writable
   if (
     reason === "no_grant" ||

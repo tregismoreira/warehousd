@@ -4,6 +4,7 @@ import {
   MUTATION_REFUSAL_REASONS,
   ACL_REFUSAL_REASONS,
   GRANT_REQUEST_ERRORS,
+  PROPOSAL_ACTIONS,
 } from "@warehousd/broker";
 
 // A document's fields are per-deployment config. A spec cannot enumerate them, and must not try:
@@ -130,6 +131,42 @@ export const DecisionResultOkSchema = z.object({
   auditId: AuditIdSchema,
 });
 export const DecisionResultSchema = z.union([DecisionResultOkSchema, MutationRefusalSchema]);
+
+// POST /v1/proposals/decide
+export const BatchDecisionsBodySchema = z.object({
+  decisions: z.array(z.object({ proposalId: z.string(), action: z.enum(PROPOSAL_ACTIONS) })).min(1),
+});
+export const BatchDecisionOutcomeSchema = z.union([
+  z.object({
+    proposalId: z.string(),
+    action: z.enum(PROPOSAL_ACTIONS),
+    ok: z.literal(true),
+    documentId: z.string(),
+    rev: z.string().optional(),
+    auditId: AuditIdSchema,
+  }),
+  z.object({
+    proposalId: z.string(),
+    action: z.enum(PROPOSAL_ACTIONS),
+    ok: z.literal(false),
+    reason: MutationRefusalReasonSchema,
+    auditId: AuditIdSchema,
+  }),
+]);
+export const BatchDecisionOkSchema = z.object({
+  ok: z.literal(true),
+  batchId: z.string(),
+  decisions: z.array(BatchDecisionOutcomeSchema),
+});
+// The refusal body IS the full batch envelope — the caller needs failedProposalId and the
+// per-proposal outcomes, not the bare `{ error }` shape refuse() gives every other route.
+export const BatchDecisionRefusalSchema = z.object({
+  ok: z.literal(false),
+  batchId: z.string(),
+  reason: MutationRefusalReasonSchema,
+  failedProposalId: z.string().nullable(),
+  decisions: z.array(BatchDecisionOutcomeSchema),
+});
 
 // acl/manage.ts
 export const DocumentAclSchema = z.object({

@@ -46,6 +46,10 @@ export type AuditEvent = {
   // and "this access came from a group membership" has to stay answerable after the row naming
   // it is gone.
   grantPrincipal?: string | null;
+  // The id shared by every audit row one atomic batch decision produces (decideProposals in
+  // verbs/propose.ts), or null for a decision made outside a batch. A property of the DECISION,
+  // like principals and grantPrincipal above — see migration 0013 for why it is a column.
+  batchId?: string | null;
   // `string & {}` rather than a bare `string`: it keeps RefusalReason's members offered by
   // autocomplete while still admitting the operational codes the comment below describes. A plain
   // `RefusalReason | string` collapses to `string` and loses the hint.
@@ -67,8 +71,8 @@ export async function insertAuditEvent(app: Pool, e: AuditEvent): Promise<string
   const r = await app.query(
     `insert into app.audit_events
        (user_id, env, collection, workspace_id, intent, fields_returned, unmasked_fields, principals,
-        grant_id, grant_principal, outcome, reason, via)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
+        grant_id, grant_principal, outcome, reason, via, batch_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
     [
       e.userId,
       e.env,
@@ -83,6 +87,7 @@ export async function insertAuditEvent(app: Pool, e: AuditEvent): Promise<string
       e.outcome,
       e.reason,
       e.via,
+      e.batchId ?? null,
     ],
   );
   return r.rows[0].id;

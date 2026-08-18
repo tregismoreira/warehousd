@@ -158,6 +158,12 @@ export function makeAuditWriter(
   ctx: BrokerContext,
   enabled: boolean,
   destination: AuditDestination = {},
+  // The id shared by every audit row one atomic batch decision produces. Trailing and optional so
+  // every existing call site compiles unchanged — see migration 0013. On the writer, not on
+  // AuditDetail: allow/refuse build their own detail internally, so a per-call-site field is one a
+  // future call site could forget to pass, where a constructor argument cannot be forgotten once
+  // it is bound.
+  batchId?: string,
 ): AuditWriter {
   async function record(
     collection: string | null,
@@ -185,6 +191,7 @@ export function makeAuditWriter(
           outcome,
           reason,
           via: ctx.via,
+          batchId: batchId ?? null,
         },
         destination,
       );

@@ -13,6 +13,8 @@ import {
   AclResultOkSchema,
   ProposalsResponseSchema,
   DecisionResultOkSchema,
+  BatchDecisionsBodySchema,
+  BatchDecisionOkSchema,
   ChangesResponseSchema,
   GrantsResponseSchema,
   GrantRequestCreatedSchema,
@@ -408,6 +410,36 @@ export const OPERATIONS: Operation[] = [
       },
     ],
     reasons: [...RESTRICTED, "not_found", "verb_denied"],
+  },
+  {
+    path: "/v1/proposals/decide",
+    method: "post",
+    operationId: "decideProposals",
+    summary: "Decide on a batch of proposals atomically",
+    tags: ["proposals"],
+    requestBody: {
+      schema: BatchDecisionsBodySchema,
+      description:
+        "Up to MAX_BATCH_DECISIONS decisions, each an independent approve or reject. Either " +
+        "every one of them commits or none does — the first refusal rolls the whole batch back.",
+    },
+    success: [
+      {
+        status: 200,
+        schema: BatchDecisionOkSchema,
+        description: "Every decision in the batch committed.",
+      },
+    ],
+    reasons: [
+      ...RESTRICTED,
+      "self_approval_denied",
+      "conflict",
+      "not_found",
+      "verb_denied",
+      "field_denied",
+      "not_writable",
+      "batch_aborted",
+    ],
   },
   {
     path: "/v1/changes",

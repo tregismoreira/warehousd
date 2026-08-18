@@ -1766,6 +1766,127 @@
         }
       }
     },
+    "/v1/proposals/decide": {
+      "post": {
+        "operationId": "decideProposals",
+        "summary": "Decide on a batch of proposals atomically",
+        "tags": ["proposals"],
+        "requestBody": {
+          "required": true,
+          "description": "Up to MAX_BATCH_DECISIONS decisions, each an independent approve or reject. Either every one of them commits or none does — the first refusal rolls the whole batch back.",
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/BatchDecisionsBody" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Every decision in the batch committed.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BatchDecisionOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, self_approval_denied, verb_denied, field_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "expired_grant",
+                        "field_denied",
+                        "no_grant",
+                        "self_approval_denied",
+                        "verb_denied"
+                      ]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Refusal: not_writable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["not_writable"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — no If-Match header was sent. reason: conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["batch_aborted", "conflict"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/proposals/{id}/approve": {
       "post": {
         "operationId": "approveProposal",
@@ -2052,6 +2173,217 @@
         },
         "required": ["ok", "acl", "auditId"],
         "additionalProperties": false
+      },
+      "BatchDecisionOk": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "batchId": { "type": "string" },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "proposalId": { "type": "string" },
+                    "action": { "type": "string", "enum": ["approve", "reject"] },
+                    "ok": { "type": "boolean", "const": true },
+                    "documentId": { "type": "string" },
+                    "rev": { "type": "string" },
+                    "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                  },
+                  "required": ["proposalId", "action", "ok", "documentId", "auditId"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "proposalId": { "type": "string" },
+                    "action": { "type": "string", "enum": ["approve", "reject"] },
+                    "ok": { "type": "boolean", "const": false },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "no_grant",
+                        "expired_grant",
+                        "field_denied",
+                        "unknown_collection",
+                        "unknown_field",
+                        "invalid_intent",
+                        "internal_error",
+                        "not_found",
+                        "verb_denied",
+                        "verb_not_supported",
+                        "field_not_writable",
+                        "conflict",
+                        "invalid_value",
+                        "not_writable",
+                        "self_approval_denied",
+                        "batch_aborted"
+                      ]
+                    },
+                    "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                  },
+                  "required": ["proposalId", "action", "ok", "reason", "auditId"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": ["ok", "batchId", "decisions"],
+        "additionalProperties": false
+      },
+      "BatchDecisionOutcome": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "proposalId": { "type": "string" },
+              "action": { "type": "string", "enum": ["approve", "reject"] },
+              "ok": { "type": "boolean", "const": true },
+              "documentId": { "type": "string" },
+              "rev": { "type": "string" },
+              "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+            },
+            "required": ["proposalId", "action", "ok", "documentId", "auditId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "proposalId": { "type": "string" },
+              "action": { "type": "string", "enum": ["approve", "reject"] },
+              "ok": { "type": "boolean", "const": false },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "no_grant",
+                  "expired_grant",
+                  "field_denied",
+                  "unknown_collection",
+                  "unknown_field",
+                  "invalid_intent",
+                  "internal_error",
+                  "not_found",
+                  "verb_denied",
+                  "verb_not_supported",
+                  "field_not_writable",
+                  "conflict",
+                  "invalid_value",
+                  "not_writable",
+                  "self_approval_denied",
+                  "batch_aborted"
+                ]
+              },
+              "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+            },
+            "required": ["proposalId", "action", "ok", "reason", "auditId"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "BatchDecisionRefusal": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": false },
+          "batchId": { "type": "string" },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "no_grant",
+              "expired_grant",
+              "field_denied",
+              "unknown_collection",
+              "unknown_field",
+              "invalid_intent",
+              "internal_error",
+              "not_found",
+              "verb_denied",
+              "verb_not_supported",
+              "field_not_writable",
+              "conflict",
+              "invalid_value",
+              "not_writable",
+              "self_approval_denied",
+              "batch_aborted"
+            ]
+          },
+          "failedProposalId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "proposalId": { "type": "string" },
+                    "action": { "type": "string", "enum": ["approve", "reject"] },
+                    "ok": { "type": "boolean", "const": true },
+                    "documentId": { "type": "string" },
+                    "rev": { "type": "string" },
+                    "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                  },
+                  "required": ["proposalId", "action", "ok", "documentId", "auditId"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "proposalId": { "type": "string" },
+                    "action": { "type": "string", "enum": ["approve", "reject"] },
+                    "ok": { "type": "boolean", "const": false },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "no_grant",
+                        "expired_grant",
+                        "field_denied",
+                        "unknown_collection",
+                        "unknown_field",
+                        "invalid_intent",
+                        "internal_error",
+                        "not_found",
+                        "verb_denied",
+                        "verb_not_supported",
+                        "field_not_writable",
+                        "conflict",
+                        "invalid_value",
+                        "not_writable",
+                        "self_approval_denied",
+                        "batch_aborted"
+                      ]
+                    },
+                    "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                  },
+                  "required": ["proposalId", "action", "ok", "reason", "auditId"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": ["ok", "batchId", "reason", "failedProposalId", "decisions"],
+        "additionalProperties": false
+      },
+      "BatchDecisionsBody": {
+        "type": "object",
+        "properties": {
+          "decisions": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "proposalId": { "type": "string" },
+                "action": { "type": "string", "enum": ["approve", "reject"] }
+              },
+              "required": ["proposalId", "action"]
+            }
+          }
+        },
+        "required": ["decisions"]
       },
       "BrokerResultOk": {
         "type": "object",

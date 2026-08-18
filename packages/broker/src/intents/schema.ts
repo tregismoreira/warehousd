@@ -98,6 +98,18 @@ export const DocSearchIntentSchema = z.object({
   offset: Offset.optional(),
 });
 
+export const PROPOSAL_ACTIONS = ["approve", "reject"] as const;
+
+// Deliberately unbounded here, unlike `limit` above: `limit` is capped rather than rejected
+// because an oversized page request is a reasonable thing to do badly, and the server just hands
+// back less than asked. A batch that is too long is a different shape of mistake — trimming it
+// silently would decide WHICH proposals to act on and which to drop, a choice the caller never
+// made and the response would not explain. So `decideProposals` (verbs/propose.ts) refuses the
+// whole batch with `invalid_intent` past MAX_BATCH_DECISIONS rather than truncating it.
+export const BatchDecisionsIntentSchema = z.object({
+  decisions: z.array(z.object({ proposalId: z.string(), action: z.enum(PROPOSAL_ACTIONS) })).min(1),
+});
+
 // id and path are mutually exclusive: they address different things (a dataset row by pk, a
 // source file by path) and accepting both would leave the broker to pick, which is a decision
 // the caller has to make.
