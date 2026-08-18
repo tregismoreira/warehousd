@@ -203,6 +203,79 @@ describe("limit is type-checked at the schema and clamped by the builder", () =>
   });
 });
 
+describe("keyset pagination", () => {
+  it("emits a total order — sort field then pk, both directions — and no `after` predicate on a first page", () => {
+    for (const dir of ["asc", "desc"] as const) {
+      const { text, values } = buildSelect(
+        "dev",
+        { collection: "people", fields: ["id", "full_name"] },
+        ["id", "full_name"],
+        { keyset: { field: "full_name", dir, pk: "id" } },
+      );
+      expect(text).toContain(`order by "full_name" ${dir}, "id" ${dir}`);
+      // No cursor supplied, so no lower-bound predicate — only ORDER BY changes on a first page.
+      expect(text).not.toContain(">");
+      expect(text).not.toContain("<");
+      expect(values).toEqual([]);
+    }
+  });
+
+  it("emits a row-value comparison against `after`, both cursor values bound parameters", () => {
+    const { text, values } = buildSelect(
+      "dev",
+      { collection: "people", fields: ["id", "full_name"] },
+      ["id", "full_name"],
+      { keyset: { field: "full_name", dir: "asc", pk: "id", after: ["Grace", "id-123"] } },
+    );
+    expect(text).toContain(`("full_name", "id") > ($1, $2)`);
+    expect(text).toContain(`order by "full_name" asc, "id" asc`);
+    expect(values).toEqual(["Grace", "id-123"]);
+  });
+
+  it("flips the row-value comparison operator for a descending walk", () => {
+    const { text, values } = buildSelect("dev", { collection: "people", fields: ["id"] }, ["id"], {
+      keyset: { field: "id", dir: "desc", pk: "id", after: ["id-999", "id-999"] },
+    });
+    expect(text).toContain(`("id", "id") < ($1, $2)`);
+    expect(text).toContain(`order by "id" desc, "id" desc`);
+    expect(values).toEqual(["id-999", "id-999"]);
+  });
+
+  it("the sort field and pk reach SQL only through q()/ident(), never interpolated raw", () => {
+    // A field name with a double quote in it would be a syntax break (or worse) if it ever
+    // reached the text unquoted — q() always wraps in double quotes, doubling any embedded one.
+    // Real field names are identifier-shaped (enforced at config load), so this proves the
+    // mechanism rather than a reachable payload.
+    const { text } = buildSelect("dev", { collection: "people", fields: ["id"] }, ["id"], {
+      keyset: { field: "full_name", dir: "asc", pk: "id", after: ["a", "b"] },
+    });
+    expect(text).toContain('"full_name"');
+    expect(text).toContain('"id"');
+  });
+
+  it("keyset takes priority over intent.orderBy in the ORDER BY, and never emits two", () => {
+    const { text } = buildSelect(
+      "dev",
+      { collection: "people", fields: ["id"], orderBy: { field: "id", dir: "desc" } },
+      ["id"],
+      { keyset: { field: "full_name", dir: "asc", pk: "id" } },
+    );
+    const orderByCount = (text.match(/order by/g) ?? []).length;
+    expect(orderByCount).toBe(1);
+    expect(text).toContain(`order by "full_name" asc, "id" asc`);
+  });
+
+  it("rankExpr overrides keyset — never two ORDER BYs when both are supplied", () => {
+    const { text } = buildSelect("dev", { collection: "people", fields: ["id"] }, ["id"], {
+      q: "hello",
+      keyset: { field: "full_name", dir: "asc", pk: "id" },
+    });
+    const orderByCount = (text.match(/order by/g) ?? []).length;
+    expect(orderByCount).toBe(1);
+    expect(text).toContain(`order by ts_rank_cd`);
+  });
+});
+
 // Unknown keys are dropped rather than refused, and that is the invariant: §10 test 5 forges
 // `env: "live"` into tool arguments and requires the call to succeed against dev, because the
 // value has no code path that reads it. See the note at the top of intents/schema.ts.

@@ -38,6 +38,11 @@ export type QueryIntent = {
   offset?: number | undefined;
   aggregate?: Aggregate[] | undefined; // when present, `fields` must be omitted
   groupBy?: string[] | undefined;
+  // A cursor from a previous page's `nextCursor`, for a stable walk that survives concurrent
+  // inserts and deletes — unlike `offset`, which counts rows from the top on every call. Mutually
+  // exclusive with `offset` and `aggregate` (both refuse `invalid_intent`); see verbs/read.ts and
+  // sql/cursor.ts for what it does and does not protect.
+  after?: string | undefined;
 };
 
 export type SearchMode = "text" | "semantic" | "hybrid";
@@ -87,6 +92,11 @@ export type BrokerResult =
       // Present only on a fan-out search: which collections were reached, and which refused.
       // A single-collection call is byte-identical to what it always was.
       collections?: SearchedCollection[] | undefined;
+      // Present only when the page came back full — documents.length equal to the clamped
+      // limit — which is how a caller tells "more to walk" from "reached the end" without
+      // inspecting document counts itself. Absent on any query the collection or field posture
+      // cannot support keyset for (see verbs/read.ts).
+      nextCursor?: string | undefined;
     }
   | { ok: false; reason: RefusalReason; auditId: AuditId };
 

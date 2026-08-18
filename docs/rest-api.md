@@ -30,6 +30,26 @@ The machine-readable contract is [`docs/openapi.json`](openapi.json), generated 
 
 **There is deliberately no `GET /v1/proposals/{id}`.** `listProposals` returns no field values, so reading the *proposed content* of a single proposal is a separate, more privileged call — `broker.getProposal`, reachable only through the console's session route `GET /api/proposals/{id}`. Reviewing proposed content is a console-only surface. Exposing it over `/v1` would be a new public API commitment rather than a gap to close, so it is left to its own decision.
 
+### Pagination
+
+`POST /v1/collections/{c}/query` supports two ways to page through a result set, and they answer different questions rather than being interchangeable defaults.
+
+`offset` counts rows from the top of the result set on every call, which is fine for a shallow "page 2 of a UI list" but re-derives its position from scratch each time — a document inserted or deleted ahead of the current page shifts every row behind it, so the next page can repeat a document already seen or silently skip one. It stays the simplest option for paging that does not need to survive concurrent writes.
+
+`after` takes the `nextCursor` a previous response returned and resumes from an exact position instead of a row count, so a walk started with it is correct even while the collection is being written to concurrently — nothing shifts, because the next page is defined by a value, not an offset. A response carries `nextCursor` only when the page came back full; a short page is how the walk ends. `after` and `offset` are mutually exclusive on the same request (`invalid_intent`), and so are `after` and `aggregate` — an aggregate collapses many documents into one row, and there is nothing left to walk.
+
+Three constraints gate `after`, all refusing rather than guessing:
+
+- The collection needs a declared primary key. A collection with none (a file collection, whose identity is `path`) has no total order to page over, so a plain query against one is unaffected — `after` is simply not usable there, and passing it refuses `invalid_intent`.
+- The sort field — `orderBy.field`, or the primary key when `orderBy` is omitted — must not be nullable. A `NULL` inside the row-value comparison a cursor builds makes the predicate unknown rather than false, which would drop documents from the walk silently; refusing outright is the safer failure.
+- The primary key must be inside the caller's `allowedFields`. The cursor carries the primary key's value back to the caller on every page, so they must be entitled to read it even when it is not otherwise part of what they projected — a grant that excludes it refuses `field_denied`, the same way any other denied field would.
+
+The sort field and the primary key are always read for a keyset page, whether or not the caller asked for them, because the next cursor is built from the row that comes back — but they are never added to the documents or `fieldsReturned` the caller did not request. A narrow `fields` list gets exactly the fields it named, and pagination works underneath it regardless.
+
+A cursor is opaque but deliberately not secret and not signed — see the header comment on `packages/broker/src/sql/cursor.ts`. A forged or hand-built cursor decodes to a `(sortField, pk)` pair that becomes a bound-parameter comparison in the same `WHERE` clause as everything else: the grant's document filters, the per-document ACL predicate, and every posture are ANDed in regardless of where the cursor came from, so a forged cursor is no more powerful than a `gt` filter the caller could already write. What a cursor can never do is create a comparison on a masked field — that is enforced the same way `orderBy` on a masked field already is.
+
+**Indexing caveat.** Constant-time page fetches depend on a composite index covering `(sortField, pk)` in the sort direction used. The primary-key-ordered walk is served by the same partial unique index every writable collection already has (`(workspace_id, pk) where _current`), so paging in pk order is constant-time out of the box. Paging by any other field is only constant-time if an operator has indexed that field by hand — nothing in this phase creates one, and no `warehousd.yml` key declares one. Cortex's real shape (`filter page_id eq <id>` ordered by `order`) needs an index on `(workspace_id, page_id, order, <pk>)` to get the same guarantee; without it, that specific walk still returns correct results, just not in constant time per page.
+
 ## Known warts
 
 The spec documents these two shapes faithfully rather than prettying them up, so they are recorded here as known rather than surprising.

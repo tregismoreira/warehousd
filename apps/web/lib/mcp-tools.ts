@@ -122,14 +122,22 @@ export const TOOLS: ToolDef[] = [
       'Example aggregation: aggregate=[{"fn":"count","field":"id"}], ' +
       'groupBy=["department_name"]. Refusals are deny-by-default and purpose-bound; a refusal ' +
       "includes a request_access hint.",
-    inputSchema: advertise(QueryIntentSchema, {
-      collection: "Collection name, from list_collections.",
-      fields: "Document-fetch shape only. Field names to return; omit for aggregation.",
-      limit: "Default 100, max 500.",
-      offset: "Pagination offset, paired with limit.",
-      aggregate: "Aggregation shape only. e.g. count/sum/avg per group.",
-      groupBy: "Aggregation shape only. Field names to group by.",
-    }),
+    inputSchema: advertise(
+      QueryIntentSchema,
+      {
+        collection: "Collection name, from list_collections.",
+        fields: "Document-fetch shape only. Field names to return; omit for aggregation.",
+        limit: "Default 100, max 500.",
+        offset: "Pagination offset, paired with limit.",
+        aggregate: "Aggregation shape only. e.g. count/sum/avg per group.",
+        groupBy: "Aggregation shape only. Field names to group by.",
+      },
+      // `after` (keyset pagination) is deliberately not advertised here — decisions taken, "no new
+      // MCP tools": widening what an untrusted proposer can do through the model-facing surface is
+      // a separate call from the REST surface's own. The handler still accepts it if a caller
+      // passes it through the raw JSON-RPC arguments; it is simply not documented to a model.
+      { omit: ["after"] },
+    ),
     handler: async (ctx, input) => {
       // inputSchema above is advertised to the client, not enforced by it: the SDK's low-level
       // setRequestHandler(CallToolRequestSchema) validates the JSON-RPC envelope and passes

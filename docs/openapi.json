@@ -1289,7 +1289,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "The collection comes from the path, never the body.",
+          "description": "The collection comes from the path, never the body. `after` takes a previous response's `nextCursor` for a stable keyset walk and is mutually exclusive with `offset` and `aggregate`.",
           "content": {
             "application/json": {
               "schema": {
@@ -1346,7 +1346,8 @@
                   "groupBy": {
                     "type": "array",
                     "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
-                  }
+                  },
+                  "after": { "type": "string" }
                 }
               }
             }
@@ -2429,7 +2430,8 @@
               "required": ["collection", "matched", "reason", "auditId"],
               "additionalProperties": false
             }
-          }
+          },
+          "nextCursor": { "type": "string" }
         },
         "required": ["ok", "documents", "fieldsReturned", "auditId"],
         "additionalProperties": false

@@ -12,10 +12,11 @@ import type {
   Document,
   Filter,
 } from "../types";
-import { MAX_LIMIT } from "../types";
+import { MAX_LIMIT, DEFAULT_LIMIT } from "../types";
 import type { CollectionListing } from "../types";
 import { buildSelect, UnsupportedFilter } from "../sql/build";
 import { ident } from "../sql/ident";
+import { decodeCursor, encodeCursor, type Cursor } from "../sql/cursor";
 import { dataPool, withWorkspace, writePool } from "../db/pools";
 import { findCollection } from "../config/load";
 import { kindOf } from "../config/kinds";
@@ -53,6 +54,38 @@ export function makeReadVerbs(d: VerbDeps) {
     const referenced = collectReferenced(intent);
     for (const f of referenced)
       if (!all.includes(f)) return audit.refuse(intent.collection, "unknown_field", { intent });
+    // 2b. Keyset pagination — resolved before the grant so its errors read the same as any other
+    // malformed intent, and so the sort field and pk can be folded into the grant's field check
+    // below rather than checked a second way. See sql/cursor.ts for what a cursor does and does
+    // not protect, and docs/rest-api.md for the caller-facing contract.
+    //
+    // `after` and `offset` are two answers to "where do I resume", and a caller supplying both is
+    // asking a question with no defined winner. Same reasoning for `after` and `aggregate`: an
+    // aggregate collapses many documents into one row, and there is nothing left to walk.
+    if (intent.after !== undefined && intent.offset !== undefined)
+      return audit.refuse(intent.collection, "invalid_intent", { intent });
+    if (intent.after !== undefined && intent.aggregate && intent.aggregate.length)
+      return audit.refuse(intent.collection, "invalid_intent", { intent });
+    const pk = pkOf(c0);
+    // A collection with no declared pk (a file collection, whose identity is `path`) has no total
+    // order to page over, so keyset never applies to it. That is silent when the caller did not
+    // ask to use it — an ordinary query against such a collection is exactly what it always was —
+    // and refused when they explicitly did, by handing back a cursor.
+    if (intent.after !== undefined && pk === null)
+      return audit.refuse(intent.collection, "invalid_intent", { intent });
+    const keysetActive =
+      pk !== null && !(intent.aggregate && intent.aggregate.length) && intent.offset === undefined;
+    const sortField = keysetActive ? (intent.orderBy?.field ?? pk) : null;
+    const dir = intent.orderBy?.dir ?? "asc";
+    // A NULL inside the row-value comparison keyset builds makes the predicate UNKNOWN rather
+    // than false, which drops documents from the walk silently — worse than refusing outright.
+    if (sortField && c0.fields[sortField]?.nullable === true)
+      return audit.refuse(intent.collection, "invalid_intent", { intent });
+    // Folded into the grant's field check below: the cursor carries `sortField` and `pk` back to
+    // the caller (in `nextCursor` and, for `pk`, possibly in the row itself), so a grant that does
+    // not carry them refuses the same way any other denied field would.
+    if (sortField && !referenced.includes(sortField)) referenced.push(sortField);
+    if (keysetActive && pk && !referenced.includes(pk)) referenced.push(pk);
     // 3. grant, read verb, field coverage, document filters, mask plan, ACL options — all of it,
     // in one place, already audited on any refusal. See verbs/guard.ts.
     const g = await resolveGranted(d, audit, ctx, intent.collection, "read", {
@@ -61,37 +94,98 @@ export function makeReadVerbs(d: VerbDeps) {
     });
     if (!g.ok) return g;
     const { grant, plan } = g;
-    // 4. a masked field may be PROJECTED but never computed over — see collectComputed.
-    // field_denied, not a new code: the caller does hold the field, just not in a form that
-    // answers this question, and inventing a reason would say which fields are masked to
-    // someone whose grant does not carry them.
-    for (const f of collectComputed(intent))
+    // 4. a masked field may be PROJECTED but never computed over — see collectComputed. `pk` is
+    // folded in only when keyset is active: it lands in a row-value comparison exactly like
+    // orderBy's field does, and the reasoning is the same one collectComputed already states.
+    const computed = collectComputed(intent);
+    if (keysetActive && pk) computed.push(pk);
+    for (const f of computed)
       if (plan.masked.has(f))
         return audit.refuse(intent.collection, "field_denied", { intent, grant });
-    // fields to select: explicit, else all granted fields present on the collection
+    // The cursor carries `pk`'s value back to the caller on every keyset page, so they must be
+    // entitled to read it even when it is not otherwise part of what they projected.
+    if (keysetActive && pk && !grant.allowedFields.includes(pk))
+      return audit.refuse(intent.collection, "field_denied", { intent, grant });
+    // A cursor from one ordering must not walk another: it would silently resume a DIFFERENT sort
+    // than the one it was minted under, which is not "the next page" of anything.
+    let cursor: Cursor | null = null;
+    if (intent.after !== undefined) {
+      const cur = decodeCursor(intent.after);
+      if (!cur || cur.f !== sortField || cur.d !== dir)
+        return audit.refuse(intent.collection, "invalid_intent", { intent, grant });
+      cursor = cur;
+    }
+    // fields to select: explicit, else all granted fields present on the collection. This is the
+    // CLIENT-VISIBLE list — what `fieldsReturned` and every document key will be — and is
+    // deliberately untouched by keyset: a caller who named an explicit narrow projection gets
+    // exactly that projection back, exactly as before keyset existed.
     const selectFields =
       intent.fields && intent.fields.length
         ? intent.fields
         : grant.allowedFields.filter((f) => all.includes(f));
+    // `sortField` and `pk` still have to come back from Postgres to build the next cursor even
+    // when the caller did not ask for them — so they are added to the actual SQL SELECT here, and
+    // stripped back off each row below before anything is handed to the caller or named in
+    // `fieldsReturned`. A cursor is an opaque token; nothing about using one requires the caller to
+    // have projected the columns it is built from.
+    const cursorExtra =
+      keysetActive && sortField && pk
+        ? [sortField, pk].filter((f) => !selectFields.includes(f))
+        : [];
+    const querySelectFields = cursorExtra.length ? [...selectFields, ...cursorExtra] : selectFields;
+    const effectiveLimit = Math.min(Math.max(1, intent.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
     // 5. build + execute on the env-scoped pool through withWorkspace transaction
     try {
-      const { text, values } = buildSelect(ctx.env, intent, grant.allowedFields, {
-        documentFilters: grant.documentFilter,
-        isMultiValueField,
-        maskFor: plan.maskFor,
-        // Only for a collection whose view carries an `_acl` column. Passed here — where the
-        // aggregate branch is built too — so the predicate lands in the same WHERE every
-        // aggregate reads: a count over an ACL'd collection counts what this caller may see, not
-        // what exists and then a shortfall that reports the difference.
-        ...g.aclOpts,
-      });
-      const documents = await withWorkspace(
+      const { text, values } = buildSelect(
+        ctx.env,
+        { ...intent, fields: querySelectFields },
+        grant.allowedFields,
+        {
+          documentFilters: grant.documentFilter,
+          isMultiValueField,
+          maskFor: plan.maskFor,
+          // Only for a collection whose view carries an `_acl` column. Passed here — where the
+          // aggregate branch is built too — so the predicate lands in the same WHERE every
+          // aggregate reads: a count over an ACL'd collection counts what this caller may see, not
+          // what exists and then a shortfall that reports the difference.
+          ...g.aclOpts,
+          ...(keysetActive && sortField && pk
+            ? {
+                keyset: {
+                  field: sortField,
+                  dir,
+                  pk,
+                  ...(cursor ? { after: cursor.k } : {}),
+                },
+              }
+            : {}),
+        },
+      );
+      const rawDocuments = await withWorkspace(
         dataPool(pools, ctx),
         ctx.workspaceId,
         async (client: PoolClient) => {
           return (await client.query(text, values)).rows;
         },
       );
+      // A short page (fewer documents than the clamped limit) is how the caller learns the walk
+      // ended. Only built when keyset actually ran — an aggregate or offset query has no cursor to
+      // hand back, and forcing one would claim a capability the request never had.
+      const last = rawDocuments[rawDocuments.length - 1];
+      const nextCursor =
+        keysetActive && sortField && pk && rawDocuments.length === effectiveLimit && last
+          ? encodeCursor({ v: 1, f: sortField, d: dir, k: [last[sortField], last[pk]] })
+          : undefined;
+      // Strip the cursor-only columns back off before anything leaves this function — the caller
+      // never asked for them, so `documents` and `fieldsReturned` stay exactly what they would
+      // have been without keyset.
+      const documents = cursorExtra.length
+        ? rawDocuments.map((row) => {
+            const copy = { ...row };
+            for (const f of cursorExtra) delete copy[f];
+            return copy;
+          })
+        : rawDocuments;
       const fieldsReturned =
         intent.aggregate && intent.aggregate.length
           ? [...(intent.groupBy ?? []), ...intent.aggregate.map((a) => `${a.fn}_${a.field}`)]
@@ -105,7 +199,13 @@ export function makeReadVerbs(d: VerbDeps) {
         grant,
       });
       if (!rec.ok) return rec;
-      return { ok: true, documents, fieldsReturned, auditId: rec.auditId };
+      return {
+        ok: true,
+        documents,
+        fieldsReturned,
+        auditId: rec.auditId,
+        ...(nextCursor !== undefined ? { nextCursor } : {}),
+      };
     } catch (err) {
       // A filter the builder can't express is the caller's mistake, not ours. It carries no
       // driver detail, so answering invalid_intent tells them something actionable.
