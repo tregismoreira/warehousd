@@ -29,13 +29,21 @@ const REVIEW_OPTIONS = `--   1. Rename instead of retyping: keep the existing fi
  * nothing and is the only thing that makes the ALTER legal.
  */
 export function renderMigrationSql(changes: SchemaChange[]): string {
-  const live = changes.filter((c) => c.destructive && c.env === "live");
+  // `drop_index` is the one non-destructive change that still belongs in a reviewed migration:
+  // it discards no data, so `apply` must not do it unasked, but it does change query plans.
+  const live = changes.filter(
+    (c) => (c.destructive || c.kind === "drop_index") && c.env === "live",
+  );
   if (live.length === 0) return `${HEADER}\n\n-- No destructive changes to apply.\n`;
 
   const out: string[] = [HEADER, ""];
 
-  // One view drop per collection, before anything that touches its columns.
-  for (const collection of [...new Set(live.map((c) => c.collection))]) {
+  // One view drop per collection, before anything that touches its columns. Driven by the
+  // destructive changes alone: a dropped index needs no view out of its way, and emitting a
+  // pointless drop/recreate for an index-only migration would read as a column change.
+  for (const collection of [
+    ...new Set(live.filter((c) => c.destructive).map((c) => c.collection)),
+  ]) {
     out.push(
       `-- Recreated by applyConfig; dropped here because a view blocks ALTER on its columns.`,
       `drop view if exists data_live.v_${collection};`,
@@ -45,6 +53,17 @@ export function renderMigrationSql(changes: SchemaChange[]): string {
 
   for (const change of live) {
     const { collection, table, field } = change;
+
+    if (change.kind === "drop_index") {
+      out.push(
+        `-- ${change.from} is no longer declared in warehousd.yml. Dropping an index discards no`,
+        `-- data, but it can change query plans — review before uncommenting. CONCURRENTLY keeps`,
+        `-- the collection writable while it runs, and cannot be inside a transaction block.`,
+        `-- drop index concurrently if exists data_live."${change.from}";`,
+        "",
+      );
+      continue;
+    }
 
     if (change.kind === "drop_collection") {
       out.push(
