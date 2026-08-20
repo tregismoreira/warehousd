@@ -5,11 +5,11 @@ import type { BrokerContext, MutationIntent, MutationResult } from "../types";
 import type { CollectionConfig } from "../config/schema";
 import { writePosture } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
-import { admits, validateDocumentFilters } from "../grants/filters";
+import { admits, admitsPostImage, validateDocumentFilters } from "../grants/filters";
 import { withWorkspace, writePool } from "../db/pools";
 import { insertRevision, currentRevision, reviseDocument } from "../db/revisions";
 import { supportedVerbs } from "../config/load";
-import { pkOf, dataSchema } from "../config/collection";
+import { pkOf, dataSchema, nextDataRow } from "../config/collection";
 import { ident } from "../sql/ident";
 import { aclColumnSql } from "../acl/sql";
 import { chunkText } from "../indexing/chunk";
@@ -285,6 +285,21 @@ async function mutateDataset(
         // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const documentId = String(docId);
 
+        // The document filter, put to the document this create will PRODUCE. There is no pre-image
+        // to check, which is why the create branch had no filter check at all: a grant reading
+        // `document_filter: state eq draft` with verb `create` could insert `state: published`, and
+        // the per-field loop above cannot see it — that loop governs which fields may be written,
+        // never which values.
+        //
+        // A field the caller did not state is the NULL insertRevision binds for it, so a grant
+        // scoped to `owner eq $self` refuses a create that omits `owner`. Correct: it would
+        // otherwise mint a document the same grant cannot read back.
+        //
+        // `not_found` and not a new reason — the same rule as getDocument, and the same answer the
+        // proposal path already gives (propose.ts).
+        if (!admitsPostImage(nextDataRow(c, null, coerced), grant, c))
+          return audit.refuseMutation(intent, grant, "not_found");
+
         // Check first so the caller gets a reason code; the partial unique index is the
         // backstop if two creates race.
         const clash = await client.query(
@@ -344,6 +359,16 @@ async function mutateDataset(
       // A document the grant's filter OR its ACL excludes is not_found, never a distinct refusal —
       // the same rule as getDocument. $self is already bound by loadActiveGrant.
       if (!admits(current, grant, c)) return audit.refuseMutation(intent, grant, "not_found");
+
+      // …and the document it will BECOME. The line above is the pre-image: it answers whether the
+      // grant reaches the document as stored, which is getDocument's question. It does not answer
+      // whether the grant reaches the document the write produces, so a grant scoped to
+      // `state eq draft` could publish and then be unable to read what it wrote.
+      //
+      // Skipped for a delete: a delete states no values, so its post-image is the pre-image the
+      // line above already admitted, and a tombstone is not a document for a filter to reach.
+      if (intent.op !== "delete" && !admitsPostImage(nextDataRow(c, current, coerced), grant, c))
+        return audit.refuseMutation(intent, grant, "not_found");
 
       // Optimistic concurrency: `expect` is the _rev the caller last saw.
       if (intent.expect && intent.expect !== current._rev)

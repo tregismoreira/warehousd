@@ -42,6 +42,15 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
         value: { type: "text", posture: { read: "allow", write: "allow" } },
       },
     },
+    aclcol: {
+      description: "ACL",
+      writable: true,
+      acl: true,
+      fields: {
+        id: { type: "uuid", posture: "allow", pk: true },
+        owner: { type: "text", posture: { read: "allow", write: "allow" } },
+      },
+    },
   },
 });
 
@@ -575,5 +584,149 @@ describe("broker.mutate refusals", () => {
       [result.documentId],
     );
     expect(row.rows.length).toBe(1);
+  });
+});
+
+// document_filter checked against what a write PRODUCES, not only what it replaces. Before this,
+// mutate.ts checked the pre-image only (an update) or nothing at all (a create) — a grant scoped
+// `owner eq filter_user` could publish a document under any other owner, and could create one
+// outright.
+describe("document_filter is enforced against the post-image", () => {
+  async function filteredGrant(userId: string, verbs: string[] = ["read", "create", "update"]) {
+    const grantId = await requestGrant(app, {
+      userId,
+      collection: "people",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "owner"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", {
+      verbs,
+      documentFilters: [{ field: "owner", op: "eq", value: "filter_user" }],
+    });
+  }
+
+  it("refuses a create whose document would fall outside the grant's filter", async () => {
+    await filteredGrant("post_image_create_outside");
+    const ctx: BrokerContext = makeCtx({ userId: "post_image_create_outside" });
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com", owner: "someone_else" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not_found");
+    assertNoLeak(result, undefined, "someone_else");
+  });
+
+  it("refuses a create that omits the filtered field", async () => {
+    await filteredGrant("post_image_create_omit");
+    const ctx: BrokerContext = makeCtx({ userId: "post_image_create_omit" });
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not_found");
+  });
+
+  it("allows a create whose document falls inside the filter", async () => {
+    await filteredGrant("post_image_create_inside");
+    const ctx: BrokerContext = makeCtx({ userId: "post_image_create_inside" });
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com", owner: "filter_user" },
+    });
+    assertApplied(result);
+  });
+
+  it("refuses an update that would carry the document out of the filter, and leaves it unchanged", async () => {
+    await filteredGrant("post_image_update_outside");
+    const ctx: BrokerContext = makeCtx({ userId: "post_image_update_outside" });
+    const created = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com", owner: "filter_user" },
+    });
+    assertApplied(created);
+
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "update",
+      id: created.documentId,
+      values: { owner: "other" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not_found");
+    assertNoLeak(result, undefined, "other");
+
+    const row = await app.query(`select owner from data_synth.people where id = $1 and _current`, [
+      created.documentId,
+    ]);
+    expect(row.rows[0].owner).toBe("filter_user");
+  });
+
+  it("still allows an update that leaves the document inside the filter", async () => {
+    await filteredGrant("post_image_update_inside");
+    const ctx: BrokerContext = makeCtx({ userId: "post_image_update_inside" });
+    const created = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com", owner: "filter_user" },
+    });
+    assertApplied(created);
+
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "update",
+      id: created.documentId,
+      values: { email: "y@ex.com" },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("a delete through the same filtered grant still succeeds", async () => {
+    await filteredGrant("post_image_delete", ["read", "create", "delete"]);
+    const ctx: BrokerContext = makeCtx({ userId: "post_image_delete" });
+    const created = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com", owner: "filter_user" },
+    });
+    assertApplied(created);
+
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "delete",
+      id: created.documentId,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("ACL regression: a create on a collection with acl: true through a filtered grant is applied, not refused", async () => {
+    // Proves the post-image check does not drag admits()'s fail-closed-on-absent-ACL branch into
+    // the create path: the post-image is built from submitted values, which never carry _acl.
+    const grantId = await requestGrant(app, {
+      userId: "post_image_acl_create",
+      collection: "aclcol",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "owner"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", {
+      verbs: ["read", "create"],
+      documentFilters: [{ field: "owner", op: "eq", value: "filter_user" }],
+    });
+    const ctx: BrokerContext = makeCtx({ userId: "post_image_acl_create" });
+    const result = await broker.mutate(ctx, {
+      collection: "aclcol",
+      op: "create",
+      values: { owner: "filter_user" },
+    });
+    assertApplied(result);
   });
 });

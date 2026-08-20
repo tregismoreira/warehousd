@@ -614,4 +614,38 @@ describe("a grant scopes read and write identically", () => {
     expect(r.readReaches).toBe("refused:invalid_intent");
     expect(r.writeReaches).toBe("refused:invalid_intent");
   });
+
+  it("a write that re-states every field at its stored value is still admitted by a grant filtered on a date field", async () => {
+    // coerce's date branch used to emit a full instant, which canonicalize (a calendar day) could
+    // never match — so a grant scoped on `due` would refuse a write that merely restated it.
+    const userId = `parity_user_${seq++}`;
+    const grantId = await requestGrant(wapp, {
+      userId,
+      collection: "things",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "parity",
+      allowedFields: FIELDS,
+    });
+    await approveGrant(wapp, wcfg, grantId, "admin", {
+      verbs: ["read", "update"],
+      documentFilters: [{ field: "due", op: "eq", value: "2026-07-29" }],
+    });
+    const ctx: BrokerContext = makeCtx({ userId });
+    const write = await broker.mutate(ctx, {
+      collection: "things",
+      op: "update",
+      id: docId,
+      values: {
+        name: "widget",
+        owner: "ada",
+        amount: "100.00",
+        count: 5,
+        due: "2026-07-29",
+        at: "2026-07-29T12:00:00Z",
+        active: true,
+      },
+    });
+    expect(write.ok, JSON.stringify(write)).toBe(true);
+  });
 });
