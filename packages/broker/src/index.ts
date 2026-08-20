@@ -9,6 +9,7 @@ export {
   GetDocumentIntentSchema,
   MutationIntentSchema,
   BatchDecisionsIntentSchema,
+  BatchQueryIntentSchema,
   PROPOSAL_ACTIONS,
   FilterSchema,
   AggregateSchema,

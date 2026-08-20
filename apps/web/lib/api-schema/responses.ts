@@ -5,6 +5,7 @@ import {
   ACL_REFUSAL_REASONS,
   GRANT_REQUEST_ERRORS,
   PROPOSAL_ACTIONS,
+  QueryIntentSchema,
 } from "@warehousd/broker";
 
 // A document's fields are per-deployment config. A spec cannot enumerate them, and must not try:
@@ -169,6 +170,18 @@ export const BatchDecisionRefusalSchema = z.object({
   reason: MutationRefusalReasonSchema,
   failedProposalId: z.string().nullable(),
   decisions: z.array(BatchDecisionOutcomeSchema),
+});
+
+// POST /v1/batch
+export const BatchQueryBodySchema = z.object({
+  queries: z.array(QueryIntentSchema.extend({ label: z.string().min(1).max(64) })).min(1),
+});
+// `results` unions the ok and refusal shapes per label — a refusing sub-query is a normal member
+// of the map, not an envelope-level failure. See BatchQueryResult in packages/broker/src/types.ts.
+export const BatchQueryOkSchema = z.object({
+  ok: z.literal(true),
+  results: z.record(z.string(), z.union([BrokerResultOkSchema, RefusalSchema])),
+  auditId: AuditIdSchema,
 });
 
 // acl/manage.ts

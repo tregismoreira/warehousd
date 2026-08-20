@@ -15,6 +15,8 @@ import {
   DecisionResultOkSchema,
   BatchDecisionsBodySchema,
   BatchDecisionOkSchema,
+  BatchQueryBodySchema,
+  BatchQueryOkSchema,
   ChangesResponseSchema,
   GrantsResponseSchema,
   GrantRequestCreatedSchema,
@@ -174,6 +176,29 @@ export const OPERATIONS: Operation[] = [
     },
     success: [{ status: 200, schema: BrokerResultOkSchema, description: "Matching documents." }],
     reasons: [...RESTRICTED, "field_denied", "unknown_field"],
+  },
+  {
+    path: "/v1/batch",
+    method: "post",
+    operationId: "batchQuery",
+    summary: "Run up to MAX_BATCH_QUERIES labelled queries in one request",
+    tags: ["data"],
+    requestBody: {
+      schema: BatchQueryBodySchema,
+      description:
+        "Each entry is a QueryIntent plus a caller-chosen `label` used to key its slot in the " +
+        "response. Sub-queries run sequentially and are independently grant-checked; a refusing " +
+        "sub-query returns its own reason in its slot and does not change the HTTP status — the " +
+        "envelope succeeds as long as the request itself was well-formed.",
+    },
+    success: [
+      {
+        status: 200,
+        schema: BatchQueryOkSchema,
+        description: "One result (or refusal) per label, in the same shape POST /query returns.",
+      },
+    ],
+    reasons: [...RESTRICTED],
   },
   {
     path: "/v1/collections/{c}/search",

@@ -50,6 +50,8 @@ const NAMED_SCHEMAS: { name: string; schema: z.ZodType; io: "input" | "output" }
   { name: "BatchDecisionOutcome", schema: R.BatchDecisionOutcomeSchema, io: "output" },
   { name: "BatchDecisionOk", schema: R.BatchDecisionOkSchema, io: "output" },
   { name: "BatchDecisionRefusal", schema: R.BatchDecisionRefusalSchema, io: "output" },
+  { name: "BatchQueryBody", schema: R.BatchQueryBodySchema, io: "input" },
+  { name: "BatchQueryOk", schema: R.BatchQueryOkSchema, io: "output" },
   { name: "ChangesResponse", schema: R.ChangesResponseSchema, io: "output" },
   { name: "GrantsResponse", schema: R.GrantsResponseSchema, io: "output" },
   { name: "GrantRequestCreated", schema: R.GrantRequestCreatedSchema, io: "output" },

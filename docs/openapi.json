@@ -35,6 +35,90 @@
     { "name": "grants", "description": "Requesting and listing access grants." }
   ],
   "paths": {
+    "/v1/batch": {
+      "post": {
+        "operationId": "batchQuery",
+        "summary": "Run up to MAX_BATCH_QUERIES labelled queries in one request",
+        "tags": ["data"],
+        "requestBody": {
+          "required": true,
+          "description": "Each entry is a QueryIntent plus a caller-chosen `label` used to key its slot in the response. Sub-queries run sequentially and are independently grant-checked; a refusing sub-query returns its own reason in its slot and does not change the HTTP status — the envelope succeeds as long as the request itself was well-formed.",
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/BatchQueryBody" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One result (or refusal) per label, in the same shape POST /query returns.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BatchQueryOk" } }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["expired_grant", "no_grant"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["unknown_collection"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/changes": {
       "get": {
         "operationId": "listChanges",
@@ -2385,6 +2469,166 @@
           }
         },
         "required": ["decisions"]
+      },
+      "BatchQueryBody": {
+        "type": "object",
+        "properties": {
+          "queries": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "collection": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+                "fields": {
+                  "type": "array",
+                  "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+                },
+                "filters": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+                      "op": {
+                        "type": "string",
+                        "enum": ["eq", "neq", "gt", "lt", "gte", "lte", "like", "in"]
+                      },
+                      "value": {}
+                    },
+                    "required": ["field", "op", "value"]
+                  }
+                },
+                "orderBy": {
+                  "type": "object",
+                  "properties": {
+                    "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+                    "dir": { "type": "string", "enum": ["asc", "desc"] }
+                  },
+                  "required": ["field", "dir"]
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "aggregate": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "fn": { "type": "string", "enum": ["avg", "sum", "count", "min", "max"] },
+                      "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+                    },
+                    "required": ["fn", "field"]
+                  }
+                },
+                "groupBy": {
+                  "type": "array",
+                  "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+                },
+                "after": { "type": "string" },
+                "label": { "type": "string", "minLength": 1, "maxLength": 64 }
+              },
+              "required": ["collection", "label"]
+            }
+          }
+        },
+        "required": ["queries"]
+      },
+      "BatchQueryOk": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "results": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean", "const": true },
+                    "documents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "propertyNames": { "type": "string" },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "fieldsReturned": { "type": "array", "items": { "type": "string" } },
+                    "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                    "collections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "collection": { "type": "string" },
+                          "matched": { "type": "number" },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "no_grant",
+                                  "expired_grant",
+                                  "field_denied",
+                                  "unknown_collection",
+                                  "unknown_field",
+                                  "invalid_intent",
+                                  "internal_error",
+                                  "not_found"
+                                ]
+                              },
+                              { "type": "null" }
+                            ]
+                          },
+                          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                        },
+                        "required": ["collection", "matched", "reason", "auditId"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": { "type": "string" }
+                  },
+                  "required": ["ok", "documents", "fieldsReturned", "auditId"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean", "const": false },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "no_grant",
+                        "expired_grant",
+                        "field_denied",
+                        "unknown_collection",
+                        "unknown_field",
+                        "invalid_intent",
+                        "internal_error",
+                        "not_found"
+                      ]
+                    },
+                    "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                  },
+                  "required": ["ok", "reason", "auditId"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "results", "auditId"],
+        "additionalProperties": false
       },
       "BrokerResultOk": {
         "type": "object",

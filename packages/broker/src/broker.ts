@@ -27,7 +27,7 @@ export function makeBroker(
 ) {
   const deps = makeVerbDeps(pools, cfg, opts);
 
-  const { query, describeCollection, listCollections, searchDocuments, getDocument } =
+  const { query, queryBatch, describeCollection, listCollections, searchDocuments, getDocument } =
     makeReadVerbs(deps);
   const mutate = makeMutateVerb(deps);
   const { approveProposal, rejectProposal, listProposals, getProposal, decideProposals } =
@@ -44,6 +44,7 @@ export function makeBroker(
 
   return {
     query,
+    queryBatch,
     describeCollection,
     listCollections,
     searchDocuments,

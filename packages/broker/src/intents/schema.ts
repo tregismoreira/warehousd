@@ -81,6 +81,13 @@ export const QueryIntentSchema = z.object({
   after: z.string().optional(),
 });
 
+// Deliberately unbounded here too, for the same reason as BatchDecisionsIntentSchema below:
+// `queryBatch` (verbs/read.ts) refuses a batch longer than MAX_BATCH_QUERIES with invalid_intent
+// rather than truncating it, which would silently decide which sub-queries to drop.
+export const BatchQueryIntentSchema = z.object({
+  queries: z.array(QueryIntentSchema.extend({ label: z.string().min(1).max(64) })).min(1),
+});
+
 export const SEARCH_MODES = ["text", "semantic", "hybrid"] as const;
 
 // `mode` defaults to `text`, so a client that predates semantic search behaves exactly as before.
