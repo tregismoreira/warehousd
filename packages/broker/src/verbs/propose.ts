@@ -19,13 +19,14 @@ import type { CollectionConfig } from "../config/schema";
 import { ACL_COLUMN } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
 import { loadActiveGrant, loadActiveGrants } from "../grants/eval";
-import { admits, validateDocumentFilters } from "../grants/filters";
+import { admits, admitsPostImage, validateDocumentFilters } from "../grants/filters";
 import { withWorkspace, writePool } from "../db/pools";
 import { insertRevision, demoteRevision } from "../db/revisions";
 import { findCollection, maskedFieldsFor } from "../config/load";
 import {
   pkOf,
   dataColsOf,
+  nextDataRow,
   revisableCollections,
   dataSchema,
   type RevisionRow,
@@ -81,8 +82,6 @@ export async function proposeDataset(
     coerced[name] = r.value;
   }
 
-  const dataCols = dataColsOf(c);
-
   const pool = writePool(d.pools, ctx);
   if (!pool) return audit.refuseMutation(intent, grant, "not_writable");
 
@@ -100,6 +99,9 @@ export async function proposeDataset(
         // that once, here, rather than at each use.
         // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const documentId = String(docId);
+
+        if (!admitsPostImage(nextDataRow(c, null, coerced), grant, c))
+          return audit.refuseMutation(intent, grant, "not_found");
 
         const clash = await client.query(
           `select 1 from ${table} where ${ident(pk)} = $1 and (_current or _rev_status = 'pending')`,
@@ -159,8 +161,9 @@ export async function proposeDataset(
       // For pending revisions, _rev_fields holds the proposed field names and the data columns
       // hold the proposed state. Not `current`, and no demotion: the document keeps the revision
       // it has until someone approves this one. That is why this cannot call reviseDocument.
-      const next: Record<string, unknown> = {};
-      for (const f of dataCols) next[f] = f in coerced ? coerced[f] : current[f];
+      const next = nextDataRow(c, current, coerced);
+      if (!isDelete && !admitsPostImage(next, grant, c))
+        return audit.refuseMutation(intent, grant, "not_found");
 
       const revId = await insertRevision(
         client,
@@ -458,6 +461,18 @@ export async function applyApproval(
   const currentRev = base.currentRev;
 
   const { merged, newSeq } = mergeRevision(c, proposal, currentRev);
+
+  // The approver's grant must reach the document the merge PRODUCES, not only the one it
+  // replaces. resolveBase checked the pre-image; an update proposal can still carry the
+  // document out of the approver's filter, and the merge can pull in changes made while the
+  // proposal was pending that neither the proposer nor resolveBase saw.
+  //
+  // `update` only. A create proposal's post-image is already checked by resolveBase, which
+  // also has the ACL to check there; a delete's merge is the current revision resolveBase
+  // just admitted.
+  if (proposal._rev_op === "update" && !admitsPostImage(merged, grant, c))
+    return { ok: false, reason: "not_found" };
+
   const newRevId = await commitRevision(client, ctx, {
     table,
     collection: name,

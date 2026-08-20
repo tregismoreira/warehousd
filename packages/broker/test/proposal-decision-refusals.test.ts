@@ -278,6 +278,69 @@ describe("proposal decisions: verbs", () => {
   });
 });
 
+describe("document_filter is enforced against what a proposal produces", () => {
+  // proposeDataset checks the PROPOSER's filter against the values it is about to park — a gap
+  // this closes, because approval only ever evaluates the APPROVER's grant.
+  it("proposeDataset refuses a proposal whose values fall outside the proposer's own filter", async () => {
+    const fields = ["id", "email", "name", "dept"];
+    const proposerId = await requestGrant(app, {
+      userId: "proposer_ownfilter",
+      collection: "people",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "test",
+      allowedFields: fields,
+    });
+    await approveGrant(app, cfg, proposerId, "admin", {
+      verbs: ["read", "create"],
+      mode: "proposal_only",
+      documentFilters: [{ field: "dept", op: "eq", value: "Engineering" }],
+    });
+    const proposer = makeCtx({ userId: "proposer_ownfilter" });
+
+    const res = await broker.mutate(proposer, {
+      collection: "people",
+      op: "create",
+      values: { email: "sales@ex.com", name: "Sales Hire", dept: "Sales" },
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("not_found");
+  });
+
+  // Approval evaluates the APPROVER's grant against the state the merge PRODUCES, not only the
+  // one it replaces — a proposal that leaves the document inside the pre-image but moves it
+  // outside the post-image must still be refused, and refusing it must not touch the pending row.
+  it("approve refuses an update proposal whose merged state leaves the approver's filter, and the pending row is untouched", async () => {
+    const { proposer, approver } = await grantPair("merge_outside", {
+      documentFilters: [{ field: "dept", op: "eq", value: "Engineering" }],
+    });
+    const docId = await seedDocument("Engineering", "mover@ex.com");
+
+    const proposed = await broker.mutate(proposer, {
+      collection: "people",
+      op: "update",
+      id: docId,
+      values: { dept: "Sales" },
+    });
+    assertPending(proposed);
+
+    const res = await broker.approveProposal(approver, proposed.proposalId);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("not_found");
+
+    const row = await app.query(`select _rev_status from data_synth.people where _rev = $1`, [
+      proposed.proposalId,
+    ]);
+    expect(row.rows[0]._rev_status).toBe("pending");
+
+    const current = await app.query(
+      `select dept from data_synth.people where id = $1 and _current`,
+      [docId],
+    );
+    expect(current.rows[0].dept).toBe("Engineering");
+  });
+});
+
 describe("proposal decisions: listProposals filtering", () => {
   it("omits a pending proposal whose document the caller's filter excludes", async () => {
     const { proposer, approver } = await grantPair("list_filtered", {

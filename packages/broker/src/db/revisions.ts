@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { REV_COLS, dataColsOf, type RevisionRow } from "../config/collection";
+import { REV_COLS, dataColsOf, nextDataRow, type RevisionRow } from "../config/collection";
 import type { CollectionConfig } from "../config/schema";
 import { ident } from "../sql/ident";
 import { encodeForColumn } from "./encode";
@@ -136,8 +136,7 @@ export async function reviseDocument(
   changed: Record<string, unknown>,
   meta: Pick<RevisionMeta, "op" | "status" | "by" | "workspaceId">,
 ): Promise<string> {
-  const next: Record<string, unknown> = {};
-  for (const f of dataColsOf(c)) next[f] = f in changed ? changed[f] : current[f];
+  const next = nextDataRow(c, current, changed);
   await demoteRevision(client, table, current._rev);
   return insertRevision(
     client,

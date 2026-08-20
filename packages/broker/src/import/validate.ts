@@ -177,7 +177,18 @@ export function coerce(
       if (["false", "f", "0", "no"].includes(s)) return { ok: true, value: false };
       return { ok: false, reason: "invalid_boolean" };
     }
-    case "date":
+    case "date": {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      const t = Date.parse(String(v));
+      if (Number.isNaN(t)) return { ok: false, reason: "invalid_date" };
+      // A `date` field is a calendar day, so the value bound for it is one. Postgres truncates the
+      // instant form to the same day, so nothing about what is STORED changes; what changes is what
+      // the value is in this process. canonicalize() reads a date as a calendar day and returns null
+      // for an instant, so the post-image of a write that stated a date field could not be matched
+      // by a date filter — and a grant scoped by one would refuse every such write.
+      // indexing/extract.ts already coerces a date this way; this is the two coercers agreeing.
+      return { ok: true, value: new Date(t).toISOString().slice(0, 10) };
+    }
     case "timestamptz": {
       // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const t = Date.parse(String(v));

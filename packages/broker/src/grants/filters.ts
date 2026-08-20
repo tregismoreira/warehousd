@@ -256,6 +256,27 @@ export function admits(
   return aclAdmits(acl as string[], grant.principals);
 }
 
+// The same question `admits` asks, put to the document a write will PRODUCE rather than the one it
+// replaces — and deliberately only half of it.
+//
+// `admits` is document filters AND the per-document ACL. Only the filters are a question about the
+// values being written: an ACL is keyed on the document's identity, and no write through mutate or
+// propose can move a document into or out of one (`pk` is refused on update). On an update the ACL
+// was answered against the pre-image by the `admits` call the caller makes first. On a create,
+// asking it here would refuse everything — the post-image is built from submitted values, which
+// never carry `_acl`, and `admits` fails closed on an absent ACL column, by design.
+//
+// Two questions, two functions, and the grant parameter is narrowed to the half that is used so a
+// reader cannot believe the ACL was consulted. `admits` is still the door for the whole question;
+// nothing here lets a caller skip it.
+export function admitsPostImage(
+  row: Record<string, unknown>,
+  grant: { documentFilter: DocumentFilter[] },
+  c: CollectionConfig,
+): boolean {
+  return matchesFilters(row, grant.documentFilter, c);
+}
+
 // The grant's document filters, ANDed, evaluated against a row the write path already holds.
 // `$self` is bound by loadActiveGrant, so by here every value is a plain literal. An empty list
 // scopes nothing, which is what buildSelect does with it too.

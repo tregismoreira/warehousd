@@ -92,6 +92,29 @@ export function revisableCollections(cfg: WarehousdConfig): string[] {
   );
 }
 
+/**
+ * The data half of the revision a write will append: the values it STATES, over the values the
+ * document already holds. One definition, because three paths were building it separately and a
+ * security check is about to depend on all three agreeing.
+ *
+ * `current` is null for a create, and a field the write does not state is then the SQL NULL
+ * insertRevision binds for it — nothing declares a column default. It is spelled as an explicit
+ * `null` rather than left absent so the object is the whole document: a filter on a field nobody
+ * stated must fail to match, which is what `col = NULL` does in SQL. (canonicalize returns null for
+ * both absent and null, so the evaluator does not depend on this; the reader does.)
+ *
+ * `?? null` and not `||`: `false` and `0` are values a document may hold.
+ */
+export function nextDataRow(
+  c: CollectionConfig,
+  current: Record<string, unknown> | null,
+  stated: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = {};
+  for (const f of dataColsOf(c)) next[f] = f in stated ? stated[f] : (current?.[f] ?? null);
+  return next;
+}
+
 // The one mapping from a context's env to the schema holding that env's data. dev is synthetic,
 // live is real; nothing else may decide this. sql/build.ts spells the same rule for the *views*
 // it reads, which live in the same two schemas.

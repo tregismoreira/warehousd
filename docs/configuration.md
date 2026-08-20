@@ -248,6 +248,8 @@ The transform is computed **in SQL**, so the raw value is never fetched — it c
 
 A grant's own `document_filter` is the deliberate exception and may still reference a masked column — it is written by a human manager rather than by the model, the same reason a denied `path` can gate documents.
 
+A `document_filter` confines which documents the grant may reach **and** which documents it may leave behind: a write whose resulting document would fall outside the filter is refused, the same as an excluded document is on read.
+
 Refused at config load, because each one is a way for a mask to look applied and not be: masking a `pk` (identity has to round-trip), masking a `searchable: true` field (the generated `<field>_tsv` column indexes the raw value), masking a file collection's `content` or `path`, a transform its column type cannot compute, and `unmask: allow` on a field that is not masked.
 
 ### Writable collections
