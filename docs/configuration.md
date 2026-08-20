@@ -214,6 +214,29 @@ Relations are read-only, exactly as `view_join` is, and for the same reason — 
 
 A relation reaches one collection. Relating to a field that is itself a relation is a config error.
 
+A relation can also reach the other way — every document in another collection that points back at this one:
+
+```yaml
+matters:
+  fields:
+    time_entries:
+      posture: allow
+      relation:
+        collection: time_entries
+        via: matter_id
+        select:
+          entry_date: { posture: allow }
+          hours: { posture: allow }
+        limit: 50
+        order: { field: entry_date, dir: desc }
+```
+
+`via` names the *target's* field carrying `fk:` back to this collection. `limit` and `order` are both required and have no defaults: a truncated list whose order nobody chose is arbitrary, and an untruncated one is unbounded. `limit` may not exceed 50 — one request can carry several queries, each returning many documents, each expanding its relations, so the ceiling is what keeps a single call bounded.
+
+A to-many resolves one lookup per host document, so **the target's `via` field must be the first field of a declared index on the target collection**, and a configuration that omits it is refused at load with a message naming the index to add. That turns the one performance trap this feature has into an error a person sees before deploying rather than a slow query they find afterwards.
+
+A document the caller cannot see is absent from the array without shortening anything else — the host document is still returned, with a shorter list.
+
 #### `gen`
 
 Field-name heuristics cover the generic cases (`*_email`, `*_name`, `*_address`). `gen` is for the ones they cannot tell apart — `matter_number`, `bar_number`, `client_number` and `invoice_number` are all `*number*`:
