@@ -164,6 +164,9 @@ export function makeReadVerbs(d: VerbDeps) {
           targetHasAcl: (name: string) => cfg.collections[name]?.acl === true,
           fkOf: (f: string) => c0.fields[f]?.fk ?? null,
           relationPrincipals: grant.principals,
+          // The host's own declared primary key, for a to-many relation's `via` join. Only
+          // meaningful when one is present — `pk` is already computed above for keyset.
+          ...(pk ? { hostPk: pk } : {}),
           // Only for a collection whose view carries an `_acl` column. Passed here — where the
           // aggregate branch is built too — so the predicate lands in the same WHERE every
           // aggregate reads: a count over an ACL'd collection counts what this caller may see, not
@@ -647,6 +650,7 @@ export function makeReadVerbs(d: VerbDeps) {
           }
         : { collection: intent.collection, fields: selectFields, filters: [key], limit: 1 };
 
+      const hostPk = pkOf(c);
       const { text, values } = buildSelect(ctx.env, shaped, grant.allowedFields, {
         documentFilters: grant.documentFilter,
         isMultiValueField,
@@ -655,6 +659,7 @@ export function makeReadVerbs(d: VerbDeps) {
         targetHasAcl: (name: string) => cfg.collections[name]?.acl === true,
         fkOf: (f: string) => c.fields[f]?.fk ?? null,
         relationPrincipals: grant.principals,
+        ...(hostPk ? { hostPk } : {}),
         ...g.aclOpts,
       });
       const rows = await withWorkspace(
