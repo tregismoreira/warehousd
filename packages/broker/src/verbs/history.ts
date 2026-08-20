@@ -191,7 +191,12 @@ export function makeHistoryVerbs(d: VerbDeps) {
           by: String(row._rev_by),
           op: String(row._rev_op),
           status: String(row._rev_status),
-          fields: row._rev_fields ?? [],
+          // Filtered by the grant. `_rev_fields` is the raw list of columns a revision touched,
+          // so returning it verbatim discloses the NAMES of fields the caller cannot read —
+          // which is what "denied means absent" forbids, in a response the caller is otherwise
+          // entitled to. A caller learns that a revision happened, and which of the fields they
+          // can read moved; not that a field they cannot read exists.
+          fields: (row._rev_fields ?? []).filter((f: string) => grant.allowedFields.includes(f)),
         }));
       });
 
