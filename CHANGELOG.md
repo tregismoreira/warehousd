@@ -13,7 +13,6 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 - **`regenerateSynthetic` truncated every workspace's dev data, not just the one being regenerated.** `truncate data_synth.<name> cascade` is a cross-tenant destructive statement; a `delete from data_synth.<name>` scoped by `withWorkspace` replaces it, so RLS confines the blast radius to the workspace that asked.
 - **A file collection's `path` was unique deployment-wide, not per workspace.** Two tenants indexing a file at the same relative path — an ordinary name collision, not an adversarial one — hit a database-level conflict even though `ingestFile`'s own existence check (`indexing/ingest.ts`) is workspace-scoped and expected the insert to succeed. The constraint is now `unique (workspace_id, path)`.
 - **`document_filter` was checked against the document a write replaces, never against the document it produces.** A grant scoped `state eq draft` could `PUT {"state":"published"}` and publish, and the create path had no filter check at all, so the same grant could create a published document outright. Both `mutate` and `propose`/`approve` now check the document a write is about to leave behind, refusing `not_found` (the same reason an excluded document reads as) whenever it falls outside the grant's filter — on create as well as on update. **Behaviour change**: a grant that today writes outside its own filter will start being refused.
-
 ### Added
 
 - **Multi-workspace tenancy.** One deployment now hosts many workspaces instead of one implicit `'default'` tenant: a user may belong to several with a role per workspace, and every write path that used to default silently to `'default'` (synthetic generation, file ingestion, taxonomy sync) now takes an explicit workspace id and is rejected by RLS rather than mis-filed if it omits one.
@@ -33,6 +32,10 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 
 - **`server.runtime`, `warehousd init --runtime`, and the wizard's "Which container engine?" question.** Docker is the container engine, and the CLI now says so rather than offering a choice it had never verified: podman was selectable and checkable but nothing in this repository had ever run a container under it. An unverified option in `warehousd.yml` is worse than no option, because that file is the one the product asks you to review in git. Podman moves to [docs/roadmap.md](docs/roadmap.md#planned) with what verifying it would actually take. A leftover `runtime:` key is ignored rather than rejected.
 - One bug went with it: `warehousd logs --follow` always spawned `docker` regardless of the configured engine.
+
+### Fixed
+
+- **`warehousd start`/`restart` truncated a `writable: true` collection's dev data on every boot.** The entrypoint's synthetic-seeding loop truncated every synthesisable collection unconditionally, including one holding real writes and pending proposals made over `/v1` — `generateSynthetic` and `regenerateSynthetic` already skip a writable collection for exactly this reason, but the entrypoint's own truncate carried no such guard, so a restart silently discarded documents the generator was never going to put back. It now carries the same guard.
 
 ## [0.1.0-rc.1] - 2026-08-11
 

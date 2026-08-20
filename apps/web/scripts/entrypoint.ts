@@ -207,11 +207,14 @@ export async function bootstrap(): Promise<void> {
       await seedDemoPersonas(db, cfg);
     }
 
-    // 8. Synthetic data. Truncate-then-generate so a restart is idempotent
+    // 8. Synthetic data. Truncate-then-generate so a restart is idempotent.
     for (const [name, c] of Object.entries(cfg.collections)) {
       // A kind the generator cannot produce is populated another way — a file collection by
-      // indexCollection, below.
-      if (!kindOf(c).synthesisable) continue;
+      // indexCollection, below. A writable collection is populated by its clients: truncating one
+      // would discard every document written over /v1 and every pending proposal, and
+      // generateSynthetic skips it anyway, so there would be nothing to put back. Same guard as
+      // regenerateSynthetic (synthetic/regenerate.ts) and generateSynthetic itself.
+      if (!kindOf(c).synthesisable || c.writable) continue;
       await db.query(`truncate data_synth.${name} cascade`);
     }
     await generateSynthetic(

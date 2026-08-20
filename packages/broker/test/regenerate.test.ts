@@ -70,6 +70,20 @@ describe("regenerateSynthetic", () => {
     expect(r.collections).toContain("people");
   });
 
+  it("preserves writable collections — a regen must not touch matter_tasks", async () => {
+    const taskId = "11111111-1111-1111-1111-111111111111";
+    await admin.query(
+      `insert into data_synth.matter_tasks (${R}, id, title) values (${RV}, $1, 'Keep Me')`,
+      [taskId],
+    );
+    await regenerateSynthetic(admin, cfg, DEFAULT_WORKSPACE_ID, 42);
+    const kept = await admin.query(`select title from data_synth.matter_tasks where id = $1`, [
+      taskId,
+    ]);
+    expect(kept.rowCount).toBe(1);
+    expect(kept.rows[0].title).toBe("Keep Me");
+  });
+
   it("never touches data_live", async () => {
     await admin.query(
       `insert into data_live.departments (${R}, id, name) values (${RV}, gen_random_uuid(), 'Live Only Dept')`,

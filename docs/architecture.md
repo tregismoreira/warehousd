@@ -301,7 +301,7 @@ Two rules are enforced at approval time, in one place (`validateVerbs`), so no a
 - **`approve` requires `read`.** You cannot approve what you cannot see; without this, "approve, then read the diff" is a privilege-escalation path around field postures. Read is _not_ required in general — an append-only ingestion grant (`create`, no `read`) is legitimate and forcing `read` onto it would widen access rather than narrow it.
 - **Verb support is structural.** It follows from the collection's type, so `update` on a file collection is refused regardless of what an approver asks for. File collections are a record of what was _ingested_; dataset collections are a record of what is currently _true_. You append to the former and revise the latter.
 
-`writable: true` on a collection opts it into the write path. Collections that do not opt in are physically untouched — no extra columns, no extra view predicate, no read cost.
+`writable: true` on a collection opts it into the write path. Collections that do not opt in are physically untouched — no extra columns, no extra view predicate, no read cost. It also opts the collection out of the seeding lifecycle: `generateSynthetic` never populates it and `start`/`restart`/`regen-synth` never truncate it — see the backups paragraph below.
 
 `searchable: true` on a dataset text field generates the same `tsv` column and GIN index the file branch already emits, and makes `broker.searchDocuments` work against datasets. A dataset with no searchable field still refuses `invalid_intent`.
 
@@ -467,7 +467,7 @@ create table app.change_log (
 
 The audit trail is the same problem with a sharper edge. `app.audit_events` also grows without bound, and the application *cannot* prune it: `revoke update, delete` is what stops a compromised app role erasing its own trail, and it stops the app tidying up for exactly the same reason. Pruning is a superuser action, and therefore a deliberate and attributable one. That is the intended trade — unbounded growth is the price of a trail the application cannot rewrite.
 
-For backups, the order that matters is: `app.grants`, `app.audit_events` and `app.change_log` are irreplaceable; `data_synth` regenerates from the config with a fixed seed (`warehousd regen-synth`); `data_live` has its own upstream and an append-only import path. The mechanics are per target: [deploy-fly.md](deploy-fly.md#backups), [deploy-railway.md](deploy-railway.md#backups) and [deploy-compose.md](deploy-compose.md#backups).
+For backups, the order that matters is: `app.grants`, `app.audit_events` and `app.change_log` are irreplaceable; `data_synth` regenerates from the config with a fixed seed (`warehousd regen-synth`), except for a `writable: true` collection, whose rows are real writes and pending proposals rather than generator output, and are never truncated by a regen or a restart; `data_live` has its own upstream and an append-only import path. The mechanics are per target: [deploy-fly.md](deploy-fly.md#backups), [deploy-railway.md](deploy-railway.md#backups) and [deploy-compose.md](deploy-compose.md#backups).
 
 ## Client credentials and the collection ceiling
 
