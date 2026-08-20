@@ -13,6 +13,23 @@ Every call carries a bearer token. A missing or invalid one answers 401 with a `
 
 `{baseUrl}` is always the deployment's `BETTER_AUTH_URL`, never the request's `Host` header — a connector URL derived from an attacker-controlled header would send a user's OAuth flow somewhere else.
 
+## Response envelope
+
+A tool call answers over SSE by default — `content-type: text/event-stream`, one `event: message` frame whose `data:` line carries the JSON-RPC response — because `enableJsonResponse` on the streamable HTTP transport defaults to false; a client sending `accept: application/json, text/event-stream` still gets this framing rather than a bare JSON body. Reaching the tool's own result takes a second parse on top of that: the JSON-RPC envelope's `result.content[0].text` is a **stringified JSON string** — the broker result, `JSON.stringify`-ed into the one `text` field of an MCP content block (`apps/web/app/mcp/route.ts`) — not the result itself.
+
+For a list-returning tool such as `search_documents` or `query_collection`, that inner JSON is a `BrokerResult`, keyed `documents`, plural (`packages/broker/src/types.ts`, advertised through `apps/web/lib/mcp-tools.ts`) — `get_document` instead returns a `GetDocumentResult` keyed `document`, singular, the same distinction [`docs/rest-api.md`](rest-api.md#response-shapes) documents for the REST adapter's matching routes, because both adapters wrap the same broker results.
+
+The two-step parse, mirroring the `rpc()` helper in `apps/web/test/mcp-endpoint.integration.test.ts`:
+
+```ts
+const sseBody = await res.text();
+const dataLine = sseBody.split("\n").find((l) => l.startsWith("data: "))!;
+const rpcEnvelope = JSON.parse(dataLine.slice(6));
+const toolResult = JSON.parse(rpcEnvelope.result.content[0].text);
+// toolResult.documents is the array `search_documents` and `query_collection` return;
+// toolResult.ok, toolResult.fieldsReturned and toolResult.auditId sit beside it.
+```
+
 ## The tools
 
 Nine tools. Every refusal (`ok: false`) carries a `hint` pointing at `request_access` — the model reading it is the first consumer of the governance model, not an afterthought.

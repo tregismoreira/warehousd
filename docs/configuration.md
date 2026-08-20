@@ -163,6 +163,10 @@ Collection and field names must both match `[a-z_][a-z0-9_]*` (case-insensitive)
 
 Changing `type` on a field, removing a field, or moving `pk` is a **breaking change** once a collection holds live content: `apply` refuses it rather than leaving the column and the config disagreeing about what it holds. See [migrations.md](migrations.md) for the flow that gets you past it.
 
+#### `fk`
+
+`fk: <collection>.<field>` is metadata for the config loader and the synthetic generator, not a database constraint. It drives which collection a generated foreign-key value is drawn from and orders generation so a parent collection's rows exist before a child's reference them (`packages/broker/src/synthetic/generate.ts`), and it is what a `view_join` field's `on` must point at — the sibling field it names has to carry `fk:` for the same table, checked at config load (`packages/broker/src/config/rules/view-join.ts`). It emits no Postgres foreign key: `apply`'s DDL (`packages/broker/src/apply/ddl.ts`) never writes a `references` clause for an `fk:` field, so nothing in the database stops a document naming a parent that does not exist — an orphan document is accepted, not rejected. That is a feature rather than a gap: it is what lets a client write a child document before the parent it will eventually reference, in whatever order the writes happen to arrive, instead of failing until the two land in dependency order.
+
 #### `nullable`
 
 `nullable` governs three things: whether the synthetic generator emits the occasional NULL, whether import treats a missing value as `missing_required`, and whether a write payload may state the field as an explicit `null` — a `nullable: true` field accepts one and stores SQL NULL, a field without it refuses one with `invalid_value`. It never becomes a `not null` constraint — every column on a dataset collection is nullable in Postgres, `nullable: true` or not.
