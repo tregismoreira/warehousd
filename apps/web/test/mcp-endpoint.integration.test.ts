@@ -216,7 +216,7 @@ describe("/mcp endpoint", () => {
     expect(row.rows[0].status).toBe("pending");
   });
 
-  it("tools/list returns all nine tools", async () => {
+  it("tools/list returns all twelve tools", async () => {
     const token = await mintAccessToken("env:dev");
     const { body } = await rpc(token, "tools/list");
     const names = body.result.tools.map((t: { name: string }) => t.name).sort();
@@ -224,8 +224,11 @@ describe("/mcp endpoint", () => {
       "create_document",
       "delete_document",
       "describe_collection",
+      "diff_revisions",
       "get_document",
+      "get_revision",
       "list_collections",
+      "list_revisions",
       "query_collection",
       "request_access",
       "search_documents",
