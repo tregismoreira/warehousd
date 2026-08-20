@@ -57,6 +57,24 @@ export const sourceRefNoViewJoin: CollectionRule = {
   },
 };
 
+// The same hazard one step further out: a relation is a correlated subquery evaluated once per
+// host document, so hosting one on a foreign table pulls the remote collection over the wire per
+// document rather than per query. Stated as its own rule rather than folded into the one above,
+// for the same reason relation/write-deny is stated apart from the view_join rule it mirrors — a
+// reader looking up "why is my relation refused here" should find this rule, not that one.
+export const sourceRefNoRelation: CollectionRule = {
+  id: "source-ref/no-relation",
+  check(c, ctx) {
+    if (!c.source_ref) return;
+    for (const [name, f] of Object.entries(c.fields))
+      if (f.relation)
+        ctx.addIssue({
+          code: "custom",
+          message: `field "${name}" has a relation on an external collection; relations are not resolved across a source_ref`,
+        });
+  },
+};
+
 export const sourceRefNoSearchable: CollectionRule = {
   id: "source-ref/no-searchable",
   check(c, ctx) {
@@ -94,6 +112,7 @@ export const SOURCE_REF_RULES: CollectionRule[] = [
   sourceRefHasNoSourceDir,
   sourceRefNotWritable,
   sourceRefNoViewJoin,
+  sourceRefNoRelation,
   sourceRefNoSearchable,
   columnRequiresSourceRef,
 ];

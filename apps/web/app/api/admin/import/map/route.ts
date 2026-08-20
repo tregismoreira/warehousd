@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
     // Storable fields only: a view_join field is resolved from a sibling table and has no column
     // to import into, so offering it in a picker would offer a mapping the config then refuses.
     fields: Object.entries(c.fields)
-      .filter(([, f]) => !f.view_join)
+      .filter(([, f]) => !f.view_join && !f.relation)
       .map(([name, f]) => ({ name, type: f.type ?? null, nullable: f.nullable ?? false })),
     // What the config already says, so the picker starts from the governed answer rather than
     // from a guess that would silently propose undoing it.

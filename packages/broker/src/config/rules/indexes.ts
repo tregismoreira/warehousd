@@ -28,10 +28,10 @@ export const indexesIndexableField: CollectionRule = {
           ctx.addIssue({ code: "custom", message: `index names unknown field "${name}"` });
           continue;
         }
-        if (f.view_join)
+        if (f.view_join || f.relation)
           ctx.addIssue({
             code: "custom",
-            message: `index names field "${name}", which is not stored: a view_join field is resolved at read time`,
+            message: `index names field "${name}", which is not stored: a ${f.relation ? "relation" : "view_join"} field is resolved at read time`,
           });
         if (f.type === "json")
           ctx.addIssue({

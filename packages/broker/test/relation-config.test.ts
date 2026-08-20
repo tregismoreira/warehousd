@@ -152,4 +152,19 @@ describe("relation config", () => {
     expect(dataColsOf(parsed.collections.matters!)).not.toContain("client");
     expect(dataColsOf(parsed.collections.matters!)).toContain("client_id");
   });
+
+  // A relation resolves once per host document, so hosting one on a foreign table would pull the
+  // remote collection over the wire per document. Refused for the same reason view_join is.
+  it("rejects a relation on an external collection", () => {
+    const external = cfg(OK) as unknown as {
+      collections: Record<string, Record<string, unknown>>;
+    };
+    external.collections.matters!.source_ref = { source: "erp", table: "matters" };
+    const r = ConfigSchema.safeParse(external);
+    expect(r.success).toBe(false);
+    if (!r.success)
+      expect(r.error.issues.map((i) => i.message).join(" ")).toContain(
+        "relations are not resolved across a source_ref",
+      );
+  });
 });

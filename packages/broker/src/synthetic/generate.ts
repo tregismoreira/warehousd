@@ -64,7 +64,7 @@ export async function generateSynthetic(
     // are no longer the reason: every dataset has them, and the insert below fills them.)
     if (c.writable) continue;
     const n = cfg.synthetic.documents_per_collection[name] ?? 20;
-    const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
+    const storedFields = Object.entries(c.fields).filter(([, f]) => !f.view_join && !f.relation);
     // Build term slug sets for each bound vocabulary. Only YAML vocabularies have terms to
     // draw from here: a dataset-sourced one is populated by syncDatasetTerms, which by
     // construction cannot run yet — the rows it reads are the ones being generated below.

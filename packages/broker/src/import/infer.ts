@@ -219,7 +219,9 @@ export function inferMapping(
   c: CollectionConfig,
   headers: string[],
 ): InferredMapping {
-  const fields = Object.entries(c.fields).filter(([, f]) => !f.view_join);
+  // view_join and relation fields are resolved at read time and have no column to map a header
+  // onto, so neither is offered as a mapping target.
+  const fields = Object.entries(c.fields).filter(([, f]) => !f.view_join && !f.relation);
   const byName = new Map(fields.map(([n]) => [n, n]));
   const existing = c.import?.columns ?? {};
 

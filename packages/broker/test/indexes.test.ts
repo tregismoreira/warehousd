@@ -68,6 +68,19 @@ describe("indexes config", () => {
     expect(errors([{ fields: ["client_name"] }]).join(" ")).toContain("is not stored");
   });
 
+  // A relation is not stored either. Without this the config parses and `applyConfig` then emits
+  // `create index … ("client", "id")` against a column that was never created, so the failure
+  // lands at boot instead of at config load.
+  it("rejects a relation field", () => {
+    const relation = {
+      posture: "allow",
+      relation: { collection: "clients", on: "client_id", select: { name: { posture: "allow" } } },
+    };
+    expect(errors([{ fields: ["client"] }], { client: relation }).join(" ")).toContain(
+      "is not stored",
+    );
+  });
+
   it("rejects a json field", () => {
     expect(errors([{ fields: ["blob"] }]).join(" ")).toContain("type json");
   });

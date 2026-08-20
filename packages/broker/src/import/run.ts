@@ -229,7 +229,9 @@ export async function importCollection(
   // inserts: an upsert file that sets one column on 500 existing documents is the normal case,
   // and demanding every required column there would make upsert useless for editing.
   const requiredCols = Object.entries(c.fields)
-    .filter(([, f]) => !f.view_join && !f.nullable)
+    // A relation is excluded for the same reason a view_join is: neither has a column on the
+    // base table, so neither can be required of an import that could never carry one.
+    .filter(([, f]) => !f.view_join && !f.relation && !f.nullable)
     .map(([n]) => n);
   // Written to app.change_log after the data transaction commits — the import role has no
   // privileges in `app` at all, and giving it some to write its own feed entry would undo the
