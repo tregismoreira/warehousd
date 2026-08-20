@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { REV_COLS, type RevisionRow } from "../config/collection";
+import { REV_COLS, dataColsOf, type RevisionRow } from "../config/collection";
+import type { CollectionConfig } from "../config/schema";
 import { ident } from "../sql/ident";
+import { encodeForColumn } from "./encode";
 
 // The revision writer. Every dataset table carries the REV_COLS bookkeeping columns, and every
 // path that adds a row to one goes through here: the direct write path (verbs/mutate.ts), the
@@ -32,8 +34,8 @@ export type RevisionMeta = {
 };
 
 // Seeders and fixtures write straight SQL against a dataset table rather than going through
-// insertRevision — they run as the owner, before any broker exists, and they have no dataCols
-// list to hand it. Every dataset is revisioned, so a bare `insert into data_live.people (...)`
+// insertRevision — they run as the owner, before any broker exists, and they have no collection
+// config to hand it. Every dataset is revisioned, so a bare `insert into data_live.people (...)`
 // now fails on the NOT NULL bookkeeping columns. These two constants are the literal fragment
 // that makes such an insert a well-formed `create` revision.
 //
@@ -42,15 +44,24 @@ export type RevisionMeta = {
 export const SEED_REV_COLUMNS = "_rev_seq, _rev_by, _rev_op, _rev_status, _rev_fields, _current";
 export const SEED_REV_VALUES = "1, 'seed', 'create', 'approved', '{}', true";
 
-/** Append one revision row. Returns its `_rev`. */
+/**
+ * Append one revision row. Returns its `_rev`.
+ *
+ * `row` holds values in the shape node-postgres hands back on a READ — a `json` field is a JS
+ * value, never serialised text. Both producers already satisfy that: `coerce()` parses rather than
+ * stringifies, and a carried-forward column was parsed by the driver. The single rendering happens
+ * in encodeForColumn below; a caller that serialises first gets its JSON stored as a JSON *string*,
+ * which is why this is a contract and not a heuristic.
+ */
 export async function insertRevision(
   client: PoolClient,
   table: string,
-  dataCols: string[],
+  c: CollectionConfig,
   meta: RevisionMeta,
   row: Record<string, unknown>,
 ): Promise<string> {
   const revId = randomUUID();
+  const dataCols = dataColsOf(c);
   const cols = [...REV_COLS, ...dataCols].map(ident).join(", ");
   // Positional, and in REV_COLS order. Do not reorder without reordering REV_COLS.
   const vals: unknown[] = [
@@ -64,7 +75,9 @@ export async function insertRevision(
     meta.base,
     meta.current,
     meta.workspaceId,
-    ...dataCols.map((k) => row[k] ?? null),
+    // `?? null` used to live here. It is inside encodeForColumn now, where the json case needs the
+    // null test to come first anyway — `typeof null === "object"`.
+    ...dataCols.map((k) => encodeForColumn(c.fields[k]?.type, row[k])),
   ];
   await client.query(
     `insert into ${table} (${cols}) values (${vals.map((_, i) => `$${i + 1}`).join(", ")})`,
@@ -118,18 +131,18 @@ export async function currentRevision(
 export async function reviseDocument(
   client: PoolClient,
   table: string,
-  dataCols: string[],
+  c: CollectionConfig,
   current: RevisionRow,
   changed: Record<string, unknown>,
   meta: Pick<RevisionMeta, "op" | "status" | "by" | "workspaceId">,
 ): Promise<string> {
   const next: Record<string, unknown> = {};
-  for (const f of dataCols) next[f] = f in changed ? changed[f] : current[f];
+  for (const f of dataColsOf(c)) next[f] = f in changed ? changed[f] : current[f];
   await demoteRevision(client, table, current._rev);
   return insertRevision(
     client,
     table,
-    dataCols,
+    c,
     {
       seq: Number(current._rev_seq) + 1,
       op: meta.op,

@@ -111,7 +111,7 @@ export async function proposeDataset(
         const revId = await insertRevision(
           client,
           table,
-          dataCols,
+          c,
           {
             seq: 1,
             op: "create",
@@ -165,7 +165,7 @@ export async function proposeDataset(
       const revId = await insertRevision(
         client,
         table,
-        dataCols,
+        c,
         {
           seq: Number(current._rev_seq) + 1,
           op: isDelete ? "delete" : "update",
@@ -347,7 +347,7 @@ export async function commitRevision(
   const newRevId = await insertRevision(
     client,
     table,
-    dataColsOf(c),
+    c,
     {
       seq: newSeq,
       op: proposal._rev_op as "create" | "update" | "delete",
