@@ -288,6 +288,8 @@ Checks Docker, the config, the server image, both ports and the containers, then
 └  1 problem found — fix it, then re-run `warehousd doctor`.
 ```
 
+When `config` fails on a schema violation — a wrong-typed value, or an unrecognised top-level key, since `warehousd.yml` is validated strictly — the detail names the offending key and its problem, multiple issues joined with `; `, rather than a bare `[`. `warehousd doctor --json` carries the same detail in the `config` check's `detail` field.
+
 | Flag       |                                                              |
 | ---------- | ------------------------------------------------------------ |
 | `--deploy` | Also run the deploy pre-flight — see below. Off by default.   |
