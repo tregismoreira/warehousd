@@ -43,6 +43,9 @@ export const BrokerResultOkSchema = z.object({
   fieldsReturned: z.array(z.string()),
   auditId: AuditIdSchema,
   collections: z.array(SearchedCollectionSchema).optional(),
+  // Present only when this page came back full — the caller's signal that the keyset walk has
+  // more to fetch. See QueryIntentSchema's `after` in routes.ts and packages/broker/src/types.ts.
+  nextCursor: z.string().optional(),
 });
 export const BrokerResultSchema = z.union([BrokerResultOkSchema, RefusalSchema]);
 

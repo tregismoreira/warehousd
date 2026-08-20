@@ -75,6 +75,10 @@ export const QueryIntentSchema = z.object({
   offset: Offset.optional(),
   aggregate: z.array(AggregateSchema).optional(),
   groupBy: z.array(Ident).optional(),
+  // Opaque — not an Ident, not validated here beyond "is a string". decodeCursor (sql/cursor.ts)
+  // is the one place its shape is checked, and a malformed one answers invalid_intent from there
+  // rather than from this schema.
+  after: z.string().optional(),
 });
 
 export const SEARCH_MODES = ["text", "semantic", "hybrid"] as const;

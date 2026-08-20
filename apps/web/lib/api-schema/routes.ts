@@ -168,7 +168,9 @@ export const OPERATIONS: Operation[] = [
     params: [cParam],
     requestBody: {
       schema: QueryIntentSchema.omit({ collection: true }),
-      description: "The collection comes from the path, never the body.",
+      description:
+        "The collection comes from the path, never the body. `after` takes a previous response's " +
+        "`nextCursor` for a stable keyset walk and is mutually exclusive with `offset` and `aggregate`.",
     },
     success: [{ status: 200, schema: BrokerResultOkSchema, description: "Matching documents." }],
     reasons: [...RESTRICTED, "field_denied", "unknown_field"],

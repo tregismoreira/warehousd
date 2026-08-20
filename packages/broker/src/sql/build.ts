@@ -73,6 +73,13 @@ export function buildSelect(
     // request — the read verbs take it from the loaded grant, which derives it from
     // `app.user_groups` (acl/principals.ts).
     aclPrincipals?: string[];
+    // Keyset pagination. `field` and `pk` are config-validated identifiers (verbs/read.ts resolves
+    // and grant-checks them before this is called), never raw client input, so they go through
+    // q() like every other identifier. `after`, when present, is the caller's cursor position —
+    // both values are always bound parameters (invariant 2). Mutually exclusive with `rankExpr`
+    // (search ranking), `offset` and `aggregate`; the verb refuses that combination before
+    // reaching here, but this function must not emit two ORDER BYs if it is ever called wrong.
+    keyset?: { field: string; dir: "asc" | "desc"; pk: string; after?: [unknown, unknown] };
   } = {},
 ): { text: string; values: unknown[] } {
   const schema = dataSchema(env);
@@ -179,6 +186,15 @@ export function buildSelect(
       where.push(`${q(f.field)} ${lookup(OP_SQL, f.op, "operator")} ${param(f.value)}`);
     }
   }
+  // Keyset pagination's WHERE half: a row-value comparison against the caller's cursor position,
+  // both values bound parameters. Postgres can use a composite index — (sortField, pk) — to serve
+  // this form without a sort over the whole result. Absent `after` means "first page": total order
+  // still needs the ORDER BY below, but there is no lower bound to add yet.
+  if (opts.keyset?.after) {
+    const { field, pk, dir, after } = opts.keyset;
+    const op = dir === "asc" ? ">" : "<";
+    where.push(`(${q(field)}, ${q(pk)}) ${op} (${param(after[0])}, ${param(after[1])})`);
+  }
   // AND all grant-carried document filters.
   //
   // This is one of two evaluators for the same rule: the write path cannot reuse this SQL (it
@@ -263,9 +279,18 @@ export function buildSelect(
   if (intent.groupBy && intent.groupBy.length)
     text += ` group by ${intent.groupBy.map(q).join(", ")}`;
 
-  // ORDER BY: when rankExpr present, relevance overrides intent.orderBy
+  // ORDER BY: when rankExpr present, relevance overrides intent.orderBy AND keyset — search
+  // ranking and keyset pagination are mutually exclusive (refused in the verb before this is
+  // called), and this is the enforcement of last resort: never emit two ORDER BYs.
+  //
+  // With keyset active, the pk tie-break is what makes the order TOTAL — the property a cursor
+  // needs. Ties on the sort field alone would let two rows swap places between pages, which is
+  // indistinguishable from losing or duplicating one.
   if (rankExpr) text += ` order by ${rankExpr} desc`;
-  else if (intent.orderBy)
+  else if (opts.keyset) {
+    const { field, pk, dir } = opts.keyset;
+    text += ` order by ${q(field)} ${dir}, ${q(pk)} ${dir}`;
+  } else if (intent.orderBy)
     text += ` order by ${q(intent.orderBy.field)} ${intent.orderBy.dir === "desc" ? "desc" : "asc"}`;
 
   text += ` limit ${limit}${offset}`;
