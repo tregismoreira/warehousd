@@ -50,6 +50,58 @@ A cursor is opaque but deliberately not secret and not signed — see the header
 
 **Indexing caveat.** Constant-time page fetches depend on a composite index covering `(sortField, pk)` in the sort direction used. The primary-key-ordered walk is served by the same partial unique index every writable collection already has (`(workspace_id, pk) where _current`), so paging in pk order is constant-time out of the box. Paging by any other field is only constant-time if an operator has indexed that field by hand — nothing in this phase creates one, and no `warehousd.yml` key declares one. Cortex's real shape (`filter page_id eq <id>` ordered by `order`) needs an index on `(workspace_id, page_id, order, <pk>)` to get the same guarantee; without it, that specific walk still returns correct results, just not in constant time per page.
 
+## Response shapes
+
+The three data-returning routes wrap their payload differently, and each shape reads naturally enough on its own that a client written against one is easy to leave silently wrong against another.
+
+**`POST /v1/collections/{c}/documents`** sets `Location` to the new document's URL and returns the mutation result. There is no `ETag` on this response — only `GET` and `PUT` set one (`apps/web/app/v1/collections/[c]/documents/[id]/route.ts`) — so read the new document's revision from `rev` in the body, not from a response header:
+
+```http
+HTTP/1.1 201 Created
+Location: /v1/collections/pages/documents/3f2e2d10-9b4a-4c1e-8f3a-6d2c9e1b7a52
+
+{
+  "ok": true,
+  "status": "applied",
+  "documentId": "3f2e2d10-9b4a-4c1e-8f3a-6d2c9e1b7a52",
+  "rev": "9a1c7e4b-2f0d-4a8e-b6c1-5d3f9e2a1b70",
+  "auditId": "b7e2a1c0-4d5f-4e8a-9b3c-1a2d3e4f5b6c"
+}
+```
+
+**`GET /v1/collections/{c}/documents/{id}`** wraps a single document, keyed `document`, singular, and carries the document's `rev`:
+
+```json
+{
+  "ok": true,
+  "document": { "id": "3f2e2d10-9b4a-4c1e-8f3a-6d2c9e1b7a52", "title": "Q3 roadmap" },
+  "fieldsReturned": ["id", "title"],
+  "rev": "9a1c7e4b-2f0d-4a8e-b6c1-5d3f9e2a1b70",
+  "auditId": "b7e2a1c0-4d5f-4e8a-9b3c-1a2d3e4f5b6c"
+}
+```
+
+**`POST /v1/collections/{c}/query`** wraps a list, keyed `documents`, plural, and carries no `rev` at all — a result set is not one document to version:
+
+```json
+{
+  "ok": true,
+  "documents": [{ "id": "3f2e2d10-9b4a-4c1e-8f3a-6d2c9e1b7a52", "title": "Q3 roadmap" }],
+  "fieldsReturned": ["id", "title"],
+  "auditId": "b7e2a1c0-4d5f-4e8a-9b3c-1a2d3e4f5b6c"
+}
+```
+
+`document`-with-`rev` versus `documents`-without is the detail that gets missed: a client that generates one type from the other's shape, or that reaches for `.rev` after a query the way it does after a fetch, fails silently rather than loudly.
+
+**Every refusal is a bare string under `error`** — never an object, never `{"reason": "..."}`:
+
+```json
+{ "error": "not_found" }
+```
+
+(`apps/web/lib/rest.ts`, the `refuse()` helper.) The values a client must be prepared to switch on are every member of `RefusalReason` — `no_grant`, `expired_grant`, `field_denied`, `unknown_collection`, `unknown_field`, `invalid_intent`, `internal_error`, `not_found` — plus, on any mutating route, `MUTATION_ONLY_REFUSAL_REASONS`'s additions — `verb_denied`, `verb_not_supported`, `field_not_writable`, `conflict`, `invalid_value`, `not_writable`, `self_approval_denied`, `batch_aborted` (`packages/broker/src/types.ts`). See [Status codes and reasons](#status-codes-and-reasons) below for which HTTP status each one maps to.
+
 ## Known warts
 
 The spec documents these two shapes faithfully rather than prettying them up, so they are recorded here as known rather than surprising.
