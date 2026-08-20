@@ -32,7 +32,7 @@ const toolResult = JSON.parse(rpcEnvelope.result.content[0].text);
 
 ## The tools
 
-Nine tools. Every refusal (`ok: false`) carries a `hint` pointing at `request_access` — the model reading it is the first consumer of the governance model, not an afterthought.
+Twelve tools. Every refusal (`ok: false`) carries a `hint` pointing at `request_access` — the model reading it is the first consumer of the governance model, not an afterthought.
 
 | Tool | What it does | Refusal reasons |
 |---|---|---|
@@ -41,6 +41,9 @@ Nine tools. Every refusal (`ok: false`) carries a `hint` pointing at `request_ac
 | `query_collection` | Structured query: filters, ordering, aggregation, grouping — re-validated against the grant, then executed. | `no_grant`, `expired_grant`, `unknown_collection`, `invalid_intent`, `internal_error`, `field_denied`, `unknown_field` |
 | `search_documents` | Ranked search. Naming a collection searches it; omitting one fans out across every collection the caller may read and merges by reciprocal-rank fusion. | `no_grant`, `expired_grant`, `unknown_collection`, `invalid_intent`, `internal_error`, `field_denied`, `unknown_field` |
 | `get_document` | Fetch one document by id or path. | `no_grant`, `expired_grant`, `unknown_collection`, `invalid_intent`, `internal_error`, `field_denied`, `not_found` |
+| `list_revisions` | Every revision of one document, metadata only. | `no_grant`, `expired_grant`, `unknown_collection`, `invalid_intent`, `internal_error`, `not_found` |
+| `get_revision` | One past revision, projected through the caller's current grant. | `no_grant`, `expired_grant`, `unknown_collection`, `invalid_intent`, `internal_error`, `field_denied`, `unknown_field`, `not_found` |
+| `diff_revisions` | The fields that moved between two revisions. | `no_grant`, `expired_grant`, `unknown_collection`, `invalid_intent`, `internal_error`, `field_denied`, `not_found` |
 | `create_document` | Create a document in a writable collection. May return `status: "pending"` — invisible until a human approves it. | `no_grant`, `expired_grant`, `unknown_collection`, `invalid_intent`, `internal_error`, `verb_denied`, `field_not_writable`, `invalid_value`, `not_writable`, `verb_not_supported`, `conflict` |
 | `update_document` | Update an existing document. May return `status: "pending"`. | as `create_document`, plus `not_found` |
 | `delete_document` | Delete a document. May return `status: "pending"`. | as `create_document`, plus `not_found` |
@@ -51,6 +54,7 @@ Nine tools. Every refusal (`ok: false`) carries a `hint` pointing at `request_ac
 ## What is deliberately absent
 
 - **No `approve`/`reject` tools.** The model may propose a write; it may not decide on one, including someone else's. Adding these would not by itself let a model approve its own proposal — the broker refuses `self_approval_denied` against the proposal's author regardless — but it would let it approve *another* proposer's, which is not a decision an untrusted party gets to make.
+- **No `revert_document` tool.** `broker.revertDocument` is a bulk write derived from state the model did not compose — it reaches back into the revision history and reapplies an earlier state wholesale, rather than the model proposing specific field values the way `create_document`/`update_document` do. It stays a console- and `/v1`-only operation.
 - **No ACL tools.** A tool the model can call is a tool that can widen who else may read something. Per-document ACLs are managed over `/v1` only, authorised against the caller's standing rather than a grant.
 - **No resources, no prompts.** Only tools are exposed.
 - **No client-supplied vector on search.** The vector is always derived server-side from `q`. A client-supplied one would be an oracle: a caller could probe the embedding space of documents their grant excludes, reading similarity out of a corpus they cannot read.

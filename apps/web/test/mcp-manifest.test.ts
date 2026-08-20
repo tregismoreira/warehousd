@@ -84,4 +84,17 @@ describe("mcp-manifest", () => {
     const { body } = await rpc(token, "tools/list");
     expect(body.result.tools).toEqual(mcpToolsCommitted.tools);
   });
+
+  it("advertises the revision tools with their required properties", async () => {
+    const token = await mintAccessToken("env:dev");
+    const { body } = await rpc(token, "tools/list");
+    const tools: { name: string; inputSchema: { required?: string[] } }[] = body.result.tools;
+    expect(tools.map((t) => t.name)).toContain("list_revisions");
+    expect(tools.map((t) => t.name)).toContain("get_revision");
+    expect(tools.map((t) => t.name)).toContain("diff_revisions");
+    const get = tools.find((t) => t.name === "get_revision");
+    expect(get?.inputSchema.required?.slice().sort()).toEqual(["collection", "id", "rev"]);
+    const diff = tools.find((t) => t.name === "diff_revisions");
+    expect(diff?.inputSchema.required?.slice().sort()).toEqual(["collection", "from", "id", "to"]);
+  });
 });

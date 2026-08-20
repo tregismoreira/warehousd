@@ -130,6 +130,24 @@ export const GetDocumentIntentSchema = z.union([
   z.object({ collection: Ident, path: z.string() }),
 ]);
 
+// The three revision reads. Declared here rather than in the adapter so the MCP tool advertises
+// exactly what the handler parses — the drift that made the advertised query schema miss
+// `offset` is what this file exists to prevent.
+export const ListRevisionsIntentSchema = z
+  .object({ collection: Ident, id: z.string().min(1) })
+  .strict();
+export const GetRevisionIntentSchema = z
+  .object({ collection: Ident, id: z.string().min(1), rev: z.string().min(1) })
+  .strict();
+export const DiffRevisionsIntentSchema = z
+  .object({
+    collection: Ident,
+    id: z.string().min(1),
+    from: z.string().min(1),
+    to: z.string().min(1),
+  })
+  .strict();
+
 // Field NAMES are identifiers and are checked; field VALUES are bound parameters and are not.
 // coerce() in import/validate.ts is what holds values to their declared type, per collection —
 // this schema cannot know it.

@@ -6,6 +6,9 @@ import {
   QueryIntentSchema,
   DocSearchIntentSchema,
   GetDocumentIntentSchema,
+  ListRevisionsIntentSchema,
+  GetRevisionIntentSchema,
+  DiffRevisionsIntentSchema,
   MutationIntentSchema,
 } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../app/lib/broker";
@@ -207,6 +210,55 @@ export const TOOLS: ToolDef[] = [
       const parsed = GetDocumentIntentSchema.safeParse(input);
       if (!parsed.success) return withHint({ ok: false, reason: "invalid_intent" });
       return withHint(await getBroker().broker.getDocument(ctx, parsed.data));
+    },
+  },
+  {
+    name: "list_revisions",
+    description:
+      "Every revision of one document, newest last. Metadata only — who changed it, when, and " +
+      "which of the fields you can read moved. Use get_revision to read the values.",
+    inputSchema: advertise(ListRevisionsIntentSchema, {
+      collection: "Collection name.",
+      id: "Document id.",
+    }),
+    handler: async (ctx, input) => {
+      const parsed = ListRevisionsIntentSchema.safeParse(input);
+      if (!parsed.success) return withHint({ ok: false, reason: "invalid_intent" });
+      return withHint(await getBroker().broker.listRevisions(ctx, parsed.data));
+    },
+  },
+  {
+    name: "get_revision",
+    description:
+      "One past revision of a document. Fields you cannot read are absent and masked fields " +
+      "stay masked, exactly as in get_document — the grant and the postures applied are the " +
+      "current ones, not the ones in force when the revision was written.",
+    inputSchema: advertise(GetRevisionIntentSchema, {
+      collection: "Collection name.",
+      id: "Document id.",
+      rev: "Revision id, as returned by list_revisions.",
+    }),
+    handler: async (ctx, input) => {
+      const parsed = GetRevisionIntentSchema.safeParse(input);
+      if (!parsed.success) return withHint({ ok: false, reason: "invalid_intent" });
+      return withHint(await getBroker().broker.getRevision(ctx, parsed.data));
+    },
+  },
+  {
+    name: "diff_revisions",
+    description:
+      "The fields that moved between two revisions of one document. A masked field is masked on " +
+      "both sides, so a diff of one can read as unchanged even when the value moved.",
+    inputSchema: advertise(DiffRevisionsIntentSchema, {
+      collection: "Collection name.",
+      id: "Document id.",
+      from: "The earlier revision id.",
+      to: "The later revision id.",
+    }),
+    handler: async (ctx, input) => {
+      const parsed = DiffRevisionsIntentSchema.safeParse(input);
+      if (!parsed.success) return withHint({ ok: false, reason: "invalid_intent" });
+      return withHint(await getBroker().broker.diffRevisions(ctx, parsed.data));
     },
   },
   // Approve and reject are deliberately NOT MCP tools — the untrusted model may propose, but not

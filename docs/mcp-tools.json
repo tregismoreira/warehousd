@@ -138,6 +138,61 @@
       }
     },
     {
+      "name": "list_revisions",
+      "description": "Every revision of one document, newest last. Metadata only — who changed it, when, and which of the fields you can read moved. Use get_revision to read the values.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Collection name."
+          },
+          "id": { "type": "string", "minLength": 1, "description": "Document id." }
+        },
+        "required": ["collection", "id"]
+      }
+    },
+    {
+      "name": "get_revision",
+      "description": "One past revision of a document. Fields you cannot read are absent and masked fields stay masked, exactly as in get_document — the grant and the postures applied are the current ones, not the ones in force when the revision was written.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Collection name."
+          },
+          "id": { "type": "string", "minLength": 1, "description": "Document id." },
+          "rev": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Revision id, as returned by list_revisions."
+          }
+        },
+        "required": ["collection", "id", "rev"]
+      }
+    },
+    {
+      "name": "diff_revisions",
+      "description": "The fields that moved between two revisions of one document. A masked field is masked on both sides, so a diff of one can read as unchanged even when the value moved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Collection name."
+          },
+          "id": { "type": "string", "minLength": 1, "description": "Document id." },
+          "from": { "type": "string", "minLength": 1, "description": "The earlier revision id." },
+          "to": { "type": "string", "minLength": 1, "description": "The later revision id." }
+        },
+        "required": ["collection", "id", "from", "to"]
+      }
+    },
+    {
       "name": "create_document",
       "description": "Create a document in a writable collection. Governance is deny-by-default: the operation requires an active create grant. A write may return status:pending (invisible to everyone until a human approves it); the model cannot approve its own proposal. Refusals include a request_access hint.",
       "inputSchema": {
