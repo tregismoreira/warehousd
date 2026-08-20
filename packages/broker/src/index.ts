@@ -86,6 +86,8 @@ export {
   normalizePosture,
   readPosture,
   writePosture,
+  isToMany,
+  RELATION_MAX_LIMIT,
 } from "./config/schema";
 export type {
   CollectionConfig,

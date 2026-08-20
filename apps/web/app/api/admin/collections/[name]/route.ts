@@ -8,6 +8,7 @@ import {
   loadTaxonomyBindings,
   type TaxonomyBinding,
   kindOf,
+  isToMany,
 } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../../../../lib/broker";
 import { requireRole } from "../../../../../lib/authz";
@@ -122,7 +123,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
       relation: f.relation
         ? {
             collection: f.relation.collection,
-            on: f.relation.on,
+            on: isToMany(f.relation) ? null : f.relation.on,
             fields: Object.keys(f.relation.select),
           }
         : null,

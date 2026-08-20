@@ -168,3 +168,81 @@ describe("relation config", () => {
       );
   });
 });
+
+describe("to-many relation config", () => {
+  function many(relation: unknown, timeIndexes: unknown[] = [{ fields: ["matter_id"] }]) {
+    return {
+      project: "t",
+      collections: {
+        matters: {
+          description: "Matters",
+          fields: {
+            id: { type: "uuid", posture: "allow", pk: true },
+            entries: { posture: "allow", relation },
+          },
+        },
+        time_entries: {
+          description: "Time",
+          indexes: timeIndexes,
+          fields: {
+            id: { type: "uuid", posture: "allow", pk: true },
+            matter_id: { type: "uuid", posture: "allow", fk: "matters.id" },
+            person_id: { type: "uuid", posture: "allow" },
+            hours: { type: "numeric", posture: "allow" },
+            entry_date: { type: "date", posture: "allow" },
+          },
+        },
+      },
+    };
+  }
+  function errs(relation: unknown, idx?: unknown[]): string[] {
+    const r = ConfigSchema.safeParse(many(relation, idx));
+    return r.success ? [] : r.error.issues.map((i) => i.message);
+  }
+  const OK_MANY = {
+    collection: "time_entries",
+    via: "matter_id",
+    select: { hours: { posture: "allow" } },
+    limit: 50,
+    order: { field: "entry_date", dir: "desc" },
+  };
+
+  it("accepts a well-formed to-many relation", () => {
+    expect(errs(OK_MANY)).toEqual([]);
+  });
+
+  it("rejects a to-many with no limit", () => {
+    const { limit: _drop, ...noLimit } = OK_MANY;
+    expect(errs(noLimit).length).toBeGreaterThan(0);
+  });
+
+  it("rejects a to-many with no order", () => {
+    const { order: _drop, ...noOrder } = OK_MANY;
+    expect(errs(noOrder).length).toBeGreaterThan(0);
+  });
+
+  it("rejects a limit above the ceiling", () => {
+    expect(errs({ ...OK_MANY, limit: 5000 }).length).toBeGreaterThan(0);
+  });
+
+  it("rejects both on and via in one relation", () => {
+    expect(errs({ ...OK_MANY, on: "id" }).length).toBeGreaterThan(0);
+  });
+
+  it("rejects a via field that carries no fk back to this collection", () => {
+    expect(errs({ ...OK_MANY, via: "person_id" }).join(" ")).toContain("fk");
+  });
+
+  it("rejects an order field the target does not have", () => {
+    expect(errs({ ...OK_MANY, order: { field: "nope", dir: "asc" } }).join(" ")).toContain("nope");
+  });
+
+  it("REFUSES a to-many whose via field is not covered by a declared index on the target", () => {
+    expect(errs(OK_MANY, []).join(" ")).toContain("is not indexed");
+    expect(errs(OK_MANY, [{ fields: ["person_id"] }]).join(" ")).toContain("is not indexed");
+  });
+
+  it("accepts a via field that leads a composite index on the target", () => {
+    expect(errs(OK_MANY, [{ fields: ["matter_id", "entry_date"] }])).toEqual([]);
+  });
+});

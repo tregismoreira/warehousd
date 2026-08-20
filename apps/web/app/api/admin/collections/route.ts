@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { countDocumentsIn } from "@warehousd/broker";
+import { countDocumentsIn, isToMany } from "@warehousd/broker";
 import { getBroker, getAppPool, getConfig } from "../../../lib/broker";
 import { requireRole } from "../../../../lib/authz";
 import { readEnvCookie } from "../../../../lib/session";
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
       relation: f.relation
         ? {
             collection: f.relation.collection,
-            on: f.relation.on,
+            on: isToMany(f.relation) ? null : f.relation.on,
             fields: Object.keys(f.relation.select),
           }
         : null,
