@@ -119,6 +119,11 @@ export function makeReadVerbs(d: VerbDeps) {
     for (const f of computed)
       if (plan.masked.has(f))
         return audit.refuse(intent.collection, "field_denied", { intent, grant });
+    // A relation is not denied; it is not a value. `field_denied` would tell a caller to ask for
+    // a grant that would not help.
+    for (const f of computed)
+      if (c0.fields[f]?.relation)
+        return audit.refuse(intent.collection, "invalid_intent", { intent, grant });
     // A cursor from one ordering must not walk another: it would silently resume a DIFFERENT sort
     // than the one it was minted under, which is not "the next page" of anything.
     let cursor: Cursor | null = null;
@@ -155,6 +160,10 @@ export function makeReadVerbs(d: VerbDeps) {
           documentFilters: grant.documentFilter,
           isMultiValueField,
           maskFor: plan.maskFor,
+          relationFor: (f: string) => c0.fields[f]?.relation ?? null,
+          targetHasAcl: (name: string) => cfg.collections[name]?.acl === true,
+          fkOf: (f: string) => c0.fields[f]?.fk ?? null,
+          relationPrincipals: grant.principals,
           // Only for a collection whose view carries an `_acl` column. Passed here — where the
           // aggregate branch is built too — so the predicate lands in the same WHERE every
           // aggregate reads: a count over an ACL'd collection counts what this caller may see, not
@@ -451,6 +460,15 @@ export function makeReadVerbs(d: VerbDeps) {
       intent.fields && intent.fields.length
         ? intent.fields
         : grant.allowedFields.filter((f) => all.includes(f));
+    // Relations are refused in search, in every mode, and this is a correctness rule rather than
+    // a performance note. The hybrid path wraps the projection in a `scoped` CTE that carries no
+    // LIMIT — deliberately, since both ranking CTEs read it and filtering after ranking would
+    // leak result counts — so a correlated relation subquery inside the projection is evaluated
+    // once per matching document across the whole collection rather than once per returned one.
+    // Relations are a query and getDocument capability.
+    for (const f of selectFields)
+      if (c0.fields[f]?.relation)
+        return audit.refuse(intent.collection, "invalid_intent", { intent, grant });
     // A masked field is projected here like anywhere else. Search itself is unaffected: a
     // dataset's searchable fields cannot be masked (CollectionSchema refuses the combination,
     // because the generated <f>_tsv indexes the raw column), and a file collection matches on
@@ -626,6 +644,10 @@ export function makeReadVerbs(d: VerbDeps) {
         documentFilters: grant.documentFilter,
         isMultiValueField,
         maskFor: plan.maskFor,
+        relationFor: (f: string) => c.fields[f]?.relation ?? null,
+        targetHasAcl: (name: string) => cfg.collections[name]?.acl === true,
+        fkOf: (f: string) => c.fields[f]?.fk ?? null,
+        relationPrincipals: grant.principals,
         ...g.aclOpts,
       });
       const rows = await withWorkspace(
