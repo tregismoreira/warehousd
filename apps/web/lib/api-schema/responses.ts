@@ -213,6 +213,36 @@ export const RevisionsResponseSchema = z.object({
   revisions: z.array(RevisionMetadataSchema),
   auditId: AuditIdSchema,
 });
+export const RevisionDocumentSchema = z.object({
+  rev: z.string(),
+  seq: z.number(),
+  at: z.string(),
+  by: z.string(),
+  op: z.string(),
+  status: z.string(),
+  document: z.record(z.string(), z.unknown()),
+});
+export const RevisionDocumentResponseSchema = z.object({
+  ok: z.literal(true),
+  revision: RevisionDocumentSchema,
+  fieldsReturned: z.array(z.string()),
+  auditId: AuditIdSchema,
+});
+// `before` and `after` are `unknown`: a field's type is whatever the collection declared, and a
+// masked field's is whatever the transform produced.
+export const FieldChangeSchema = z.object({
+  field: z.string(),
+  before: z.unknown(),
+  after: z.unknown(),
+});
+export const RevisionDiffResponseSchema = z.object({
+  ok: z.literal(true),
+  from: z.string(),
+  to: z.string(),
+  changes: z.array(FieldChangeSchema),
+  fieldsReturned: z.array(z.string()),
+  auditId: AuditIdSchema,
+});
 export const ProposalsResponseSchema = z.object({
   ok: z.literal(true),
   proposals: z.array(ProposalSummarySchema),
