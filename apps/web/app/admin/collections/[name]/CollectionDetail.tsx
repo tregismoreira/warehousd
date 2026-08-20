@@ -183,7 +183,9 @@ function FieldsTab({ detail }: { detail: Detail }) {
                       ? `fk:${f.fk}`
                       : f.view_join
                         ? `join:${f.view_join.table}.${f.view_join.column}`
-                        : "—"}
+                        : f.relation
+                          ? `→ ${f.relation.collection} (${f.relation.fields.join(", ")})`
+                          : "—"}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {[f.searchable && "searchable", f.nullable && "nullable"]

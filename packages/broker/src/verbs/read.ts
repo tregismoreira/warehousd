@@ -324,9 +324,16 @@ export function makeReadVerbs(d: VerbDeps) {
       // of what this caller already holds, not what anyone else can see.
       .map(([n, f]) => ({
         name: n,
-        type: isMultiValueField(n) ? "text[]" : f.type!,
+        type: isMultiValueField(n) ? "text[]" : f.relation ? "object" : f.type!,
         pk: f.pk,
         ...(plan.masked.has(n) ? { masked: true as const } : {}),
+        // A relation's nested shape, so a caller knows what the object will contain without
+        // fetching a document. Names only — the target's postures are the host's declared ones,
+        // and a caller learns those the same way they learn any field's: by reading a value or
+        // a mask, not by being told.
+        relation: f.relation
+          ? { collection: f.relation.collection, fields: Object.keys(f.relation.select) }
+          : null,
       }));
     const rec = await audit.allow(name, {
       fieldsReturned: fields.map((f) => f.name),

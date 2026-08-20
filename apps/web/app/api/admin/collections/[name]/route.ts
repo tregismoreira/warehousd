@@ -119,6 +119,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
       pk: f.pk ?? false,
       fk: f.fk ?? null,
       view_join: f.view_join ?? null,
+      relation: f.relation
+        ? {
+            collection: f.relation.collection,
+            on: f.relation.on,
+            fields: Object.keys(f.relation.select),
+          }
+        : null,
       nullable: f.nullable ?? false,
       searchable: f.searchable ?? false,
     })),

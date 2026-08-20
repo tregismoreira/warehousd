@@ -13,6 +13,7 @@ export type Field = {
   pk: boolean;
   fk: string | null;
   view_join: ViewJoin | null;
+  relation: { collection: string; on: string; fields: string[] } | null;
   nullable: boolean;
   searchable: boolean;
 };

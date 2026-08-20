@@ -169,6 +169,16 @@ describe("GET /api/admin/collections/[name]", () => {
     expect(joined.view_join).toEqual({ table: "departments", column: "name", on: "department_id" });
   });
 
+  it("describes a relation's nested shape", async () => {
+    const body = await (await detail("matters", anaCookie)).json();
+    const client = body.fields.find((f: any) => f.name === "client");
+    expect(client.relation).toEqual({
+      collection: "clients",
+      on: "client_id",
+      fields: ["name", "industry", "primary_contact_email"],
+    });
+  });
+
   it("serves the broker's own filter operators rather than a restatement of them", async () => {
     const body = await (await detail("people", anaCookie)).json();
     expect(body.filterOps).toEqual(["eq", "neq", "gt", "lt", "gte", "lte", "like", "in"]);

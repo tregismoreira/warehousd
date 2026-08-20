@@ -3396,9 +3396,23 @@
                 "name": { "type": "string" },
                 "type": { "type": "string" },
                 "pk": { "type": "boolean" },
-                "masked": { "type": "boolean", "const": true }
+                "masked": { "type": "boolean", "const": true },
+                "relation": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "collection": { "type": "string" },
+                        "fields": { "type": "array", "items": { "type": "string" } }
+                      },
+                      "required": ["collection", "fields"],
+                      "additionalProperties": false
+                    },
+                    { "type": "null" }
+                  ]
+                }
               },
-              "required": ["name", "type"],
+              "required": ["name", "type", "relation"],
               "additionalProperties": false
             }
           }
