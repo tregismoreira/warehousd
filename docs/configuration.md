@@ -165,7 +165,7 @@ Changing `type` on a field, removing a field, or moving `pk` is a **breaking cha
 
 #### `nullable`
 
-`nullable` governs two things and only two: whether the synthetic generator emits the occasional NULL, and whether import treats a missing value as `missing_required`. It never becomes a `not null` constraint — every column on a dataset collection is nullable in Postgres, `nullable: true` or not.
+`nullable` governs three things: whether the synthetic generator emits the occasional NULL, whether import treats a missing value as `missing_required`, and whether a write payload may state the field as an explicit `null` — a `nullable: true` field accepts one and stores SQL NULL, a field without it refuses one with `invalid_value`. It never becomes a `not null` constraint — every column on a dataset collection is nullable in Postgres, `nullable: true` or not.
 
 It cannot become one. Cyclic and self-referential foreign keys are inserted NULL and back-filled in a second pass, so `people.department_id` is genuinely NULL between the two — a `not null` column would make the generator impossible to run.
 

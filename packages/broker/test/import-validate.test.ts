@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseCsv, parseImportPayload } from "../src/import/csv";
-import { validateImportRows } from "../src/import/validate";
+import { validateImportRows, coerce } from "../src/import/validate";
 import { loadConfig } from "../src/config/load";
 import { ConfigSchema } from "../src/config/schema";
 
@@ -432,5 +432,38 @@ describe("import.columns mapping", () => {
     });
     expect(r.success).toBe(false);
     if (!r.success) expect(JSON.stringify(r.error.issues)).toContain("import/column-target-exists");
+  });
+});
+
+describe("coerce: explicit null", () => {
+  it("accepts an explicit null on a nullable field, for every type", () => {
+    for (const type of [
+      "uuid",
+      "text",
+      "int",
+      "numeric",
+      "boolean",
+      "date",
+      "timestamptz",
+      "json",
+    ] as const) {
+      const r = coerce(null, { type, posture: "allow", nullable: true });
+      expect(r, type).toEqual({ ok: true, value: null });
+    }
+  });
+
+  it("refuses an explicit null on a field that is not nullable", () => {
+    const r = coerce(null, { type: "text", posture: "allow" });
+    expect(r.ok).toBe(false);
+  });
+
+  it("still refuses an empty cell on a non-nullable column through validateImportRows", () => {
+    // Pins that validateImportRows' own empty-cell branch — which runs BEFORE coerce is ever
+    // called — is unchanged by the null branch added to coerce. `departments.name` carries no
+    // `nullable: true` in the Harbor config.
+    const r = validateImportRows(cfg, "departments", [{ id: UUID, name: "" }]);
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.errors[0]).toMatchObject({ column: "name", reason: "missing_required" });
   });
 });

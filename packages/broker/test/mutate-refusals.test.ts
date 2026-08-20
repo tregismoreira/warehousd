@@ -7,7 +7,7 @@ import type { BrokerContext } from "../src/types";
 import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
-import { assertPending } from "./helpers/results";
+import { assertPending, assertApplied } from "./helpers/results";
 
 let p: Provisioned, app: Pool, pools: any;
 
@@ -22,6 +22,8 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
         email: { type: "text", posture: { read: "allow", write: "allow" } },
         name: { type: "text", posture: "allow" },
         owner: { type: "text", posture: { read: "allow", write: "allow" } },
+        parent_id: { type: "uuid", posture: { read: "allow", write: "allow" }, nullable: true },
+        tags: { type: "json", posture: { read: "allow", write: "allow" }, nullable: true },
       },
     },
     readOnly: {
@@ -460,5 +462,118 @@ describe("broker.mutate refusals", () => {
     expect(u.ok).toBe(false);
     const urow = await app.query(`select intent from app.audit_events where id = $1`, [u.auditId]);
     expect(urow.rows[0].intent).toMatchObject({ op: "update", collection: "testcol" });
+  });
+
+  it("applied: create accepts an explicit null on a nullable field, and it reads back SQL NULL", async () => {
+    const grantId = await requestGrant(app, {
+      userId: "null_create_user",
+      collection: "people",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "parent_id"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
+
+    const ctx: BrokerContext = makeCtx({ userId: "null_create_user" });
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com", parent_id: null },
+    });
+    assertApplied(result);
+
+    const row = await app.query(
+      `select parent_id from data_synth.people where id = $1 and parent_id is null`,
+      [result.documentId],
+    );
+    expect(row.rows.length).toBe(1);
+  });
+
+  it("applied: update accepts an explicit null on a nullable field and clears a previously-set value", async () => {
+    const grantId = await requestGrant(app, {
+      userId: "null_update_user",
+      collection: "people",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "parent_id"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create", "update"] });
+    const ctx: BrokerContext = makeCtx({ userId: "null_update_user" });
+
+    const someParent = "11111111-1111-1111-1111-111111111111";
+    const created = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com", parent_id: someParent },
+    });
+    assertApplied(created);
+
+    const before = await app.query(`select parent_id from data_synth.people where id = $1`, [
+      created.documentId,
+    ]);
+    expect(before.rows[0].parent_id).toBe(someParent);
+
+    const updated = await broker.mutate(ctx, {
+      collection: "people",
+      op: "update",
+      id: created.documentId,
+      values: { parent_id: null },
+    });
+    expect(updated.ok).toBe(true);
+
+    const after = await app.query(
+      `select parent_id from data_synth.people where id = $1 and parent_id is null`,
+      [created.documentId],
+    );
+    expect(after.rows.length).toBe(1);
+  });
+
+  it("invalid_value: an explicit null is refused on a field without nullable: true", async () => {
+    const grantId = await requestGrant(app, {
+      userId: "null_refused_user",
+      collection: "people",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
+    const ctx: BrokerContext = makeCtx({ userId: "null_refused_user" });
+
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: null },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("invalid_value");
+  });
+
+  it("applied: a nullable json field given null stores SQL NULL, not the jsonb document null", async () => {
+    const grantId = await requestGrant(app, {
+      userId: "null_json_user",
+      collection: "people",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "test",
+      allowedFields: ["id", "email", "tags"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
+    const ctx: BrokerContext = makeCtx({ userId: "null_json_user" });
+
+    const result = await broker.mutate(ctx, {
+      collection: "people",
+      op: "create",
+      values: { email: "x@ex.com", tags: null },
+    });
+    assertApplied(result);
+
+    const row = await app.query(
+      `select tags from data_synth.people where id = $1 and tags is null`,
+      [result.documentId],
+    );
+    expect(row.rows.length).toBe(1);
   });
 });
