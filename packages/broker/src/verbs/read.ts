@@ -11,8 +11,9 @@ import type {
   GetDocumentResult,
   Document,
   Filter,
+  BatchQueryResult,
 } from "../types";
-import { MAX_LIMIT, DEFAULT_LIMIT } from "../types";
+import { MAX_LIMIT, DEFAULT_LIMIT, MAX_BATCH_QUERIES } from "../types";
 import type { CollectionListing } from "../types";
 import { buildSelect, UnsupportedFilter } from "../sql/build";
 import { ident } from "../sql/ident";
@@ -28,6 +29,7 @@ import {
   QueryIntentSchema,
   DocSearchIntentSchema,
   GetDocumentIntentSchema,
+  BatchQueryIntentSchema,
   checkIntent,
 } from "../intents/schema";
 import { resolveGranted } from "./guard";
@@ -217,6 +219,67 @@ export function makeReadVerbs(d: VerbDeps) {
       console.error("[broker] query failed", { collection: intent.collection, err });
       return audit.refuse(intent.collection, "internal_error", { intent, grant });
     }
+  }
+
+  /**
+   * A labelled batch of up to MAX_BATCH_QUERIES read-only queries, run one after another and
+   * returned in one envelope keyed by the caller's own labels.
+   *
+   * Three rules, one borrowed from searchAll twice and one that makes this the deliberate
+   * opposite of decideProposals:
+   *
+   *   - **Sequential, not parallel — no `Promise.all`.** Same reasoning as searchAll's own `for`
+   *     loop above: each sub-query opens its own transaction on a pool sized for one request, and
+   *     ten at once is how a page-open takes the whole app down.
+   *   - **One audit row per sub-query, plus one for the envelope**, matching searchAll's own
+   *     envelope row — the trail records that a single request reached N collections rather than
+   *     leaving N rows to be correlated by timestamp.
+   *   - **Partial failure is the contract, not a bug.** A refusing sub-query returns its own
+   *     `{ ok: false, reason, auditId }` in its slot, and the others still return documents; the
+   *     envelope is `ok: true` regardless. This is the deliberate OPPOSITE of decideProposals'
+   *     all-or-nothing batch: a read has nothing to roll back, and refusing the whole page because
+   *     one of ten collections denied it would throw away nine good answers for one bad one. Read
+   *     batching and write batching must never converge on one failure model.
+   *
+   * The isolation property that matters: every sub-query runs through `query()` completely
+   * unchanged, which is what makes isolation automatic rather than something this function has to
+   * get right by hand. Each call loads its OWN grant (`loadActiveGrant`), runs its OWN
+   * `resolveGranted`, builds its OWN mask plan and its OWN ACL predicate — nothing is hoisted out
+   * of the loop and shared across sub-queries. That is the whole of the isolation property, and
+   * the whole reason this stays a plain sequential loop calling `query()` rather than a batched
+   * variant of the SQL it builds: hoisting so much as the grant load would let one sub-query's
+   * posture leak into another's.
+   */
+  async function queryBatch(ctx: BrokerContext, raw: unknown): Promise<BatchQueryResult> {
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
+    const parsed = checkIntent(BatchQueryIntentSchema, raw, "queryBatch");
+    if (!parsed.ok) return audit.refuse("*", "invalid_intent");
+    const { queries } = parsed.intent;
+
+    if (queries.length > MAX_BATCH_QUERIES) return audit.refuse("*", "invalid_intent");
+
+    // Duplicate labels are refused before any sub-query runs: a partially-executed batch that
+    // then refuses the envelope would audit reads the caller never got a result for.
+    const seen = new Set<string>();
+    for (const q of queries) {
+      if (seen.has(q.label)) return audit.refuse("*", "invalid_intent");
+      seen.add(q.label);
+    }
+
+    const results: Record<string, BrokerResult> = {};
+    for (const q of queries) {
+      // Stripped explicitly, rather than relying on query()'s own re-parse to drop it: the intent
+      // query() audits (and the intent it builds SQL from) must be exactly a QueryIntent, with no
+      // batch-only key riding along by accident.
+      const { label, ...intent } = q;
+      results[label] = await query(ctx, intent);
+    }
+
+    const rec = await audit.allow("*", {
+      intent: { op: "queryBatch", labels: queries.map((q) => q.label) },
+    });
+    if (!rec.ok) return rec;
+    return { ok: true, results, auditId: rec.auditId };
   }
 
   async function describeCollection(
@@ -589,7 +652,7 @@ export function makeReadVerbs(d: VerbDeps) {
     }
   }
 
-  return { query, describeCollection, listCollections, searchDocuments, getDocument };
+  return { query, queryBatch, describeCollection, listCollections, searchDocuments, getDocument };
 }
 
 // The document's current revision id, or undefined where there is none to fetch.

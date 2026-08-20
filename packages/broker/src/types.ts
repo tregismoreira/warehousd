@@ -238,3 +238,23 @@ export type BatchDecisionResult =
       failedProposalId: string | null;
       decisions: BatchDecisionOutcome[];
     };
+
+// The most sub-queries one call to queryBatch (verbs/read.ts) will run. Enforced in the verb, not
+// in intents/schema.ts's zod shape — same convention as MAX_BATCH_DECISIONS above: a batch that
+// is too long is refused with invalid_intent rather than silently trimmed, which would decide
+// WHICH sub-queries to drop, a choice the caller never made and the response would not explain.
+export const MAX_BATCH_QUERIES = 10;
+
+// One QueryIntent plus a caller-chosen label. The label is only a key into the result map — it
+// carries no reference syntax and no ordering contract beyond execution order (queryBatch runs
+// the list sequentially, in the order given).
+export type BatchQuery = QueryIntent & { label: string };
+
+// Unlike BatchDecisionResult, a batch READ never rolls back on one sub-query's refusal — see
+// queryBatch in verbs/read.ts for why. The ok arm carries one BrokerResult per label, refusals
+// included; the envelope itself refuses only when the request could not be run at all (a
+// malformed intent, too many sub-queries, or duplicate labels) — none of which ever touched a
+// single collection, so there is nothing per-sub-query to report on that path.
+export type BatchQueryResult =
+  | { ok: true; results: Record<string, BrokerResult>; auditId: AuditId }
+  | { ok: false; reason: RefusalReason; auditId: AuditId };

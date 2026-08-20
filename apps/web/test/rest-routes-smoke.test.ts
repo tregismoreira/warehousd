@@ -12,6 +12,7 @@ import * as proposalsRoute from "../app/v1/proposals/route";
 import * as approveRoute from "../app/v1/proposals/[id]/approve/route";
 import * as rejectRoute from "../app/v1/proposals/[id]/reject/route";
 import * as decideRoute from "../app/v1/proposals/decide/route";
+import * as batchRoute from "../app/v1/batch/route";
 import * as grantsRoute from "../app/v1/grants/route";
 
 describe("REST routes: handler exports", () => {
@@ -69,6 +70,10 @@ describe("REST routes: handler exports", () => {
 
   test("POST /v1/proposals/decide exports POST", () => {
     expect(typeof decideRoute.POST).toBe("function");
+  });
+
+  test("POST /v1/batch exports POST", () => {
+    expect(typeof batchRoute.POST).toBe("function");
   });
 
   test("GET /v1/grants exports GET, POST /v1/grants exports POST", () => {
