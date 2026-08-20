@@ -9,7 +9,12 @@ import type {
   MutationResult,
   RefusalReason,
   AuditId,
+  ProposalAction,
+  BatchDecision,
+  BatchDecisionOutcome,
+  BatchDecisionResult,
 } from "../types";
+import { MAX_BATCH_DECISIONS } from "../types";
 import type { CollectionConfig } from "../config/schema";
 import { ACL_COLUMN } from "../config/schema";
 import type { ActiveGrant } from "../grants/eval";
@@ -28,7 +33,13 @@ import {
 import { ident } from "../sql/ident";
 import { aclColumnSql } from "../acl/sql";
 import { coerce } from "../import/validate";
-import { makeAuditWriter, assertRecorded, type AuditWriter } from "../audit/decision";
+import {
+  makeAuditWriter,
+  assertRecorded,
+  AuditWriteFailed,
+  type AuditWriter,
+} from "../audit/decision";
+import { BatchDecisionsIntentSchema, checkIntent } from "../intents/schema";
 import { writeChangeLog } from "./history";
 import type { VerbDeps } from "./deps";
 
@@ -212,6 +223,74 @@ export function checkFourEyes(
   return proposal._rev_by === ctx.userId;
 }
 
+// May THIS caller decide on THIS proposal? Everything that can be answered from the proposal row,
+// the config and the decider's own grant — no `await`, no database access. Extracted from what
+// used to be `authorizeApproval` so it can be reasoned about, and tested, without a transaction:
+// it is the one part of a decision that is pure, and the part that most needs an independent test.
+//
+// `c` and `grant` are resolved by the caller (a config lookup and a grant load respectively) and
+// handed in, rather than looked up here, because the grant load is a database call and this
+// function may not make one. Both may be null: `c` when the collection named on the proposal no
+// longer exists in config, `grant` when the decider holds none — and the reason each of those
+// carries no grant on the refusal is that there was never one to name.
+//
+// The checks and their order are exactly `authorizeApproval`'s, unchanged, for `action ===
+// "approve"`. For `action === "reject"` this applies exactly the (narrower) subset
+// `rejectProposal` has always applied: collection, then grant-plus-approve-verb collapsed into one
+// `verb_denied` (rejectProposal never told the two apart), then four eyes, then pk. Reject never
+// reads a proposal's values, so it has no field-coverage check, and it never promotes a merged row
+// for `admits()` to test, so it has no document-filter check either — widening or narrowing either
+// path here would be a real behaviour change, not a refactor.
+export function authorizeDecision(
+  ctx: Pick<BrokerContext, "userId">,
+  name: string,
+  c: CollectionConfig | null,
+  grant: ActiveGrant | null,
+  proposal: RevisionRow,
+  action: ProposalAction,
+):
+  | { ok: true; pk: string }
+  | { ok: false; reason: MutationRefusalReason; grant: ActiveGrant | null } {
+  if (!c) return { ok: false, reason: "unknown_collection", grant: null };
+
+  if (action === "reject") {
+    if (!grant || !grant.verbs.includes("approve"))
+      return { ok: false, reason: "verb_denied", grant: grant ?? null };
+
+    // Rejecting your own proposal is closer to withdrawing it than to deciding on it, and there is
+    // no withdraw verb — so it takes the same second person approve does.
+    if (checkFourEyes(proposal, ctx)) return { ok: false, reason: "self_approval_denied", grant };
+
+    const pk = pkOf(c);
+    if (!pk) return { ok: false, reason: "invalid_intent", grant };
+
+    return { ok: true, pk };
+  }
+
+  if (!grant) return { ok: false, reason: "no_grant", grant: null };
+
+  // Four eyes, checked BEFORE the verb so the answer does not depend on the caller's own grant:
+  // a proposer who lacks `approve` learns they cannot approve their own work either way.
+  if (checkFourEyes(proposal, ctx)) return { ok: false, reason: "self_approval_denied", grant };
+
+  if (!grant.verbs.includes("approve")) return { ok: false, reason: "verb_denied", grant };
+
+  // Invariant: approve requires read coverage of every field in the proposal. Without this,
+  // "approve, then read the diff" is a privilege-escalation path around field postures.
+  for (const f of proposedFieldsOf(proposal))
+    if (!grant.allowedFields.includes(f)) return { ok: false, reason: "field_denied", grant };
+
+  const pk = pkOf(c);
+  if (!pk) return { ok: false, reason: "invalid_intent", grant };
+
+  // The filters must be evaluable before either branch below leans on them, and refused the
+  // same way the read path refuses them — see grants/filters.ts.
+  if (validateDocumentFilters(grant.documentFilter, c))
+    return { ok: false, reason: "invalid_intent", grant };
+
+  return { ok: true, pk };
+}
+
 // The state the document will hold once this proposal is applied: the current revision with the
 // proposal's own changed fields laid over it, and the sequence number that state gets.
 //
@@ -297,30 +376,398 @@ export async function commitRevision(
   return newRevId;
 }
 
+// What this proposal is being applied ON TOP OF: the document's current revision, or nothing for
+// a create. Also where the two questions that need the stored state are asked — does the
+// approver's grant admit this document, and has anything it touches moved since it was proposed.
+//
+// Called only by applyApproval, immediately below — reject never resolves a base, because it
+// never promotes a merged row.
+async function resolveBase(
+  client: PoolClient,
+  ctx: BrokerContext,
+  name: string,
+  c: CollectionConfig,
+  grant: ActiveGrant,
+  pk: string,
+  table: string,
+  proposal: RevisionRow,
+): Promise<
+  { ok: true; currentRev: RevisionRow | null } | { ok: false; reason: MutationRefusalReason }
+> {
+  if (proposal._rev_op === "create") {
+    // No current revision yet, so the filter is checked against the proposed values.
+    const tempDoc: Record<string, unknown> = {};
+    for (const f of Object.keys(c.fields)) tempDoc[f] = proposal[f];
+    // The ACL comes with it. A document that does not exist yet can still have one — an ACL is
+    // keyed on the pk, and nothing stops it being written before the create is approved — and
+    // dropping the column here would make `admits()` fail closed on every create proposal
+    // against an ACL'd collection.
+    if (Object.hasOwn(proposal, ACL_COLUMN)) tempDoc[ACL_COLUMN] = proposal[ACL_COLUMN];
+    if (!admits(tempDoc, grant, c)) return { ok: false, reason: "not_found" };
+    return { ok: true, currentRev: null };
+  }
+
+  const currentQ = await client.query(
+    `select t.*${aclColumnSql(ctx.env, name, c, "t")} from ${table} t
+     where t.${ident(pk)} = $1 and t._current`,
+    [proposal[pk]],
+  );
+  if (currentQ.rows.length === 0) return { ok: false, reason: "not_found" };
+  const currentRev = currentQ.rows[0] as RevisionRow;
+
+  if (!admits(currentRev, grant, c)) return { ok: false, reason: "not_found" };
+
+  // If any field in proposal._rev_fields was changed after _rev_base, the proposal was written
+  // against a state that no longer exists.
+  const proposedFields = proposedFieldsOf(proposal);
+  if (proposal._rev_base !== null && proposedFields.length > 0) {
+    const conflictQ = await client.query(
+      `select _rev_fields from ${table}
+       where ${ident(pk)} = $1 and _rev_status = 'approved' and _rev_seq > $2
+       order by _rev_seq asc`,
+      [proposal[pk], proposal._rev_base],
+    );
+    const changedSince = new Set<string>();
+    for (const row of conflictQ.rows)
+      for (const f of (row._rev_fields ?? []) as string[]) changedSince.add(f);
+    if (proposedFields.some((f) => changedSince.has(f))) return { ok: false, reason: "conflict" };
+  }
+
+  return { ok: true, currentRev };
+}
+
+// The transactional work of approving one proposal: resolve what it replaces, merge, commit,
+// log — everything `authorizeDecision` already cleared for. Split from it (and from the driver in
+// `decideProposals`) so the security-relevant decision and the data writes are two different
+// things a reader can check separately.
+export async function applyApproval(
+  client: PoolClient,
+  ctx: BrokerContext,
+  name: string,
+  c: CollectionConfig,
+  grant: ActiveGrant,
+  proposal: RevisionRow,
+  pk: string,
+  table: string,
+): Promise<
+  | { ok: true; documentId: string; rev?: string | undefined }
+  | { ok: false; reason: MutationRefusalReason }
+> {
+  const base = await resolveBase(client, ctx, name, c, grant, pk, table, proposal);
+  if (!base.ok) return base;
+  const currentRev = base.currentRev;
+
+  const { merged, newSeq } = mergeRevision(c, proposal, currentRev);
+  const newRevId = await commitRevision(client, ctx, {
+    table,
+    collection: name,
+    c,
+    proposal,
+    currentRev,
+    merged,
+    newSeq,
+    pk,
+  });
+
+  const docId = String(merged[pk] ?? proposal[pk]);
+  await writeChangeLog(client, ctx, name, docId, newRevId, proposal._rev_op, "approved");
+
+  return { ok: true, documentId: docId, rev: newRevId };
+}
+
+// The transactional work of rejecting one proposal. No merge, no promoted row: the pending
+// revision is simply retired, and the change log names it by its own `_rev`.
+export async function applyRejection(
+  client: PoolClient,
+  ctx: BrokerContext,
+  name: string,
+  _c: CollectionConfig,
+  proposal: RevisionRow,
+  pk: string,
+  table: string,
+): Promise<
+  | { ok: true; documentId: string; rev?: string | undefined }
+  | { ok: false; reason: MutationRefusalReason }
+> {
+  await client.query(`update ${table} set _rev_status = 'rejected' where _rev = $1`, [
+    proposal._rev,
+  ]);
+
+  const docId = String(proposal[pk]);
+  await writeChangeLog(client, ctx, name, docId, proposal._rev, proposal._rev_op, "rejected");
+
+  return { ok: true, documentId: docId };
+}
+
+// Raised inside `decideProposals`' transaction to abort it on the first refused decision —
+// module-private, like `UnsupportedFilter` in sql/build.ts. `withWorkspace` rolls back on any
+// thrown error; this one just carries no information of its own; `failed` (a closure variable set
+// immediately before the throw) is what the driver's catch block reads back.
+class BatchAborted extends Error {}
+
+// The one proposal (if any) whose refusal aborted the batch, and why — see `decideProposals`.
+type FailedDecision = {
+  proposalId: string;
+  reason: MutationRefusalReason;
+  grant: ActiveGrant | null;
+  collection: string | null;
+};
+
 export function makeProposeVerbs(d: VerbDeps) {
   const { app, cfg, pools } = d;
 
-  // Locate a pending proposal by id. Only revisable collections have a _rev column at all —
-  // scanning the rest throws `column "_rev" does not exist`.
+  // Locate every pending proposal in `ids` at once, one query per revisable collection rather than
+  // one per collection PER id — the change that makes a 40-item batch cost O(collections) queries
+  // instead of O(collections × proposals). Every row this function hands back is later put to
+  // `admits()`, so it carries its ACL from the start — one statement, one transaction, no window
+  // between the row and its policy, exactly as the single-id form already guaranteed.
+  async function loadPendingMany(
+    client: PoolClient,
+    env: "dev" | "live",
+    schema: string,
+    ids: string[],
+  ): Promise<Map<string, { collection: string; row: RevisionRow }>> {
+    const out = new Map<string, { collection: string; row: RevisionRow }>();
+    if (ids.length === 0) return out;
+    for (const coll of revisableCollections(cfg)) {
+      if (out.size === ids.length) break; // every id already located
+      const c = findCollection(cfg, coll);
+      if (!c) continue;
+      const q = await client.query(
+        `select t.*${aclColumnSql(env, coll, c, "t")} from ${schema}.${ident(coll)} t
+         where t._rev = any($1) and t._rev_status = 'pending'`,
+        [ids],
+      );
+      for (const row of q.rows as RevisionRow[])
+        if (!out.has(row._rev)) out.set(row._rev, { collection: coll, row });
+    }
+    return out;
+  }
+
+  // Locate a pending proposal by id. A one-id wrapper over loadPendingMany, kept for the callers
+  // (getProposal, the single-decision wrappers below) that only ever want one.
   async function loadPending(
     client: PoolClient,
     env: "dev" | "live",
     schema: string,
     proposalId: string,
   ): Promise<{ collection: string; row: RevisionRow } | null> {
-    for (const coll of revisableCollections(cfg)) {
-      const c = findCollection(cfg, coll);
-      if (!c) continue;
-      // Every row this function hands back is later put to `admits()`, so it carries its ACL from
-      // the start — one statement, one transaction, no window between the row and its policy.
-      const q = await client.query(
-        `select t.*${aclColumnSql(env, coll, c, "t")} from ${schema}.${ident(coll)} t
-         where t._rev = $1 and t._rev_status = 'pending'`,
-        [proposalId],
-      );
-      if (q.rowCount && q.rowCount > 0) return { collection: coll, row: q.rows[0] as RevisionRow };
+    const found = await loadPendingMany(client, env, schema, [proposalId]);
+    return found.get(proposalId) ?? null;
+  }
+
+  // The atomic driver behind approveProposal, rejectProposal, and POST /v1/proposals/decide.
+  //
+  // One transaction for the whole list: every decision is individually grant-checked
+  // (authorizeDecision), applied (applyApproval/applyRejection), and — only once every one of
+  // them succeeds — audited, still inside the transaction. The first refusal aborts the whole
+  // batch by throwing BatchAborted, which rolls everything back; the refusal path below then
+  // re-derives one audit row per input decision, named `batch_aborted` for everyone but the one
+  // that actually failed. Nothing is committed and nothing is audited as an allow unless every
+  // decision in the batch would have succeeded on its own.
+  async function decideProposals(ctx: BrokerContext, raw: unknown): Promise<BatchDecisionResult> {
+    const batchId = randomUUID();
+    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo, batchId);
+    const schema = dataSchema(ctx.env);
+
+    const envelopeRefusal = async (reason: MutationRefusalReason): Promise<BatchDecisionResult> => {
+      await audit.refuse("*", reason);
+      return { ok: false, batchId, reason, failedProposalId: null, decisions: [] };
+    };
+
+    const parsed = checkIntent(BatchDecisionsIntentSchema, raw, "decideProposals");
+    if (!parsed.ok) return envelopeRefusal("invalid_intent");
+    const decisions: BatchDecision[] = parsed.intent.decisions;
+
+    if (decisions.length > MAX_BATCH_DECISIONS) return envelopeRefusal("invalid_intent");
+
+    // A duplicate is ambiguous — approve then reject the same proposal? — and refusing is cheaper
+    // than defining a precedence rule nobody asked for.
+    const seen = new Set<string>();
+    for (const dcn of decisions) {
+      if (seen.has(dcn.proposalId)) return envelopeRefusal("invalid_intent");
+      seen.add(dcn.proposalId);
     }
-    return null;
+
+    const pool = writePool(pools, ctx);
+    if (!pool) return envelopeRefusal("not_writable");
+
+    // Set inside the transaction the moment a decision refuses, and read back afterward to build
+    // the refusal path. `null` after a rollback means no single decision was at fault — the
+    // AuditWriteFailed and "anything else" branches below, where the whole batch is the casualty
+    // of something that is not any one proposal's problem.
+    //
+    // Read back through `getFailed()` rather than the bare variable: TypeScript's flow analysis
+    // does not see past the `withWorkspace` closure's assignments, so it narrows the bare
+    // variable's apparent type to `null` after the `await` — a function boundary re-establishes
+    // the declared type instead of a non-null assertion papering over the gap.
+    let failed: FailedDecision | null = null;
+    const getFailed = (): FailedDecision | null => failed;
+    let abortReason: MutationRefusalReason = "internal_error";
+
+    // What every input decision resolved to, whether or not it was ever reached by the
+    // authorize/apply loop below — populated before that loop runs, from the batch's own
+    // loadPendingMany/loadActiveGrants calls, so the refusal path can still name the right
+    // collection and grant on a decision the loop never got to.
+    const resolved = new Map<string, { collection: string | null; grant: ActiveGrant | null }>();
+
+    try {
+      const outcomes = await withWorkspace(
+        pool,
+        ctx.workspaceId,
+        async (client): Promise<BatchDecisionOutcome[]> => {
+          const ids = decisions.map((dcn) => dcn.proposalId);
+          const found = await loadPendingMany(client, ctx.env, schema, ids);
+
+          const names = [...new Set([...found.values()].map((f) => f.collection))];
+          const grants = await loadActiveGrants(app, ctx, names);
+
+          for (const dcn of decisions) {
+            const entry = found.get(dcn.proposalId);
+            const collection = entry?.collection ?? null;
+            resolved.set(dcn.proposalId, {
+              collection,
+              grant: collection ? (grants.get(collection) ?? null) : null,
+            });
+          }
+
+          const applied: BatchDecisionOutcome[] = [];
+          for (const dcn of decisions) {
+            const entry = found.get(dcn.proposalId);
+            if (!entry) {
+              failed = {
+                proposalId: dcn.proposalId,
+                reason: "not_found",
+                grant: null,
+                collection: null,
+              };
+              throw new BatchAborted();
+            }
+            const { collection: name, row: proposal } = entry;
+            const c = findCollection(cfg, name);
+            const grant = grants.get(name) ?? null;
+
+            const authorized = authorizeDecision(ctx, name, c, grant, proposal, dcn.action);
+            if (!authorized.ok) {
+              failed = {
+                proposalId: dcn.proposalId,
+                reason: authorized.reason,
+                grant: authorized.grant,
+                collection: name,
+              };
+              throw new BatchAborted();
+            }
+            if (!c || !grant) {
+              // Unreachable: authorizeDecision's own first checks (unknown_collection, then
+              // no_grant/reject's collapsed verb_denied) already refuse whenever either is null,
+              // so `authorized.ok` implies both are non-null here. A thrown error, rather than a
+              // non-null assertion, is what keeps that relationship visible to the compiler
+              // instead of silently trusted.
+              throw new Error("authorizeDecision returned ok without a resolved collection/grant");
+            }
+
+            const table = `${schema}.${ident(name)}`;
+            let applyResult;
+            try {
+              applyResult =
+                dcn.action === "approve"
+                  ? await applyApproval(client, ctx, name, c, grant, proposal, authorized.pk, table)
+                  : await applyRejection(client, ctx, name, c, proposal, authorized.pk, table);
+            } catch (err) {
+              // Caught here, at the decision it happened to, rather than only by the outer catch:
+              // a lost race is a property of THIS proposal, not of the batch, and the caller (or
+              // the one-item wrapper) should be told so by name instead of `batch_aborted`, which
+              // would be true but strictly less informative for a batch of one.
+              if ((err as { code?: string }).code === "23505") {
+                failed = {
+                  proposalId: dcn.proposalId,
+                  reason: "conflict",
+                  grant,
+                  collection: name,
+                };
+                throw new BatchAborted();
+              }
+              throw err;
+            }
+
+            if (!applyResult.ok) {
+              failed = {
+                proposalId: dcn.proposalId,
+                reason: applyResult.reason,
+                grant,
+                collection: name,
+              };
+              throw new BatchAborted();
+            }
+
+            applied.push({
+              proposalId: dcn.proposalId,
+              action: dcn.action,
+              ok: true,
+              documentId: applyResult.documentId,
+              rev: applyResult.rev,
+              auditId: null,
+            });
+          }
+
+          // Every decision in the batch succeeded — write the per-proposal audit rows now, still
+          // inside the transaction, so an audit write that fails here rolls everything back too
+          // (assertRecorded throws AuditWriteFailed, caught below).
+          const final: BatchDecisionOutcome[] = [];
+          for (const outcome of applied) {
+            const info = resolved.get(outcome.proposalId);
+            const rec = await audit.allow(info?.collection ?? null, { grant: info?.grant ?? null });
+            assertRecorded(rec);
+            final.push({ ...outcome, auditId: rec.auditId });
+          }
+          return final;
+        },
+      );
+
+      return { ok: true, batchId, decisions: outcomes };
+    } catch (err) {
+      if (err instanceof BatchAborted) {
+        const f = getFailed();
+        if (f) abortReason = f.reason;
+      } else if (err instanceof AuditWriteFailed) {
+        abortReason = "internal_error";
+      } else if ((err as { code?: string }).code === "23505") {
+        // The partial unique index on (workspace_id, pk) where _current (apply/ddl.ts): another
+        // revision became current between this transaction's demote and its insert. A lost race
+        // against a concurrent writer, not a server fault — see approveProposal's own history of
+        // this mapping, preserved here for the batch path.
+        abortReason = "conflict";
+      } else {
+        console.error("[broker] decideProposals failed", { batchId, err });
+        abortReason = "internal_error";
+      }
+    }
+
+    // The refusal path, run after the rollback and outside the transaction: one audit row per
+    // input decision, in the caller's order. The proposal `failed` names (if any) keeps its own
+    // real reason; every other entry — decided or not — is recorded as `batch_aborted`, because it
+    // was neither approved nor rejected once the transaction it lived in rolled back.
+    const f = getFailed();
+    const failedProposalId = f ? f.proposalId : null;
+    const failedReason = f ? f.reason : abortReason;
+    const outcomes: BatchDecisionOutcome[] = [];
+    for (const dcn of decisions) {
+      const isFailing = dcn.proposalId === failedProposalId;
+      const reason: MutationRefusalReason = isFailing ? failedReason : "batch_aborted";
+      const info = resolved.get(dcn.proposalId);
+      const rec = await audit.refuse(info?.collection ?? "*", reason, {
+        grant: info?.grant ?? null,
+      });
+      outcomes.push({
+        proposalId: dcn.proposalId,
+        action: dcn.action,
+        ok: false,
+        reason,
+        auditId: rec.auditId,
+      });
+    }
+
+    return { ok: false, batchId, reason: abortReason, failedProposalId, decisions: outcomes };
   }
 
   // Approve and reject are deliberately NOT MCP tools — the untrusted model may propose, but not
@@ -328,165 +775,51 @@ export function makeProposeVerbs(d: VerbDeps) {
   // exposes both verbs to any bearer token, so the other half — that the decider is not the
   // proposer — is enforced in `checkFourEyes`, where no adapter can omit it.
   //
-  // The body below is the sequence and nothing else: authorise, resolve what is being replaced,
-  // merge, commit. Each of those four is a named function, because as one 200-line block the
-  // security-relevant middle (four eyes, field coverage, the conflict scan) sat between two
-  // stretches of bookkeeping and could only be reviewed by reading all of it.
+  // Both are now one-item batches through decideProposals: one implementation of four eyes, field
+  // coverage and the conflict scan, rather than two. A one-item batch can never produce
+  // `batch_aborted` as its OWN outcome, because the failing item, if any, is the only item — but
+  // `result.reason` is what stays authoritative even when it can: a single-item batch that aborts
+  // on a driver error not tied to any one decision (a lost race, an audit outage) still names the
+  // real reason at the envelope level while its lone per-item outcome is generically
+  // `batch_aborted` — see decideProposals' refusal path. The wrapper always reports
+  // `result.reason`, and recovers the real `auditId` from `decisions[0]` when one was written.
   async function approveProposal(ctx: BrokerContext, proposalId: string): Promise<DecisionResult> {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
-    const schema = dataSchema(ctx.env);
-
-    const pool = writePool(pools, ctx);
-    if (!pool) return audit.refuse("*", "not_writable");
-
-    try {
-      return await withWorkspace(pool, ctx.workspaceId, async (client): Promise<DecisionResult> => {
-        const found = await loadPending(client, ctx.env, schema, proposalId);
-        if (!found) return audit.refuse("*", "not_found");
-        const { collection: name, row: proposal } = found;
-
-        const authorized = await authorizeApproval(ctx, audit, name, proposal);
-        if (!authorized.ok) return authorized;
-        const { collection: c, grant, pk } = authorized;
-
-        const table = `${schema}.${ident(name)}`;
-        const base = await resolveBase(client, ctx, audit, { name, c, grant, pk, table }, proposal);
-        if (!base.ok) return base;
-        const currentRev = base.currentRev;
-
-        const { merged, newSeq } = mergeRevision(c, proposal, currentRev);
-        const newRevId = await commitRevision(client, ctx, {
-          table,
-          collection: name,
-          c,
-          proposal,
-          currentRev,
-          merged,
-          newSeq,
-          pk,
-        });
-
-        const docId = String(merged[pk] ?? proposal[pk]);
-        await writeChangeLog(client, ctx, name, docId, newRevId, proposal._rev_op, "approved");
-
-        const rec = await audit.allow(name, { grant });
-        assertRecorded(rec);
-        return { ok: true as const, documentId: docId, rev: newRevId, auditId: rec.auditId };
+    const result = await decideProposals(ctx, { decisions: [{ proposalId, action: "approve" }] });
+    if (!result.ok) {
+      const outcome = result.decisions[0];
+      return { ok: false, reason: result.reason, auditId: outcome ? outcome.auditId : null };
+    }
+    const outcome = result.decisions[0];
+    if (!outcome) {
+      // Unreachable: a successful batch's `decisions` always carries one entry per input
+      // decision, and this input is always exactly one. A defensive refusal, rather than a
+      // non-null assertion, is what keeps that relationship visible to the compiler —
+      // `noUncheckedIndexedAccess` still types the lookup as possibly `undefined`.
+      console.error("[broker] approveProposal: successful batch returned no outcome", {
+        proposalId,
       });
-    } catch (err) {
-      // 23505 here is the partial unique index on (workspace_id, pk) where _current (apply/ddl.ts):
-      // another revision became current between this transaction's demote and its insert, so two
-      // rows claimed _current at once. That is a lost race against a concurrent writer — the same
-      // situation `expect` reports on the direct path — not a server fault. mutateFile already
-      // maps it this way; reporting it as internal_error told the caller there was nothing to
-      // retry and a bug to file.
-      if ((err as { code?: string }).code === "23505") return audit.refuse("*", "conflict");
-      console.error("[broker] approveProposal failed", { proposalId, err });
-      return audit.refuse("*", "internal_error");
+      return { ok: false, reason: "internal_error", auditId: null };
     }
-  }
-
-  // May THIS caller approve THIS proposal? Everything that can be answered from the proposal row,
-  // the config and the approver's own grant, in the order it has always been asked in.
-  async function authorizeApproval(
-    ctx: BrokerContext,
-    audit: AuditWriter,
-    name: string,
-    proposal: RevisionRow,
-  ): Promise<
-    | { ok: true; collection: CollectionConfig; grant: ActiveGrant; pk: string }
-    | { ok: false; reason: MutationRefusalReason; auditId: AuditId }
-  > {
-    const c = findCollection(cfg, name);
-    if (!c) return audit.refuse(name, "unknown_collection");
-
-    const grant = await loadActiveGrant(app, ctx, name);
-    if (!grant) return audit.refuse(name, "no_grant");
-
-    // Four eyes, checked BEFORE the verb so the answer does not depend on the caller's own grant:
-    // a proposer who lacks `approve` learns they cannot approve their own work either way.
-    if (checkFourEyes(proposal, ctx)) return audit.refuse(name, "self_approval_denied", { grant });
-
-    if (!grant.verbs.includes("approve")) return audit.refuse(name, "verb_denied", { grant });
-
-    // Invariant: approve requires read coverage of every field in the proposal. Without this,
-    // "approve, then read the diff" is a privilege-escalation path around field postures.
-    for (const f of proposedFieldsOf(proposal))
-      if (!grant.allowedFields.includes(f)) return audit.refuse(name, "field_denied", { grant });
-
-    const pk = pkOf(c);
-    if (!pk) return audit.refuse(name, "invalid_intent", { grant });
-
-    // The filters must be evaluable before either branch below leans on them, and refused the
-    // same way the read path refuses them — see grants/filters.ts.
-    if (validateDocumentFilters(grant.documentFilter, c))
-      return audit.refuse(name, "invalid_intent", { grant });
-
-    return { ok: true, collection: c, grant, pk };
-  }
-
-  // What this proposal is being applied ON TOP OF: the document's current revision, or nothing for
-  // a create. Also where the two questions that need the stored state are asked — does the
-  // approver's grant admit this document, and has anything it touches moved since it was proposed.
-  async function resolveBase(
-    client: PoolClient,
-    ctx: BrokerContext,
-    audit: AuditWriter,
-    scope: {
-      name: string;
-      c: CollectionConfig;
-      grant: ActiveGrant;
-      pk: string;
-      table: string;
-    },
-    proposal: RevisionRow,
-  ): Promise<
-    | { ok: true; currentRev: RevisionRow | null }
-    | { ok: false; reason: MutationRefusalReason; auditId: AuditId }
-  > {
-    const { name, c, grant, pk, table } = scope;
-
-    if (proposal._rev_op === "create") {
-      // No current revision yet, so the filter is checked against the proposed values.
-      const tempDoc: Record<string, unknown> = {};
-      for (const f of Object.keys(c.fields)) tempDoc[f] = proposal[f];
-      // The ACL comes with it. A document that does not exist yet can still have one — an ACL is
-      // keyed on the pk, and nothing stops it being written before the create is approved — and
-      // dropping the column here would make `admits()` fail closed on every create proposal
-      // against an ACL'd collection.
-      if (Object.hasOwn(proposal, ACL_COLUMN)) tempDoc[ACL_COLUMN] = proposal[ACL_COLUMN];
-      if (!admits(tempDoc, grant, c)) return audit.refuse(name, "not_found", { grant });
-      return { ok: true, currentRev: null };
+    if (!outcome.ok) {
+      // Cannot happen: result.ok is true only when every decision in the batch succeeded.
+      console.error("[broker] approveProposal: successful batch contained a refused outcome", {
+        proposalId,
+      });
+      return { ok: false, reason: "internal_error", auditId: outcome.auditId };
     }
-
-    const currentQ = await client.query(
-      `select t.*${aclColumnSql(ctx.env, name, c, "t")} from ${table} t
-       where t.${ident(pk)} = $1 and t._current`,
-      [proposal[pk]],
-    );
-    if (currentQ.rows.length === 0) return audit.refuse(name, "not_found", { grant });
-    const currentRev = currentQ.rows[0] as RevisionRow;
-
-    if (!admits(currentRev, grant, c)) return audit.refuse(name, "not_found", { grant });
-
-    // If any field in proposal._rev_fields was changed after _rev_base, the proposal was written
-    // against a state that no longer exists.
-    const proposedFields = proposedFieldsOf(proposal);
-    if (proposal._rev_base !== null && proposedFields.length > 0) {
-      const conflictQ = await client.query(
-        `select _rev_fields from ${table}
-         where ${ident(pk)} = $1 and _rev_status = 'approved' and _rev_seq > $2
-         order by _rev_seq asc`,
-        [proposal[pk], proposal._rev_base],
-      );
-      const changedSince = new Set<string>();
-      for (const row of conflictQ.rows)
-        for (const f of (row._rev_fields ?? []) as string[]) changedSince.add(f);
-      if (proposedFields.some((f) => changedSince.has(f)))
-        return audit.refuse(name, "conflict", { grant });
+    if (outcome.rev === undefined) {
+      // Cannot happen: applyApproval always returns a rev, and this is the "approve" branch of a
+      // one-item batch — only a reject's outcome ever omits one. A defensive refusal here, rather
+      // than a non-null assertion, is what keeps that relationship visible instead of trusted.
+      console.error("[broker] approveProposal: batch outcome missing rev", { proposalId });
+      return { ok: false, reason: "internal_error", auditId: outcome.auditId };
     }
-
-    return { ok: true, currentRev };
+    return {
+      ok: true,
+      documentId: outcome.documentId,
+      rev: outcome.rev,
+      auditId: outcome.auditId,
+    };
   }
 
   async function rejectProposal(
@@ -495,64 +828,26 @@ export function makeProposeVerbs(d: VerbDeps) {
   ): Promise<
     { ok: true; auditId: AuditId } | { ok: false; reason: MutationRefusalReason; auditId: AuditId }
   > {
-    const audit = makeAuditWriter(app, ctx, d.auditEnabled, d.auditTo);
-    const schema = dataSchema(ctx.env);
-
-    const pool = writePool(pools, ctx);
-    if (!pool) return audit.refuse("*", "not_writable");
-
-    try {
-      return await withWorkspace(pool, ctx.workspaceId, async (client) => {
-        const found = await loadPending(client, ctx.env, schema, proposalId);
-        if (!found) return audit.refuse("*", "not_found");
-        const { collection: collectionName, row: proposal } = found;
-
-        const c = findCollection(cfg, collectionName);
-        if (!c) return audit.refuse(collectionName, "unknown_collection");
-
-        const grant = await loadActiveGrant(app, ctx, collectionName);
-        if (!grant || !grant.verbs.includes("approve"))
-          return audit.refuse(collectionName, "verb_denied", { grant: grant ?? null });
-
-        // Rejecting your own proposal is closer to withdrawing it than to deciding on it, and
-        // there is no withdraw verb — so it takes the same second person approve does. The rule
-        // matters less here than the symmetry does: one decision verb enforcing four eyes and
-        // its opposite not enforcing it is the kind of gap that reads as an oversight and gets
-        // used as one. A proposal a proposer wants gone is rejected by a reviewer.
-        if (proposal._rev_by === ctx.userId)
-          return audit.refuse(collectionName, "self_approval_denied", { grant });
-
-        // The same guard approveProposal states above. A collection with no primary key has no
-        // document id to log, and `proposal.id ?? proposal.document_id` was guessing at column
-        // names revision tables do not have — a miss wrote the string "undefined" into the change
-        // log. Approve and reject refuse the same way instead.
-        const pk = pkOf(c);
-        if (!pk) return audit.refuse(collectionName, "invalid_intent", { grant });
-
-        const table = `${schema}.${ident(collectionName)}`;
-        await client.query(`update ${table} set _rev_status = 'rejected' where _rev = $1`, [
-          proposalId,
-        ]);
-
-        const docId = String(proposal[pk]);
-        await writeChangeLog(
-          client,
-          ctx,
-          collectionName,
-          docId,
-          proposalId,
-          proposal._rev_op,
-          "rejected",
-        );
-
-        const rec = await audit.allow(collectionName, { grant });
-        assertRecorded(rec);
-        return { ok: true as const, auditId: rec.auditId };
-      });
-    } catch (err) {
-      console.error("[broker] rejectProposal failed", { proposalId, err });
-      return audit.refuse("*", "internal_error");
+    const result = await decideProposals(ctx, { decisions: [{ proposalId, action: "reject" }] });
+    if (!result.ok) {
+      const outcome = result.decisions[0];
+      return { ok: false, reason: result.reason, auditId: outcome ? outcome.auditId : null };
     }
+    const outcome = result.decisions[0];
+    if (!outcome) {
+      // Unreachable — see the matching branch in approveProposal above.
+      console.error("[broker] rejectProposal: successful batch returned no outcome", {
+        proposalId,
+      });
+      return { ok: false, reason: "internal_error", auditId: null };
+    }
+    if (!outcome.ok) {
+      console.error("[broker] rejectProposal: successful batch contained a refused outcome", {
+        proposalId,
+      });
+      return { ok: false, reason: "internal_error", auditId: outcome.auditId };
+    }
+    return { ok: true, auditId: outcome.auditId };
   }
 
   // What a reviewer may see BEFORE deciding: metadata and the names of the fields a proposal
@@ -761,5 +1056,5 @@ export function makeProposeVerbs(d: VerbDeps) {
     }
   }
 
-  return { approveProposal, rejectProposal, listProposals, getProposal };
+  return { approveProposal, rejectProposal, listProposals, getProposal, decideProposals };
 }

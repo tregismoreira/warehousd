@@ -10,6 +10,7 @@ import { m0009WorkspaceMembership } from "./0009-workspace-membership";
 import { m0010TermsWorkspace } from "./0010-terms-workspace";
 import { m0011PlatformKeys } from "./0011-platform-keys";
 import { m0012ControlPlaneRls } from "./0012-control-plane-rls";
+import { m0013AuditBatchId } from "./0013-audit-batch-id";
 
 export type Migration = { version: string; sql: string };
 
@@ -33,4 +34,5 @@ export const MIGRATIONS: readonly Migration[] = [
   m0010TermsWorkspace,
   m0011PlatformKeys,
   m0012ControlPlaneRls,
+  m0013AuditBatchId,
 ];

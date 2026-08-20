@@ -145,6 +145,12 @@ export const MUTATION_ONLY_REFUSAL_REASONS = [
   // "denied" would send them asking for a grant they already have. What they need is a second
   // person. See approveProposal.
   "self_approval_denied",
+  // A proposal caught in a batch that rolled back because a DIFFERENT proposal in the same call
+  // failed. It was neither approved nor rejected — recording it as `conflict` or `internal_error`
+  // would misdescribe why nothing happened to it. This is what "preserving per-proposal detail"
+  // means for a batch that aborted: the failing item keeps its own real reason, and every other
+  // item in the batch is named batch_aborted rather than folded into that reason too.
+  "batch_aborted",
 ] as const;
 export const MUTATION_REFUSAL_REASONS = [
   ...REFUSAL_REASONS,
@@ -186,3 +192,39 @@ export type MutationRefusal = {
 
 export const DEFAULT_LIMIT = 100;
 export const MAX_LIMIT = 500;
+// The most decisions one call to decideProposals will act on. Enforced in the verb, not in
+// intents/schema.ts's zod shape — see the note there on why a batch is refused rather than
+// clamped, unlike `limit`.
+export const MAX_BATCH_DECISIONS = 100;
+
+export type ProposalAction = "approve" | "reject";
+export type BatchDecision = { proposalId: string; action: ProposalAction };
+
+// One outcome per input decision, in the caller's order — whether the batch as a whole committed
+// or was rolled back. `rev` is optional because a reject produces none.
+export type BatchDecisionOutcome =
+  | {
+      proposalId: string;
+      action: ProposalAction;
+      ok: true;
+      documentId: string;
+      rev?: string | undefined;
+      auditId: AuditId;
+    }
+  | {
+      proposalId: string;
+      action: ProposalAction;
+      ok: false;
+      reason: MutationRefusalReason;
+      auditId: AuditId;
+    };
+
+export type BatchDecisionResult =
+  | { ok: true; batchId: string; decisions: BatchDecisionOutcome[] }
+  | {
+      ok: false;
+      batchId: string;
+      reason: MutationRefusalReason;
+      failedProposalId: string | null;
+      decisions: BatchDecisionOutcome[];
+    };

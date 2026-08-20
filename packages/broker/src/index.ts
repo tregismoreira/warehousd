@@ -8,6 +8,8 @@ export {
   DocSearchIntentSchema,
   GetDocumentIntentSchema,
   MutationIntentSchema,
+  BatchDecisionsIntentSchema,
+  PROPOSAL_ACTIONS,
   FilterSchema,
   AggregateSchema,
   FILTER_OPS,
