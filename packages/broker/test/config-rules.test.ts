@@ -51,6 +51,7 @@ function coll(over: Partial<RawCollection> = {}): RawCollection {
     description: "a collection",
     type: "dataset",
     taxonomies: [],
+    indexes: [],
     acl: false,
     fields: {},
     ...over,

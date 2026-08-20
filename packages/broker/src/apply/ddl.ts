@@ -2,6 +2,7 @@ import { kindOf } from "../config/kinds";
 import type { WarehousdConfig } from "../config/schema";
 import { fileMetadataFields, ACL_COLUMN, ACL_TABLE } from "../config/schema";
 import { ident, literal } from "../sql/ident";
+import { indexName } from "../config/collection";
 
 // The width of the embedding column when no `embedding:` block is configured. Matches the
 // default local model (bge-small-en-v1.5), so turning semantic search on later with the default
@@ -343,6 +344,32 @@ export function datasetTableDDL(
   ddl += ` alter table ${schema}.${collection} drop constraint if exists "${statusCheck}";`;
   ddl += ` alter table ${schema}.${collection} add constraint "${statusCheck}" check (_rev_status in (${statusValues}));`;
   ddl += ` create unique index if not exists "${collection}_current_idx" on ${schema}.${collection} (workspace_id, "${pkField}") where _current;`;
+
+  // History scans read every revision of one document by (workspace_id, pk) and order by
+  // _rev_seq — listRevisions, getRevision and diffRevisions all do exactly that (verbs/history.ts).
+  // Structural rather than declared: three verbs depend on it and an operator cannot be asked to
+  // remember it. Not partial on `_current`, because history is precisely the non-current rows.
+  ddl += ` create index if not exists "${collection}_history_idx" on ${schema}.${collection} (workspace_id, "${pkField}", _rev_seq);`;
+
+  // Declared indexes.
+  //
+  // `workspace_id` leads because the view's predicate is an equality on it. The declared pk
+  // TRAILS because keyset pagination orders by (sortField, pk) and compares (sortField, pk) as a
+  // row value (sql/build.ts), and keyset is active on nearly every query — an index stopping at
+  // the declared fields cannot serve that walk and Postgres falls back to sorting the whole
+  // result on every page. The partial predicate mirrors the view's, so the planner can prove
+  // implication and use the index.
+  //
+  // A large live collection pays the index build at boot, because applyConfig runs there and
+  // `create index concurrently` cannot run inside a transaction block. The escape hatch is to
+  // pre-create the index in a project migration with `create index concurrently if not exists`
+  // under the same generated name, after which this statement is a no-op.
+  for (const idx of c.indexes ?? []) {
+    const trailing = idx.fields.includes(pkField) ? [] : [pkField];
+    const cols = [...idx.fields, ...trailing].map((f) => `"${f}"`).join(", ");
+    ddl += ` create index if not exists "${indexName(collection, idx.fields)}" on ${schema}.${collection} (workspace_id, ${cols}) where _current and _rev_op <> 'delete';`;
+  }
+
   ddl += fieldAlters.join("");
   ddl += vocabAlters;
   ddl += searchAlters;
