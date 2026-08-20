@@ -18,6 +18,7 @@ The machine-readable contract is [`docs/openapi.json`](openapi.json), generated 
 | GET | `/v1/collections/{c}/documents/{id}/revisions` | Revision history of one document |
 | GET | `/v1/collections/{c}/documents/{id}/revisions/{rev}` | One past revision, projected through the caller's current grant and postures |
 | GET | `/v1/collections/{c}/documents/{id}/revisions/diff?from=&to=` | The fields that moved between two revisions |
+| POST | `/v1/collections/{c}/documents/{id}/revisions/{rev}/revert` | Append a new revision carrying that revision's values. Reads `If-Match`. |
 | GET | `/v1/collections/{c}/documents/{id}/acl` | The document's ACL; empty principals means public within the grant. `{id}` is the primary key on a dataset and the url-encoded `path` on a file collection |
 | PUT | `/v1/collections/{c}/documents/{id}/acl` | Replace the ACL (`{"principals":["user:…","group:…"]}`); an empty list removes it |
 | DELETE | `/v1/collections/{c}/documents/{id}/acl` | Remove the ACL — the document is public within the grant again |
@@ -127,7 +128,7 @@ All refusals return a `reason` code; never a denied field value, never SQL. `/v1
 | **2xx** | — | Success; response carries documents or metadata. |
 | 201 | (success) | Document created (mutation applied immediately). |
 | 202 | (success) | Mutation accepted but pending approval (stored as a proposal). |
-| 204 | (success) | Document deleted (direct mode) with no body per RFC 7231. |
+| 204 | (success) | Document deleted (direct mode), or a revert whose target revision is already the current one — both with no body per RFC 7231. |
 | 400 | `invalid_intent`, `invalid_value` | Malformed query or mutation. |
 | 401 | `unauthenticated` | Missing or invalid access token. |
 | 403 | `no_grant`, `expired_grant`, `field_denied`, `verb_denied`, `field_not_writable`, `acl_denied` | Access denied: no grant, expired grant, field/verb not granted, field is not writable, or the client's policy does not carry `can_manage_acl`. |

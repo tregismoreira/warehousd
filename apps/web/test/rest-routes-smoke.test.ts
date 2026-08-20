@@ -8,6 +8,7 @@ import * as documentDetailRoute from "../app/v1/collections/[c]/documents/[id]/r
 import * as revisionsRoute from "../app/v1/collections/[c]/documents/[id]/revisions/route";
 import * as revisionRoute from "../app/v1/collections/[c]/documents/[id]/revisions/[rev]/route";
 import * as revisionDiffRoute from "../app/v1/collections/[c]/documents/[id]/revisions/diff/route";
+import * as revertRoute from "../app/v1/collections/[c]/documents/[id]/revisions/[rev]/revert/route";
 import * as aclRoute from "../app/v1/collections/[c]/documents/[id]/acl/route";
 import * as changesRoute from "../app/v1/changes/route";
 import * as proposalsRoute from "../app/v1/proposals/route";
@@ -54,6 +55,10 @@ describe("REST routes: handler exports", () => {
 
   test("GET /v1/collections/{c}/documents/{id}/revisions/diff exports GET", () => {
     expect(typeof revisionDiffRoute.GET).toBe("function");
+  });
+
+  test("POST /v1/collections/{c}/documents/{id}/revisions/{rev}/revert exports POST", () => {
+    expect(typeof revertRoute.POST).toBe("function");
   });
 
   test("GET /v1/collections/{c}/documents/{id}/acl exports GET, PUT, DELETE", () => {

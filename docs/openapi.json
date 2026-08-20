@@ -1581,6 +1581,158 @@
         }
       }
     },
+    "/v1/collections/{c}/documents/{id}/revisions/{rev}/revert": {
+      "post": {
+        "operationId": "revertDocument",
+        "summary": "Restore a document to a past revision by appending a new revision carrying that revision's values.",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "rev",
+            "in": "path",
+            "required": true,
+            "description": "The revision to restore.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reverted.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MutationApplied" } }
+            }
+          },
+          "202": {
+            "description": "Queued as a proposal.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MutationPending" } }
+            }
+          },
+          "204": { "description": "Already at that revision; nothing was written." },
+          "400": {
+            "description": "Refusal: invalid_intent, invalid_value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["invalid_intent", "invalid_value"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, verb_denied, field_not_writable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_not_writable", "no_grant", "verb_denied"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Refusal: not_writable, verb_not_supported.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_writable", "verb_not_supported"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — no If-Match header was sent. reason: conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["conflict"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Optimistic concurrency mismatch — If-Match did not match the document's current rev. reason: conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["conflict"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/collections/{c}/query": {
       "post": {
         "operationId": "queryCollection",

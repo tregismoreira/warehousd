@@ -60,6 +60,15 @@ export function refuse(reason: AnyRefusalReason, ifMatchProvided?: boolean): Res
   return Response.json({ error: reason }, { status });
 }
 
+// The HTTP status a mutation's SUCCESS status maps to — distinct from restStatus, which maps
+// REFUSAL reasons. `applied`/`pending` are inlined at each of the three existing mutation routes
+// rather than routed through here; this is for revertDocument's `noop`, whose 204 is new.
+export function mutationStatus(status: "applied" | "pending" | "noop"): number {
+  if (status === "applied") return 200;
+  if (status === "pending") return 202;
+  return 204; // noop: nothing was created and nothing changed, so there is no body either
+}
+
 // Unauthenticated is REST-adapter-level, not a broker refusal reason — it is fine to have
 // this as a distinct path that doesn't go through restStatus.
 export function unauthenticated(): Response {
