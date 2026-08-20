@@ -187,6 +187,33 @@ responsible_attorney_name: { type: text, posture: allow,
 
 The column is derived, so it exists only on the view: it is never stored, and an import naming it is rejected as a `derived_column`.
 
+#### `relation`
+
+A field that composes documents from another collection into this one.
+
+```yaml
+matters:
+  fields:
+    client_id: { type: uuid, posture: allow, fk: clients.id }
+    client:
+      posture: allow
+      relation:
+        collection: clients
+        on: client_id
+        select:
+          name: { posture: allow }
+          primary_contact_email:
+            { posture: { read: mask, write: deny }, mask: { transform: domain } }
+```
+
+`on` names a local field carrying `fk: <collection>.<column>`, and `select` names the target fields this collection exposes — each with a posture of its own. A relation is a field-set on the host, not a window into the target: a target field that is not named here does not exist as far as this collection is concerned, whatever posture it carries in its own.
+
+A grant carries the relation under its own name — `client`, not `client.name` — and gets every field `select` names, each still subject to the posture written here and to the grant's unmasked-field list. **No grant on the target collection is needed or consulted.** The target's per-document ACL still applies: an ACL is a property of the document rather than of a grant, so a relation resolves to `null` for a document the caller is not a principal of.
+
+Relations are read-only, exactly as `view_join` is, and for the same reason — there is no column for a write to land in. Writing one refuses `field_not_writable`. Filtering, ordering, grouping or aggregating by one refuses `invalid_intent`, and so does naming one in a search: search wraps its projection in a ranking stage that has no row limit, so expanding a relation there would resolve it once per matching document in the whole collection rather than once per returned document.
+
+A relation reaches one collection. Relating to a field that is itself a relation is a config error.
+
 #### `gen`
 
 Field-name heuristics cover the generic cases (`*_email`, `*_name`, `*_address`). `gen` is for the ones they cannot tell apart — `matter_number`, `bar_number`, `client_number` and `invoice_number` are all `*number*`:
