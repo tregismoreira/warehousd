@@ -136,23 +136,42 @@ export function coerce(
   v: unknown,
   f: FieldConfig,
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
+  // `nullable: true` is what lets a column hold nothing. A write payload that spells that absence
+  // as an explicit `null` means the same thing and is accepted as the same thing — every generated
+  // client serialises an absent optional value that way. Before this branch each type fell through
+  // to its own parser, where `Number("null")` is NaN and `typeof null === "string"` is false, so a
+  // nullable field refused the one value it was declared to hold. Only the import path escaped it,
+  // because validateImportRows tests for an empty cell before calling here.
+  //
+  // It comes before the switch, not inside it, because `typeof null === "object"` — the json branch
+  // would otherwise catch a null and store the four-character jsonb document `null`.
+  if (v === null || v === undefined) {
+    return f.nullable ? { ok: true, value: null } : { ok: false, reason: "null_not_allowed" };
+  }
+  // The check above narrows `v`'s TYPE from `unknown` to `{}` — TypeScript's shorthand for
+  // "anything but null or undefined" — which no-base-to-string reads as an object offering only
+  // Object's default toString. Nothing changed at RUNTIME: `v` could hold an object here exactly
+  // as much as it could before this branch existed, same as the json case below already disables.
   switch (f.type) {
     case "uuid":
       return typeof v === "string" && UUID_RE.test(v)
         ? { ok: true, value: v }
         : { ok: false, reason: "invalid_uuid" };
     case "int": {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const n = typeof v === "number" ? v : Number(String(v).trim());
       if (!Number.isInteger(n)) return { ok: false, reason: "invalid_int" };
       return { ok: true, value: n };
     }
     case "numeric": {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const n = typeof v === "number" ? v : Number(String(v).trim());
       if (!Number.isFinite(n)) return { ok: false, reason: "invalid_numeric" };
       return { ok: true, value: n };
     }
     case "boolean": {
       if (typeof v === "boolean") return { ok: true, value: v };
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const s = String(v).trim().toLowerCase();
       if (["true", "t", "1", "yes"].includes(s)) return { ok: true, value: true };
       if (["false", "f", "0", "no"].includes(s)) return { ok: true, value: false };
@@ -160,6 +179,7 @@ export function coerce(
     }
     case "date":
     case "timestamptz": {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const t = Date.parse(String(v));
       if (Number.isNaN(t)) return { ok: false, reason: "invalid_date" };
       return { ok: true, value: new Date(t).toISOString() };
