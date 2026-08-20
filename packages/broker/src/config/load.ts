@@ -2,6 +2,7 @@ import { readFileSync, existsSync, accessSync, constants } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { kindOf } from "./kinds";
+import { describeZodError } from "../zod-error";
 import {
   ConfigSchema,
   readPosture,
@@ -84,7 +85,15 @@ export function loadConfig(dir: string): WarehousdConfig {
     const local = parse(interpolate(readFileSync(localPath, "utf8"))) as object;
     cfg = deepMerge(cfg as object, local);
   }
-  return ConfigSchema.parse(cfg);
+  const parsed = ConfigSchema.safeParse(cfg);
+  if (!parsed.success) {
+    // ZodError's own message is the serialised issue array, so anything printing an error on one
+    // line showed a bare "[". Config errors are read by a person editing YAML; name the key.
+    throw new Error(`Invalid warehousd.yml: ${describeZodError(parsed.error)}`, {
+      cause: parsed.error,
+    });
+  }
+  return parsed.data;
 }
 
 // Whether decisions are recorded at all. The `??` is not belt-and-braces: most of the test suite

@@ -122,6 +122,36 @@ describe("configCheck", () => {
     expect(c.ok).toBe(false);
     expect(c.detail).not.toContain("\n");
   });
+
+  it("names the field on a schema validation failure", () => {
+    writeFileSync(join(dir, "warehousd.yml"), "project: demo\ndemo: yes-please\ncollections: {}\n");
+    const c = configCheck(dir);
+    expect(c.ok).toBe(false);
+    expect(c.detail).not.toBe("[");
+    expect(c.detail).toContain("demo");
+    expect(c.detail).not.toContain("\n");
+  });
+
+  // `workspaces` is a real key with shape `{ enabled: boolean }`, so a list under it is a
+  // wrong-typed value rather than an unknown key — and it is the exact config that reported `[`.
+  it("names a wrong-typed value on a real top-level key", () => {
+    writeFileSync(join(dir, "warehousd.yml"), "project: demo\nworkspaces: []\ncollections: {}\n");
+    const c = configCheck(dir);
+    expect(c.ok).toBe(false);
+    expect(c.detail).toContain("workspaces");
+    expect(c.detail).not.toContain("\n");
+  });
+
+  // The other half of what `.strict()` catches: a key the schema does not declare at all. Zod
+  // reports it against the root, so only the message carries the key name — which is precisely
+  // what a `[` detail threw away.
+  it("names an unrecognised top-level key", () => {
+    writeFileSync(join(dir, "warehousd.yml"), "project: demo\nwarehouses: []\ncollections: {}\n");
+    const c = configCheck(dir);
+    expect(c.ok).toBe(false);
+    expect(c.detail).toContain("warehouses");
+    expect(c.detail).not.toContain("\n");
+  });
 });
 
 describe("imageCheck", () => {

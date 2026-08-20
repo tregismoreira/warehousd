@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { describeZodError } from "../zod-error";
 
 // Runtime shapes for the four client-supplied intents. `types.ts` declares them as TypeScript
 // types, which is a compile-time claim about code we wrote — it says nothing about a JSON body
@@ -155,9 +156,7 @@ export const MutationIntentSchema = z.discriminatedUnion("op", [
 // by design — a refusal that quoted the offending value back would be the leak the reason code
 // exists to avoid. The message is for the server log, not the caller.
 export function describeIntentError(err: z.ZodError): string {
-  return err.issues
-    .map((i) => `${i.path.length ? i.path.join(".") : "(root)"}: ${i.message}`)
-    .join("; ");
+  return describeZodError(err);
 }
 
 // Hold a client-supplied intent to its runtime shape before any of it is read.
