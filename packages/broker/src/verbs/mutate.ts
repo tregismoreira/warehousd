@@ -9,7 +9,7 @@ import { admits, validateDocumentFilters } from "../grants/filters";
 import { withWorkspace, writePool } from "../db/pools";
 import { insertRevision, currentRevision, reviseDocument } from "../db/revisions";
 import { supportedVerbs } from "../config/load";
-import { pkOf, dataColsOf, dataSchema } from "../config/collection";
+import { pkOf, dataSchema } from "../config/collection";
 import { ident } from "../sql/ident";
 import { aclColumnSql } from "../acl/sql";
 import { chunkText } from "../indexing/chunk";
@@ -268,8 +268,6 @@ async function mutateDataset(
     coerced[name] = r.value;
   }
 
-  // Storable columns, in one fixed order shared by every insert below.
-  const dataCols = dataColsOf(c);
   const actor = { by: ctx.userId, workspaceId: ctx.workspaceId };
 
   try {
@@ -298,7 +296,7 @@ async function mutateDataset(
         const revId = await insertRevision(
           client,
           table,
-          dataCols,
+          c,
           {
             seq: 1,
             op: "create",
@@ -354,7 +352,7 @@ async function mutateDataset(
       const isDelete = intent.op === "delete";
       // Demote-then-promote, untouched columns carried forward: reviseDocument owns both, and is
       // the same call the import path makes, so the two cannot drift.
-      const revId = await reviseDocument(client, table, dataCols, current, coerced, {
+      const revId = await reviseDocument(client, table, c, current, coerced, {
         op: isDelete ? "delete" : "update",
         status: "approved",
         ...actor,

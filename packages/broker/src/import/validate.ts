@@ -165,14 +165,18 @@ export function coerce(
       return { ok: true, value: new Date(t).toISOString() };
     }
     case "json": {
-      if (typeof v === "object") return { ok: true, value: JSON.stringify(v) };
-      // The object case returned on the line above, so what is left is a scalar — which the
-      // compiler still only knows as `unknown`. Stringified once so the reason is stated once.
+      // Returned as a JS VALUE, not as text. The revision writer renders a json field exactly once
+      // (db/encode.ts), and it can only do that safely if every value reaching it has the same
+      // shape as one carried forward from a select — which node-postgres has already parsed.
+      // Stringifying here produced a second shape the writer could not tell apart, and a
+      // carried-forward array was bound as a Postgres array literal and refused.
+      if (typeof v === "object") return { ok: true, value: v };
+      // The object case returned above, so what is left is a scalar the compiler only knows as
+      // `unknown`. Stringified once so the reason is stated once.
       // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const text = String(v);
       try {
-        JSON.parse(text);
-        return { ok: true, value: text };
+        return { ok: true, value: JSON.parse(text) as unknown };
       } catch {
         return { ok: false, reason: "invalid_json" };
       }

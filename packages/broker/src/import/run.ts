@@ -3,7 +3,7 @@ import type { WarehousdConfig } from "../config/schema";
 import type { Pools } from "../db/pools";
 import { withWorkspace } from "../db/pools";
 import { insertRevision, currentRevision, reviseDocument } from "../db/revisions";
-import { pkOf, dataColsOf } from "../config/collection";
+import { pkOf } from "../config/collection";
 import { ident } from "../sql/ident";
 import { DEFAULT_WORKSPACE_ID } from "../db/migrate-app";
 import { makeAuditWriter, auditDestination } from "../audit/decision";
@@ -225,7 +225,6 @@ export async function importCollection(
   // identifiers are safe to interpolate — SQL identifiers cannot be parameterized. Every VALUE
   // is parameterized, by insertRevision and reviseDocument.
   const table = `data_live.${ident(collection)}`;
-  const dataCols = dataColsOf(c);
   // Columns the config says must carry a value. Only checked on the rows that turn out to be
   // inserts: an upsert file that sets one column on 500 existing documents is the normal case,
   // and demanding every required column there would make upsert useless for editing.
@@ -283,7 +282,7 @@ export async function importCollection(
         opts.onProgress?.({ done: idx, total: v.values.length, phase: "write" });
 
         if (mode === "append") {
-          const rev = await insertRevision(client, table, dataCols, create(v.columns), doc);
+          const rev = await insertRevision(client, table, c, create(v.columns), doc);
           n.inserted++;
           // A collection with no pk has no document identity, so there is nothing for a feed
           // entry to name. It still gets its revision and its audit row.
@@ -298,7 +297,7 @@ export async function importCollection(
           const rev = await reviseDocument(
             client,
             table,
-            dataCols,
+            c,
             current!,
             {},
             {
@@ -326,7 +325,7 @@ export async function importCollection(
           // refuses a pk on an update outright for the same reason ("changing identity is not
           // an edit"), and test/revision-parity.test.ts is what holds the two together.
           const { [pk!]: _addressed, ...changed } = doc;
-          const rev = await reviseDocument(client, table, dataCols, current, changed, {
+          const rev = await reviseDocument(client, table, c, current, changed, {
             op: "update",
             status: "approved",
             by: actor,
@@ -349,7 +348,7 @@ export async function importCollection(
               scope: "row" as const,
             })),
           );
-        const rev = await insertRevision(client, table, dataCols, create(v.columns), doc);
+        const rev = await insertRevision(client, table, c, create(v.columns), doc);
         n.inserted++;
         feed.push({ documentId: idOf(doc), rev, op: "create" });
       }
