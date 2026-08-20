@@ -199,6 +199,27 @@ Available: `client_number`, `matter_number`, `invoice_number`, `bar_number` (den
 
 The sequence hints are dense and stable for a given row count, which is what lets committed seed documents reference a generated row by slug. Shrinking a collection's row count below a slug a document names breaks indexing loudly.
 
+### Indexes
+
+A dataset collection may declare indexes. Nothing else in `warehousd.yml` affects query speed, and no index is created for a declared field unless it is named here.
+
+```yaml
+collections:
+  matters:
+    description: Client matters
+    indexes:
+      - fields: [client_id]
+      - fields: [status, opened_at]
+```
+
+Each entry names one to four stored fields. `workspace_id` is prepended and the collection's primary key is appended automatically, and the index is partial on the same predicate the collection's view carries — so what reaches Postgres for the first entry above is `(workspace_id, "client_id", "id") where _current and _rev_op <> 'delete'`. The primary key is appended because a query walks a collection by a `(sort field, primary key)` cursor; an index stopping at the declared fields cannot serve that walk.
+
+Three cases are worth an index, and little else is. Ordering by a field that is not the primary key, which otherwise sorts the whole result on every page. A filter selective enough to matter, including one a grant carries in its document filter. And the back-reference of a to-many relation, which is required rather than advised — a relation whose target field is unindexed is refused at config load.
+
+Indexes are btree and are never unique. A unique index would have to be partial on the current revision to mean anything, and `warehousd apply` cannot safely add a data constraint to a collection that already holds documents.
+
+Adding an entry is picked up by `warehousd apply`. Removing one is not: `apply` is additive by contract, so the index survives and `warehousd migrate plan` reports it as drift. `warehousd migrate generate` then writes the `drop index` commented out for review. A large collection pays the index build when `apply` runs; to avoid that, create the index ahead of time in a project migration with `create index concurrently if not exists` under the same generated name — `<collection>_ix_<fields joined by underscore>` — after which `apply` finds it and does nothing.
+
 ### Postures are two-tier, on three axes
 
 A posture governs reading, writing, and unmasking separately:

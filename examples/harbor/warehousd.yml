@@ -170,6 +170,8 @@ collections:
       credit_notes: { type: text, posture: deny }
   matters:
     description: Client matters
+    indexes:
+      - fields: [client_id]
     fields:
       id: { type: uuid, posture: allow, pk: true }
       matter_number: { type: text, posture: allow, gen: matter_number }
@@ -193,6 +195,9 @@ collections:
       privileged_notes: { type: text, posture: deny }
   time_entries:
     description: Attorney time entries
+    indexes:
+      - fields: [matter_id]
+      - fields: [person_id, entry_date]
     fields:
       id: { type: uuid, posture: allow, pk: true }
       matter_id: { type: uuid, posture: allow, fk: matters.id }
