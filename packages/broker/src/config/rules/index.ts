@@ -2,6 +2,7 @@ import type { CollectionRule } from "./types";
 import { FIELD_RULES } from "./fields";
 import { TAXONOMY_RULES } from "./taxonomy";
 import { VIEW_JOIN_RULES } from "./view-join";
+import { RELATION_RULES } from "./relation";
 import { SEARCHABLE_RULES } from "./searchable";
 import { WRITABLE_RULES } from "./writable";
 import { ACL_RULES } from "./acl";
@@ -39,6 +40,7 @@ export function collectionRules(): CollectionRule[] {
     ...FIELD_RULES,
     ...TAXONOMY_RULES,
     ...VIEW_JOIN_RULES,
+    ...RELATION_RULES,
     ...kindRules(),
     ...SEARCHABLE_RULES,
     ...INDEX_RULES,
@@ -63,6 +65,7 @@ export { runCollectionRules } from "./types";
 export { FIELD_RULES } from "./fields";
 export { TAXONOMY_RULES } from "./taxonomy";
 export { VIEW_JOIN_RULES } from "./view-join";
+export { RELATION_RULES } from "./relation";
 export { FILE_RULES } from "./file";
 export { DATASET_RULES } from "./dataset";
 export { SEARCHABLE_RULES } from "./searchable";

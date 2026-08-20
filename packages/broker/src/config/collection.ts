@@ -23,9 +23,13 @@ export function pkOf(c: CollectionConfig): string | null {
 // the collection's view and has no column on the base table (apply/ddl.ts skips it), so it is
 // neither written nor carried forward.
 export function dataColsOf(c: CollectionConfig): string[] {
-  return Object.entries(c.fields)
-    .filter(([, f]) => !f.view_join)
-    .map(([n]) => n);
+  return (
+    Object.entries(c.fields)
+      // Neither a view_join nor a relation has a column on the base table: both are resolved at
+      // read time, so nothing can be stranded in one and nothing can be written to one.
+      .filter(([, f]) => !f.view_join && !f.relation)
+      .map(([n]) => n)
+  );
 }
 
 // The revision bookkeeping columns, in the order every insert below binds them. Frozen because the
