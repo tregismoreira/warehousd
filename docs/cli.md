@@ -165,7 +165,7 @@ The scaffolded `app_name` is the project name as a DNS label (`Acme Data` become
 
 ### `start`
 
-Starts the server container, plus a managed Postgres container unless `database.url` is set. Applies the config, seeds synthetic data, indexes file collections, prints the outputs block, and writes `.warehousd/outputs.json`. Idempotent — re-running picks up YAML changes.
+Starts the server container, plus a managed Postgres container unless `database.url` is set. Applies the config, regenerates synthetic content for non-writable collections, indexes file collections, prints the outputs block, and writes `.warehousd/outputs.json`. Idempotent — re-running picks up YAML changes. A `writable: true` collection is left alone: its documents come from real writes and pending proposals, not from the generator, so a restart never truncates it — see `restart`, below.
 
 | Flag             |                                              |
 | ---------------- | -------------------------------------------- |
@@ -253,7 +253,7 @@ The health check uses `apiUrl` from `.warehousd/outputs.json` when that file is 
 
 ### `restart`
 
-`stop` then `start`, keeping data. Takes `-s, --seed <n>` and `--show-secrets`.
+`stop` then `start`. A `writable: true` collection's documents — real writes and pending proposals — survive; a non-writable collection's synthetic content is regenerated from the seed. Takes `-s, --seed <n>` and `--show-secrets`.
 
 ### `logs`
 

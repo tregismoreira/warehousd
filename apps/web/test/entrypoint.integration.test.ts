@@ -4,7 +4,19 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { setupWebDb } from "./helpers/web-db";
+import {
+  loadConfig,
+  makeBroker,
+  createPools,
+  requestGrant,
+  approveGrant,
+  SEED_REV_COLUMNS,
+  SEED_REV_VALUES,
+} from "@warehousd/broker";
+import { makeCtx } from "../../../packages/broker/test/helpers/ctx";
+import { assertApplied, assertPending } from "../../../packages/broker/test/helpers/results";
 
 describe("entrypoint.bootstrap", () => {
   let fixture: string;
@@ -49,6 +61,12 @@ collections:
     fields:
       id: { type: uuid, posture: allow, pk: true }
       name: { type: text, posture: allow }
+  notes:
+    description: Test writable collection
+    writable: true
+    fields:
+      id: { type: uuid, posture: allow, pk: true }
+      body: { type: text, posture: { read: allow, write: allow } }
   documents:
     type: file
     description: Test files
@@ -168,6 +186,112 @@ collections:
     await db.end();
   });
 
+  it("preserves a writable collection's documents and pending proposals across a restart, while a non-writable one is still truncated and regenerated", async () => {
+    const { bootstrap } = await import("../scripts/entrypoint");
+
+    // The data-role URLs are populated by bootstrap() itself (entrypoint.ts step 10), and a
+    // bootstrap has already run earlier in this file.
+    const devUrl = process.env.DEV_DATABASE_URL;
+    const devWriteUrl = process.env.DEV_WRITE_DATABASE_URL;
+    const liveUrl = process.env.LIVE_DATABASE_URL;
+    const liveWriteUrl = process.env.LIVE_WRITE_DATABASE_URL;
+    if (!devUrl || !devWriteUrl || !liveUrl || !liveWriteUrl) {
+      throw new Error("expected bootstrap() to have set the data-role URLs already");
+    }
+
+    const cfg = loadConfig(fixture);
+    const pools = createPools({
+      app: setup.appUrl,
+      dev: devUrl,
+      live: liveUrl,
+      devWrite: devWriteUrl,
+      liveWrite: liveWriteUrl,
+    });
+    const broker = makeBroker(pools, cfg);
+    const app = new Pool({ connectionString: setup.appUrl });
+
+    try {
+      // A direct-mode grant writes an approved document; a proposal_only grant parks one as
+      // pending. Both go through the broker's real write path — the same one /v1 exposes.
+      const writerGrant = await requestGrant(app, {
+        userId: "notes_writer",
+        collection: "notes",
+        env: "dev",
+        workspaceId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "body"],
+      });
+      await approveGrant(app, cfg, writerGrant, "admin", {
+        verbs: ["read", "create"],
+        mode: "direct",
+      });
+
+      const proposerGrant = await requestGrant(app, {
+        userId: "notes_proposer",
+        collection: "notes",
+        env: "dev",
+        workspaceId: "default",
+        purposeLabel: "test",
+        allowedFields: ["id", "body"],
+      });
+      await approveGrant(app, cfg, proposerGrant, "admin", {
+        verbs: ["read", "create"],
+        mode: "proposal_only",
+      });
+
+      const writeResult = await broker.mutate(makeCtx({ userId: "notes_writer" }), {
+        collection: "notes",
+        op: "create",
+        values: { body: "written by a client, over the write path" },
+      });
+      assertApplied(writeResult);
+      const writtenId = writeResult.documentId;
+
+      const proposeResult = await broker.mutate(makeCtx({ userId: "notes_proposer" }), {
+        collection: "notes",
+        op: "create",
+        values: { body: "proposed, not yet decided" },
+      });
+      assertPending(proposeResult);
+      const proposalId = proposeResult.proposalId;
+
+      // A canary row in the non-writable collection, inserted the way generateSynthetic never
+      // would. If the truncate-then-generate loop still runs unconditionally for `items`, this
+      // row cannot survive a restart no matter what the generator produces afterward.
+      const canaryId = randomUUID();
+      await app.query(
+        `insert into data_synth.items (${SEED_REV_COLUMNS}, id, name) values (${SEED_REV_VALUES}, $1, 'CANARY-NON-WRITABLE')`,
+        [canaryId],
+      );
+
+      await bootstrap();
+
+      const writtenAfter = await app.query(`select id, body from data_synth.notes where id = $1`, [
+        writtenId,
+      ]);
+      expect(writtenAfter.rowCount).toBe(1);
+      expect(writtenAfter.rows[0].body).toBe("written by a client, over the write path");
+
+      const proposalAfter = await app.query(
+        `select _rev_status from data_synth.notes where _rev = $1`,
+        [proposalId],
+      );
+      expect(proposalAfter.rowCount).toBe(1);
+      expect(proposalAfter.rows[0]._rev_status).toBe("pending");
+
+      const canaryAfter = await app.query(`select 1 from data_synth.items where id = $1`, [
+        canaryId,
+      ]);
+      expect(canaryAfter.rowCount).toBe(0);
+
+      const itemsAfter = await app.query(`select count(*) as cnt from data_synth.items`);
+      expect(Number(itemsAfter.rows[0].cnt)).toBeGreaterThan(0);
+    } finally {
+      await app.end();
+      await pools.end();
+    }
+  });
+
   it("bootstrap() picks up new collections added to YAML", async () => {
     const { bootstrap } = await import("../scripts/entrypoint");
 
@@ -186,6 +310,12 @@ collections:
     fields:
       id: { type: uuid, posture: allow, pk: true }
       name: { type: text, posture: allow }
+  notes:
+    description: Test writable collection
+    writable: true
+    fields:
+      id: { type: uuid, posture: allow, pk: true }
+      body: { type: text, posture: { read: allow, write: allow } }
   documents:
     type: file
     description: Test files
