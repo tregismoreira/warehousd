@@ -6,7 +6,7 @@ For any coding agent working in this repo, whatever the assistant or editor. Hum
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — install, environment variables, bootstrap, PR checklist.
 - [docs/architecture.md](docs/architecture.md) — the security invariants. Authoritative; this file summarises, it does not replace.
-- [docs/glossary.md](docs/glossary.md) — **collection, document, field.** Not table, row, item. This is product vocabulary, not a preference; use it in code, tests, and prose. It also fixes the spelling of the name: **warehousd is lowercase everywhere, never bolded in prose, and never at the start of a sentence** — write around it.
+- [docs/glossary.md](docs/glossary.md) — **collection, document, field.** Not table, row, item. This is product vocabulary, not a preference; use it in code, tests, and prose. It also fixes the spelling of the name: **warehousd is lowercase everywhere, and never at the start of a sentence** — write around it. Bold is the one exception to "everywhere": bold it once per document, on the first mention in prose, and never again in that document.
 - [docs/testing.md](docs/testing.md) — the suites in full, including the slow ones.
 
 ## Commands
