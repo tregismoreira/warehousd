@@ -3,7 +3,7 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "REST API (/v1)",
-    "version": "0.1.0-rc.1",
+    "version": "0.1.0-rc.2",
     "description": "A thin HTTP adapter for programmatic access to collections, governed by the same broker that powers the MCP server and web UI.",
     "license": { "name": "Apache-2.0", "identifier": "Apache-2.0" }
   },

@@ -154,16 +154,16 @@ The image tags have no equivalent rule, deliberately. `warehousd start` pulls `g
 
 ```bash
 # The image must be pullable anonymously — run this somewhere not logged into ghcr.io
-docker pull ghcr.io/tregismoreira/warehousd:0.1.0-rc.1
+docker pull ghcr.io/tregismoreira/warehousd:0.1.0-rc.2
 
 # The full consumer path, from a clean directory
 mkdir /tmp/wd && cd /tmp/wd
-npx warehousd@0.1.0-rc.1 init
-npx warehousd@0.1.0-rc.1 start
-npx warehousd@0.1.0-rc.1 status
-npx warehousd@0.1.0-rc.1 stop --destroy --yes
+npx warehousd@0.1.0-rc.2 init
+npx warehousd@0.1.0-rc.2 start
+npx warehousd@0.1.0-rc.2 status
+npx warehousd@0.1.0-rc.2 stop --destroy --yes
 
-# And, on a first release, that the bare name resolves at all
+# And, while every published version is still a prerelease, that the bare name resolves at all
 npm view warehousd dist-tags
 ```
 

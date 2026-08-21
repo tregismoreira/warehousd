@@ -12,7 +12,7 @@ npm install -g warehousd
 
 Requires Docker and Node 22+.
 
-The published version is **0.1.0-rc.1**, a release candidate that is not meant to be used in production — see [the status note](status.md#release-status). It is the first release, so it holds npm's `latest` tag and a bare `npx warehousd` resolves to it; `npx warehousd@0.1.0-rc.1` pins it explicitly.
+The published version is **0.1.0-rc.2**, a release candidate that is not meant to be used in production — see [the status note](status.md#release-status). It holds npm's `latest` tag — because what held it before this release, `0.1.0-rc.1`, was itself a prerelease — and a bare `npx warehousd` resolves to it; `npx warehousd@0.1.0-rc.2` pins it explicitly.
 
 ## Global flags
 
