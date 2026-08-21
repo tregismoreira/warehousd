@@ -517,9 +517,9 @@ describe("REST API /v1/* routes", () => {
     });
 
     // A live row is `select *`, not a broker type — `expectTypeOf` in api-schema-parity.test.ts
-    // never touches it, which is exactly how `org_id` kept being declared here after the
-    // 0008-rename-org-to-workspace migration renamed the column. This must fail whenever the
-    // schema and the route disagree about a column name.
+    // never touches it, which is exactly how `org_id` could keep being declared here after
+    // migration 0001 named the column `workspace_id`. This must fail whenever the schema and the
+    // route disagree about a column name.
     it("GET response validates against GrantsResponseSchema", async () => {
       const { GET } = await import("../app/v1/grants/route");
       const res = await GET(req("/v1/grants") as any);
