@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, ListChecks } from "lucide-react";
 import { toast } from "sonner";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { DataTable } from "@/components/common/DataTable";
 import { Button } from "@/components/ui/button";
 import { Mono } from "@/components/common/Mono";
@@ -72,7 +72,7 @@ export function ActiveGrants() {
     }
   }
 
-  const columns: ColumnDef<ActiveGrant, unknown>[] = [
+  const columns: DataTableColumn<ActiveGrant>[] = [
     {
       accessorKey: "principal",
       header: "Held by",

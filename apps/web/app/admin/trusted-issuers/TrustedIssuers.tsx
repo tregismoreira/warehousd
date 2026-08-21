@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { toast } from "sonner";
 import { ShieldCheck } from "lucide-react";
 import { DataTable } from "@/components/common/DataTable";
@@ -33,7 +33,7 @@ export function TrustedIssuers() {
     void load();
   }, []);
 
-  const columns: ColumnDef<TrustedIssuer, unknown>[] = [
+  const columns: DataTableColumn<TrustedIssuer>[] = [
     {
       accessorKey: "issuer",
       header: "Issuer",

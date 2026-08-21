@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { requestJson } from "@/lib/client-api";
@@ -124,7 +124,7 @@ export function UsersTable() {
       .catch(() => setCollections([]));
   }, []);
 
-  const columns: ColumnDef<User, unknown>[] = [
+  const columns: DataTableColumn<User>[] = [
     { accessorKey: "email", header: "Email" },
     { accessorKey: "name", header: "Name" },
     {

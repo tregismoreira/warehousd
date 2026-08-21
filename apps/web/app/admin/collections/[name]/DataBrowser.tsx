@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { History, KeyRound, Loader2, Plus, Search, Table2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -223,9 +223,9 @@ export function DataBrowser({
     }
   }
 
-  const columns: ColumnDef<Row, unknown>[] = useMemo(() => {
+  const columns: DataTableColumn<Row>[] = useMemo(() => {
     const cols = result?.ok ? result.fieldsReturned : [];
-    const fieldCols: ColumnDef<Row, unknown>[] = cols.map((name) => ({
+    const fieldCols: DataTableColumn<Row>[] = cols.map((name) => ({
       id: name,
       header: name,
       accessorFn: (row: Row) => row[name],
@@ -237,7 +237,7 @@ export function DataBrowser({
     const pkField = detail.fields.find((f) => f.pk)?.name;
     if (!pkField) return fieldCols;
 
-    const historyCol: ColumnDef<Row, unknown> = {
+    const historyCol: DataTableColumn<Row> = {
       id: "_history",
       header: "",
       cell: ({ row }) => {

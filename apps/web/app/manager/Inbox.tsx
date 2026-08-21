@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Inbox as InboxIcon } from "lucide-react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -49,7 +49,7 @@ export function Inbox() {
     void load();
   }, []);
 
-  const columns: ColumnDef<GrantRow, unknown>[] = [
+  const columns: DataTableColumn<GrantRow>[] = [
     {
       accessorKey: "user_id",
       header: "Requester",
