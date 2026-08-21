@@ -407,7 +407,6 @@ export function aclTableDDL(env: "dev" | "live"): string {
       updated_by  text not null,
       primary key (workspace_id, collection, document_id));
     alter table ${t} enable row level security;
-    drop policy if exists org_isolation on ${t};
     drop policy if exists workspace_isolation on ${t};
     create policy workspace_isolation on ${t}
       using (workspace_id = current_setting('warehousd.workspace_id', true))
@@ -667,7 +666,6 @@ export function rlsDDL(env: "dev" | "live", collection: string, cfg: WarehousdCo
     .map(
       (t: string) => `
     alter table ${t} enable row level security;
-    drop policy if exists org_isolation on ${t};
     drop policy if exists workspace_isolation on ${t};
     create policy workspace_isolation on ${t}
       using (workspace_id = current_setting('warehousd.workspace_id', true))
