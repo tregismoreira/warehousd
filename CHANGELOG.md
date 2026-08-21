@@ -6,6 +6,8 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 
 ## [Unreleased]
 
+## [0.1.0-rc.2] - 2026-08-21
+
 ### Security
 
 - **`nanoid` advisory GHSA-2v37-7h3g-55p8.** The pinned override sat at `^3.3.17`, which resolved `@tailwindcss/postcss` → `postcss` → `nanoid` onto a version whose custom generators can loop indefinitely when `size` is zero. Raised to `^3.3.18`, the patched line; `pnpm audit --prod --audit-level high` is clean again.
@@ -15,6 +17,7 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 - **A file collection's `path` was unique deployment-wide, not per workspace.** Two tenants indexing a file at the same relative path — an ordinary name collision, not an adversarial one — hit a database-level conflict even though `ingestFile`'s own existence check (`indexing/ingest.ts`) is workspace-scoped and expected the insert to succeed. The constraint is now `unique (workspace_id, path)`.
 - **`document_filter` was checked against the document a write replaces, never against the document it produces.** A grant scoped `state eq draft` could `PUT {"state":"published"}` and publish, and the create path had no filter check at all, so the same grant could create a published document outright. Both `mutate` and `propose`/`approve` now check the document a write is about to leave behind, refusing `not_found` (the same reason an excluded document reads as) whenever it falls outside the grant's filter — on create as well as on update. **Behaviour change**: a grant that today writes outside its own filter will start being refused.
 - **A revision's field list disclosed the names of denied fields.** `listRevisions` returned `_rev_fields` — every column a revision wrote — without filtering it by the caller's grant, so a caller holding a narrow grant learned the names of fields they could not read whenever one of them changed. The list is now intersected with `allowed_fields`.
+
 ### Added
 
 - **Multi-workspace tenancy.** One deployment now hosts many workspaces instead of one implicit `'default'` tenant: a user may belong to several with a role per workspace, and every write path that used to default silently to `'default'` (synthetic generation, file ingestion, taxonomy sync) now takes an explicit workspace id and is rejected by RLS rather than mis-filed if it omits one.
@@ -30,10 +33,12 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 - **Revert.** `POST /v1/collections/{c}/documents/{id}/revisions/{rev}/revert` restores a document to a past revision by appending a new revision, never by rewinding — history stays append-only. Only the fields that actually differ are written, so reverting a title does not demand write access to a field that did not move; if any field that *did* move is not writable by the caller, the whole revert refuses `field_not_writable` rather than producing a document state that never existed. Under a `proposal_only` grant it queues a proposal like any other write. Reverting to the revision a document is already at returns `204` and writes nothing. Deliberately not an MCP tool.
 - **Relations.** A field can now compose documents from another collection: `relation: { collection, on, select }` names the target, the local foreign key, and the target fields this collection exposes — each with a posture of its own — so `get_document` returns a matter with its client nested rather than an id to resolve in a second call. Governed as fields of the collection that declares it: no grant on the target is needed or consulted, though the target's per-document ACL still applies and resolves the relation to `null` for a document the caller is not a principal of. Resolved at query time against the target's view, so it inherits the current-revision filter and the workspace predicate rather than restating them. Read-only, like `view_join`, and refused in filters, ordering, grouping, aggregation and search. Documented in [docs/configuration.md](docs/configuration.md#relation).
 - **To-many relations.** A relation can also reach the other way, composing every document in another collection that points back at this one — a matter with its time entries — as an ordered, capped array. `limit` and `order` are both required, `limit` may not exceed 50, and the target's back-reference must lead a declared index on the target collection, refused at config load with the index to add rather than discovered as a slow query.
+- **`pnpm spec`.** The `/v1` OpenAPI spec and the MCP tool manifest are generated from the schemas each REST endpoint and MCP tool handler already enforce — not hand-mirrored — into `docs/openapi.json` and `docs/mcp-tools.json`, and served at `GET /v1/openapi.json` and a browsable reference at `GET /v1/docs`. CI gates on the committed files staying in sync with the generator.
 
 ### Changed
 
 - **`organization`/`org`/`orgId`/`org_id` renamed to `workspace`/`workspaceId`/`workspace_id` throughout** — config, code, database columns, docs. Breaking under the pre-1.0 [versioning policy](docs/releasing.md#versioning-policy): the one config key affected is `source_ref.org`, now `source_ref.workspace`.
+- **`warehousd.yml` schema validation now names the offending key.** A `ZodError`'s own `.message` is `JSON.stringify(issues, null, 2)`, so a config that failed to parse printed a bare `[` and nothing else wherever an error surfaces on one line. `loadConfig`, and every other site that renders a zod failure, now produce `path: message` per issue instead, so a malformed field posture or an unknown key names itself.
 
 ### Removed
 
@@ -43,6 +48,9 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 ### Fixed
 
 - **`warehousd start`/`restart` truncated a `writable: true` collection's dev data on every boot.** The entrypoint's synthetic-seeding loop truncated every synthesisable collection unconditionally, including one holding real writes and pending proposals made over `/v1` — `generateSynthetic` and `regenerateSynthetic` already skip a writable collection for exactly this reason, but the entrypoint's own truncate carried no such guard, so a restart silently discarded documents the generator was never going to put back. It now carries the same guard.
+- **A `type: json` value silently changed shape across a partial update.** The revision writer stringified a json value going in, but node-postgres already parses `jsonb` coming out, so a value carried forward untouched by an update to some other field was serialized a second time: an array round-tripped as `["a","b"]` came back as the Postgres array literal `{a,b}` and the column refused it. `encodeForColumn` is now the one place a json value is rendered for the column, applied the same way whether the value was freshly coerced or carried forward from the current revision, so an untouched json field survives a partial update unchanged.
+- **An explicit `null` on a nullable field was refused.** `coerce` fell through to each type's own parser before checking for `null`, so `Number(String(null))` and the rest all failed rather than recognizing the absence a `nullable: true` field is declared to hold. A `create` or `update` payload may now write `null` on any nullable field, of any type, and it reads back as SQL NULL.
+- **A grant whose `allowed_fields` omitted a collection's primary key could not read it at all.** Keyset pagination folded the primary key into the fields a grant must cover before running any query, not only when a caller actually presented a cursor, so a grant trimmed to the minimum fields it needed — omitting the pk, as such a grant often does — was refused `field_denied` on an ordinary first page. The pk is now required only when a cursor is presented or resumed; a caller who cannot read the pk is simply never issued a `nextCursor`, and an ordinary page of documents comes back exactly as it did before keyset existed.
 
 ## [0.1.0-rc.1] - 2026-08-11
 
@@ -146,5 +154,6 @@ Publishing goes to npm's `next` dist-tag and, until a stable release exists, to 
 - A hosted Postgres that installs its extensions outside `public` now works. Supabase ships pgcrypto in a schema called `extensions`, making `create extension if not exists pgcrypto` a silent no-op and leaving every unqualified reference unresolvable for the data roles — apply and boot both succeeded, and the first masked read or semantic search failed at request time as an `internal_error`. `applyConfig` reads back where `vector`, `pgcrypto` and `postgres_fdw` landed and puts that schema on the roles' `search_path`, scoped to the one database.
 - The boot wait for Postgres no longer leaks a connection pool per failed attempt. It ended one only on success, so a 60s wait at 500ms intervals left up to 120 dangling.
 
-[Unreleased]: https://github.com/tregismoreira/warehousd/compare/v0.1.0-rc.1...HEAD
+[Unreleased]: https://github.com/tregismoreira/warehousd/compare/v0.1.0-rc.2...HEAD
+[0.1.0-rc.2]: https://github.com/tregismoreira/warehousd/compare/v0.1.0-rc.1...v0.1.0-rc.2
 [0.1.0-rc.1]: https://github.com/tregismoreira/warehousd/releases/tag/v0.1.0-rc.1

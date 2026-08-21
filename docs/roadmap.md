@@ -2,7 +2,7 @@
 
 What is planned, and where the open-source line sits. For what is built *today*, [status.md](status.md) is the authoritative list — it marks each component `real`, `partial` or `not built`, and it is checked against the code rather than against intentions.
 
-At 0.1.0-rc.1, **warehousd** is a release candidate that is not meant to be used in production. That changes nothing below: the open-core commitment holds from the first release, and the planned items are as Apache 2.0 as the shipped ones.
+At 0.1.0-rc.2, **warehousd** is a release candidate that is not meant to be used in production. That changes nothing below: the open-core commitment holds from the first release, and the planned items are as Apache 2.0 as the shipped ones.
 
 ## The open-core line
 

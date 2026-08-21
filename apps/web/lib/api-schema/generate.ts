@@ -254,7 +254,7 @@ function buildComponentSchemas(): Record<string, unknown> {
 
 // This deployment's own release version (packages/cli/package.json) — a fact about the product,
 // not a value derived from Date or process.env, so regeneration stays deterministic.
-const API_VERSION = "0.1.0-rc.1";
+const API_VERSION = "0.1.0-rc.2";
 
 export function buildOpenApiDoc(): Record<string, unknown> {
   return {

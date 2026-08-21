@@ -23,7 +23,7 @@ Anything that breaks one of the invariants in [docs/architecture.md](docs/archit
 
 ## Deployment expectations
 
-**At 0.1.0-rc.1, warehousd is a release candidate, and is not meant to be used in production.** It has had no external security audit and no production deployment behind it. That is a statement about the *data*, not about the hosting: `warehousd deploy` exists and the runbooks under [docs/](docs/) are meant to be followed, so putting a release candidate on a real host is fine. Putting data behind it whose exposure would cost you something is not — evaluate it against synthetic or non-critical content until a stable release exists.
+**At 0.1.0-rc.2, warehousd is a release candidate, and is not meant to be used in production.** It has had no external security audit and no production deployment behind it. That is a statement about the *data*, not about the hosting: `warehousd deploy` exists and the runbooks under [docs/](docs/) are meant to be followed, so putting a release candidate on a real host is fine. Putting data behind it whose exposure would cost you something is not — evaluate it against synthetic or non-critical content until a stable release exists.
 
 Everything below applies regardless — warehousd assumes the operator does these, and failures caused by not doing them are not vulnerabilities:
 

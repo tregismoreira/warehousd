@@ -18,7 +18,7 @@
 
 ---
 
-> [!WARNING] **0.1.0-rc.1 is a release candidate, and is not meant to be used in production.** The code is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](SECURITY.md). [docs/status.md](docs/status.md) gives a per-component verdict checked against the code.
+> [!WARNING] **0.1.0-rc.2 is a release candidate, and is not meant to be used in production.** The code is feature-complete and covered by its own suite, but it has had no external security audit and no production deployment behind it. It is pre-1.0: interfaces can change between release candidates, and no upgrade path is guaranteed. Point it at synthetic or non-critical data and treat it as something to evaluate, not something to depend on — use at your own risk. Bug reports welcome; vulnerabilities privately, per [SECURITY.md](SECURITY.md). [docs/status.md](docs/status.md) gives a per-component verdict checked against the code.
 
 Connecting an LLM to real company data usually means handing it a database connection and hoping the prompt holds — **warehousd** replaces hope with enforcement: every request from an assistant is a **proposal** that a server-side broker re-validates against deny-by-default field postures and purpose-bound, expiring grants before a single row is read.
 
