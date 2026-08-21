@@ -240,6 +240,29 @@ describe("to-one relations", () => {
     );
   });
 
+  // getDocument is the headline case for a relation — "a matter with its client nested, rather
+  // than an id to resolve in a second call" — and it reaches buildSelect through its own call
+  // site, with its own relation options. A regression there would leave query() passing and the
+  // single-document read returning an unexpanded column or erroring.
+  it("expands a relation on getDocument, not only on query", async () => {
+    const r = await broker.getDocument(ctx, { collection: "matters", id: M1 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const doc = r.document as Record<string, unknown>;
+    expect(doc.client).toMatchObject({ name: "Acme Renamed" });
+    // the same three properties query() gets: unselected target fields absent, masked one masked
+    expect(JSON.stringify(r)).not.toContain("credit_notes");
+    expect(JSON.stringify(r)).not.toContain("CREDIT_CANARY");
+    expect((doc.client as Record<string, unknown>).billing_email).not.toBe("ap@acme.example");
+  });
+
+  it("resolves a relation to null on getDocument across a workspace boundary", async () => {
+    const r = await broker.getDocument(ctx, { collection: "matters", id: M2 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect((r.document as Record<string, unknown>).client).toBeNull();
+  });
+
   it("refuses invalid_intent when a relation is filtered on", async () => {
     const r = await broker.query(ctx, {
       collection: "matters",
