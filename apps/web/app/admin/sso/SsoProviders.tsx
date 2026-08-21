@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { toast } from "sonner";
 import { Trash2, AlertCircle, CheckCircle, AlertTriangle } from "lucide-react";
 import { DataTable } from "@/components/common/DataTable";
@@ -135,7 +135,7 @@ export function SsoProviders() {
 
   const statusCard = getStatusCard();
 
-  const columns: ColumnDef<Provider, unknown>[] = [
+  const columns: DataTableColumn<Provider>[] = [
     {
       accessorKey: "providerId",
       header: "Provider ID",

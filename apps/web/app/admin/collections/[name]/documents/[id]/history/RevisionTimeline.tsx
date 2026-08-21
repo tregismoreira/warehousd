@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
 import { History, GitCompare } from "lucide-react";
-import { DataTable } from "@/components/common/DataTable";
+import { DataTable, type DataTableColumn } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Mono } from "@/components/common/Mono";
 import { Button } from "@/components/ui/button";
@@ -79,7 +78,7 @@ export function RevisionTimeline({ collection, id }: { collection: string; id: s
       />
     );
 
-  const columns: ColumnDef<Revision, unknown>[] = [
+  const columns: DataTableColumn<Revision>[] = [
     { accessorKey: "seq", header: "#", size: 60 },
     {
       accessorKey: "at",
@@ -152,7 +151,7 @@ export function RevisionTimeline({ collection, id }: { collection: string; id: s
     },
   ];
 
-  const changeColumns: ColumnDef<Change, unknown>[] = [
+  const changeColumns: DataTableColumn<Change>[] = [
     {
       accessorKey: "field",
       header: "Field",

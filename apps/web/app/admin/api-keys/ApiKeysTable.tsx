@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Loader2, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { DataTable } from "@/components/common/DataTable";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -90,7 +90,7 @@ export function ApiKeysTable({
     return key.secrets.find((s) => !s.revokedAt);
   }
 
-  const columns: ColumnDef<ApiKey, unknown>[] = [
+  const columns: DataTableColumn<ApiKey>[] = [
     {
       accessorKey: "displayName",
       header: "Name",

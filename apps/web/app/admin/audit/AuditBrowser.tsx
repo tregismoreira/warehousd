@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { toast } from "sonner";
 import { ArrowLeft, ScrollText } from "lucide-react";
 import { DataTable } from "@/components/common/DataTable";
@@ -154,7 +154,7 @@ export function AuditBrowser({
     }
   }
 
-  const columns: ColumnDef<AuditEvent, unknown>[] = [
+  const columns: DataTableColumn<AuditEvent>[] = [
     {
       accessorKey: "at",
       header: "Timestamp",

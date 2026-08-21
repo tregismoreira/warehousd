@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Inbox } from "lucide-react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { DataTable } from "@/components/common/DataTable";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +31,7 @@ export function ProposalsTable({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedProposal = proposals.find((p) => p.proposalId === selectedId) ?? null;
 
-  const columns: ColumnDef<Proposal, unknown>[] = [
+  const columns: DataTableColumn<Proposal>[] = [
     {
       accessorKey: "collection",
       header: "Collection",

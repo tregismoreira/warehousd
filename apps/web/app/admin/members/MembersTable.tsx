@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { toast } from "sonner";
 import { UsersRound } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
@@ -139,7 +139,7 @@ export function MembersTable({
     }
   }
 
-  const columns: ColumnDef<Member, unknown>[] = [
+  const columns: DataTableColumn<Member>[] = [
     { accessorKey: "email", header: "Email" },
     { accessorKey: "name", header: "Name" },
     {

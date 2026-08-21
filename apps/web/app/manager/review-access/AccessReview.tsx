@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { toast } from "sonner";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -55,7 +55,7 @@ export function AccessReview() {
     } else toast.error(`Could not revoke: ${res.error}`);
   }
 
-  const columns: ColumnDef<ReviewRow, unknown>[] = [
+  const columns: DataTableColumn<ReviewRow>[] = [
     {
       id: "principal",
       header: "Held by",

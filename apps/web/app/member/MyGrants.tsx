@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { KeyRound } from "lucide-react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/common/DataTable";
 import { DataTable } from "@/components/common/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { StatusBadge, type GrantStatus } from "@/components/common/StatusBadge";
@@ -22,7 +22,7 @@ export type MeGrant = {
   document_filter: { field: string; op: string; value: unknown }[] | null;
 };
 
-const columns: ColumnDef<MeGrant, unknown>[] = [
+const columns: DataTableColumn<MeGrant>[] = [
   {
     accessorKey: "collection",
     header: "Collection",
@@ -72,7 +72,7 @@ export function MyGrants({ grants, loading }: { grants: MeGrant[]; loading: bool
   // to do about it. Asking about yourself needs no role.
   const [explaining, setExplaining] = useState<string | null>(null);
 
-  const withExplain: ColumnDef<MeGrant, unknown>[] = [
+  const withExplain: DataTableColumn<MeGrant>[] = [
     ...columns,
     {
       id: "explain",
