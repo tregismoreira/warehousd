@@ -3167,7 +3167,7 @@
                 "allowed_fields": {
                   "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }]
                 },
-                "org_id": { "type": "string" },
+                "workspace_id": { "type": "string" },
                 "env": { "type": "string", "enum": ["dev", "live"] },
                 "status": {
                   "type": "string",
@@ -3193,7 +3193,7 @@
                 "purpose_label",
                 "purpose_detail",
                 "allowed_fields",
-                "org_id",
+                "workspace_id",
                 "env",
                 "status",
                 "requested_at",

@@ -7,6 +7,7 @@ import {
   createClientSecret,
 } from "@warehousd/broker";
 import { getAppPool } from "../app/lib/broker";
+import { GrantsResponseSchema } from "../lib/api-schema/responses";
 
 const fixtureDir = new URL("./fixtures/rest-api", import.meta.url).pathname;
 
@@ -513,6 +514,17 @@ describe("REST API /v1/* routes", () => {
       const { grants } = await res.json();
       expect(grants.length).toBeGreaterThan(0);
       expect(grants.every((g: any) => g.user_id === "marcus")).toBe(true);
+    });
+
+    // A live row is `select *`, not a broker type — `expectTypeOf` in api-schema-parity.test.ts
+    // never touches it, which is exactly how `org_id` kept being declared here after the
+    // 0008-rename-org-to-workspace migration renamed the column. This must fail whenever the
+    // schema and the route disagree about a column name.
+    it("GET response validates against GrantsResponseSchema", async () => {
+      const { GET } = await import("../app/v1/grants/route");
+      const res = await GET(req("/v1/grants") as any);
+      const body = await res.json();
+      expect(() => GrantsResponseSchema.parse(body)).not.toThrow();
     });
 
     it("POST requests a new grant → 201", async () => {

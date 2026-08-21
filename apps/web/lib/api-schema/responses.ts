@@ -271,7 +271,7 @@ export const GrantRowSchema = z
     purpose_label: z.string().nullable(),
     purpose_detail: z.string().nullable(),
     allowed_fields: z.array(z.string()).nullable(),
-    org_id: z.string(),
+    workspace_id: z.string(),
     env: z.enum(["dev", "live"]),
     status: z.enum(["pending", "approved", "denied", "revoked"]),
     requested_at: z.string().nullable(),
