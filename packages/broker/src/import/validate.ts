@@ -296,14 +296,17 @@ export function validateImportRows(
     summary: finishSummary([...tally.values()], affectedRows.size, rows.length, headerCount),
   });
 
-  // Storable columns: everything on the collection EXCEPT view_join fields, which are
-  // resolved from a sibling table at view time and have no column on the base table.
+  // Storable columns: everything on the collection EXCEPT view_join and relation fields, neither
+  // of which has a column on the base table — one is resolved from a sibling table at view time,
+  // the other from the target's view at query time. Without this exclusion, a collection with a
+  // relation field would refuse every otherwise-valid `append` import as `missing_required`, since
+  // a relation can never appear in a payload for a header to satisfy.
   //
   // posture:deny columns ARE storable. Postures govern who may read a field, not whether it
   // exists — `people.home_address` is real data that must be importable and permanently
   // unreadable through the broker.
   const storable = new Map<string, FieldConfig>(
-    Object.entries(c.fields).filter(([, f]) => !f.view_join),
+    Object.entries(c.fields).filter(([, f]) => !f.view_join && !f.relation),
   );
   const pk = Object.entries(c.fields).find(([, f]) => f.pk)?.[0] ?? null;
   // Build a map of taxonomy field names to their valid slugs.
@@ -354,7 +357,8 @@ export function validateImportRows(
     if (clash !== undefined && clash !== header)
       push({ row: 0, column: header, reason: "duplicate_column", scope: "column" });
     else seenField.set(field, header);
-    if (f.view_join) push({ row: 0, column: header, reason: "derived_column", scope: "column" });
+    if (f.view_join || f.relation)
+      push({ row: 0, column: header, reason: "derived_column", scope: "column" });
     if (datasetSourcedFields.has(field))
       push({ row: 0, column: header, reason: "unvalidatable_term", scope: "column" });
   }

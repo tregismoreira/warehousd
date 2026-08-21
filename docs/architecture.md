@@ -146,6 +146,12 @@ For each collection and environment there is a Postgres view `data_{env}.v_{coll
 
 Views are intentionally _flat_: every field appears regardless of posture. Access control is enforced at the grant and query layer, not by omitting columns, which keeps one view valid for every caller. This is why the view's owner role — not the caller's — is what reads the base tables.
 
+A relation is governed as fields of the collection that declares it. The host names the target and the target fields it exposes, and gives each of them a posture; no grant on the target collection is loaded, and none is required. That is the same rule `view_join` follows one column at a time, made explicit and extended to a set.
+
+The target's per-document ACL is the deliberate exception, and it is not an inconsistency. A grant is a statement about a caller's access to a collection; an ACL is a statement about one document, attached to that document. Ignoring it would make a relation a way around a restriction the document itself carries, so the relation's subquery ANDs in the same ACL predicate the read path uses everywhere else.
+
+The subquery reads the target's **view**, never its table. That is what makes it inherit the current-revision filter, the workspace predicate and the ACL column rather than having to restate all three — and restating them is exactly what a second copy of a security predicate means.
+
 ## Environments: dev and live
 
 `data_synth` holds generated data; `data_live` holds real data. Two Postgres roles exist with privileges on exactly one schema each, and the broker keeps a connection pool per role. `ctx.env` picks the pool; the schema name is never interpolated from anything a caller supplied.

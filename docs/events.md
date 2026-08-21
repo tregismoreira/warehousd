@@ -185,7 +185,7 @@ Questions a consumer building against the surfaces above tends to ask, answered 
 
 Hard purge is deferred by decision, and the constraint it puts on everything that lands before it — no new place content or derived vectors come to rest — bears directly on the transports above: an outbox (§6) carries identifiers only, and a push channel that carried content would be a new resting place as well as a leak. [docs/roadmap.md](roadmap.md#planned) holds the item and the inventory of what a purge would have to find.
 
-Reading a revision and diffing two (`getRevision`, `diffRevisions`) add no resting place either: both project columns that already rest in the collection's own table, so a purge that removed a document's revisions would remove what they read, with no second place to sweep.
+Reading a revision and diffing two (`getRevision`, `diffRevisions`) add no resting place either: both project columns that already rest in the collection's own table, so a purge that removed a document's revisions would remove what they read, with no second place to sweep. A relation adds none either: it is a correlated subquery evaluated at query time against the target's view, so the target's documents rest exactly where they already did.
 
 ## Also see
 

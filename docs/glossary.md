@@ -16,6 +16,7 @@ The words **warehousd** uses, and the ones it deliberately does not. The core mo
 | **Workspace** | The tenant a user, grant, audit event and document belong to. A user may belong to several, with a role per workspace. Derived from the authenticated identity and its membership, never named freely by a request. |
 | **Intent** | A structured query *proposal* from a client. The broker re-validates it and builds the SQL itself. |
 | **Refusal** | A denial carrying a reason code (`no_grant`, `field_denied`, …) and nothing else — no denied value, no SQL. |
+| **Relation** | A field that composes documents from another collection into this one. Declared on the host collection, which names the target and the target fields it exposes, each with a posture of its own. Read-only. A relation is not a join and not a foreign key: it is a set of the host's own fields whose values happen to come from somewhere else. |
 | **Broker** | The library that turns `(identity, grants, intent)` into documents or a refusal. The only thing that reads collection data. |
 | **Adapter** | A thin protocol translator in front of the broker — the MCP server, the web UI, anything future. |
 | **Taxonomy / vocabulary** | A named set of **terms** bound to a collection, so grants can be scoped to a subset of documents. Supports single or multiple terms per document; may be defined inline (YAML) or sourced from a dataset collection. |
@@ -43,3 +44,4 @@ Identifiers follow their language, not this rule: `WarehousdConfig` is PascalCas
 - **Item** — deleted. "Document" is the only word for a queryable record.
 - **Chunk** — retired as a noun. "Chunking" is the verb for the segmentation step; each resulting segment is a Document.
 - **Table** and **column** — Postgres implementation details. In the product surface they are Collection and Field.
+- **Join** — internal only. In the query builder and the DDL a relation is a join; in the product surface it is a Relation, and what a caller reads is a field.

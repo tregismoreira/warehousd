@@ -191,6 +191,7 @@ export type VisibleField = {
   type: string;
   pk?: boolean | undefined;
   masked?: true | undefined;
+  relation: { collection: string; fields: string[] } | null;
 };
 export type VisibleSchema = {
   collection: string;

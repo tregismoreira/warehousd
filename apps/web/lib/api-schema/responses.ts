@@ -93,6 +93,7 @@ export const VisibleFieldSchema = z.object({
   type: z.string(),
   pk: z.boolean().optional(),
   masked: z.literal(true).optional(),
+  relation: z.object({ collection: z.string(), fields: z.array(z.string()) }).nullable(),
 });
 export const VisibleSchemaSchema = z.object({
   collection: z.string(),

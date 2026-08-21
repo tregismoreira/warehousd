@@ -112,8 +112,9 @@ export function datasetDeclaredTables(collection: string, cfg: WarehousdConfig):
   // apply a config that had not changed at all.
   const structural: string[] = ["workspace_id", ...REV_COLS];
   for (const [name, f] of Object.entries(c.fields)) {
-    // Join columns are resolved in the view and stored nowhere, so nothing can be stranded in one.
-    if (f.view_join) continue;
+    // Join columns and relations are resolved at read time and stored nowhere, so nothing can be
+    // stranded in one.
+    if (f.view_join || f.relation) continue;
     const pgType = boundVocabs.has(name)
       ? cfg.taxonomies[name]?.multiple
         ? "text[]"
@@ -265,7 +266,7 @@ export function datasetTableDDL(
   );
   const fieldAlters: string[] = [];
   for (const [name, f] of Object.entries(c.fields)) {
-    if (f.view_join) continue; // join columns are not stored on the base table
+    if (f.view_join || f.relation) continue; // neither is stored on the base table
     // Upgrade path for a field added to an already-created collection, mirroring what the
     // file branch does for its metadata fields — without this, `create table if not exists`
     // silently leaves the new column off an existing table. Field names are IDENT-validated
@@ -513,7 +514,7 @@ export function datasetViewDDL(
   // the only wall. It is stated in docs/architecture.md and SECURITY.md rather than left implicit.
   if (c.source_ref && env === "live") {
     const cols = Object.entries(c.fields)
-      .filter(([, f]) => !f.view_join)
+      .filter(([, f]) => !f.view_join && !f.relation)
       .map(([name]) => `base."${name}"`);
     return `${recreate}
       select ${cols.join(", ")} from ${schema}."_ext_${collection}" base
@@ -528,6 +529,11 @@ export function datasetViewDDL(
       const alias = `j_${name}`;
       joins.push(`left join ${schema}."${jt}" ${alias} on ${alias}.id = base."${onField}"`);
       selects.push(`${alias}."${jc}" as "${name}"`);
+    } else if (f.relation) {
+      // Unlike a view_join, a relation is not resolved by the view at all: it has no column on
+      // the base table to select and no join belongs here either. buildSelect expands it at query
+      // time as a correlated subquery over the TARGET's own view (sql/build.ts, relationExpr).
+      continue;
     } else {
       selects.push(`base."${name}"`);
       // Include tsvector columns for searchable fields; they're not in the grantable set
@@ -599,7 +605,7 @@ export function foreignTableDDL(collection: string, cfg: WarehousdConfig): strin
   const q1 = (v: string) => `'${v.replace(/'/g, "''")}'`;
 
   const cols = Object.entries(c.fields)
-    .filter(([, f]) => !f.view_join)
+    .filter(([, f]) => !f.view_join && !f.relation)
     .map(([name, f]) => {
       const pgType = (c.taxonomies ?? []).includes(name)
         ? cfg.taxonomies[name]?.multiple

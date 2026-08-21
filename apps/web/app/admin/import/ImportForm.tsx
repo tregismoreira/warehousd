@@ -47,6 +47,7 @@ interface Collection {
     pk: boolean;
     fk: string | null;
     view_join: ViewJoin | null;
+    relation: { collection: string; on: string; fields: string[] } | null;
     nullable: boolean;
   }>;
 }
@@ -524,7 +525,7 @@ export function ImportForm() {
               <p className="text-xs text-muted-foreground">{currentMode.columns}</p>
               <div className="space-y-1">
                 {currentCollection.fields
-                  .filter((field) => !field.view_join)
+                  .filter((field) => !field.view_join && !field.relation)
                   // In delete mode only the pk is read, so listing the rest as "required"
                   // would be describing a different mode's file.
                   .filter((field) => mode !== "delete" || field.pk)

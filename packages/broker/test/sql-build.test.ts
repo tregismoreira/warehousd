@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildSelect, UnsupportedFilter } from "../src/sql/build";
 import { QueryIntentSchema } from "../src/intents/schema";
 import type { QueryIntent } from "../src/types";
+import type { RelationDef } from "../src/config/schema";
 
 it("selects only granted fields, parameterizes filter values, caps limit", () => {
   const intent: QueryIntent = {
@@ -274,6 +275,29 @@ describe("keyset pagination", () => {
     expect(orderByCount).toBe(1);
     expect(text).toContain(`order by ts_rank_cd`);
   });
+});
+
+const REL: RelationDef = {
+  collection: "clients",
+  on: "client_id",
+  select: { name: { posture: "allow" } },
+};
+
+it("emits a relation as a correlated subquery over the target view, with bound principals", () => {
+  const { text, values } = buildSelect("dev", { collection: "matters" }, ["id", "client"], {
+    relationFor: (f) => (f === "client" ? REL : null),
+    fkOf: (f) => (f === "client_id" ? "clients.id" : null),
+    targetHasAcl: () => true,
+    relationPrincipals: ["user:alice"],
+  });
+  expect(text).toContain("from data_synth.v_matters base");
+  expect(text).toContain("from data_synth.v_clients rel");
+  expect(text).toContain(`rel."id" = base."client_id"`);
+  expect(text).toContain("to_jsonb(r)");
+  expect(text).toContain('limit 1) r) as "client"');
+  expect(values).toContainEqual(["user:alice"]);
+  // No interpolated identifier escaped quoting.
+  expect(text).not.toMatch(/rel\.[a-z_]+[^"]/);
 });
 
 // Unknown keys are dropped rather than refused, and that is the invariant: §10 test 5 forges

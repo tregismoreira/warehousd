@@ -133,6 +133,45 @@ export const MASK_TYPES: Record<string, readonly string[]> = {
   year: ["date", "timestamptz"],
 };
 
+/**
+ * What a relation exposes from its target, and under what posture.
+ *
+ * The host names each target field it surfaces and gives it a posture of its own. That is what
+ * "host-governed" means: the relation is a field-set on the host, not a window into the target,
+ * and no grant on the target collection is consulted. A target field the host does not name has
+ * no posture here, so there would be nothing to decide with — which is why the list is explicit
+ * rather than "everything the target has".
+ */
+export const RelationSelectSchema = z
+  .record(
+    z.string().regex(IDENT),
+    z
+      .object({
+        posture: PostureSchema,
+        mask: MaskSchema.optional(),
+      })
+      .strict(),
+  )
+  .refine((s) => Object.keys(s).length > 0, "a relation must select at least one field");
+
+/**
+ * A field that composes documents from another collection.
+ *
+ * Projection only, exactly as `view_join` is, and for the same reason: there is no column on the
+ * base table for a write to land in. Resolved at query time against the TARGET'S VIEW rather
+ * than its table, which is what makes it inherit the target's current-revision filter, its
+ * workspace predicate and its per-document ACL instead of having to restate all three.
+ */
+export const RelationSchema = z
+  .object({
+    collection: z.string().regex(IDENT),
+    /** The local field carrying `fk: <collection>.<column>`. */
+    on: z.string().regex(IDENT),
+    select: RelationSelectSchema,
+  })
+  .strict();
+export type RelationDef = z.infer<typeof RelationSchema>;
+
 // Every object in this file is strict: an unrecognised key in warehousd.yml is a typo, and the
 // cost of ignoring one is not a validation error but a silent policy change. `postur: deny` parses
 // as a field with no posture declared, and a field with no posture is not a field that denies —
@@ -153,6 +192,7 @@ export const FieldSchema = z
     pk: z.boolean().optional(),
     fk: z.string().optional(), // "people.id"
     view_join: ViewJoinSchema.optional(), // { table: "people", column: "full_name", on: "responsible_attorney_id" }
+    relation: RelationSchema.optional(),
     nullable: z.boolean().optional(),
     min: z.number().optional(),
     max: z.number().optional(),
@@ -736,6 +776,43 @@ export const ConfigSchema = z
             ctx.addIssue({
               code: "custom",
               message: `vocabulary "${taxSlug}" source fields (slug: "${vocab.source.slug}", label: "${vocab.source.label}") not found in collection "${vocab.source.collection}"`,
+            });
+        }
+      }
+    }
+    // Cross-collection relation checks. A CollectionRule sees one collection; these need both.
+    for (const [cname, c] of Object.entries(cfg.collections)) {
+      for (const [fname, f] of Object.entries(c.fields)) {
+        const rel = f.relation;
+        if (!rel) continue;
+        const target = cfg.collections[rel.collection];
+        if (!target) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${cname}.${fname} relates to unknown collection "${rel.collection}"`,
+          });
+          continue;
+        }
+        if (target.type !== "dataset") {
+          ctx.addIssue({
+            code: "custom",
+            message: `${cname}.${fname} relates to "${rel.collection}", which is not a dataset collection`,
+          });
+          continue;
+        }
+        for (const sub of Object.keys(rel.select)) {
+          const tf = target.fields[sub];
+          if (!tf) {
+            ctx.addIssue({
+              code: "custom",
+              message: `${cname}.${fname} selects "${sub}" but target collection "${rel.collection}" has no field "${sub}"`,
+            });
+            continue;
+          }
+          if (tf.relation)
+            ctx.addIssue({
+              code: "custom",
+              message: `${cname}.${fname} selects "${sub}", which is itself a relation; a relation reaches one collection, not a chain`,
             });
         }
       }

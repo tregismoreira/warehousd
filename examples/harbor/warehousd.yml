@@ -178,6 +178,16 @@ collections:
       client_id: { type: uuid, posture: allow, fk: clients.id }
       client_name:
         { type: text, posture: allow, view_join: { table: clients, column: name, on: client_id } }
+      client:
+        posture: allow
+        relation:
+          collection: clients
+          on: client_id
+          select:
+            name: { posture: allow }
+            industry: { posture: allow }
+            primary_contact_email:
+              { posture: { read: mask, write: deny }, mask: { transform: domain } }
       responsible_attorney_id: { type: uuid, posture: allow, fk: people.id }
       responsible_attorney_name:
         {

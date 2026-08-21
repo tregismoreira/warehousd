@@ -105,7 +105,8 @@ export function makeMutateVerb(d: VerbDeps) {
     const all = Object.keys(c.fields);
     for (const f of fieldNames) {
       if (!all.includes(f)) return audit.refuseMutation(intent, grant, "unknown_field");
-      if (c.fields[f]!.view_join) return audit.refuseMutation(intent, grant, "field_not_writable");
+      if (c.fields[f]!.view_join || c.fields[f]!.relation)
+        return audit.refuseMutation(intent, grant, "field_not_writable");
       if (f === identityField) {
         if (intent.op !== "create")
           return audit.refuseMutation(intent, grant, "field_not_writable");

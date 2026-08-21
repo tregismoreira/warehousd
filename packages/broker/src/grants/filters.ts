@@ -180,11 +180,15 @@ export function validateDocumentFilters(
   for (const f of filters) {
     const field = c.fields[f.field];
     if (!field) return { field: f.field, detail: "no such field on the collection" };
-    // A view_join field is computed by the collection's view and is not stored on the base table
-    // (apply/ddl.ts skips it), so the write path cannot see it at all. Allowing it on the read
-    // path only would recreate exactly the divergence this module exists to remove.
-    if (field.view_join)
-      return { field: f.field, detail: "view_join fields are not stored on the base table" };
+    // A relation has no column on the base table, exactly as a view_join does not, so neither
+    // evaluator has a value to test — the read path would have to compare a jsonb object it
+    // built, and the write path has nothing at all. Refused on both, which is what keeps the
+    // two agreeing.
+    if (field.view_join || field.relation)
+      return {
+        field: f.field,
+        detail: "view_join and relation fields are not stored on the base table",
+      };
     const values = f.op === "in" && Array.isArray(f.value) ? f.value : [f.value];
     for (const v of values)
       if (v !== null && v !== undefined && canonicalize(field.type, v) === null)

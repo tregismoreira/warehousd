@@ -314,7 +314,7 @@ async function verifyExternalShape(
   const c = cfg.collections[collection];
   if (!c?.source_ref) return;
   const cols = Object.entries(c.fields)
-    .filter(([, f]) => !f.view_join)
+    .filter(([, f]) => !f.view_join && !f.relation)
     .map(([name]) => `"${name}"`);
   try {
     await db.query(`select ${cols.join(", ")} from data_live."_ext_${collection}" limit 0`);

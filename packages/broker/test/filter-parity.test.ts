@@ -356,6 +356,39 @@ describe("document filter validation refuses what the two paths could not agree 
     expect(err!.detail).toContain("view_join");
   });
 
+  it("refuses a relation field, which the write path cannot see at all", () => {
+    // A relation has no column on the base table either, exactly like a view_join — the read
+    // path resolves it as a correlated subquery over the target's view, and the write path has
+    // nothing to compare at all. Refusing on both keeps them in step.
+    const related = ConfigSchema.parse({
+      project: "t",
+      collections: {
+        c: {
+          description: "d",
+          fields: {
+            id: { type: "uuid", posture: "allow", pk: true },
+            owner_id: { type: "uuid", posture: "allow", fk: "people.id" },
+            owner: {
+              posture: "allow",
+              relation: {
+                collection: "people",
+                on: "owner_id",
+                select: { id: { posture: "allow" } },
+              },
+            },
+          },
+        },
+        people: {
+          description: "People",
+          fields: { id: { type: "uuid", posture: "allow", pk: true } },
+        },
+      },
+    }).collections.c!;
+    const err = validateDocumentFilters([{ field: "owner", op: "eq", value: "Ada" }], related);
+    expect(err).not.toBeNull();
+    expect(err!.detail).toContain("relation");
+  });
+
   it("refuses a json field, which the old comparison matched against everything", () => {
     // String({…}) is "[object Object]" for every object, so a json document filter used to admit
     // every row with any object in that column. Refusing is the safe direction and matches the
