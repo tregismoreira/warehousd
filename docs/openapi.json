@@ -23,7 +23,7 @@
     { "name": "auth", "description": "Minting an access token." },
     { "name": "collections", "description": "Discovering what a caller may read." },
     { "name": "data", "description": "Reading, searching, and mutating documents." },
-    { "name": "history", "description": "Revisions and the org/env change feed." },
+    { "name": "history", "description": "Revisions and the workspace/env change feed." },
     {
       "name": "acl",
       "description": "Per-document access control. Authorised against the caller's standing, not a grant."
@@ -142,7 +142,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Document mutations for this org/env.",
+            "description": "Document mutations for this workspace/env.",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ChangesResponse" } }
             }
