@@ -390,13 +390,42 @@ it("test 10: a nullable sort field refuses invalid_intent", async () => {
   expect(r).toMatchObject({ ok: false, reason: "invalid_intent" });
 });
 
-it("test 11: a pk outside allowedFields refuses field_denied", async () => {
+// A cursor encodes the pk's value, so a caller who cannot read the pk must never be handed one.
+// That withholds the CURSOR, not the documents: refusing the whole read would mean a grant trimmed
+// to the minimum necessary fields — the thing every approver is encouraged to do — could not read
+// the collection at all, which is what `grant-lifecycle-ui` exercises from the console side.
+it("test 11: a pk outside allowedFields reads, but is never handed a cursor", async () => {
   const r = await broker.query(makeCtx({ userId: "nopk" }), {
     collection: "items",
     fields: ["seq"],
     filters: [{ field: "scenario", op: "eq", value: "small" }],
     orderBy: { field: "seq", dir: "asc" },
     limit: 2,
+  });
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  // A full page — so keyset WOULD have minted a cursor here had the pk been granted.
+  expect(r.documents.length).toBe(2);
+  expect(r.nextCursor).toBeUndefined();
+  // and the pk's value never reaches the caller by any other route either
+  expect(Object.keys(r.documents[0] as object)).not.toContain("id");
+});
+
+it("test 11b: presenting a cursor without the pk granted is still refused", async () => {
+  // Resuming a walk is the one request that genuinely cannot be answered without the pk: the
+  // cursor was minted from one and resumes on one.
+  const r = await broker.query(makeCtx({ userId: "nopk" }), {
+    collection: "items",
+    fields: ["seq"],
+    filters: [{ field: "scenario", op: "eq", value: "small" }],
+    orderBy: { field: "seq", dir: "asc" },
+    limit: 2,
+    after: encodeCursor({
+      v: 1,
+      f: "seq",
+      d: "asc",
+      k: [0, "00000000-0000-4000-8000-000000000000"],
+    }),
   });
   expect(r).toMatchObject({ ok: false, reason: "field_denied" });
 });

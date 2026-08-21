@@ -83,11 +83,17 @@ export function makeReadVerbs(d: VerbDeps) {
     // than false, which drops documents from the walk silently — worse than refusing outright.
     if (sortField && c0.fields[sortField]?.nullable === true)
       return audit.refuse(intent.collection, "invalid_intent", { intent });
-    // Folded into the grant's field check below: the cursor carries `sortField` and `pk` back to
-    // the caller (in `nextCursor` and, for `pk`, possibly in the row itself), so a grant that does
-    // not carry them refuses the same way any other denied field would.
-    if (sortField && !referenced.includes(sortField)) referenced.push(sortField);
-    if (keysetActive && pk && !referenced.includes(pk)) referenced.push(pk);
+    // An EXPLICIT orderBy names a field the caller chose to sort by, so it is theirs to be
+    // entitled to, exactly as it was before keyset existed. The DEFAULTED sortField is `pk`, which
+    // the caller never asked for — folding that into the required list would make a grant that
+    // omits the primary key unable to read the collection at all, which is what trimming a grant
+    // to the minimum necessary fields routinely produces. The keyset gate below handles it
+    // instead, by withholding the cursor rather than the documents.
+    if (intent.orderBy?.field && !referenced.includes(intent.orderBy.field))
+      referenced.push(intent.orderBy.field);
+    // Presenting a cursor is the one request that genuinely cannot be answered without the pk: it
+    // was minted from one and resumes on one, so the pk is part of what the caller is asking for.
+    if (intent.after !== undefined && pk && !referenced.includes(pk)) referenced.push(pk);
     // 3. grant, read verb, field coverage, document filters, mask plan, ACL options — all of it,
     // in one place, already audited on any refusal. See verbs/guard.ts.
     const g = await resolveGranted(d, audit, ctx, intent.collection, "read", {
@@ -99,15 +105,20 @@ export function makeReadVerbs(d: VerbDeps) {
     // 4. a masked field may be PROJECTED but never computed over — see collectComputed. `pk` is
     // folded in only when keyset is active: it lands in a row-value comparison exactly like
     // orderBy's field does, and the reasoning is the same one collectComputed already states.
+    //
+    // The cursor carries `pk`'s value back to the caller in `nextCursor`, so a caller who cannot
+    // read the pk must not be handed one. That is a reason to withhold the CURSOR, not the
+    // documents: keyset simply does not engage, and an ordinary first page comes back exactly as
+    // it did before keyset existed. Asking to RESUME a cursor without the pk is still a refusal,
+    // because that request cannot be answered at all.
+    const keyset = keysetActive && pk !== null && grant.allowedFields.includes(pk);
+    if (intent.after !== undefined && !keyset)
+      return audit.refuse(intent.collection, "field_denied", { intent, grant });
     const computed = collectComputed(intent);
-    if (keysetActive && pk) computed.push(pk);
+    if (keyset && pk) computed.push(pk);
     for (const f of computed)
       if (plan.masked.has(f))
         return audit.refuse(intent.collection, "field_denied", { intent, grant });
-    // The cursor carries `pk`'s value back to the caller on every keyset page, so they must be
-    // entitled to read it even when it is not otherwise part of what they projected.
-    if (keysetActive && pk && !grant.allowedFields.includes(pk))
-      return audit.refuse(intent.collection, "field_denied", { intent, grant });
     // A cursor from one ordering must not walk another: it would silently resume a DIFFERENT sort
     // than the one it was minted under, which is not "the next page" of anything.
     let cursor: Cursor | null = null;
@@ -131,9 +142,7 @@ export function makeReadVerbs(d: VerbDeps) {
     // `fieldsReturned`. A cursor is an opaque token; nothing about using one requires the caller to
     // have projected the columns it is built from.
     const cursorExtra =
-      keysetActive && sortField && pk
-        ? [sortField, pk].filter((f) => !selectFields.includes(f))
-        : [];
+      keyset && sortField && pk ? [sortField, pk].filter((f) => !selectFields.includes(f)) : [];
     const querySelectFields = cursorExtra.length ? [...selectFields, ...cursorExtra] : selectFields;
     const effectiveLimit = Math.min(Math.max(1, intent.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
     // 5. build + execute on the env-scoped pool through withWorkspace transaction
@@ -151,7 +160,7 @@ export function makeReadVerbs(d: VerbDeps) {
           // aggregate reads: a count over an ACL'd collection counts what this caller may see, not
           // what exists and then a shortfall that reports the difference.
           ...g.aclOpts,
-          ...(keysetActive && sortField && pk
+          ...(keyset && sortField && pk
             ? {
                 keyset: {
                   field: sortField,
@@ -175,7 +184,7 @@ export function makeReadVerbs(d: VerbDeps) {
       // hand back, and forcing one would claim a capability the request never had.
       const last = rawDocuments[rawDocuments.length - 1];
       const nextCursor =
-        keysetActive && sortField && pk && rawDocuments.length === effectiveLimit && last
+        keyset && sortField && pk && rawDocuments.length === effectiveLimit && last
           ? encodeCursor({ v: 1, f: sortField, d: dir, k: [last[sortField], last[pk]] })
           : undefined;
       // Strip the cursor-only columns back off before anything leaves this function — the caller
