@@ -216,6 +216,50 @@ describe("/mcp endpoint", () => {
     expect(row.rows[0].status).toBe("pending");
   });
 
+  // The three revision reads, through the endpoint rather than through the tool table. Each is
+  // driven with no grant on `matter_tasks`, which is the deny-by-default path — what it pins is
+  // that the handler parses its arguments and reaches the broker at all, and that a refusal comes
+  // back shaped like every other tool's rather than as a thrown error. Data-correctness for these
+  // verbs lives in packages/broker's revision-read.test.ts.
+  it.each([
+    ["list_revisions", { collection: "matter_tasks", id: "11111111-1111-4111-8111-111111111111" }],
+    [
+      "get_revision",
+      {
+        collection: "matter_tasks",
+        id: "11111111-1111-4111-8111-111111111111",
+        rev: "22222222-2222-4222-8222-222222222222",
+      },
+    ],
+    [
+      "diff_revisions",
+      {
+        collection: "matter_tasks",
+        id: "11111111-1111-4111-8111-111111111111",
+        from: "22222222-2222-4222-8222-222222222222",
+        to: "33333333-3333-4333-8333-333333333333",
+      },
+    ],
+  ])("%s refuses without a grant, and answers in the tool refusal shape", async (name, args) => {
+    const token = await mintAccessToken("env:dev");
+    const { body } = await rpc(token, "tools/call", { name, arguments: args });
+    const out = JSON.parse(body.result.content[0].text);
+    expect(out.ok).toBe(false);
+    expect(out.hint).toContain("request_access");
+  });
+
+  it("a revision tool refuses invalid_intent on a malformed argument set", async () => {
+    const token = await mintAccessToken("env:dev");
+    // `rev` missing — the handler's own safeParse, not the broker's.
+    const { body } = await rpc(token, "tools/call", {
+      name: "get_revision",
+      arguments: { collection: "matter_tasks" },
+    });
+    const out = JSON.parse(body.result.content[0].text);
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("invalid_intent");
+  });
+
   it("tools/list returns all twelve tools", async () => {
     const token = await mintAccessToken("env:dev");
     const { body } = await rpc(token, "tools/list");

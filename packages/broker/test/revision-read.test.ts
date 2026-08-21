@@ -21,6 +21,16 @@ const CONFIG = ConfigSchema.parse({
           posture: { read: "mask", write: "allow" },
           mask: { transform: "last4" },
         },
+        // `last4` above emits pure SQL; `first` BINDS its argument. Both are here on purpose: the
+        // statement these verbs build already carries positional parameters of its own
+        // (workspace, id, and one or two revision ids), so a mask that binds has to number itself
+        // after them. A mask expression numbered from $1 would read the workspace id as its
+        // character count and the whole projection would be wrong.
+        note: {
+          type: "text",
+          posture: { read: "mask", write: "allow" },
+          mask: { transform: "first", chars: 3 },
+        },
         secret_memo: { type: "text", posture: { read: "deny", write: "allow" } },
       },
     },
@@ -55,22 +65,22 @@ describe("getRevision and diffRevisions", () => {
       `insert into app.grants (id, workspace_id, user_id, principal, collection, purpose_label,
          allowed_fields, verbs, mode, env, status, document_filter, requested_at, decided_at)
        values (gen_random_uuid(), 'default', 'alice', 'user:alice', 'tasks', 'test',
-         array['id','owner','title','account'], array['read','create','update','delete'],
+         array['id','owner','title','account','note'], array['read','create','update','delete'],
          'direct', 'dev', 'approved', '[{"field":"owner","op":"eq","value":"$self"}]'::jsonb,
          now(), now())`,
     );
 
     // Two revisions of alice's document, and one document owned by somebody else.
-    for (const [seq, title, account, memo, current] of [
-      [1, "first", "4111111111111111", "MEMO_CANARY_ONE", false],
-      [2, "second", "4222222222222222", "MEMO_CANARY_TWO", true],
+    for (const [seq, title, account, memo, note, current] of [
+      [1, "first", "4111111111111111", "MEMO_CANARY_ONE", "alpha-one", false],
+      [2, "second", "4222222222222222", "MEMO_CANARY_TWO", "bravo-two", true],
     ] as const) {
       await app.query(
         `insert into data_synth.tasks
            (_rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _rev_base,
-            _current, workspace_id, id, owner, title, account, secret_memo)
+            _current, workspace_id, id, owner, title, account, secret_memo, note)
          values ($1, $2, now(), 'alice', $3, 'approved', array['title','account','secret_memo'],
-            null, $4, 'default', $5, 'alice', $6, $7, $8)`,
+            null, $4, 'default', $5, 'alice', $6, $7, $8, $9)`,
         [
           `3333333${seq}-3333-4333-8333-333333333333`,
           seq,
@@ -80,15 +90,16 @@ describe("getRevision and diffRevisions", () => {
           title,
           account,
           memo,
+          note,
         ],
       );
     }
     await app.query(
       `insert into data_synth.tasks
          (_rev, _rev_seq, _rev_at, _rev_by, _rev_op, _rev_status, _rev_fields, _rev_base,
-          _current, workspace_id, id, owner, title, account, secret_memo)
+          _current, workspace_id, id, owner, title, account, secret_memo, note)
        values (gen_random_uuid(), 1, now(), 'bob', 'create', 'approved', array['title'], null,
-          true, 'default', $1, 'bob', 'theirs', '4999999999999999', 'OTHER')`,
+          true, 'default', $1, 'bob', 'theirs', '4999999999999999', 'OTHER', 'charlie')`,
       [THEIRS],
     );
   }, 120_000);
@@ -108,7 +119,7 @@ describe("getRevision and diffRevisions", () => {
     if (!res.ok) return;
     expect(res.revision.seq).toBe(1);
     expect(res.revision.document.title).toBe("first");
-    expect(res.fieldsReturned.sort()).toEqual(["account", "id", "owner", "title"]);
+    expect(res.fieldsReturned.sort()).toEqual(["account", "id", "note", "owner", "title"]);
   });
 
   it("omits a denied field entirely, and never logs its value", async () => {
@@ -131,6 +142,17 @@ describe("getRevision and diffRevisions", () => {
     if (!res.ok) return;
     expect(res.revision.document.account).not.toBe("4111111111111111");
     expect(String(res.revision.document.account)).toContain("1111");
+  });
+
+  // The mask that BINDS. `first` numbers its argument after the statement's own positional
+  // parameters, so a projection that got the numbering wrong would either error or silently read
+  // the workspace id as the character count.
+  it("masks a field whose transform binds a parameter, numbered after the statement's own", async () => {
+    const res = await broker.getRevision(ctx, { collection: "tasks", id: MINE, rev: REV1 });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.revision.document.note).toBe("alp…");
+    expect(JSON.stringify(res)).not.toContain("alpha-one");
   });
 
   it("refuses not_found for a document the grant's document filter excludes", async () => {
@@ -195,6 +217,21 @@ describe("getRevision and diffRevisions", () => {
     // account changed, but both sides are masked, so neither raw value appears.
     expect(JSON.stringify(res)).not.toContain("4111111111111111");
     expect(JSON.stringify(res)).not.toContain("4222222222222222");
+  });
+
+  it("reports a bind-masked field's change through the mask on both sides", async () => {
+    const res = await broker.diffRevisions(ctx, {
+      collection: "tasks",
+      id: MINE,
+      from: REV1,
+      to: REV2,
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const note = res.changes.find((c) => c.field === "note");
+    expect(note).toEqual({ field: "note", before: "alp…", after: "bra…" });
+    expect(JSON.stringify(res)).not.toContain("alpha-one");
+    expect(JSON.stringify(res)).not.toContain("bravo-two");
   });
 
   it("returns an empty change list for a revision compared with itself", async () => {
