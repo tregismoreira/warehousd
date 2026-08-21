@@ -1,5 +1,6 @@
 export * from "./types";
 export { makeBroker } from "./broker";
+export { makeRevertVerb } from "./verbs/revert";
 export type {
   RevisionMetadata,
   RevisionDocument,

@@ -4,6 +4,7 @@ import type { Embedder } from "./providers";
 import { makeVerbDeps } from "./verbs/deps";
 import { makeReadVerbs } from "./verbs/read";
 import { makeMutateVerb } from "./verbs/mutate";
+import { makeRevertVerb } from "./verbs/revert";
 import { makeProposeVerbs } from "./verbs/propose";
 import { makeHistoryVerbs } from "./verbs/history";
 import { makeAclVerbs } from "./acl/manage";
@@ -30,6 +31,9 @@ export function makeBroker(
   const { query, queryBatch, describeCollection, listCollections, searchDocuments, getDocument } =
     makeReadVerbs(deps);
   const mutate = makeMutateVerb(deps);
+  // Takes `mutate` rather than VerbDeps alone: a revert IS an update, and composing the verb is
+  // what keeps every write rule in one place.
+  const { revertDocument } = makeRevertVerb(deps, mutate);
   const { approveProposal, rejectProposal, listProposals, getProposal, decideProposals } =
     makeProposeVerbs(deps);
   const { changes, listRevisions, getRevision, diffRevisions } = makeHistoryVerbs(deps);
@@ -50,6 +54,7 @@ export function makeBroker(
     searchDocuments,
     getDocument,
     mutate,
+    revertDocument,
     approveProposal,
     rejectProposal,
     listProposals,

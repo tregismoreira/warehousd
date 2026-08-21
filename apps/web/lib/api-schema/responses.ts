@@ -72,9 +72,19 @@ export const MutationPendingSchema = z.object({
   proposalId: z.string(),
   auditId: AuditIdSchema,
 });
+// A revert whose target revision already IS the current state — see MutationResult in
+// packages/broker/src/types.ts. Not routed through any `schema:` entry in routes.ts: the 204
+// response it maps to carries no body.
+export const MutationNoopSchema = z.object({
+  ok: z.literal(true),
+  status: z.literal("noop"),
+  documentId: z.string(),
+  auditId: AuditIdSchema,
+});
 export const MutationResultSchema = z.union([
   MutationAppliedSchema,
   MutationPendingSchema,
+  MutationNoopSchema,
   MutationRefusalSchema,
 ]);
 

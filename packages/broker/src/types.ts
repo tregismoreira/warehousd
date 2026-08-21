@@ -177,6 +177,10 @@ export type MutationResult =
       auditId: AuditId;
     }
   | { ok: true; status: "pending"; proposalId: string; auditId: AuditId }
+  // A revert whose target revision already IS the current state. Well-formed, authorised, and
+  // with nothing to write — distinct from `applied` because no revision was appended and the
+  // change feed has no entry, and distinct from a refusal because nothing was denied.
+  | { ok: true; status: "noop"; documentId: string; auditId: AuditId }
   | { ok: false; reason: MutationRefusalReason; auditId: AuditId };
 
 // `masked` is present only when true, so an unmasked schema is byte-identical to what it was

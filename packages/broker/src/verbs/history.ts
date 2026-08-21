@@ -11,7 +11,7 @@ import { pkOf, dataSchema, dataColsOf } from "../config/collection";
 import { ident } from "../sql/ident";
 import { aclColumnSql } from "../acl/sql";
 import { makeAuditWriter } from "../audit/decision";
-import { maskPlan } from "./guard";
+import { maskPlan, type GrantVerb } from "./guard";
 import { maskExpr } from "../sql/mask";
 import type { VerbDeps } from "./deps";
 
@@ -62,6 +62,114 @@ export type DiffRevisionsResult =
       auditId: AuditId;
     }
   | { ok: false; reason: RefusalReason; auditId: AuditId };
+
+// The prologue every history read — and revert.ts's own read of history — shares, in the order
+// openHistory has always run it. Kept as one function, at module scope, so no second copy of a
+// collection/grant/verb/document-filter ladder can drift into answering "why can't I see this?"
+// differently. `verbs` is the parameter that lets revert.ts reuse this rather than fork it: the
+// read verbs ask for `["read"]` alone, revert asks for `["read", "update"]` because a revert both
+// reads history and writes.
+//
+// Two overloads carry the same rule guard.ts's `resolveGranted` states for the same reason: a
+// caller that only ever asks for `["read"]` can never receive `verb_denied` — a missing `read` is
+// always `no_grant` (see the loop below) — so its refusal reason stays `RefusalReason`, matching
+// what the read verbs already return. A caller that asks for more than `read` (only revert.ts,
+// today) gets the wider `RefusalReason | "verb_denied"`.
+export type HistoryGrantOutcome<R extends string = RefusalReason> =
+  | {
+      ok: true;
+      c: CollectionConfig;
+      grant: ActiveGrant;
+      pool: Pool;
+      pk: string;
+      schema: "data_live" | "data_synth";
+    }
+  // `grant` travels with the failure so a mutation-shaped caller can attach it to its own audit
+  // call. It is null on every refusal reached before a grant was loaded, and — matching the rule
+  // above — also null when the refusal IS `no_grant`: a caller cannot infer a grant exists from a
+  // refusal that says otherwise. It is present only for `verb_denied` and the two `invalid_intent`
+  // checks that run after the grant is in hand.
+  | { ok: false; reason: R; grant: ActiveGrant | null };
+
+export function resolveHistoryGrant(
+  d: VerbDeps,
+  ctx: BrokerContext,
+  name: string,
+  verbs: readonly ["read"],
+): Promise<HistoryGrantOutcome>;
+export function resolveHistoryGrant(
+  d: VerbDeps,
+  ctx: BrokerContext,
+  name: string,
+  verbs: readonly GrantVerb[],
+): Promise<HistoryGrantOutcome<RefusalReason | "verb_denied">>;
+export async function resolveHistoryGrant(
+  d: VerbDeps,
+  ctx: BrokerContext,
+  name: string,
+  verbs: readonly GrantVerb[],
+): Promise<HistoryGrantOutcome<RefusalReason | "verb_denied">> {
+  const { app, cfg, pools } = d;
+
+  const c = findCollection(cfg, name);
+  if (!c) return { ok: false, reason: "unknown_collection", grant: null };
+  if (!c.writable) return { ok: false, reason: "invalid_intent", grant: null };
+
+  const pool = writePool(pools, ctx);
+  if (!pool) return { ok: false, reason: "internal_error", grant: null };
+
+  const grant = await loadActiveGrant(app, ctx, name);
+  if (!grant) return { ok: false, reason: "no_grant", grant: null };
+
+  // Rule 1 from guard.ts, restated per verb in the list rather than once: a missing `read` is
+  // simply "you cannot see this collection", `no_grant`, with no grant attached — the grant's
+  // existence is itself information a caller without read access should not get. A missing verb
+  // that is not `read` denies with the grant attached, because the caller already knows the grant
+  // exists: they are holding it.
+  for (const v of verbs) {
+    if (!grant.verbs.includes(v))
+      return v === "read"
+        ? { ok: false, reason: "no_grant", grant: null }
+        : { ok: false, reason: "verb_denied", grant };
+  }
+
+  if (validateDocumentFilters(grant.documentFilter, c))
+    return { ok: false, reason: "invalid_intent", grant };
+
+  const pk = pkOf(c);
+  if (!pk) return { ok: false, reason: "invalid_intent", grant };
+
+  return { ok: true, c, grant, pool, pk, schema: dataSchema(ctx.env) };
+}
+
+// The current revision of one document, carrying its ACL, for the admits() check both reads run
+// before returning anything, and that revert.ts's noop path now also runs. History (and a revert)
+// is visible only for a document the grant's document filter and the document's ACL admit RIGHT
+// NOW — not as of the revision. A document that became restricted must not stay readable through
+// its own history, and must not stay revertible either.
+export async function admitsDocument(
+  client: PoolClient,
+  ctx: BrokerContext,
+  name: string,
+  c: CollectionConfig,
+  grant: ActiveGrant,
+  pk: string,
+  schema: string,
+  id: string,
+): Promise<boolean> {
+  const cols = ["_rev"];
+  for (const f of grant.documentFilter)
+    if (Object.hasOwn(c.fields, f.field) && !cols.includes(f.field)) cols.push(f.field);
+  const q = await client.query(
+    `select ${cols.map((col) => `t.${ident(col)}`).join(", ")}${aclColumnSql(ctx.env, name, c, "t")}
+       from ${schema}.${ident(name)} t
+      where t.workspace_id=$1 and t.${ident(pk)}=$2 and t._current`,
+    [ctx.workspaceId, id],
+  );
+  const row = q.rows[0];
+  if (!row) return false;
+  return admits(row, grant, c);
+}
 
 export function makeHistoryVerbs(d: VerbDeps) {
   const { app, cfg, pools } = d;
@@ -144,11 +252,10 @@ export function makeHistoryVerbs(d: VerbDeps) {
     }
   }
 
-  // The prologue both revision reads share, in the order listRevisions has always run it. Kept
-  // as one function so the two verbs cannot drift into answering "why can't I see this?"
-  // differently — which is exactly the drift a second copy of a refusal ladder produces.
-  //
-  // Returns a refusal to hand straight back, or everything the caller needs to build a statement.
+  // Thin wrapper over the module-scope resolveHistoryGrant: the read verbs only ever need `read`,
+  // and audit their refusal the query-shaped way (`audit.refuse`), unlike revert.ts's mutation
+  // refusals. Returns a refusal to hand straight back, or everything the caller needs to build a
+  // statement.
   async function openHistory(
     ctx: BrokerContext,
     audit: ReturnType<typeof makeAuditWriter>,
@@ -164,53 +271,14 @@ export function makeHistoryVerbs(d: VerbDeps) {
         schema: "data_live" | "data_synth";
       }
   > {
-    const c = findCollection(cfg, name);
-    if (!c) return { ok: false, refusal: await audit.refuse(name, "unknown_collection") };
-    if (!c.writable) return { ok: false, refusal: await audit.refuse(name, "invalid_intent") };
-
-    const pool = writePool(pools, ctx);
-    if (!pool) return { ok: false, refusal: await audit.refuse(name, "internal_error") };
-
-    const grant = await loadActiveGrant(app, ctx, name);
-    if (!grant) return { ok: false, refusal: await audit.refuse(name, "no_grant") };
-    if (!grant.verbs.includes("read"))
-      return { ok: false, refusal: await audit.refuse(name, "no_grant") };
-
-    if (validateDocumentFilters(grant.documentFilter, c))
-      return { ok: false, refusal: await audit.refuse(name, "invalid_intent", { grant }) };
-
-    const pk = pkOf(c);
-    if (!pk) return { ok: false, refusal: await audit.refuse(name, "invalid_intent", { grant }) };
-
-    return { ok: true, c, grant, pool, pk, schema: dataSchema(ctx.env) };
-  }
-
-  // The current revision of one document, carrying its ACL, for the admits() check both reads
-  // run before returning anything. History is visible only for a document the grant's document
-  // filter and the document's ACL admit RIGHT NOW — not as of the revision. A document that
-  // became restricted must not stay readable through its own history.
-  async function admitsDocument(
-    client: PoolClient,
-    ctx: BrokerContext,
-    name: string,
-    c: CollectionConfig,
-    grant: ActiveGrant,
-    pk: string,
-    schema: string,
-    id: string,
-  ): Promise<boolean> {
-    const cols = ["_rev"];
-    for (const f of grant.documentFilter)
-      if (Object.hasOwn(c.fields, f.field) && !cols.includes(f.field)) cols.push(f.field);
-    const q = await client.query(
-      `select ${cols.map((col) => `t.${ident(col)}`).join(", ")}${aclColumnSql(ctx.env, name, c, "t")}
-         from ${schema}.${ident(name)} t
-        where t.workspace_id=$1 and t.${ident(pk)}=$2 and t._current`,
-      [ctx.workspaceId, id],
-    );
-    const row = q.rows[0];
-    if (!row) return false;
-    return admits(row, grant, c);
+    const r = await resolveHistoryGrant(d, ctx, name, ["read"]);
+    if (!r.ok) {
+      return {
+        ok: false,
+        refusal: await audit.refuse(name, r.reason, r.grant ? { grant: r.grant } : {}),
+      };
+    }
+    return { ok: true, c: r.c, grant: r.grant, pool: r.pool, pk: r.pk, schema: r.schema };
   }
 
   async function listRevisions(

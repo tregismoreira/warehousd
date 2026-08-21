@@ -130,9 +130,25 @@ export function RevisionTimeline({ collection, id }: { collection: string; id: s
           >
             To
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={async () => {
+              const res = await fetch(
+                `/api/collections/${encodeURIComponent(collection)}/documents/${encodeURIComponent(id)}` +
+                  `/revisions/${encodeURIComponent(row.original.rev)}/revert`,
+                { method: "POST" },
+              );
+              if (res.ok) window.location.reload();
+            }}
+            aria-label={`Revert to revision ${row.original.seq}`}
+          >
+            Revert
+          </Button>
         </span>
       ),
-      size: 140,
+      size: 200,
     },
   ];
 

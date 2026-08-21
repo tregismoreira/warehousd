@@ -385,6 +385,32 @@ export const OPERATIONS: Operation[] = [
     reasons: [...RESTRICTED, "not_found", "field_denied"],
   },
   {
+    path: "/v1/collections/{c}/documents/{id}/revisions/{rev}/revert",
+    method: "post",
+    operationId: "revertDocument",
+    summary:
+      "Restore a document to a past revision by appending a new revision carrying that revision's values.",
+    tags: ["history"],
+    params: [
+      cParam,
+      idParam,
+      {
+        name: "rev",
+        in: "path",
+        required: true,
+        schema: z.string(),
+        description: "The revision to restore.",
+      },
+    ],
+    success: [
+      { status: 200, schema: MutationAppliedSchema, description: "Reverted." },
+      { status: 202, schema: MutationPendingSchema, description: "Queued as a proposal." },
+      { status: 204, description: "Already at that revision; nothing was written." },
+    ],
+    reasons: [...RESTRICTED, ...MUTATION_EXTRA, "not_found"],
+    conditional: true,
+  },
+  {
     path: "/v1/collections/{c}/documents/{id}/acl",
     method: "get",
     operationId: "getDocumentAcl",
