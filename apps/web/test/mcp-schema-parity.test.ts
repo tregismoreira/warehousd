@@ -23,7 +23,10 @@ function enforcedShape(schema: z.ZodType): JsonObjectSchema {
 
 describe("mcp-schema-parity: derived tools match what the handler enforces", () => {
   const cases: { tool: string; schema: z.ZodType; omit?: string[] }[] = [
-    { tool: "query_collection", schema: QueryIntentSchema },
+    // `after` is enforced but deliberately not advertised — see the rationale on the `omit` in
+    // mcp-tools.ts. Named here for the same reason `op` is below: the omission is a decision, so
+    // the parity check has to know about it or it reports a decision as drift.
+    { tool: "query_collection", schema: QueryIntentSchema, omit: ["after"] },
     { tool: "search_documents", schema: DocSearchIntentSchema },
     { tool: "create_document", schema: MutationIntentSchema.options[0], omit: ["op"] },
     { tool: "update_document", schema: MutationIntentSchema.options[1], omit: ["op"] },
