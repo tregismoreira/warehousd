@@ -11,6 +11,20 @@ on:
   # so a release run gets every job with no path filtering.
   workflow_call:
 
+# One run per pull request at a time. Without this, a push that updates several branches at once —
+# a stacked pull request being restacked is the ordinary case — starts a run for each branch AND a
+# run for each child whose base moved, all on the same commits and all at once. Nothing cancelled
+# anything, so they saturated the runner pool and jobs died on a SIGTERM (exit 143) or an
+# "operation was canceled" with no failing assertion anywhere in the log. The same commit would
+# pass in one run and fail in another, which is the signature to recognise.
+#
+# `cancel-in-progress` is deliberately false for anything that is not a pull request. A push to
+# `main` and a `workflow_call` from release.yml are gates whose result is the record of whether a
+# commit is releasable — cancelling one mid-flight would leave a tag with no verdict.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Every job declares its own `permissions` as well. This is the floor: a job that forgets to narrow
 # still cannot write. release.yml has done this since it was written (`permissions: {}` on verify);
 # ci.yml declared nothing at all, so all five jobs ran with the repository default.
