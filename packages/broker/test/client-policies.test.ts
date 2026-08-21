@@ -1,6 +1,6 @@
 import { it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import {
   getClientPolicy,
@@ -13,7 +13,7 @@ import {
 let p: Provisioned, admin: Pool;
 beforeAll(async () => {
   p = await provision("clientpolicies");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await admin.query(
     `create table if not exists app."oauthApplication" ("clientId" text primary key)`,
   );

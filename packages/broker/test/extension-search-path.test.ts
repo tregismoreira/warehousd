@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { bootstrapBrokerDb, provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { bootstrapBrokerDb, provision, testPool, type Provisioned } from "./helpers/db";
 import {
   createAppSchema,
   applyConfig,
@@ -65,7 +65,7 @@ beforeAll(async () => {
   // max: 1 deliberately. applyConfig checks a client out for its whole run, so this pool has
   // nothing left to hand anyone until it gives that client back — every statement below is the
   // gate on it doing so. A leaked client here is not a slow test, it is a hung one.
-  admin = new Pool({ connectionString: p.urls.admin, max: 1 });
+  admin = testPool({ connectionString: p.urls.admin, max: 1 });
   await admin.query(`
     create schema extensions;
     create extension pgcrypto with schema extensions;

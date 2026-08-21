@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, makeBroker, createPools, type Pools } from "../src/index";
 import { importCollection } from "../src/import/run";
 import { loadConfig } from "../src/config/load";
@@ -16,7 +16,7 @@ const ctx = makeCtx({ userId: "mia", env: "live" });
 
 beforeAll(async () => {
   p = await provision("importprobe");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live, imp: p.urls.imp });

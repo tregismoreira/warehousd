@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker, type Pools } from "../src/index";
 import { ConfigSchema } from "../src/config/schema";
 import { EXTERNAL_CANARY, EXTERNAL_UNDECLARED_CANARY } from "./fixtures/canaries";
@@ -58,7 +58,7 @@ const cfgFor = (over: Record<string, unknown> = {}) =>
 
 beforeAll(async () => {
   remote = await provision("extsrc_remote", { bare: true });
-  remoteAdmin = new Pool({ connectionString: remote.urls.admin });
+  remoteAdmin = testPool({ connectionString: remote.urls.admin });
   await remoteAdmin.query(
     `
     create table public.accounts (
@@ -78,7 +78,7 @@ beforeAll(async () => {
   );
 
   p = await provision("extsrc");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfgFor());
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });
@@ -211,7 +211,7 @@ describe("tenant isolation without RLS", () => {
   });
 
   it("fails closed when no workspace is in scope at all", async () => {
-    const direct = new Pool({ connectionString: p.urls.live });
+    const direct = testPool({ connectionString: p.urls.live });
     try {
       const r = await direct.query(`select * from data_live.v_accounts`);
       expect(r.rowCount).toBe(0);
@@ -244,7 +244,7 @@ describe("read-only, enforced by the database", () => {
   });
 
   it("gives the read role the view and nothing else", async () => {
-    const live = new Pool({ connectionString: p.urls.live });
+    const live = testPool({ connectionString: p.urls.live });
     try {
       await expect(live.query(`select 1 from data_live."_ext_accounts" limit 1`)).rejects.toThrow(
         /permission denied/i,

@@ -1,6 +1,6 @@
 import { it, expect, beforeAll, afterAll, describe } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
@@ -26,7 +26,7 @@ const cfg = loadConfig(join(__dirname, "../../../examples/harbor"));
 let p: Provisioned, admin: Pool, pools: Pools;
 beforeAll(async () => {
   p = await provision("dbroles");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   await generateSynthetic(admin, cfg, 42, DEFAULT_WORKSPACE_ID);
@@ -42,7 +42,7 @@ afterAll(async () => {
 it("test 1: app role has NO direct data privileges; broker path works", async () => {
   // app role is warehousd_dev/live for data — but the "app" pool connects as superuser in tests;
   // assert the DENY on the two data roles crossing their wall instead (the real structural guarantee):
-  const dev = new Pool({ connectionString: p.urls.dev });
+  const dev = testPool({ connectionString: p.urls.dev });
   await expect(dev.query(`select * from data_live.v_people`)).rejects.toThrow();
   await dev.end();
 });
@@ -58,7 +58,7 @@ it("test 5 (partial): dev token cannot see live-only canary; direct role check",
     expect(blob.includes(LIVE_ONLY_CANARY)).toBe(false);
   }
   // direct: warehousd_dev is refused on data_live
-  const dev = new Pool({ connectionString: p.urls.dev });
+  const dev = testPool({ connectionString: p.urls.dev });
   await expect(dev.query(`select * from data_live.v_people`)).rejects.toThrow();
   await dev.end();
 });
@@ -198,7 +198,7 @@ it("test 5 (scope clauses): full env-as-scope acceptance gate", async () => {
 }, 60_000);
 
 it("test 8: synthetic generator role has no data_live privilege; FK integrity holds", async () => {
-  const dev = new Pool({ connectionString: p.urls.dev });
+  const dev = testPool({ connectionString: p.urls.dev });
   await expect(dev.query(`select 1 from data_live.people`)).rejects.toThrow();
   await dev.end();
   const orphans = await admin.query(
@@ -216,7 +216,7 @@ describe("env role grants (design §8 test 7)", () => {
 
   it("env role reads file view but not base tables", async () => {
     p2 = await provision("view-only");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
 
     const docCfg = ConfigSchema.parse({
@@ -251,7 +251,7 @@ describe("env role grants (design §8 test 7)", () => {
 
     // Test with dev role. The view's workspace predicate means the read needs a workspace in scope —
     // withWorkspace() is how the broker supplies it; here the setting is made directly.
-    const dev = new Pool({ connectionString: p2.urls.dev });
+    const dev = testPool({ connectionString: p2.urls.dev });
     const ok = await withWorkspace(dev, "default", (c) =>
       c.query(`select title from data_synth.v_policies`),
     );

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { createPools, type Pools } from "../src/db/pools";
@@ -70,7 +70,7 @@ async function reindex() {
 
 beforeAll(async () => {
   p = await provision("acl-file");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   // The write pool matters even though nothing here writes a document: `_acl` is a base table and

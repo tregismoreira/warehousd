@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import {
   createClientSecret,
@@ -43,7 +43,7 @@ describe("client secrets", () => {
   // "should say on sight which environment it reaches".
   it("verification reports the env encoded in the key's own prefix", async () => {
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     try {
       await createAppSchema(db);
       await seedClient(db);
@@ -86,7 +86,7 @@ describe("client secrets", () => {
 
   it("secret is unrecoverable after creation", async () => {
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await seedClient(db);
 
@@ -121,7 +121,7 @@ describe("client secrets", () => {
 
   it("revoked key fails the next verify with no expiry wait", async () => {
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await seedClient(db);
 
@@ -152,7 +152,7 @@ describe("client secrets", () => {
 
   it("expired key is refused", async () => {
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await seedClient(db);
 
@@ -170,7 +170,7 @@ describe("client secrets", () => {
 
   it("both secrets verify during rotation window; retired one stops on revoke", async () => {
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await seedClient(db);
 
@@ -216,7 +216,7 @@ describe("client secrets", () => {
 
   it("third unrevoked secret is refused", async () => {
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await seedClient(db);
 
@@ -237,7 +237,7 @@ describe("client secrets", () => {
 
   it("creation beyond MAX_KEY_LIFETIME_DAYS is refused", async () => {
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await seedClient(db);
 
@@ -253,7 +253,7 @@ describe("client secrets", () => {
 
   it("listClientSecrets never returns a hash", async () => {
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await seedClient(db);
 
@@ -281,7 +281,7 @@ describe("revokeClientSecret scope", () => {
     // a secret id could revoke it regardless of which client or tenant owned it. The route
     // compensated with its own ownership SELECT; the library now enforces it.
     p = await provision("clientsecrets");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     try {
       await createAppSchema(db);
       await seedClient(db);

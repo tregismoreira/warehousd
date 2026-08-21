@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
@@ -46,7 +46,7 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
 
 beforeAll(async () => {
   p = await provision("search-fanout");
-  app = new Pool({ connectionString: p.urls.admin });
+  app = testPool({ connectionString: p.urls.admin });
   await createAppSchema(app);
   await applyConfig(app, cfg);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { migrateApp } from "../src/db/migrate";
 import { MIGRATIONS } from "../src/db/migrations";
 import { createAppSchema } from "../src/db/migrate-app";
@@ -15,7 +15,7 @@ function migrationAt(i: number) {
 let p: Provisioned, db: Pool;
 beforeAll(async () => {
   p = await provision("migrate");
-  db = new Pool({ connectionString: p.urls.admin });
+  db = testPool({ connectionString: p.urls.admin });
 });
 afterAll(async () => {
   await db?.end();
@@ -95,7 +95,7 @@ describe("migrateApp", () => {
     // The case this task exists for: a deploy provisioned by the old function, carrying no
     // ledger and holding grants that have to survive adopting one.
     const legacy = await provision("migrate-legacy");
-    const ldb = new Pool({ connectionString: legacy.urls.admin });
+    const ldb = testPool({ connectionString: legacy.urls.admin });
     try {
       await ldb.query(migrationAt(0).sql);
       await ldb.query(
@@ -118,7 +118,7 @@ describe("migrateApp", () => {
 
   it("createAppSchema remains a working alias", async () => {
     const fresh = await provision("migrate-alias");
-    const fdb = new Pool({ connectionString: fresh.urls.admin });
+    const fdb = testPool({ connectionString: fresh.urls.admin });
     try {
       await expect(createAppSchema(fdb)).resolves.not.toThrow();
       const { rows } = await fdb.query(`select version from app.schema_migrations`);
@@ -138,7 +138,7 @@ describe("migrateApp, when a migration fails", () => {
   let p2: Provisioned, db2: Pool;
   beforeAll(async () => {
     p2 = await provision("migrate-fail");
-    db2 = new Pool({ connectionString: p2.urls.admin });
+    db2 = testPool({ connectionString: p2.urls.admin });
   });
   afterAll(async () => {
     vi.doUnmock("../src/db/migrations");
@@ -181,7 +181,7 @@ describe("migrateApp, when a migration fails", () => {
   // template clone lock is one), so a count measures the whole server and passes or fails on who
   // else is running. Acquiring it is also the property that actually matters.
   it("releases the advisory lock so the next attempt can run", async () => {
-    const other = new Pool({ connectionString: p2.urls.admin, max: 1 });
+    const other = testPool({ connectionString: p2.urls.admin, max: 1 });
     try {
       const got = await other.query<{ locked: boolean }>(
         `select pg_try_advisory_lock(87220001) as locked`,

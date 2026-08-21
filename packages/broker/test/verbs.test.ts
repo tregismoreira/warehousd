@@ -1,6 +1,6 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { createPools, type Pools } from "../src/db/pools";
@@ -45,7 +45,7 @@ let broker: ReturnType<typeof makeBroker>;
 
 beforeAll(async () => {
   p = await provision("verbs");
-  db = new Pool({ connectionString: p.urls.admin });
+  db = testPool({ connectionString: p.urls.admin });
   await createAppSchema(db);
   await applyConfig(db, cfg);
 

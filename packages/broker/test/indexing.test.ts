@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -7,7 +7,7 @@ import { extractFile } from "../src/indexing/extract";
 import { chunkText } from "../src/indexing/chunk";
 import { indexCollection } from "../src/indexing";
 import { loadTaxonomyBindings } from "../src/taxonomy";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { ConfigSchema } from "../src/config/schema";
@@ -112,7 +112,7 @@ describe("indexCollection (DB-backed)", () => {
 
   it("indexes .md/.txt, skips unchanged, re-indexes modified, deletes removed (design test 5)", async () => {
     p = await provision("indexing");
-    db = new Pool({ connectionString: p.urls.admin });
+    db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, docCfg);
 
@@ -146,7 +146,7 @@ describe("indexCollection (DB-backed)", () => {
 
   it("indexing dev touches only data_synth (design test 6)", async () => {
     p = await provision("indexing2");
-    db = new Pool({ connectionString: p.urls.admin });
+    db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, docCfg);
 
@@ -179,7 +179,7 @@ describe("indexCollection: taxonomy", () => {
 
   beforeAll(async () => {
     p = await provision("taxonomy");
-    db = new Pool({ connectionString: p.urls.admin });
+    db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, taxonomyCfg);
     taxonomies = await loadTaxonomyBindings(

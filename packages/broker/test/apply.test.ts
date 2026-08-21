@@ -1,6 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
@@ -30,7 +29,7 @@ afterAll(async () => {
 describe("applyConfig", () => {
   it("creates base tables + views in both envs and grants view SELECT to the right role", async () => {
     p = await provision("apply");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
 
@@ -42,7 +41,7 @@ describe("applyConfig", () => {
     expect(v.rows.map((x) => x.table_schema)).toEqual(["data_live", "data_synth"]);
 
     // dev role can select the synth view, live role cannot
-    const dev = new Pool({ connectionString: p.urls.dev });
+    const dev = testPool({ connectionString: p.urls.dev });
     await dev.query(`select * from data_synth.v_people`); // no throw
     await dev.end();
 
@@ -73,7 +72,7 @@ const docCfg = ConfigSchema.parse({
 describe("file collection apply", () => {
   it("creates __files, __documents, gin index, and the documents view per env", async () => {
     p = await provision("apply");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, docCfg);
 
@@ -113,7 +112,7 @@ describe("file collection apply", () => {
   });
   it("is idempotent", async () => {
     p = await provision("apply");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, docCfg);
     await applyConfig(db, docCfg);
@@ -121,7 +120,7 @@ describe("file collection apply", () => {
   });
   it("document tsv is generated and searchable", async () => {
     p = await provision("apply");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, docCfg);
 
@@ -182,7 +181,7 @@ describe("apply: additive field on an existing dataset collection", () => {
 
   it("adds the new columns in both envs and generates without error", async () => {
     p = await provision("apply_addcol");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, before);
     // `create table if not exists` is a no-op the second time round, so only an explicit
@@ -253,7 +252,7 @@ describe("apply: taxonomy", () => {
 
   it("upserts vocabularies/terms idempotently and renames labels in place", async () => {
     p = await provision("apply");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     const cfg = ConfigSchema.parse(cfgIn);
     await applyConfig(db, cfg);
@@ -280,7 +279,7 @@ describe("apply: taxonomy", () => {
 
   it("adds the term column to bound tables and the file view, both envs", async () => {
     p = await provision("apply");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     const cfg = ConfigSchema.parse(cfgIn);
     await applyConfig(db, cfg);

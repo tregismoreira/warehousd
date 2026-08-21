@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Pool } from "pg";
-import { provision } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool } from "./helpers/db";
 import { ensureSchemasAndRoles, dataRoleUrl } from "../src/index";
 
 describe("bootstrap", () => {
@@ -11,7 +11,7 @@ describe("bootstrap", () => {
     // Bare, not the template: this suite is what proves ensureSchemasAndRoles creates the
     // schemas and roles in the first place, so it has to start from an empty database.
     provisioned = await provision("bootstrap", { bare: true });
-    db = new Pool({ connectionString: provisioned.urls.admin });
+    db = testPool({ connectionString: provisioned.urls.admin });
   });
 
   afterEach(async () => {
@@ -53,7 +53,7 @@ describe("bootstrap", () => {
   it("warehousd_dev can connect and has access to data_synth and app schemas", async () => {
     await ensureSchemasAndRoles(db, "pw");
 
-    const devDb = new Pool({
+    const devDb = testPool({
       connectionString: `postgres://warehousd_dev:pw@127.0.0.1:54330/${provisioned.dbName}`,
     });
 
@@ -69,7 +69,7 @@ describe("bootstrap", () => {
     try {
       await ensureSchemasAndRoles(db, specialPassword);
 
-      const devDb = new Pool({
+      const devDb = testPool({
         connectionString: `postgres://warehousd_dev:${encodeURIComponent(specialPassword)}@127.0.0.1:54330/${provisioned.dbName}`,
       });
 

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { ConfigSchema } from "../src/config/schema";
@@ -98,7 +98,7 @@ async function put(
 
 beforeAll(async () => {
   p = await provision("upload");
-  db = new Pool({ connectionString: p.urls.admin });
+  db = testPool({ connectionString: p.urls.admin });
   await createAppSchema(db);
   await applyConfig(db, cfg);
   bindings = await loadTaxonomyBindings(db, cfg, "policies", "dev", DEFAULT_WORKSPACE_ID);

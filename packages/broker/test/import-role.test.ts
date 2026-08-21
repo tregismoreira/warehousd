@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import {
   createAppSchema,
   applyConfig,
@@ -15,10 +15,10 @@ const cfg = loadConfig(new URL("../../../examples/harbor", import.meta.url).path
 
 beforeAll(async () => {
   p = await provision("importrole");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
-  imp = new Pool({ connectionString: p.urls.imp });
+  imp = testPool({ connectionString: p.urls.imp });
 }, 60_000);
 afterAll(async () => {
   await admin.end();
@@ -160,7 +160,7 @@ describe("warehousd_import privileges", () => {
 
 describe("the read roles gain nothing", () => {
   it("warehousd_live still cannot write", async () => {
-    const live = new Pool({ connectionString: p.urls.live });
+    const live = testPool({ connectionString: p.urls.live });
     await expect(
       live.query(
         `insert into data_live.departments (${R}, id, name) values (${RV}, gen_random_uuid(), 'x')`,
@@ -170,7 +170,7 @@ describe("the read roles gain nothing", () => {
   });
 
   it("warehousd_dev still cannot see data_live", async () => {
-    const dev = new Pool({ connectionString: p.urls.dev });
+    const dev = testPool({ connectionString: p.urls.dev });
     await expect(dev.query(`select * from data_live.v_people`)).rejects.toThrow(
       /permission denied/i,
     );

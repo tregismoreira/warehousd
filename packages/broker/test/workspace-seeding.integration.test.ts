@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { withWorkspace } from "../src/db/pools";
@@ -64,7 +64,7 @@ let p: Provisioned, admin: Pool;
 
 beforeAll(async () => {
   p = await provision("wsseeding");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await admin.query(
     `insert into app.workspaces (id, name) values ($1, 'A'), ($2, 'B') on conflict do nothing`,
@@ -176,7 +176,7 @@ describe("a raw insert with no workspace_id, GUC unset, is rejected by RLS", () 
   it("with check refuses rather than silently defaulting", async () => {
     // No withWorkspace: no transaction, no set_config — current_setting('warehousd.workspace_id')
     // is genuinely unset, exactly the case the with-check policy exists to refuse.
-    const write = new Pool({ connectionString: p.urls.devWrite });
+    const write = testPool({ connectionString: p.urls.devWrite });
     try {
       await expect(
         write.query(

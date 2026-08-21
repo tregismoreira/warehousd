@@ -1,6 +1,6 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { loadActiveGrant, loadActiveGrants } from "../src/grants/eval";
 import { makeCtx } from "./helpers/ctx";
@@ -18,7 +18,7 @@ const COLLECTIONS = ["people", "policies", "orders", "ungranted"];
 
 beforeAll(async () => {
   p = await provision("grantbatch");
-  db = new Pool({ connectionString: p.urls.admin });
+  db = testPool({ connectionString: p.urls.admin });
   await createAppSchema(db);
 
   await db.query(

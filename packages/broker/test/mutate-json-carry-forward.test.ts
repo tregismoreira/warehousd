@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker, type Pools } from "../src/index";
 import { importCollection } from "../src/import/run";
 import { ConfigSchema } from "../src/config/schema";
@@ -33,7 +33,7 @@ let p: Provisioned, admin: Pool, pools: Pools, broker: ReturnType<typeof makeBro
 
 beforeAll(async () => {
   p = await provision("jsoncarry");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   pools = createPools({

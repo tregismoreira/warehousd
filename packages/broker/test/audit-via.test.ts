@@ -1,6 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { writeAudit } from "../src/audit/write";
 
@@ -12,7 +11,7 @@ afterAll(async () => {
 describe("audit via", () => {
   it("every outcome records via", async () => {
     p = await provision("auditvia");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     // Write allowed audit

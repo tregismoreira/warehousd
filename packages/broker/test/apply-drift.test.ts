@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { planFromSchema } from "../src/apply/plan";
@@ -81,7 +81,7 @@ describe("declaredTables matches what applyConfig actually creates", () => {
 
   it("accounts for every column, in both envs, with matching types", async () => {
     p = await provision("apply_drift_decl");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, rich);
 
@@ -118,7 +118,7 @@ describe("declaredTables matches what applyConfig actually creates", () => {
 describe("a destructive change to populated live data", () => {
   it("refuses, naming the collection, the field and both types", async () => {
     p = await provision("apply_drift_block");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
 
@@ -137,7 +137,7 @@ describe("a destructive change to populated live data", () => {
 
   it("points at the command that unblocks it", async () => {
     p = await provision("apply_drift_hint");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
     await db.query(
@@ -150,7 +150,7 @@ describe("a destructive change to populated live data", () => {
 
   it("refuses a removed field rather than stranding its column", async () => {
     p = await provision("apply_drift_drop");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text", { note: { type: "text", posture: "allow" } }));
     await db.query(
@@ -166,7 +166,7 @@ describe("a destructive change to populated live data", () => {
 
   it("lists every blocked change at once, not one per apply", async () => {
     p = await provision("apply_drift_many");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text", { note: { type: "text", posture: "allow" } }));
     await db.query(
@@ -185,7 +185,7 @@ describe("a destructive change to populated live data", () => {
 describe("a destructive change with nothing to lose", () => {
   it("rebuilds an empty live table and applies the new type", async () => {
     p = await provision("apply_drift_empty");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
     expect(await columnType(db, "data_live", "orders", "amount")).toBe("text");
@@ -204,7 +204,7 @@ describe("a destructive change with nothing to lose", () => {
   // migration ceremony for it would put friction on the one loop that has to stay fast.
   it("rebuilds a populated synth table without complaint", async () => {
     p = await provision("apply_drift_synth");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
     await db.query(
@@ -219,7 +219,7 @@ describe("a destructive change with nothing to lose", () => {
 
   it("applies a moved primary key on an empty table", async () => {
     p = await provision("apply_drift_pk");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
 
@@ -260,7 +260,7 @@ describe("a destructive change with nothing to lose", () => {
 
   it("drops a removed collection's empty table and clears it from the registry", async () => {
     p = await provision("apply_drift_gone");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
 
@@ -281,7 +281,7 @@ describe("a destructive change with nothing to lose", () => {
 
   it("refuses to drop a removed collection that still holds live rows", async () => {
     p = await provision("apply_drift_gone_full");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
     await db.query(
@@ -301,7 +301,7 @@ describe("a destructive change with nothing to lose", () => {
 describe("changes that are not destructive", () => {
   it("still adds a new field to a populated live table", async () => {
     p = await provision("apply_drift_add");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
     await db.query(
@@ -316,7 +316,7 @@ describe("changes that are not destructive", () => {
 
   it("is still idempotent on a populated database", async () => {
     p = await provision("apply_drift_idem");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
     await db.query(

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import type { Pools } from "../src/db/pools";
@@ -66,7 +66,7 @@ async function grantPeople(userId: string): Promise<void> {
 
 beforeAll(async () => {
   p = await provision("audit-disabled");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, offCfg);
   pools = createPools({

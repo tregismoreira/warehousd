@@ -1,6 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
@@ -37,7 +36,7 @@ afterAll(async () => {
 
 it("is deterministic for a fixed seed and honors FK integrity", async () => {
   p = await provision("synth");
-  const db = new Pool({ connectionString: p.urls.admin });
+  const db = testPool({ connectionString: p.urls.admin });
   await createAppSchema(db);
   await applyConfig(db, cfg);
 
@@ -89,7 +88,7 @@ describe("synthetic: taxonomy terms", () => {
       },
     });
     const p2 = await provision("synth2");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 7, DEFAULT_WORKSPACE_ID);
@@ -146,7 +145,7 @@ describe("synthetic: dataset-sourced taxonomy terms", () => {
   it("fills a single-value bound column with real slugs, deterministically", async () => {
     const cfg = ConfigSchema.parse(base(false));
     const p2 = await provision("synth_dsvocab");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 11, DEFAULT_WORKSPACE_ID);
@@ -173,7 +172,7 @@ describe("synthetic: dataset-sourced taxonomy terms", () => {
   it("fills a multi-value bound column with a text[] of 1-3 distinct slugs", async () => {
     const cfg = ConfigSchema.parse(base(true));
     const p2 = await provision("synth_dsvocab_multi");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 11, DEFAULT_WORKSPACE_ID);
@@ -214,7 +213,7 @@ describe("synthetic: gen: hints", () => {
       },
     });
     const p2 = await provision("synth_clientnum");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
@@ -259,7 +258,7 @@ describe("synthetic: gen: hints", () => {
       },
     });
     const p2 = await provision("synth_matternum");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
@@ -292,7 +291,7 @@ describe("synthetic: gen: hints", () => {
       },
     });
     const p2 = await provision("synth_invnum");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
@@ -328,7 +327,7 @@ describe("synthetic: gen: hints", () => {
       },
     });
     const p2 = await provision("synth_barnum");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
@@ -358,7 +357,7 @@ describe("synthetic: self-referential and cyclic FKs", () => {
       },
     });
     const p2 = await provision("synth_selfref");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);
@@ -401,7 +400,7 @@ describe("synthetic: self-referential and cyclic FKs", () => {
       },
     });
     const p2 = await provision("synth_cyclic");
-    const db = new Pool({ connectionString: p2.urls.admin });
+    const db = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, cfg);
     await generateSynthetic(db, cfg, 42, DEFAULT_WORKSPACE_ID);

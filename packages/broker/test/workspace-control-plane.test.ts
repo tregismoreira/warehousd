@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { requestGrant, approveGrant, denyGrant, revokeGrant } from "../src/grants/manage";
 import { hasApprovedLiveGrant } from "../src/oauth/client-policies";
@@ -29,7 +29,7 @@ let db: Pool;
 
 beforeAll(async () => {
   p = await provision("orgctl");
-  db = new Pool({ connectionString: p.urls.admin });
+  db = testPool({ connectionString: p.urls.admin });
   await createAppSchema(db);
   await db.query(`insert into app.workspaces (id, name) values ($1,'B')`, [WORKSPACE_B]);
 }, 60_000);
