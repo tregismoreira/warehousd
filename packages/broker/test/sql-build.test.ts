@@ -300,6 +300,26 @@ it("emits a relation as a correlated subquery over the target view, with bound p
   expect(text).not.toMatch(/rel\.[a-z_]+[^"]/);
 });
 
+const REL_MANY: RelationDef = {
+  collection: "time_entries",
+  via: "matter_id",
+  select: { hours: { posture: "allow" } },
+  limit: 50,
+  order: { field: "entry_date", dir: "desc" },
+};
+
+it("emits a to-many relation as an ordered, limited jsonb_agg over the target view", () => {
+  const { text } = buildSelect("dev", { collection: "matters" }, ["id", "entries"], {
+    relationFor: (f) => (f === "entries" ? REL_MANY : null),
+    targetHasAcl: () => false,
+  });
+  expect(text).toContain("coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb)");
+  expect(text).toContain("from data_synth.v_time_entries rel");
+  expect(text).toContain(`rel."matter_id" = base."id"`);
+  expect(text).toContain(`order by rel."entry_date" desc`);
+  expect(text).toContain("limit 50");
+});
+
 // Unknown keys are dropped rather than refused, and that is the invariant: §10 test 5 forges
 // `env: "live"` into tool arguments and requires the call to succeed against dev, because the
 // value has no code path that reads it. See the note at the top of intents/schema.ts.

@@ -155,6 +155,23 @@ export const RelationSelectSchema = z
   .refine((s) => Object.keys(s).length > 0, "a relation must select at least one field");
 
 /**
+ * The most documents one relation may pull per host document.
+ *
+ * A ceiling rather than a default. One request may carry MAX_BATCH_QUERIES labelled queries, each
+ * returning up to MAX_LIMIT documents, each expanding its relations — so an uncapped to-many
+ * turns one HTTP call into an unbounded read on a pool sized for one request. Enforced here, at
+ * config load, because a query-time cap would have to be reasoned about at every call site.
+ */
+export const RELATION_MAX_LIMIT = 50;
+
+export const RelationOrderSchema = z
+  .object({
+    field: z.string().regex(IDENT),
+    dir: z.enum(["asc", "desc"]).default("asc"),
+  })
+  .strict();
+
+/**
  * A field that composes documents from another collection.
  *
  * Projection only, exactly as `view_join` is, and for the same reason: there is no column on the
@@ -162,7 +179,7 @@ export const RelationSelectSchema = z
  * than its table, which is what makes it inherit the target's current-revision filter, its
  * workspace predicate and its per-document ACL instead of having to restate all three.
  */
-export const RelationSchema = z
+const RelationToOneSchema = z
   .object({
     collection: z.string().regex(IDENT),
     /** The local field carrying `fk: <collection>.<column>`. */
@@ -170,7 +187,30 @@ export const RelationSchema = z
     select: RelationSelectSchema,
   })
   .strict();
+
+/**
+ * The to-many form. `via` is the TARGET's field pointing back at this collection.
+ *
+ * `limit` and `order` are both required, and neither has a default. A truncated list whose order
+ * nobody chose is arbitrary, and an untruncated one is unbounded — so the two are required
+ * together or the answer is meaningless.
+ */
+const RelationToManySchema = z
+  .object({
+    collection: z.string().regex(IDENT),
+    via: z.string().regex(IDENT),
+    select: RelationSelectSchema,
+    limit: z.number().int().positive().max(RELATION_MAX_LIMIT),
+    order: RelationOrderSchema,
+  })
+  .strict();
+
+export const RelationSchema = z.union([RelationToOneSchema, RelationToManySchema]);
 export type RelationDef = z.infer<typeof RelationSchema>;
+
+export function isToMany(r: RelationDef): r is z.infer<typeof RelationToManySchema> {
+  return "via" in r;
+}
 
 // Every object in this file is strict: an unrecognised key in warehousd.yml is a typo, and the
 // cost of ignoring one is not a validation error but a silent policy change. `postur: deny` parses
@@ -813,6 +853,37 @@ export const ConfigSchema = z
             ctx.addIssue({
               code: "custom",
               message: `${cname}.${fname} selects "${sub}", which is itself a relation; a relation reaches one collection, not a chain`,
+            });
+        }
+
+        if (isToMany(rel)) {
+          const via = target.fields[rel.via];
+          if (!via) {
+            ctx.addIssue({
+              code: "custom",
+              message: `${cname}.${fname} relates via "${rel.via}", which target collection "${rel.collection}" does not have`,
+            });
+          } else if (!via.fk || !via.fk.startsWith(`${cname}.`)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `${cname}.${fname} relates via "${rel.collection}.${rel.via}", which does not have fk pointing at ${cname}`,
+            });
+          }
+          if (!target.fields[rel.order.field])
+            ctx.addIssue({
+              code: "custom",
+              message: `${cname}.${fname} orders by "${rel.order.field}", which target collection "${rel.collection}" does not have`,
+            });
+
+          // A to-many resolves one subquery per host document, so an unindexed back-reference
+          // turns a page of 100 documents into 100 sequential scans of the target. Refusing at
+          // config load turns a performance trap into an error naming both sides — the only place
+          // a person can still fix it cheaply.
+          const covered = (target.indexes ?? []).some((i) => i.fields[0] === rel.via);
+          if (!covered)
+            ctx.addIssue({
+              code: "custom",
+              message: `${cname}.${fname} relates via "${rel.collection}.${rel.via}", which is not indexed; add "- fields: [${rel.via}]" to ${rel.collection}.indexes`,
             });
         }
       }

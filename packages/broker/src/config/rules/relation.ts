@@ -1,4 +1,4 @@
-import { writePosture } from "../schema";
+import { writePosture, isToMany } from "../schema";
 import type { CollectionRule } from "./types";
 
 // A rule sees one collection, but a relation is about two. The other side comes from the config
@@ -12,6 +12,7 @@ export const relationTarget: CollectionRule = {
     for (const [name, f] of Object.entries(c.fields)) {
       const rel = f.relation;
       if (!rel) continue;
+      if (isToMany(rel)) continue; // the to-many form is checked against the target, in ConfigSchema
 
       const on = c.fields[rel.on];
       if (!on) {

@@ -6,7 +6,7 @@ import type { MaskConfig } from "../config/schema";
 import { dataSchema } from "../config/collection";
 import { aclPredicate } from "../acl/sql";
 import type { RelationDef } from "../config/schema";
-import { readPosture } from "../config/schema";
+import { readPosture, isToMany } from "../config/schema";
 
 // A filter the builder can express no SQL for. Distinct from the generic Error below so the
 // broker can answer `invalid_intent` — a caller's mistake — rather than `internal_error`.
@@ -90,6 +90,10 @@ export function buildSelect(
     targetHasAcl?: (collection: string) => boolean;
     // The `fk` string of a local field, for resolving which TARGET column a relation joins to.
     fkOf?: (field: string) => string | null;
+    // The host collection's own declared primary key, for a to-many relation's back-reference
+    // join (`rel.<via> = base.<hostPk>`). A to-one relation never reads this — it joins on its
+    // own `on` field instead. Supplied by the read verbs via `pkOf(c)`.
+    hostPk?: string;
     // The caller's principal set, for a relation's TARGET — deliberately separate from
     // `aclPrincipals` above, which is gated on the HOST collection's own `acl: true` and must stay
     // genuinely absent when the host has no `_acl` column for the top-level predicate to compare
@@ -127,11 +131,13 @@ export function buildSelect(
       (f) => {
         const rel = opts.relationFor?.(f) ?? null;
         if (rel) {
+          if (isToMany(rel))
+            return relationExpr(env, f, rel, "id", opts.hostPk ?? "id", param, opts);
           // `fk: clients.id` → join against `clients.id`. The config rule has already checked
           // that the fk names this relation's collection, so the split is safe.
           const fk = opts.fkOf?.(rel.on) ?? null;
           const targetColumn = fk ? (fk.split(".")[1] ?? "id") : "id";
-          return relationExpr(env, f, rel, targetColumn, param, opts);
+          return relationExpr(env, f, rel, targetColumn, opts.hostPk ?? "id", param, opts);
         }
         const mask = opts.maskFor?.(f) ?? null;
         return mask ? maskExpr(f, mask, param) : q(f);
@@ -323,7 +329,8 @@ export function buildSelect(
 }
 
 /**
- * A to-one relation, as a correlated scalar subquery over the TARGET'S VIEW.
+ * A relation, as a correlated subquery over the TARGET'S VIEW — a scalar object for a to-one
+ * relation, an ordered and capped array for a to-many one.
  *
  * Reading `v_<target>` rather than the target's table is the whole safety argument, and it is
  * three properties rather than one:
@@ -339,19 +346,20 @@ export function buildSelect(
  * the postures the host declared. The ACL is not a grant — it is a property of the document — so
  * skipping it would make a relation the way around one.
  *
- * `base` is the outer alias. Without it, `base."<on>"` would be an unqualified reference that
- * binds to the outer document only until the target grows a column of the same name.
- *
- * Built so a second cardinality (to-many) can be added later without restructuring: the masked
- * sub-column list and the ACL predicate are each built once, and only the final shape — a single
- * correlated object vs. a correlated array — would differ for that case.
+ * `base` is the outer alias. Without it, `base."<on>"`/`base."<hostPk>"` would be unqualified
+ * references that bind to the outer document only until the target grows a column of the same
+ * name.
  */
 function relationExpr(
   env: "dev" | "live",
   field: string,
   rel: RelationDef,
-  /** The TARGET column to join against — the column half of the host field's `fk`, never `on`. */
+  /** The TARGET column to join against for a to-one relation — the column half of the host
+   *  field's `fk`, never `on`. Unused for a to-many relation, which joins on `rel.via` instead. */
   targetColumn: string,
+  /** The host collection's own declared primary key. Unused for a to-one relation, which joins on
+   *  its own `on` field instead. */
+  hostPk: string,
   param: (v: unknown) => string,
   opts: {
     relationPrincipals?: string[] | undefined;
@@ -361,12 +369,36 @@ function relationExpr(
   const target = `${dataSchema(env)}.v_${rel.collection}`;
   // Bare identifiers, not `rel.`-prefixed: `rel` is the only relation inside the inner select,
   // so every unqualified name resolves to it — including the `"_acl"` that aclPredicate emits.
-  // The one reference that must be qualified is `base.<on>`, which reaches OUT to the host
-  // document, and it is.
+  // The one reference that must be qualified is `base.<on>`/`base.<hostPk>`, which reaches OUT to
+  // the host document, and it is.
   const subCols = Object.entries(rel.select).map(([name, def]) => {
     const mask = readPosture(def) === "mask" ? (def.mask ?? null) : null;
     return mask ? maskExpr(name, mask, param) : q(name);
   });
+
+  if (isToMany(rel)) {
+    // `coalesce(..., '[]')` so "no related documents" is an empty array rather than null — the
+    // two mean different things to a caller, and null would read as "not resolved".
+    //
+    // Ordered INSIDE the aggregate, not outside: this is what makes the truncation meaningful,
+    // and the inner LIMIT is what keeps one host document from pulling an unbounded number of
+    // target documents. `rel.limit` is interpolated rather than bound because it is a
+    // config-validated integer that has been through zod's `.int().positive().max()` — the same
+    // argument this file already makes for `limit`/`offset` in buildSelect.
+    const where = [`rel.${q(rel.via)} = base.${q(hostPk)}`];
+    if (opts.targetHasAcl?.(rel.collection) && opts.relationPrincipals)
+      where.push(aclPredicate(param(opts.relationPrincipals)));
+    const dir = rel.order.dir === "desc" ? "desc" : "asc";
+    return (
+      `(select coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb) from (` +
+      `select ${subCols.join(", ")} from ${target} rel` +
+      ` where ${where.join(" and ")}` +
+      ` order by rel.${q(rel.order.field)} ${dir}` +
+      ` limit ${rel.limit}` +
+      `) r) as ${q(field)}`
+    );
+  }
+
   const where = [`rel.${q(targetColumn)} = base.${q(rel.on)}`];
   if (opts.targetHasAcl?.(rel.collection) && opts.relationPrincipals)
     where.push(aclPredicate(param(opts.relationPrincipals)));

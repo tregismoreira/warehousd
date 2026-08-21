@@ -188,6 +188,16 @@ collections:
             industry: { posture: allow }
             primary_contact_email:
               { posture: { read: mask, write: deny }, mask: { transform: domain } }
+      time_entries:
+        posture: allow
+        relation:
+          collection: time_entries
+          via: matter_id
+          select:
+            entry_date: { posture: allow }
+            hours: { posture: allow }
+          limit: 50
+          order: { field: entry_date, dir: desc }
       responsible_attorney_id: { type: uuid, posture: allow, fk: people.id }
       responsible_attorney_name:
         {
