@@ -33,9 +33,9 @@ alter table app.workspaces add column if not exists created_by_key uuid referenc
 alter table app.workspaces add column if not exists created_at timestamptz not null default now();
 
 -- DELETE /v1/platform/workspaces/{id} (platform-context.ts) is the first thing that ever deletes
--- a row from this table, and three FKs from 0001-init.ts (renamed by 0008) were never built for
--- that: none carries ON DELETE CASCADE, so a workspace with so much as one grant, client policy,
--- or audit row would fail the delete outright.
+-- a row from this table, and three FKs from 0001-init.ts were never built for that: none carries
+-- ON DELETE CASCADE, so a workspace with so much as one grant, client policy, or audit row would
+-- fail the delete outright.
 --
 -- audit_events is different in kind, not just missing a clause. It is append-only and unprunable
 -- by the application on purpose (docs/architecture.md, "Pruning is a superuser action") — letting
@@ -47,8 +47,8 @@ alter table app.workspaces add column if not exists created_at timestamptz not n
 --
 -- grants and client_policies are current-state access configuration with no reason to outlive the
 -- workspace — cascading them is what makes "delete the tenant" actually delete it. collections is
--- config-defined and global to the deployment (0001-init.ts's own comment on org_id there), so its
--- workspace_id is always 'default' in practice; cascaded here anyway for consistency.
+-- config-defined and global to the deployment (0001-init.ts's own comment on workspace_id there),
+-- so its workspace_id is always 'default' in practice; cascaded here anyway for consistency.
 alter table app.audit_events drop constraint if exists audit_events_workspace_fk;
 
 alter table app.grants drop constraint if exists grants_workspace_fk;
