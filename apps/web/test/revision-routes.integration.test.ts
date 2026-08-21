@@ -148,4 +148,61 @@ describe("revision REST endpoints", () => {
     );
     expect(res.status).toBe(401);
   });
+  // Revert, through the route rather than the verb. The 200/202/204 mapping is the route's own
+  // (lib/rest.ts `mutationStatus`), and the broker cannot pin it: `revertDocument` returns a
+  // status string, and a route that mapped `noop` to 200 with a body would still pass every
+  // broker test while telling a client something untrue.
+  it("POST .../revisions/{rev}/revert appends a revision and answers 200", async () => {
+    const { POST } =
+      await import("../app/v1/collections/[c]/documents/[id]/revisions/[rev]/revert/route");
+    const res = await POST(
+      new Request(
+        `http://localhost:8722/v1/collections/matter_tasks/documents/${docId}/revisions/${revId}/revert`,
+        { method: "POST", headers: bearer(token) },
+      ) as any,
+      { params: Promise.resolve({ c: "matter_tasks", id: docId, rev: revId }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe("applied");
+    // Appended, never rewound: the document now has three revisions, not two.
+    const { GET: listRevisions } =
+      await import("../app/v1/collections/[c]/documents/[id]/revisions/route");
+    const listed = await listRevisions(
+      new Request(
+        `http://localhost:8722/v1/collections/matter_tasks/documents/${docId}/revisions`,
+        { headers: bearer(token) },
+      ) as any,
+      { params: Promise.resolve({ c: "matter_tasks", id: docId }) },
+    );
+    expect((await listed.json()).revisions.length).toBe(3);
+  });
+
+  it("reverting to the revision the document is already at answers 204 with no body", async () => {
+    const { POST } =
+      await import("../app/v1/collections/[c]/documents/[id]/revisions/[rev]/revert/route");
+    // The previous test just reverted to revId, so the current state already IS revId's.
+    const res = await POST(
+      new Request(
+        `http://localhost:8722/v1/collections/matter_tasks/documents/${docId}/revisions/${revId}/revert`,
+        { method: "POST", headers: bearer(token) },
+      ) as any,
+      { params: Promise.resolve({ c: "matter_tasks", id: docId, rev: revId }) },
+    );
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe("");
+  });
+
+  it("revert returns 401 without a bearer token", async () => {
+    const { POST } =
+      await import("../app/v1/collections/[c]/documents/[id]/revisions/[rev]/revert/route");
+    const res = await POST(
+      new Request(
+        `http://localhost:8722/v1/collections/matter_tasks/documents/${docId}/revisions/${revId2}/revert`,
+        { method: "POST" },
+      ) as any,
+      { params: Promise.resolve({ c: "matter_tasks", id: docId, rev: revId2 }) },
+    );
+    expect(res.status).toBe(401);
+  });
 });
