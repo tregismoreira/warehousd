@@ -1,14 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { setupWebDbWithData } from "./helpers/web-db";
-import {
-  upsertClientPolicy,
-  approveGrant,
-  requestGrant,
-  createClientSecret,
-  loadConfig,
-  type WarehousdConfig,
-} from "@warehousd/broker";
+import { approveGrant, requestGrant, loadConfig, type WarehousdConfig } from "@warehousd/broker";
+import { withStack, bearer, mintHeadlessToken, type Stack } from "./helpers/stack";
 import { getAppPool } from "../app/lib/broker";
 
 const harborDir = new URL("../../../examples/harbor", import.meta.url).pathname;
@@ -20,48 +12,11 @@ const harborCfg: WarehousdConfig = loadConfig(harborDir);
 // directly) cannot pin — a route change that stops forwarding `after` would still pass every
 // broker test.
 describe("POST /v1/collections/{c}/query — keyset pagination over HTTP", () => {
-  let db: Awaited<ReturnType<typeof setupWebDbWithData>>;
-  let admin: Pool;
+  let stack: Stack;
   let walkerToken: string;
 
-  async function mintHeadlessToken(clientName: string, robotUserId: string) {
-    const app = getAppPool();
-    const reg = await db.auth.api.registerMcpClient({
-      body: { redirect_uris: ["http://localhost:9999/callback"], client_name: clientName },
-      asResponse: true,
-    } as any);
-    const { client_id } = await reg.json();
-    await upsertClientPolicy(app, client_id, clientName, ["env:dev"]);
-    await app.query(
-      `update app.client_policies set mode='headless', robot_user_id=$1 where client_id=$2`,
-      [robotUserId, client_id],
-    );
-    const { secret } = await createClientSecret(
-      app,
-      client_id,
-      "default",
-      new Date(Date.now() + 86_400_000),
-      "test",
-    );
-
-    const { POST } = await import("../app/v1/token/route");
-    const tokenReq = new Request("http://localhost:8722/v1/token", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id,
-        client_secret: secret,
-        scope: "env:dev",
-      }).toString(),
-    });
-    const res = await POST(tokenReq as any);
-    return (await res.json()).access_token as string;
-  }
-
   beforeAll(async () => {
-    db = await setupWebDbWithData("keysetpage");
-    admin = new Pool({ connectionString: db.appUrl, max: 4 });
+    stack = await withStack("keysetpage");
     const app = getAppPool();
 
     // "clients" (examples/harbor/warehousd.yml): 150 synthetic documents, a declared pk (`id`)
@@ -78,18 +33,17 @@ describe("POST /v1/collections/{c}/query — keyset pagination over HTTP", () =>
     });
     await approveGrant(app, harborCfg, walkerGrant, "admin", { verbs: ["read"] });
 
-    walkerToken = await mintHeadlessToken("Walker Client", "marcus");
+    walkerToken = await mintHeadlessToken(stack.db, "Walker Client", "marcus");
   }, 60_000);
 
   afterAll(async () => {
-    await admin?.end();
-    await db?.end();
+    await stack?.end();
   });
 
   function queryReq(body: unknown, token: string) {
     return new Request("http://localhost:8722/v1/collections/clients/query", {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      headers: { "content-type": "application/json", ...bearer(token) },
       body: JSON.stringify(body),
     });
   }
@@ -100,7 +54,7 @@ describe("POST /v1/collections/{c}/query — keyset pagination over HTTP", () =>
   }
 
   it("walks the whole collection exactly once, following `after`/`nextCursor` alone", async () => {
-    const expected = await admin.query(`select id from data_synth.clients`);
+    const expected = await stack.admin.query(`select id from data_synth.clients`);
     const expectedIds = new Set(expected.rows.map((r) => r.id as string));
     expect(expectedIds.size).toBeGreaterThan(20); // enough for several pages of 20
 

@@ -6,6 +6,8 @@ import * as searchRoute from "../app/v1/collections/[c]/search/route";
 import * as documentsRoute from "../app/v1/collections/[c]/documents/route";
 import * as documentDetailRoute from "../app/v1/collections/[c]/documents/[id]/route";
 import * as revisionsRoute from "../app/v1/collections/[c]/documents/[id]/revisions/route";
+import * as revisionRoute from "../app/v1/collections/[c]/documents/[id]/revisions/[rev]/route";
+import * as revisionDiffRoute from "../app/v1/collections/[c]/documents/[id]/revisions/diff/route";
 import * as aclRoute from "../app/v1/collections/[c]/documents/[id]/acl/route";
 import * as changesRoute from "../app/v1/changes/route";
 import * as proposalsRoute from "../app/v1/proposals/route";
@@ -44,6 +46,14 @@ describe("REST routes: handler exports", () => {
 
   test("GET /v1/collections/{c}/documents/{id}/revisions exports GET", () => {
     expect(typeof revisionsRoute.GET).toBe("function");
+  });
+
+  test("GET /v1/collections/{c}/documents/{id}/revisions/{rev} exports GET", () => {
+    expect(typeof revisionRoute.GET).toBe("function");
+  });
+
+  test("GET /v1/collections/{c}/documents/{id}/revisions/diff exports GET", () => {
+    expect(typeof revisionDiffRoute.GET).toBe("function");
   });
 
   test("GET /v1/collections/{c}/documents/{id}/acl exports GET, PUT, DELETE", () => {

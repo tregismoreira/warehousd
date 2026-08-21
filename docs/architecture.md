@@ -357,6 +357,12 @@ grant select on data_live.pages to warehousd_live_write;   -- concurrency checks
 
 If `DEV_WRITE_DATABASE_URL` / `LIVE_WRITE_DATABASE_URL` are unset there is no mutation path at all, which is the safer default.
 
+Reading a past revision applies the grant and the postures **as they are now**, never as they were when the revision was written. A field that was `allow` a year ago and is `deny` today is absent from its own history. The alternative — storing the policy alongside each revision and replaying it — would mean a posture change silently failed to take effect on everything already recorded, which is the opposite of what changing one is for.
+
+A masked field is masked on both sides of a diff, in the statement, through the same `maskExpr` the read path uses. Two revisions of a `last4` field therefore render identically even when the value moved. That is the same trade masking already makes for filters and ordering: a caller who can bisect a masked value can recover it, so the raw value is never fetched.
+
+Which fields a revision is recorded as having touched is filtered by the caller's grant. `_rev_fields` holds every column a revision wrote; returning it verbatim would disclose the names of fields the caller cannot read, inside a response they are otherwise entitled to.
+
 ## The write path: `broker.mutate`
 
 ```ts

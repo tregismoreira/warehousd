@@ -185,6 +185,8 @@ Questions a consumer building against the surfaces above tends to ask, answered 
 
 Hard purge is deferred by decision, and the constraint it puts on everything that lands before it — no new place content or derived vectors come to rest — bears directly on the transports above: an outbox (§6) carries identifiers only, and a push channel that carried content would be a new resting place as well as a leak. [docs/roadmap.md](roadmap.md#planned) holds the item and the inventory of what a purge would have to find.
 
+Reading a revision and diffing two (`getRevision`, `diffRevisions`) add no resting place either: both project columns that already rest in the collection's own table, so a purge that removed a document's revisions would remove what they read, with no second place to sweep.
+
 ## Also see
 
 - [docs/roadmap.md](roadmap.md) — SSE and outbound notification channels under Planned, the event-bus verdict under Not planned.

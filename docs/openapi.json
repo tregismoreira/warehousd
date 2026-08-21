@@ -1357,6 +1357,230 @@
         }
       }
     },
+    "/v1/collections/{c}/documents/{id}/revisions/diff": {
+      "get": {
+        "operationId": "diffRevisions",
+        "summary": "The fields that moved between two revisions of a document.",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "description": "The earlier revision id.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "description": "The later revision id.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The field changes.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RevisionDiffResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, field_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_denied", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "enum": ["not_found", "unknown_collection"] }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collections/{c}/documents/{id}/revisions/{rev}": {
+      "get": {
+        "operationId": "getRevision",
+        "summary": "One past revision of a document, projected through the caller's current grant.",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "description": "Collection name.",
+            "schema": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The primary key on a dataset collection, or the url-encoded path on a file collection.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "rev",
+            "in": "path",
+            "required": true,
+            "description": "Revision id, from listRevisions.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The revision.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RevisionDocumentResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Refusal: invalid_intent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["invalid_intent"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "const": "unauthenticated" } },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refusal: no_grant, expired_grant, field_denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["expired_grant", "field_denied", "no_grant"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refusal: unknown_collection, not_found, unknown_field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["not_found", "unknown_collection", "unknown_field"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Refusal: internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "error": { "type": "string", "enum": ["internal_error"] } },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/collections/{c}/query": {
       "post": {
         "operationId": "queryCollection",
@@ -2718,6 +2942,12 @@
         "required": ["ok", "documentId", "rev", "auditId"],
         "additionalProperties": false
       },
+      "FieldChange": {
+        "type": "object",
+        "properties": { "field": { "type": "string" }, "before": {}, "after": {} },
+        "required": ["field", "before", "after"],
+        "additionalProperties": false
+      },
       "GetDocumentResultOk": {
         "type": "object",
         "properties": {
@@ -2907,6 +3137,55 @@
           "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
         },
         "required": ["ok", "proposals", "auditId"],
+        "additionalProperties": false
+      },
+      "RevisionDiffResponse": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "field": { "type": "string" }, "before": {}, "after": {} },
+              "required": ["field", "before", "after"],
+              "additionalProperties": false
+            }
+          },
+          "fieldsReturned": { "type": "array", "items": { "type": "string" } },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "from", "to", "changes", "fieldsReturned", "auditId"],
+        "additionalProperties": false
+      },
+      "RevisionDocumentResponse": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "revision": {
+            "type": "object",
+            "properties": {
+              "rev": { "type": "string" },
+              "seq": { "type": "number" },
+              "at": { "type": "string" },
+              "by": { "type": "string" },
+              "op": { "type": "string" },
+              "status": { "type": "string" },
+              "document": {
+                "type": "object",
+                "propertyNames": { "type": "string" },
+                "additionalProperties": {}
+              }
+            },
+            "required": ["rev", "seq", "at", "by", "op", "status", "document"],
+            "additionalProperties": false
+          },
+          "fieldsReturned": { "type": "array", "items": { "type": "string" } },
+          "auditId": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["ok", "revision", "fieldsReturned", "auditId"],
         "additionalProperties": false
       },
       "RevisionsResponse": {

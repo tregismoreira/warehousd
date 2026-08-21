@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { ColumnDef } from "@tanstack/react-table";
-import { KeyRound, Loader2, Plus, Search, Table2, Trash2 } from "lucide-react";
+import { History, KeyRound, Loader2, Plus, Search, Table2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -224,13 +225,44 @@ export function DataBrowser({
 
   const columns: ColumnDef<Row, unknown>[] = useMemo(() => {
     const cols = result?.ok ? result.fieldsReturned : [];
-    return cols.map((name) => ({
+    const fieldCols: ColumnDef<Row, unknown>[] = cols.map((name) => ({
       id: name,
       header: name,
       accessorFn: (row: Row) => row[name],
       cell: ({ row }) => <Cell value={row.original[name]} />,
     }));
-  }, [result]);
+
+    // Revision history exists only for a document with a declared pk (a dataset collection) —
+    // a file collection's identity is `path`, which has no revision history to link to.
+    const pkField = detail.fields.find((f) => f.pk)?.name;
+    if (!pkField) return fieldCols;
+
+    const historyCol: ColumnDef<Row, unknown> = {
+      id: "_history",
+      header: "",
+      cell: ({ row }) => {
+        const docId = row.original[pkField];
+        if (docId === null || docId === undefined) return null;
+        // A primary key is a string or a number; a pk of any other declared type would still
+        // need to round-trip through the URL, and JSON.stringify is the only safe way to do
+        // that for a shape String() cannot be trusted to render meaningfully.
+        const docIdStr =
+          typeof docId === "string" || typeof docId === "number"
+            ? String(docId)
+            : JSON.stringify(docId);
+        return (
+          <Link
+            href={`/admin/collections/${detail.name}/documents/${encodeURIComponent(docIdStr)}/history`}
+            aria-label="Revision history"
+            title="Revision history"
+          >
+            <History className="h-4 w-4" />
+          </Link>
+        );
+      },
+    };
+    return [...fieldCols, historyCol];
+  }, [result, detail.fields, detail.name]);
 
   if (!detail.grant)
     return (

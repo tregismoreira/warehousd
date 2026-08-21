@@ -16,6 +16,8 @@ The machine-readable contract is [`docs/openapi.json`](openapi.json), generated 
 | PUT | `/v1/collections/{c}/documents/{id}` | Update a document; `If-Match: "{rev}"` for optimistic concurrency |
 | DELETE | `/v1/collections/{c}/documents/{id}` | Delete a document |
 | GET | `/v1/collections/{c}/documents/{id}/revisions` | Revision history of one document |
+| GET | `/v1/collections/{c}/documents/{id}/revisions/{rev}` | One past revision, projected through the caller's current grant and postures |
+| GET | `/v1/collections/{c}/documents/{id}/revisions/diff?from=&to=` | The fields that moved between two revisions |
 | GET | `/v1/collections/{c}/documents/{id}/acl` | The document's ACL; empty principals means public within the grant. `{id}` is the primary key on a dataset and the url-encoded `path` on a file collection |
 | PUT | `/v1/collections/{c}/documents/{id}/acl` | Replace the ACL (`{"principals":["user:…","group:…"]}`); an empty list removes it |
 | DELETE | `/v1/collections/{c}/documents/{id}/acl` | Remove the ACL — the document is public within the grant again |
@@ -29,6 +31,10 @@ The machine-readable contract is [`docs/openapi.json`](openapi.json), generated 
 | POST | `/v1/grants` | Request access to a collection |
 
 **There is deliberately no `GET /v1/proposals/{id}`.** `listProposals` returns no field values, so reading the *proposed content* of a single proposal is a separate, more privileged call — `broker.getProposal`, reachable only through the console's session route `GET /api/proposals/{id}`. Reviewing proposed content is a console-only surface. Exposing it over `/v1` would be a new public API commitment rather than a gap to close, so it is left to its own decision.
+
+### Revision history
+
+Revision reads apply the grant and the postures **as they are now**, not as they were when the revision was written. A field that was readable last year and is denied today is absent from its own history, and a masked field is masked on both sides of a diff — so a diff of a masked field can read as unchanged even when the value moved. Both follow from the same rule the read path applies: a masked value is never fetched, because a caller who could bisect it could recover it.
 
 ### Pagination
 

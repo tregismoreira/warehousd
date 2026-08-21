@@ -32,7 +32,7 @@ export function makeBroker(
   const mutate = makeMutateVerb(deps);
   const { approveProposal, rejectProposal, listProposals, getProposal, decideProposals } =
     makeProposeVerbs(deps);
-  const { changes, listRevisions } = makeHistoryVerbs(deps);
+  const { changes, listRevisions, getRevision, diffRevisions } = makeHistoryVerbs(deps);
   // Not grant verbs, and not MCP tools: managing an ACL is authorised against the caller's
   // standing (console role, or the client's can_manage_acl flag), never against a grant. See
   // acl/manage.ts.
@@ -56,6 +56,8 @@ export function makeBroker(
     decideProposals,
     changes,
     listRevisions,
+    getRevision,
+    diffRevisions,
     explainAccess,
     getProposal,
     getDocumentAcl,
