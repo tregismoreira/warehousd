@@ -7,6 +7,7 @@ import { WRITABLE_RULES } from "./writable";
 import { ACL_RULES } from "./acl";
 import { SOURCE_REF_RULES } from "./source-ref";
 import { MASK_RULES } from "./mask";
+import { INDEX_RULES } from "./indexes";
 // Kind-specific rules come from the kind registry rather than from a second list here, so a new
 // kind cannot arrive with rules that nothing runs. See config/kinds/.
 import { kindRules } from "../kinds";
@@ -40,6 +41,7 @@ export function collectionRules(): CollectionRule[] {
     ...VIEW_JOIN_RULES,
     ...kindRules(),
     ...SEARCHABLE_RULES,
+    ...INDEX_RULES,
     ...WRITABLE_RULES,
     ...ACL_RULES,
     ...SOURCE_REF_RULES,
@@ -69,3 +71,4 @@ export { ACL_RULES } from "./acl";
 export { SOURCE_REF_RULES } from "./source-ref";
 export { IMPORT_RULES } from "./import";
 export { MASK_RULES } from "./mask";
+export { INDEX_RULES } from "./indexes";

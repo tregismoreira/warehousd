@@ -1,6 +1,7 @@
 import type { WarehousdConfig } from "../config/schema";
 import type { Queryable } from "../db/queryable";
 import { declaredTables, declaredPkField, type DeclaredColumn } from "./ddl";
+import { indexName } from "../config/collection";
 
 /**
  * What separates a change `applyConfig` can make on its own from one that needs a human.
@@ -12,7 +13,16 @@ import { declaredTables, declaredPkField, type DeclaredColumn } from "./ddl";
  * column does not have. This module is the part that notices.
  */
 export type ChangeKind =
-  "add_column" | "type_change" | "drop_column" | "pk_change" | "drop_collection";
+  | "add_column"
+  | "type_change"
+  | "drop_column"
+  | "pk_change"
+  | "drop_collection"
+  // An index holds no data, so neither of these is `destructive`. `drop_index` is still
+  // `reviewRequired`: dropping one discards nothing but does change query plans, and `apply`
+  // is additive by contract — it must not remove something it did not just create.
+  | "add_index"
+  | "drop_index";
 
 export type SchemaChange = {
   collection: string;
@@ -209,6 +219,30 @@ async function reflectPk(db: Queryable): Promise<Map<string, string>> {
 }
 
 /**
+ * Every config-owned index that exists, keyed `schema.table`.
+ *
+ * Filtered to the `_ix_` infix that `indexName` stamps on. That filter is the whole safety
+ * property: an index an operator created in `<project>/migrations/*.sql`, and every structural
+ * index the DDL emits (`%_current_idx`, `%_tsv_idx`, `%_history_idx`, the taxonomy GINs, the
+ * embedding HNSW), carries no `_ix_` and is therefore invisible here — so the planner can never
+ * propose dropping one.
+ */
+async function reflectIndexes(db: Queryable): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  const r = await db.query<{ schemaname: string; tablename: string; indexname: string }>(
+    `select schemaname, tablename, indexname from pg_indexes
+      where schemaname in ('data_synth','data_live') and indexname like '%\\_ix\\_%'`,
+  );
+  for (const row of r.rows) {
+    const key = `${row.schemaname}.${row.tablename}`;
+    const set = out.get(key);
+    if (set) set.add(row.indexname);
+    else out.set(key, new Set([row.indexname]));
+  }
+  return out;
+}
+
+/**
  * Compare the config against the database as it actually is. Authoritative — this is what
  * `applyConfig` acts on, and the only producer that can see a column whose type drifted without
  * any config change to explain it.
@@ -216,6 +250,7 @@ async function reflectPk(db: Queryable): Promise<Map<string, string>> {
 export async function planFromSchema(db: Queryable, cfg: WarehousdConfig): Promise<SchemaChange[]> {
   const actual = await reflectColumns(db);
   const pks = await reflectPk(db);
+  const indexes = await reflectIndexes(db);
   const changes: SchemaChange[] = [];
 
   const byTable = new Map<string, ActualColumn[]>();
@@ -269,6 +304,48 @@ export async function planFromSchema(db: Queryable, cfg: WarehousdConfig): Promi
             using: null,
             detail: `${collection} identifies documents by ${havePk} in the database and by ${wantPk} in warehousd.yml`,
           });
+
+        // Indexes belong to the collection's own table. A file collection's `__files` and
+        // `__documents` carry only structural indexes, so there is nothing to diff there.
+        if (decl.table === collection) {
+          const want = new Map(
+            (cfg.collections[collection]?.indexes ?? []).map((i) => [
+              indexName(collection, i.fields),
+              i,
+            ]),
+          );
+          const have = indexes.get(`${schema}.${decl.table}`) ?? new Set<string>();
+          for (const name of want.keys())
+            if (!have.has(name))
+              changes.push({
+                collection,
+                env,
+                table: decl.table,
+                kind: "add_index",
+                field: null,
+                from: null,
+                to: name,
+                destructive: false,
+                reviewRequired: false,
+                using: null,
+                detail: `${name} is declared in warehousd.yml and does not exist in ${schema}`,
+              });
+          for (const name of have)
+            if (!want.has(name))
+              changes.push({
+                collection,
+                env,
+                table: decl.table,
+                kind: "drop_index",
+                field: null,
+                from: name,
+                to: null,
+                destructive: false,
+                reviewRequired: true,
+                using: null,
+                detail: `${schema}.${name} exists but is no longer declared in warehousd.yml`,
+              });
+        }
       }
     }
   }

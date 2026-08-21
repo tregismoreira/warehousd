@@ -282,6 +282,22 @@ export const ImportSchema = z
   .strict();
 export type ImportConfig = z.infer<typeof ImportSchema>;
 
+/**
+ * A declared index on a dataset collection.
+ *
+ * Btree only, and never unique. A unique index on a revisioned table would have to be partial on
+ * `_current` to mean anything, and `applyConfig` cannot safely add a data constraint to a
+ * collection that already holds documents — that is a `warehousd migrate` question, not an
+ * `apply` one. The declared primary key is appended by the DDL rather than written here, so an
+ * operator cannot omit the column keyset pagination needs.
+ */
+export const IndexSchema = z
+  .object({
+    fields: z.array(z.string().regex(IDENT)).min(1).max(4),
+  })
+  .strict();
+export type IndexDef = z.infer<typeof IndexSchema>;
+
 // The collection as the author wrote it: parsed and defaulted, but before the rules run and before
 // `.transform` normalises postures and fills types.
 //
@@ -297,6 +313,7 @@ export const CollectionBaseSchema = z
     source_live: z.string().optional(),
     source_ref: SourceRefSchema.optional(),
     taxonomies: z.array(z.string()).default([]), // vocabulary slugs — validated against `taxonomies` at ConfigSchema level
+    indexes: z.array(IndexSchema).default([]),
     writable: z.boolean().optional(), // opt-in to write path; verb support is structural
     // Per-document ACLs. Off unless a collection asks for them, because turning them on costs a
     // join on every read of the collection and a document with no ACL row is readable by anyone

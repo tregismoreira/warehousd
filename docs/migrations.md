@@ -19,6 +19,8 @@ Anything that cannot be expressed as "add a column":
 
 Adding a field, adding a collection, changing a posture, renaming a label: none of these touch stored values, and all of them apply on their own.
 
+Removing an `indexes:` entry is the one change that sits between the two. It strands nothing — an index holds no data — so it is not a breaking change, and yet it does not apply on its own either, because `apply` never drops what it did not just create and dropping an index changes query plans. `warehousd migrate plan` reports it as a `drop_index`, and `warehousd migrate generate` writes the `drop index concurrently` statement commented out for someone to read before running.
+
 ## dev and live are not treated the same
 
 `data_synth` is a function of `(config, seed)`. It is truncated and regenerated on every boot, and file collections are re-indexed from their source directory — so warehousd rebuilds a synth table in place and says nothing. Iterating on your config locally has no ceremony at all.

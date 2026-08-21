@@ -121,3 +121,19 @@ export function nextDataRow(
 export function dataSchema(env: "dev" | "live"): "data_live" | "data_synth" {
   return env === "live" ? "data_live" : "data_synth";
 }
+
+/** Postgres truncates an identifier past this many bytes, which would make two declared indexes
+ *  collide silently. A config rule refuses instead. */
+export const MAX_IDENTIFIER_BYTES = 63;
+
+/**
+ * The name of a declared index.
+ *
+ * Deterministic, so `applyConfig` and the schema planner agree about which index a config entry
+ * refers to without storing a mapping. The `_ix_` infix is the ownership marker: `reflectIndexes`
+ * in apply/plan.ts considers only names carrying it, so an index an operator created by hand in
+ * `<project>/migrations/*.sql` can never be proposed for dropping.
+ */
+export function indexName(collection: string, fields: string[]): string {
+  return `${collection}_ix_${fields.join("_")}`;
+}
