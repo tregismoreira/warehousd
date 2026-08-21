@@ -36,8 +36,15 @@ test.describe("admin members", () => {
     await page.goto("/admin/members");
     await expect(page.getByRole("row", { name: /marcus@demo\.local/ })).toBeVisible();
 
+    // WorkspaceSwitcher updates its label optimistically and only then posts, so asserting on the
+    // label alone would let this test finish while the switch is still in flight — and ana's
+    // cookie jar is shared with every later spec in the shard. Wait for the write to land.
+    const switched = page.waitForResponse(
+      (r) => r.url().endsWith("/api/me/workspace") && r.request().method() === "POST",
+    );
     await page.getByRole("button", { name: "Default" }).click();
     await page.getByRole("menuitem", { name: "Second Co" }).click();
+    expect((await switched).status()).toBe(200);
     await expect(page.getByRole("button", { name: "Second Co" })).toBeVisible();
 
     // 'Second Co' carries no synthetic membership beyond ana herself — marcus and mia belong
@@ -49,9 +56,15 @@ test.describe("admin members", () => {
     await expect(anaRow).toContainText("Admin");
 
     // ana's session is shared for the rest of the run (see `as()` in helpers/auth.ts) — switch
-    // back, or every later admin-persona test inherits 'Second Co' and its empty seed data.
+    // back, or every later admin-persona test inherits 'Second Co' and its empty seed data. This
+    // one matters more than the switch above: leaving it half-written is what turns one test into
+    // a shard full of failures that name the wrong thing.
+    const restored = page.waitForResponse(
+      (r) => r.url().endsWith("/api/me/workspace") && r.request().method() === "POST",
+    );
     await page.getByRole("button", { name: "Second Co" }).click();
     await page.getByRole("menuitem", { name: "Default" }).click();
+    expect((await restored).status()).toBe(200);
     await expect(page.getByRole("button", { name: "Default" })).toBeVisible();
   });
 

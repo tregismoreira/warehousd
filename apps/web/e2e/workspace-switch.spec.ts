@@ -39,8 +39,14 @@ test.describe("workspace switch", () => {
     // harbor's synthetic seed gives 'Default' real rows in every applied collection.
     await expect(departmentsRow.getByRole("cell").nth(3)).not.toHaveText("0");
 
+    // The switcher's label moves optimistically, before the POST it triggers has landed — so the
+    // label alone does not prove the active workspace actually changed server-side.
+    const switched = page.waitForResponse(
+      (r) => r.url().endsWith("/api/me/workspace") && r.request().method() === "POST",
+    );
     await page.getByRole("button", { name: "Default" }).click();
     await page.getByRole("menuitem", { name: "Second Co" }).click();
+    expect((await switched).status()).toBe(200);
 
     await expect(page.getByRole("button", { name: "Second Co" })).toBeVisible();
     // The switch reloads the server tree; the row is still there (config is global) but its
@@ -49,8 +55,12 @@ test.describe("workspace switch", () => {
 
     // ana's session is shared for the rest of the run (see `as()` in helpers/auth.ts) — switch
     // back, or every later admin-persona test inherits 'Second Co' and its empty seed data.
+    const restored = page.waitForResponse(
+      (r) => r.url().endsWith("/api/me/workspace") && r.request().method() === "POST",
+    );
     await page.getByRole("button", { name: "Second Co" }).click();
     await page.getByRole("menuitem", { name: "Default" }).click();
+    expect((await restored).status()).toBe(200);
     await expect(page.getByRole("button", { name: "Default" })).toBeVisible();
   });
 });
