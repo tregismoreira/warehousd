@@ -1,5 +1,25 @@
 import { Pool } from "pg";
 import { BASE, ADMIN, runDbName, cloneTemplate, templateName } from "./templates";
+import { onPoolError } from "../../src/db/pools";
+
+/**
+ * A `pg` Pool for a provisioned test database, with the idle-client error listener attached.
+ *
+ * `new Pool(...)` on its own is a liability here, for the reason `onPoolError` documents in
+ * src/db/pools.ts: pg reports a failure on an *idle* client through the pool's `error` event, and
+ * an EventEmitter with no listener for `error` throws. The sweep in helpers/templates.ts drops a
+ * stale clone with `drop database ... with (force)`, which terminates whatever is still attached
+ * to it — so a pool left open past its own `afterAll` turns a routine cleanup into an uncaught
+ * `57P01` that fails the whole run while every test in it passed.
+ *
+ * The pools `createPools()` hands out have carried this listener all along. Pools a test builds
+ * by hand did not, which is the gap this closes.
+ */
+export function adminPool(connectionString: string, name = "test-admin"): Pool {
+  const pool = new Pool({ connectionString });
+  pool.on("error", onPoolError(name));
+  return pool;
+}
 
 // Roles are cluster-global, so they outlive a cached template. bootstrap.test.ts rotates
 // warehousd_dev's password and puts it back in a finally; a crash in between would otherwise
