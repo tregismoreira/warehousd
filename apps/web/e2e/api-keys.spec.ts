@@ -24,11 +24,21 @@ async function createKey(page: Page, name: string, robot: string, ceiling?: stri
 }
 
 // Row actions live behind an icon-only dropdown trigger, so "Manage" is a menuitem.
+//
+// Opening is retried rather than clicked once. The trigger is visible and enabled as soon as the
+// server-rendered row paints, which is before React has attached its handler — so a click that
+// Playwright considers perfectly actionable can land on nothing and open no menu, and the wait for
+// "Manage" then burns the whole per-test budget. This is reachable from any caller, but the one
+// that hit it follows `page.reload()`, which is where the hydration gap is widest.
 async function openKey(page: Page, name: string) {
   const row = page.getByRole("row", { name: new RegExp(name) });
   await expect(row).toBeVisible();
-  await row.getByRole("button").last().click();
-  await page.getByRole("menuitem", { name: "Manage" }).click();
+  const manage = page.getByRole("menuitem", { name: "Manage" });
+  await expect(async () => {
+    await row.getByRole("button").last().click();
+    await expect(manage).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+  await manage.click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
 }
 
