@@ -22,7 +22,12 @@ test.describe("data browser", () => {
     await expect(page.getByRole("checkbox", { name: "tax_id" })).toBeDisabled();
     await expect(page.getByRole("checkbox", { name: "name", exact: true })).toBeChecked();
 
+    // Gate on the query landing rather than racing it: the assertion timeout is a budget for the
+    // table to render, and spending it waiting for a governed read — broker, grant check, audit
+    // write — is how this failed on a loaded machine while passing in isolation.
+    const query = page.waitForResponse((r) => r.url().includes("/api/collections/vendors/query"));
     await page.getByRole("button", { name: "Run query" }).click();
+    expect((await query).status()).toBe(200);
 
     await expect(page.getByRole("columnheader", { name: "name", exact: true })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "tax_id" })).toHaveCount(0);
@@ -33,7 +38,11 @@ test.describe("data browser", () => {
   test("paging moves through the result a page at a time", async ({ page }) => {
     await page.goto("/admin/collections/people");
     await page.getByRole("tab", { name: "Data" }).click();
+    const firstPage = page.waitForResponse((r) =>
+      r.url().includes("/api/collections/people/query"),
+    );
     await page.getByRole("button", { name: "Run query" }).click();
+    expect((await firstPage).status()).toBe(200);
 
     // harbor generates forty people; the default page is twenty-five.
     await expect(page.getByText(/^Documents 1–25/)).toBeVisible();
@@ -68,7 +77,11 @@ test.describe("data browser", () => {
     await page.getByRole("tab", { name: "Data" }).click();
 
     await page.getByLabel("Search").fill("remote");
+    // A file collection searches rather than queries, so match the collection rather than the
+    // verb — semantic search is the slowest read on this page and the one most worth gating on.
+    const search = page.waitForResponse((r) => r.url().includes("/api/collections/policies/"));
     await page.getByRole("button", { name: "Run query" }).click();
+    expect((await search).status()).toBe(200);
 
     await expect(page.getByRole("columnheader", { name: "content" })).toBeVisible();
     await expect(page.getByText(/^Documents 1–/)).toBeVisible();
