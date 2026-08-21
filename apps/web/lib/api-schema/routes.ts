@@ -571,7 +571,7 @@ export const OPERATIONS: Operation[] = [
       {
         status: 200,
         schema: ChangesResponseSchema,
-        description: "Document mutations for this org/env.",
+        description: "Document mutations for this workspace/env.",
       },
     ],
     reasons: [...RESTRICTED],
