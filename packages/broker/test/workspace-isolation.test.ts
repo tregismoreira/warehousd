@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { createPools, withWorkspace, type Pools } from "../src/db/pools";
@@ -45,7 +45,7 @@ let broker: ReturnType<typeof makeBroker>;
 
 beforeAll(async () => {
   p = await provision("orgiso");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await admin.query(`insert into app.workspaces (id, name) values ($1,'B')`, [WORKSPACE_B]);
   await applyConfig(admin, cfg);
@@ -99,7 +99,7 @@ describe("workspace isolation", () => {
     );
     expect(text).not.toMatch(/workspace_id/);
 
-    const dev = new Pool({ connectionString: p.urls.dev });
+    const dev = testPool({ connectionString: p.urls.dev });
     // That exact statement, run with each workspace in scope, still separates the two rows.
     const a = await withWorkspace(dev, WORKSPACE_A, (c) => c.query(text, values));
     const b = await withWorkspace(dev, WORKSPACE_B, (c) => c.query(text, values));
@@ -109,7 +109,7 @@ describe("workspace isolation", () => {
   });
 
   it("with no workspace in scope the view returns nothing — the wall fails closed", async () => {
-    const dev = new Pool({ connectionString: p.urls.dev });
+    const dev = testPool({ connectionString: p.urls.dev });
     const r = await dev.query(`select full_name from data_synth.v_people`);
     await dev.end();
     expect(r.rowCount).toBe(0);

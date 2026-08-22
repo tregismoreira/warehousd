@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { makeCtx } from "./helpers/ctx";
 import { ConfigSchema } from "../src/config/schema";
 import { applyConfig, makeBroker, migrateApp, createPools } from "../src/index";
@@ -72,7 +72,7 @@ describe("revertDocument", () => {
 
   beforeAll(async () => {
     p = await provision("revert");
-    app = new Pool({ connectionString: p.urls.admin, max: 2 });
+    app = testPool({ connectionString: p.urls.admin, max: 2 });
     await migrateApp(app);
     await applyConfig(app, CONFIG);
     pools = createPools({

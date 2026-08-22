@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import type { BrokerContext } from "../src/types";
@@ -55,7 +55,7 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
 
 beforeAll(async () => {
   p = await provision("get-document");
-  app = new Pool({ connectionString: p.urls.admin });
+  app = testPool({ connectionString: p.urls.admin });
   await createAppSchema(app);
   await applyConfig(app, cfg);
   pools = createPools({

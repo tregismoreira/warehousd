@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { randomUUID } from "node:crypto";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import {
   createAppSchema,
   applyConfig,
@@ -100,7 +100,7 @@ async function seed(docs: typeof DOCS) {
 
 beforeAll(async () => {
   p = await provision("semsearch");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });

@@ -1,9 +1,9 @@
 import { it, expect, beforeAll, afterAll, vi, describe } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { createPools, type Pools } from "../src/db/pools";
@@ -35,7 +35,7 @@ const probes = allProbes.filter((p) => !p.surface || p.surface === "query");
 let p: Provisioned, admin: Pool, pools: Pools;
 beforeAll(async () => {
   p = await provision("probe");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   // plant canaries directly into denied columns
@@ -166,7 +166,7 @@ describe("document_filter bypass and hostile-q probes (design §8 test 4)", () =
 
   beforeAll(async () => {
     p2 = await provision("probe-doc");
-    db2 = new Pool({ connectionString: p2.urls.admin });
+    db2 = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(db2);
 
     const docCfg = ConfigSchema.parse({

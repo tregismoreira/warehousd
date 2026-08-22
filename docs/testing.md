@@ -217,6 +217,10 @@ The interesting ones, and where they live:
 
 - **The upload queue hashes before it sends, and skips what is already stored** (`apps/web/e2e/admin-documents.spec.ts`) — a real browser, because the claim is about the client: the plan request carries a WebCrypto digest per file and happens before any upload; re-selecting the same files issues **zero** upload requests; a folder keeps each file's relative path, so two same-named files in different directories stay two documents.
 
+- **The revision timeline lists history in order and masks what the caller cannot see** (`apps/web/e2e/revision-history.spec.ts`) — `matter_tasks` is harbor's only writable collection, and its seed has no document with a second revision, so the spec mints its own grant through the same request → approve API the console's grant lifecycle uses, then produces a create and an update through the real write path before reading the result back through the console: revisions come back oldest first, comparing two shows only the fields that moved between them, and narrowing the viewer's own grant to exclude a field makes it — and the value it held — disappear from both the revision list and the diff.
+
+- **The per-workspace Members page lists roles, follows the switcher, and is admin-only** (`apps/web/e2e/admin-members.spec.ts`) — the active workspace's members are listed with their workspace role; switching to `ana`'s other membership (seeded with no synthetic data of its own, same as `workspace-switch.spec.ts`) drops every member who does not belong to it; a manager — the closer boundary than a member, since everything else in the console already treats manager as privileged — cannot reach the page at all.
+
 ## What is still manual
 
 The Playwright suite covers every web surface. Four things are still checked by hand, because they need credentials or a product UI no test can drive:

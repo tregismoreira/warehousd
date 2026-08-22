@@ -1,6 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { tableDDL, viewDDL } from "../src/apply/ddl";
@@ -56,7 +55,7 @@ const REV_COLS = [
 describe("dataset revision DDL", () => {
   it("a writable: true dataset gets _rev*, _current, and the partial unique index", async () => {
     p = await provision("revisions-ddl");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, writableCfg);
 
@@ -95,7 +94,7 @@ describe("dataset revision DDL", () => {
 
   it("the partial unique index rejects a second current revision for one document", async () => {
     p = await provision("revisions-ddl");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, writableCfg);
 
@@ -136,7 +135,7 @@ describe("dataset revision DDL", () => {
 
   it("the view hides non-current and tombstoned revisions", async () => {
     p = await provision("revisions-ddl");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, writableCfg);
 
@@ -171,7 +170,7 @@ describe("dataset revision DDL", () => {
 
   it("applying twice is idempotent", async () => {
     p = await provision("revisions-ddl");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, writableCfg);
     await expect(applyConfig(db, writableCfg)).resolves.not.toThrow();
@@ -180,7 +179,7 @@ describe("dataset revision DDL", () => {
 
   it("applying over an existing table that predates revisions fails loudly", async () => {
     p = await provision("revisions-ddl");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     // A table created before every dataset was revisioned. `create table if not exists` is a
@@ -218,7 +217,7 @@ describe("file collection storage", () => {
 
   it("a writable file collection keeps its shape — append-only needs no revisions", async () => {
     p = await provision("revisions-ddl");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, fileCfg);
 

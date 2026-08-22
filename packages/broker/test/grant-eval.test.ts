@@ -1,6 +1,6 @@
 import { it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { loadActiveGrant } from "../src/grants/eval";
 import { makeCtx } from "./helpers/ctx";
@@ -14,7 +14,7 @@ afterAll(async () => {
 
 it("returns the active approved grant and null for revoked/expired", async () => {
   p = await provision("granteval");
-  db = new Pool({ connectionString: p.urls.admin });
+  db = testPool({ connectionString: p.urls.admin });
   await createAppSchema(db);
 
   await db.query(
@@ -42,7 +42,7 @@ it("returns the active approved grant and null for revoked/expired", async () =>
 
 it("loadActiveGrant returns documentFilters as array when set, empty array otherwise", async () => {
   p = await provision("granteval2");
-  db = new Pool({ connectionString: p.urls.admin });
+  db = testPool({ connectionString: p.urls.admin });
   await createAppSchema(db);
 
   await db.query(

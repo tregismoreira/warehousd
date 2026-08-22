@@ -3,8 +3,8 @@
 // about grants, clients and history, which is the half of the broker the data-path suites do not
 // reach.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import {
   createAppSchema,
   applyConfig,
@@ -43,7 +43,7 @@ let broker: ReturnType<typeof makeBroker>;
 
 beforeAll(async () => {
   p = await provision("control-plane-reads");
-  app = new Pool({ connectionString: p.urls.admin });
+  app = testPool({ connectionString: p.urls.admin });
   await createAppSchema(app);
   await applyConfig(app, cfg);
   pools = createPools({

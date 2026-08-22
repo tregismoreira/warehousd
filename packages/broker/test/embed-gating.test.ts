@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { ingestFile } from "../src/indexing/ingest";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { ConfigSchema } from "../src/config/schema";
@@ -36,7 +36,7 @@ describe("ingestFile: embedding gating (design test P2-2)", () => {
 
   it("re-indexing unchanged content triggers zero embedding calls, including a mere updatedAt change", async () => {
     p = await provision("embed-gating");
-    db = new Pool({ connectionString: p.urls.admin });
+    db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, docCfg);
 

@@ -1,6 +1,6 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import {
   createPlatformKey,
@@ -16,7 +16,7 @@ import {
 let p: Provisioned, admin: Pool;
 beforeAll(async () => {
   p = await provision("platformkeys");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
 });
 afterAll(async () => {

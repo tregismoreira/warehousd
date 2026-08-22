@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import {
   canonicalize,
   admits,
@@ -42,7 +42,7 @@ const PG_TYPE: Record<string, string> = {
 
 beforeAll(async () => {
   p = await provision("filter-parity");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   const cols = Object.entries(PG_TYPE)
     .map(([n, t]) => `c_${n} ${t}`)
     .join(", ");
@@ -489,7 +489,7 @@ describe("a grant scopes read and write identically", () => {
 
   beforeAll(async () => {
     wp = await provision("filter-parity-e2e");
-    wapp = new Pool({ connectionString: wp.urls.admin });
+    wapp = testPool({ connectionString: wp.urls.admin });
     await createAppSchema(wapp);
     await applyConfig(wapp, wcfg);
     wpools = createPools({

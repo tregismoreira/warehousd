@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { ConfigSchema } from "../src/config/schema";
 import { applyConfig, planFromSchema, renderMigrationSql, migrateApp } from "../src/index";
 
@@ -26,7 +26,7 @@ describe("index planning", () => {
 
   beforeAll(async () => {
     p = await provision("index-plan");
-    db = new Pool({ connectionString: p.urls.admin, max: 2 });
+    db = testPool({ connectionString: p.urls.admin, max: 2 });
     await migrateApp(db);
   }, 120_000);
 

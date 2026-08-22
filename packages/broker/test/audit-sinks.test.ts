@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import { ConfigSchema, type WarehousdConfig } from "../src/config/schema";
@@ -38,7 +38,7 @@ function cfgWith(audit: Record<string, unknown>): WarehousdConfig {
 
 beforeAll(async () => {
   p = await provision("audit-sinks");
-  app = new Pool({ connectionString: p.urls.admin });
+  app = testPool({ connectionString: p.urls.admin });
   await createAppSchema(app);
   await applyConfig(app, cfgWith({ enabled: true }));
   await app.query(

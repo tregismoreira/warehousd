@@ -1,6 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 
 let p: Provisioned;
@@ -11,7 +10,7 @@ afterAll(async () => {
 describe("app schema", () => {
   it("creates collections, grants, audit_events tables", async () => {
     p = await provision("appschema");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     const r = await db.query(
       `select table_name from information_schema.tables where table_schema='app' order by table_name`,
@@ -50,7 +49,7 @@ describe("app schema", () => {
 
   it("bootstraps exactly one implicit workspace, and stays at one across re-runs", async () => {
     p = await provision("appschema");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await createAppSchema(db);
     const r = await db.query(`select id from app.workspaces`);
@@ -60,7 +59,7 @@ describe("app schema", () => {
 
   it("workspace_id defaults to the implicit workspace on every governed table", async () => {
     p = await provision("appschema");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await db.query(
       `insert into app.grants (user_id, collection, env, status) values ('u','people','dev','pending')`,
@@ -81,7 +80,7 @@ describe("app schema", () => {
 describe("taxonomy tables", () => {
   it("vocabularies: slug unique; terms: (vocabulary_id, slug) unique, parent_id reserved-null", async () => {
     p = await provision("appschema");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     const vid = (
       await db.query(
@@ -106,7 +105,7 @@ describe("taxonomy tables", () => {
 
   it("cascade-deletes terms with their vocabulary", async () => {
     p = await provision("appschema");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     const vid = (
       await db.query(`insert into app.vocabularies (slug, label) values ('tmp','Tmp') returning id`)
@@ -122,7 +121,7 @@ describe("taxonomy tables", () => {
 describe("client_policies table", () => {
   it("creates app.client_policies with the default allow-list", async () => {
     p = await provision("appschema");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     const r = await db.query(`
       insert into app.client_policies (client_id, display_name) values ('c1', 'Test Client')
@@ -133,7 +132,7 @@ describe("client_policies table", () => {
 
   it("client_policies is idempotent under repeated createAppSchema calls", async () => {
     p = await provision("appschema");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await expect(createAppSchema(db)).resolves.not.toThrow();
     await expect(createAppSchema(db)).resolves.not.toThrow();
     await db.end();

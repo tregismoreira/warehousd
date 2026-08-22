@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import {
   createAppSchema,
   applyConfig,
@@ -91,7 +91,7 @@ const ctx = (userId: string) => makeCtx({ userId, env: "live" });
 beforeAll(async () => {
   process.env[MASK_KEY_ENV] = "test-mask-key";
   p = await provision("maskenf");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });

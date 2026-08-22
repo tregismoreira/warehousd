@@ -208,10 +208,18 @@ jobs:
   # *within* a runner would mean sharing one database and one dev server between workers, which the
   # suite is not written for.
   #
-  # Three is where the returns stop: about 180s of each shard is fixed cost it cannot share
-  # (install, `test:up`, the browser download, `e2e:setup`, the dev server and route warm-up), so a
-  # fourth shard buys ~24s of wall clock for another whole runner. Change the `3` in both places
-  # below together — the matrix and the `--shard` denominator have to agree.
+  # Four, and the reason is balance rather than wall clock. About 180s of each shard is fixed cost
+  # it cannot share (install, `test:up`, the browser download, `e2e:setup`, the dev server and
+  # route warm-up), so on time alone three was right and a fourth shard bought ~24s for another
+  # whole runner. What changed is the split: Playwright shards by file, and at three the suite
+  # landed 38/42/30, with the 42 heavy enough that the runner was intermittently reclaimed
+  # part-way through — reported as `The operation was canceled` or a bare exit 143, with no failing
+  # assertion anywhere in the log and the same commit passing on a re-run. Four splits it
+  # 30/30/30/23, which puts the heaviest shard back under what was passing before.
+  #
+  # Watch that balance when adding spec files: two new ones were what pushed a shard from 32 to 42.
+  # Check with `playwright test --shard=N/M --list`. Change the denominator in both places below
+  # together — the matrix and the `--shard` flag have to agree.
   playwright:
     needs: changes
     if: needs.changes.outputs.playwright == 'true'
@@ -224,7 +232,7 @@ jobs:
       # wrong in one go, not just whichever file happened to fail first.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -254,7 +262,7 @@ jobs:
       # script body, matching the `changes` job above. It is a literal from the matrix and so is
       # harmless either way, but the habit is what keeps a future context value from becoming
       # shell.
-      - run: pnpm --filter @warehousd/web exec playwright test --shard="$SHARD/3"
+      - run: pnpm --filter @warehousd/web exec playwright test --shard="$SHARD/4"
         env:
           SHARD: ${{ matrix.shard }}
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { generateSynthetic } from "../src/synthetic/generate";
@@ -33,7 +33,7 @@ let pools: Pools;
 let broker: ReturnType<typeof makeBroker>;
 beforeAll(async () => {
   p = await provision("brokerq");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   await generateSynthetic(admin, cfg, 7, DEFAULT_WORKSPACE_ID);
@@ -111,7 +111,7 @@ describe("document_filter on file collections", () => {
       },
     });
     const pDoc = await provision("brokerq-doc");
-    const dbDoc = new Pool({ connectionString: pDoc.urls.admin });
+    const dbDoc = testPool({ connectionString: pDoc.urls.admin });
     await createAppSchema(dbDoc);
     await applyConfig(dbDoc, docCfg);
     const poolsDoc = createPools({
@@ -176,7 +176,7 @@ describe("document_filter on file collections", () => {
       },
     });
     const pDoc = await provision("brokerq-empty");
-    const dbDoc = new Pool({ connectionString: pDoc.urls.admin });
+    const dbDoc = testPool({ connectionString: pDoc.urls.admin });
     await createAppSchema(dbDoc);
     await applyConfig(dbDoc, docCfg);
     const poolsDoc = createPools({

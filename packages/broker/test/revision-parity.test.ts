@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker, type Pools } from "../src/index";
 import { importCollection } from "../src/import/run";
 import { ConfigSchema } from "../src/config/schema";
@@ -43,7 +43,7 @@ const ID = (n: string) => `00000000-0000-4000-8000-00000000000${n}`;
 
 beforeAll(async () => {
   p = await provision("revparity");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   pools = createPools({

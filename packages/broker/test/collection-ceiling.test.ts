@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { loadActiveGrant } from "../src/grants/eval";
 import { ConfigSchema } from "../src/config/schema";
@@ -18,7 +18,7 @@ afterAll(async () => {
 describe("collection ceiling", () => {
   it("user with grant on collection outside ceiling is refused through that client", async () => {
     p = await provision("collectionceiling");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const config = ConfigSchema.parse({
@@ -76,7 +76,7 @@ describe("collection ceiling", () => {
 
   it("refusal from ceiling is indistinguishable from no_grant", async () => {
     p = await provision("collectionceiling");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const config = ConfigSchema.parse({
@@ -118,7 +118,7 @@ describe("collection ceiling", () => {
 
   it("ceiling can never widen access beyond user's grants", async () => {
     p = await provision("collectionceiling");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const config = ConfigSchema.parse({
@@ -175,7 +175,7 @@ describe("collection ceiling", () => {
 
   it("null ceiling behaves exactly as before this phase", async () => {
     p = await provision("collectionceiling");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const config = ConfigSchema.parse({
@@ -261,7 +261,7 @@ describe("collection ceiling applies to discovery", () => {
 
   beforeAll(async () => {
     lp = await provision("ceiling-discovery");
-    db = new Pool({ connectionString: lp.urls.admin });
+    db = testPool({ connectionString: lp.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, config);
     pools = createPools({

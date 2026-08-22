@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import {
   createAppSchema,
   applyConfig,
@@ -19,7 +19,7 @@ const U = (n: number) => `0000000${n}-0000-4000-8000-000000000000`.slice(-36);
 
 beforeAll(async () => {
   p = await provision("importrun");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live, imp: p.urls.imp });
@@ -604,7 +604,7 @@ describe("importCollection: dataset-sourced vocabulary", () => {
   let dp: Provisioned, dAdmin: Pool, dPools: Pools;
   beforeAll(async () => {
     dp = await provision("importrun_dsvocab");
-    dAdmin = new Pool({ connectionString: dp.urls.admin });
+    dAdmin = testPool({ connectionString: dp.urls.admin });
     await createAppSchema(dAdmin);
     await applyConfig(dAdmin, dsCfg);
     dPools = createPools({

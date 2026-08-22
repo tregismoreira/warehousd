@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { ConfigSchema } from "../src/config/schema";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
@@ -62,7 +62,7 @@ let p: Provisioned, admin: Pool;
 
 beforeAll(async () => {
   p = await provision("wsterms");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await admin.query(
     `insert into app.workspaces (id, name) values ($1, 'A'), ($2, 'B') on conflict do nothing`,

@@ -1,9 +1,8 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { Pool } from "pg";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { planFromSchema } from "../src/apply/plan";
@@ -72,7 +71,7 @@ describe("readProjectMigrations", () => {
 describe("runProjectMigrations", () => {
   it("applies pending migrations in order and records them", async () => {
     p = await provision("proj_migrations_apply");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const dir = project({
@@ -96,7 +95,7 @@ describe("runProjectMigrations", () => {
   // A silent skip is how the file on disk and the schema in production stop describing each other.
   it("refuses a migration whose file changed after it was applied", async () => {
     p = await provision("proj_migrations_edited");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const dir = project({ "0001-a.sql": `create table data_live.mig_edit (n int);` });
@@ -120,7 +119,7 @@ describe("runProjectMigrations", () => {
 
   it("rolls a failing migration back and names the version that blocked the boot", async () => {
     p = await provision("proj_migrations_fail");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const dir = project({
@@ -142,7 +141,7 @@ describe("runProjectMigrations", () => {
 
   it("reports applied, pending and modified in status", async () => {
     p = await provision("proj_migrations_status");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const dir = project({ "0001-a.sql": `create table data_live.mig_st (n int);` });
@@ -167,7 +166,7 @@ describe("runProjectMigrations", () => {
 describe("the migration path unblocks a refused change", () => {
   it("carries live rows through a lossy type change the operator reviewed", async () => {
     p = await provision("proj_migrations_e2e");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
     await db.query(
@@ -205,7 +204,7 @@ describe("the migration path unblocks a refused change", () => {
   // that does not resolve the drift must therefore still block — the schema is the check.
   it("still refuses when the migration did not actually fix the drift", async () => {
     p = await provision("proj_migrations_noop");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
     await applyConfig(db, orders("text"));
     await db.query(
@@ -224,7 +223,7 @@ describe("the migration path unblocks a refused change", () => {
   // production on the one config that is hardest to test by hand.
   it("survives a searchable field, whose view and generated column both depend on it", async () => {
     p = await provision("proj_migrations_tsv");
-    const db = new Pool({ connectionString: p.urls.admin });
+    const db = testPool({ connectionString: p.urls.admin });
     await createAppSchema(db);
 
     const before = orders("text", { note: { type: "text", posture: "allow", searchable: true } });

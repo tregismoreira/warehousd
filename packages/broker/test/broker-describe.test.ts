@@ -1,6 +1,6 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
 import { createPools, type Pools } from "../src/db/pools";
@@ -27,7 +27,7 @@ const cfg: WarehousdConfig = ConfigSchema.parse({
 let p: Provisioned, admin: Pool, pools: Pools, broker: ReturnType<typeof makeBroker>;
 beforeAll(async () => {
   p = await provision("brokerd");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });

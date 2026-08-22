@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
-import { provision, type Provisioned } from "./helpers/db";
+import type { Pool } from "pg";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { createAppSchema, applyConfig, createPools, makeBroker } from "../src/index";
 import { requestGrant, approveGrant } from "../src/grants/manage";
 import type { WarehousdConfig } from "../src/config/schema";
@@ -42,7 +42,7 @@ let broker: ReturnType<typeof makeBroker>;
 
 beforeAll(async () => {
   p = await provision("read-path-refusals");
-  app = new Pool({ connectionString: p.urls.admin });
+  app = testPool({ connectionString: p.urls.admin });
   await createAppSchema(app);
   await applyConfig(app, cfg);
   pools = createPools({ app: p.urls.admin, dev: p.urls.dev, live: p.urls.live });

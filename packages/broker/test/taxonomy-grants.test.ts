@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { provision, type Provisioned } from "./helpers/db";
+import { provision, testPool, type Provisioned } from "./helpers/db";
 import { ConfigSchema } from "../src/config/schema";
 import { createAppSchema, DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 import { applyConfig } from "../src/apply/apply";
@@ -63,7 +63,7 @@ const cfg = ConfigSchema.parse({
 
 beforeAll(async () => {
   p = await provision("taxgrants");
-  admin = new Pool({ connectionString: p.urls.admin });
+  admin = testPool({ connectionString: p.urls.admin });
   await createAppSchema(admin);
   await applyConfig(admin, cfg);
   // structured rows: 2 hr, 1 finance
@@ -244,7 +244,7 @@ describe("Stage 2: multi-predicate document filters", () => {
     });
 
     p2 = await provision("multi-vocab");
-    admin2 = new Pool({ connectionString: p2.urls.admin });
+    admin2 = testPool({ connectionString: p2.urls.admin });
     await createAppSchema(admin2);
     await applyConfig(admin2, cfg2);
 
@@ -326,7 +326,7 @@ describe("multi-value term scoping through the broker", () => {
 
   beforeAll(async () => {
     p3 = await provision("multivalue");
-    admin3 = new Pool({ connectionString: p3.urls.admin });
+    admin3 = testPool({ connectionString: p3.urls.admin });
     await createAppSchema(admin3);
     await applyConfig(admin3, cfg3);
 
@@ -501,7 +501,7 @@ describe("dataset-sourced vocabulary terms", () => {
 
   beforeAll(async () => {
     p4 = await provision("datasetterms");
-    admin4 = new Pool({ connectionString: p4.urls.admin });
+    admin4 = testPool({ connectionString: p4.urls.admin });
     await createAppSchema(admin4);
     await applyConfig(admin4, cfg4);
     await admin4.query(`insert into data_synth.clients (${R}, id, client_number, name) values
