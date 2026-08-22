@@ -35,13 +35,13 @@ export const m0006DocumentAcl = {
   version: "0006_document_acl",
   sql: `
 create table if not exists app.user_groups (
-  org_id     text not null references app.organizations(id),
-  user_id    text not null,
-  group_name text not null,
-  source     text not null check (source in ('sso','manual')),
-  updated_at timestamptz not null default now(),
-  primary key (org_id, user_id, group_name, source));
-create index if not exists user_groups_member_idx on app.user_groups (org_id, user_id);
+  workspace_id text not null references app.workspaces(id),
+  user_id      text not null,
+  group_name   text not null,
+  source       text not null check (source in ('sso','manual')),
+  updated_at   timestamptz not null default now(),
+  primary key (workspace_id, user_id, group_name, source));
+create index if not exists user_groups_member_idx on app.user_groups (workspace_id, user_id);
 
 create table if not exists app.sso_provisioned (
   user_id     text not null,

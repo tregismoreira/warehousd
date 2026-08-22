@@ -6,7 +6,18 @@
 // nothing, and records the version.
 //
 // Migrations 0002+ do NOT inherit that property and must be forward-only.
-// NEVER edit this file once it has shipped — add a new migration instead.
+//
+// This file WAS "never edit once shipped" — the tenant dimension was called `org` here, and a
+// later migration (0008, since deleted) renamed it to `workspace` because, at the time, some
+// deployment could already have bootstrapped under the old names and the ledger records versions,
+// not contents. That premise no longer holds: nothing has ever deployed under the org names —
+// there is no database anywhere running this project. So the rename was collapsed into this file
+// instead of leaving a shipped decision uncorrected: 0001 now creates `app.workspaces` and
+// `workspace_id` directly, 0008 is gone, and the "never edit" rule reverts to its ordinary meaning
+// — this file may still be edited, deliberately and with a comment explaining why, for as long as
+// nothing has bootstrapped under whatever names it currently creates. The day something has, this
+// file goes back to being append-only and the fix belongs in a new migration, the same way 0008
+// itself once did.
 //
 // The one transformation from the original: addOrgColumn() was a helper called in a loop, so its
 // four call sites are expanded here. All four passed literals, which is why the ident()/literal()
@@ -16,21 +27,21 @@ export const m0001Init = {
   sql: `
 create schema if not exists app;
 
-create table if not exists app.organizations (
+create table if not exists app.workspaces (
   id text primary key,
   name text not null,
   created_at timestamptz not null default now());
-insert into app.organizations (id, name) values ('default', 'Default')
+insert into app.workspaces (id, name) values ('default', 'Default')
   on conflict (id) do nothing;
 
 create table if not exists app.collections (
   name text primary key, description text, config jsonb,
-  org_id text not null default 'default', updated_at timestamptz default now());
+  workspace_id text not null default 'default', updated_at timestamptz default now());
 create table if not exists app.grants (
   id uuid primary key default gen_random_uuid(),
   user_id text not null, collection text not null,
   purpose_label text, purpose_detail text, allowed_fields text[],
-  org_id text not null default 'default',
+  workspace_id text not null default 'default',
   env text not null check (env in ('dev','live')),
   status text not null check (status in ('pending','approved','denied','revoked')),
   requested_at timestamptz default now(), decided_at timestamptz,
@@ -41,34 +52,34 @@ create table if not exists app.grants (
 create table if not exists app.audit_events (
   id uuid primary key default gen_random_uuid(),
   at timestamptz default now(), user_id text, env text, collection text,
-  org_id text not null default 'default',
+  workspace_id text not null default 'default',
   intent jsonb, fields_returned text[], grant_id uuid,
   outcome text, reason text);
 
--- Upgrade path for a stack provisioned before the org dimension existed. collections carries
--- org_id for symmetry only — collections are config-defined and global to the deployment in v1,
--- so it is not yet an isolation boundary there.
-alter table app."collections" add column if not exists org_id text not null default 'default';
+-- Upgrade path for a stack provisioned before the workspace dimension existed. collections carries
+-- workspace_id for symmetry only — collections are config-defined and global to the deployment in
+-- v1, so it is not yet an isolation boundary there.
+alter table app."collections" add column if not exists workspace_id text not null default 'default';
 do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'collections_org_fk') then
-    alter table app."collections" add constraint "collections_org_fk"
-      foreign key (org_id) references app.organizations(id);
+  if not exists (select 1 from pg_constraint where conname = 'collections_workspace_fk') then
+    alter table app."collections" add constraint "collections_workspace_fk"
+      foreign key (workspace_id) references app.workspaces(id);
   end if;
 end $$;
 
-alter table app."grants" add column if not exists org_id text not null default 'default';
+alter table app."grants" add column if not exists workspace_id text not null default 'default';
 do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'grants_org_fk') then
-    alter table app."grants" add constraint "grants_org_fk"
-      foreign key (org_id) references app.organizations(id);
+  if not exists (select 1 from pg_constraint where conname = 'grants_workspace_fk') then
+    alter table app."grants" add constraint "grants_workspace_fk"
+      foreign key (workspace_id) references app.workspaces(id);
   end if;
 end $$;
 
-alter table app."audit_events" add column if not exists org_id text not null default 'default';
+alter table app."audit_events" add column if not exists workspace_id text not null default 'default';
 do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'audit_events_org_fk') then
-    alter table app."audit_events" add constraint "audit_events_org_fk"
-      foreign key (org_id) references app.organizations(id);
+  if not exists (select 1 from pg_constraint where conname = 'audit_events_workspace_fk') then
+    alter table app."audit_events" add constraint "audit_events_workspace_fk"
+      foreign key (workspace_id) references app.workspaces(id);
   end if;
 end $$;
 
@@ -89,7 +100,7 @@ end $$;
 
 drop index if exists grants_one_active;
 create unique index if not exists grants_one_active
-  on app.grants (org_id, user_id, collection, env) where status='approved';
+  on app.grants (workspace_id, user_id, collection, env) where status='approved';
 
 -- Taxonomy: vocabularies (flat) + terms (single-level; parent_id reserved for hierarchy).
 -- Terms are env-scoped: 'all' for YAML vocabularies, 'dev'/'live' for dataset-sourced ones.
@@ -114,16 +125,16 @@ create table if not exists app.terms (
 create table if not exists app.client_policies (
   client_id text primary key,
   display_name text,
-  org_id text not null default 'default',
+  workspace_id text not null default 'default',
   allowed_scopes text[] not null default '{env:dev}',
   promoted_at timestamptz,
   promoted_by text);
 
-alter table app."client_policies" add column if not exists org_id text not null default 'default';
+alter table app."client_policies" add column if not exists workspace_id text not null default 'default';
 do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'client_policies_org_fk') then
-    alter table app."client_policies" add constraint "client_policies_org_fk"
-      foreign key (org_id) references app.organizations(id);
+  if not exists (select 1 from pg_constraint where conname = 'client_policies_workspace_fk') then
+    alter table app."client_policies" add constraint "client_policies_workspace_fk"
+      foreign key (workspace_id) references app.workspaces(id);
   end if;
 end $$;
 
@@ -143,7 +154,7 @@ end $$;
 create table if not exists app.client_secrets (
   id uuid primary key default gen_random_uuid(),
   client_id text not null references app.client_policies(client_id) on delete cascade,
-  org_id text not null references app.organizations(id),
+  workspace_id text not null references app.workspaces(id),
   prefix text not null,
   secret_hash text not null,
   created_at timestamptz not null default now(),
@@ -156,13 +167,13 @@ create index if not exists client_secrets_prefix_idx on app.client_secrets (pref
 -- Trusted OIDC issuers for the delegated flow
 create table if not exists app.trusted_issuers (
   id uuid primary key default gen_random_uuid(),
-  org_id text not null references app.organizations(id),
+  workspace_id text not null references app.workspaces(id),
   issuer text not null,
   jwks_uri text not null,
   audience text not null,
   subject_claim text not null default 'sub',
   created_at timestamptz not null default now(),
-  unique (org_id, issuer));
+  unique (workspace_id, issuer));
 
 -- audit_events via column records which credential/auth path was used
 alter table app.audit_events add column if not exists via text;
@@ -177,18 +188,18 @@ grant select on app.client_secrets, app.trusted_issuers to warehousd_dev, wareho
 -- might miss committed rows. The feed mitigates this by capping results to entries committed
 -- before the oldest in-flight tx (the standard snapshot isolation pattern).
 create table if not exists app.change_log (
-  seq         bigserial primary key,
-  org_id      text        not null references app.organizations(id),
-  env         text        not null check (env in ('dev','live')),
-  collection  text        not null,
-  document_id text        not null,
-  rev         uuid        not null,
-  op          text        not null,
-  status      text        not null,
-  at          timestamptz not null default now(),
-  by          text        not null);
-create index if not exists change_log_org_env_seq_idx
-  on app.change_log (org_id, env, seq);
+  seq          bigserial   primary key,
+  workspace_id text        not null references app.workspaces(id),
+  env          text        not null check (env in ('dev','live')),
+  collection   text        not null,
+  document_id  text        not null,
+  rev          uuid        not null,
+  op           text        not null,
+  status       text        not null,
+  at           timestamptz not null default now(),
+  by           text        not null);
+create index if not exists change_log_workspace_env_seq_idx
+  on app.change_log (workspace_id, env, seq);
 
 -- audit_events is INSERT-only for data roles. This is the enforcement mechanism for invariant 7
 -- (docs/architecture.md) and the audit-completeness assertions in docs/testing.md.

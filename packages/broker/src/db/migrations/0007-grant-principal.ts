@@ -57,20 +57,20 @@ end $$;
 
 -- "One approved grant per subject per collection" now means per PRINCIPAL, not per user.
 --
--- The old index was (org_id, user_id, collection, env), which is the same thing while "user_id"
--- is the subject. It is not: "user_id" is who REQUESTED the grant, so an admin who asks for a
--- group grant on a collection they already hold personally would collide with themselves — and
--- two group grants requested by the same admin would collide with each other, which is the shape
--- the whole feature is for.
+-- The old index was (workspace_id, user_id, collection, env), which is the same thing while
+-- "user_id" is the subject. It is not: "user_id" is who REQUESTED the grant, so an admin who asks
+-- for a group grant on a collection they already hold personally would collide with themselves —
+-- and two group grants requested by the same admin would collide with each other, which is the
+-- shape the whole feature is for.
 drop index if exists app.grants_one_active;
 create unique index if not exists grants_one_active_principal
-  on app."grants" (org_id, principal, collection, env) where status = 'approved';
+  on app."grants" (workspace_id, principal, collection, env) where status = 'approved';
 
--- loadActiveGrant's predicate: (collection, env, org, principal = any(...)), filtered to approved
--- and unexpired. The status column leads because it is the most selective in practice — most rows
--- in a mature deployment are decided history rather than live access.
+-- loadActiveGrant's predicate: (collection, env, workspace, principal = any(...)), filtered to
+-- approved and unexpired. The status column leads because it is the most selective in practice —
+-- most rows in a mature deployment are decided history rather than live access.
 create index if not exists grants_principal_lookup
-  on app."grants" (collection, env, org_id, principal)
+  on app."grants" (collection, env, workspace_id, principal)
   where status = 'approved';
 
 -- Which grant a decision was made under is already on the audit row via grant_id. The principal is
