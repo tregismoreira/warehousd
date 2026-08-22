@@ -284,7 +284,7 @@ export function buildOpenApiDoc(): Record<string, unknown> {
       { name: "auth", description: "Minting an access token." },
       { name: "collections", description: "Discovering what a caller may read." },
       { name: "data", description: "Reading, searching, and mutating documents." },
-      { name: "history", description: "Revisions and the org/env change feed." },
+      { name: "history", description: "Revisions and the workspace/env change feed." },
       {
         name: "acl",
         description:
