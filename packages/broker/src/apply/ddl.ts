@@ -216,12 +216,18 @@ export function fileTableDDL(
         owner text,
         checksum text not null,
         updated_at timestamptz not null,
+        origin text not null,
         unique (workspace_id, path));
       alter table ${schema}."${collection}__files" add column if not exists workspace_id text not null default 'default';${termAlter}${metadataAlter}
       alter table ${schema}."${collection}__files" add column if not exists content_type text;
       alter table ${schema}."${collection}__files" add column if not exists byte_size integer;
       alter table ${schema}."${collection}__files" add column if not exists blob bytea;
       alter table ${schema}."${collection}__files" add column if not exists origin text not null default 'index';
+      -- The default exists only for the backfill above: a collection that predates the column holds
+      -- documents the indexer wrote, and 'index' is what they are. It is dropped immediately after,
+      -- because every writer sets the column now and a future one that forgets it must fail on the
+      -- insert rather than be classified as the indexer's and swept away on the next boot.
+      alter table ${schema}."${collection}__files" alter column origin drop default;
       alter table ${schema}."${collection}__files" add column if not exists blob_checksum text
         generated always as (encode(sha256(blob), 'hex')) stored;
       create index if not exists "${collection}__files_blob_checksum_idx"

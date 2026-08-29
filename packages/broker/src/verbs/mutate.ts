@@ -13,6 +13,7 @@ import { pkOf, dataSchema, nextDataRow } from "../config/collection";
 import { ident } from "../sql/ident";
 import { aclColumnSql } from "../acl/sql";
 import { chunkText } from "../indexing/chunk";
+import type { FileOrigin } from "../indexing/ingest";
 import { coerce } from "../import/validate";
 import { makeAuditWriter, assertRecorded, type AuditWriter } from "../audit/decision";
 import { MutationIntentSchema, checkIntent } from "../intents/schema";
@@ -128,6 +129,12 @@ export function makeMutateVerb(d: VerbDeps) {
   };
 }
 
+// A document created over /v1 was never in a source directory, so it must not carry the origin
+// that marks one as a mirror of a file in it: indexCollection deletes every `index` document whose
+// path is not on disk, and the server indexes every file collection on every boot. Distinct from
+// `upload` rather than reusing it, so the console's upload surface stays countable on its own.
+const API_ORIGIN: FileOrigin = "api";
+
 // A file collection is a record of what was INGESTED, so it only ever grows: create appends
 // a file row plus its derived chunks, and `path` being unique makes a repeat a conflict
 // rather than a silent overwrite. Chunks are derived once here and never re-derived, which
@@ -195,7 +202,16 @@ async function mutateFile(
       // the import role. The unique index on `path` is what answers, and a 23505 below
       // becomes `conflict` — which also closes the race a pre-check would leave open.
       const fileId = randomUUID();
-      const cols = ["id", "workspace_id", "path", "title", "owner", "checksum", "updated_at"];
+      const cols = [
+        "id",
+        "workspace_id",
+        "path",
+        "title",
+        "owner",
+        "checksum",
+        "updated_at",
+        "origin",
+      ];
       const vals: unknown[] = [
         fileId,
         ctx.workspaceId,
@@ -204,6 +220,7 @@ async function mutateFile(
         coerced.owner ?? null,
         checksum,
         coerced.updated_at ?? new Date(),
+        API_ORIGIN,
       ];
       for (const vocabSlug of c.taxonomies ?? []) {
         cols.push(vocabSlug);

@@ -6,6 +6,10 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every server start deleted every document a client had written to a `writable: true` file collection.** `POST /v1/collections/{c}/documents` stored the document without saying how it arrived, so it took the column default — the value that marks a document as a mirror of a file in the collection's `source` directory. Indexing a file collection is a mirror and deletes every such document whose file is not on disk, the server indexes every file collection on every start, and a document written over `/v1` is never on disk: `warehousd start`, `warehousd restart`, a container restart and a host reboot all discarded them, along with their chunks, with nothing in the log and no revision to go back to. A client write is now recorded as its own origin (`api`, beside `index` and `upload`) and is left alone by the sweep, the column has lost its default so a future writer that omits it fails on the insert instead of being classified as the indexer's, and the sweep now names the documents it deletes.
+
 ## [0.1.0-rc.2] - 2026-08-21
 
 ### Security

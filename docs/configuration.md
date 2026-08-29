@@ -349,6 +349,8 @@ Which verbs the flag unlocks is **structural**, decided by the collection's type
 
 A collection without `writable: true` is physically untouched — no extra columns, no extra view predicate, no read cost. `writable: true` with no `write: allow` field is a config error.
 
+A writable file collection holds both kinds at once: the documents mirrored from its `source` directory and the documents clients create over `/v1`. They are distinguished by `origin`, so re-indexing the collection — which the server does on every start — leaves the client-written ones alone. Editing is still refused on either.
+
 ### Per-document ACLs
 
 ```yaml
@@ -487,7 +489,7 @@ Uploads are **resumable, and the resume is answered by the database**. Each file
 
 Two differences from a directory index are worth knowing:
 
-- **An upload is not a mirror.** `warehousd index` deletes a document whose file has left the source directory; an uploaded document was never in one, so it is left alone. The `origin` column is what tells them apart.
+- **An upload is not a mirror.** `warehousd index` deletes a document whose file has left the source directory; an uploaded document was never in one, so it is left alone. The `origin` column is what tells them apart — `index` for a document mirrored from the source directory, `upload` for one added here, `api` for one a client wrote over `/v1`. Only `index` is swept, and the sweep says which documents it deleted.
 - **The form fills in what the file does not say.** A `.md` or `.txt` carries its own frontmatter and that always wins; the form's owner, terms and metadata fill gaps, and are the only source for a PDF or DOCX.
 
 `WAREHOUSD_MAX_UPLOAD_BYTES` caps a single file (default 25 MB). Deleting a document and downloading its original are both admin-only and both audited.

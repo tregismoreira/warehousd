@@ -124,8 +124,8 @@ describe("file collection apply", () => {
     await createAppSchema(db);
     await applyConfig(db, docCfg);
 
-    await db.query(`insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at)
-      values (gen_random_uuid(),'t','a.md',null,'c',now())`);
+    await db.query(`insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at,origin)
+      values (gen_random_uuid(),'t','a.md',null,'c',now(),'index')`);
     const d = await db.query(`select id from data_synth."policies__files" limit 1`);
     await db.query(
       `insert into data_synth."policies__documents" (id,file_id,document_seq,content)
@@ -140,6 +140,31 @@ describe("file collection apply", () => {
 
     await db.query(`select set_config('warehousd.workspace_id','default',false)`);
     expect((await db.query(search)).rowCount).toBe(1);
+    await db.end();
+  });
+  it("gives the file origin column no default, so a writer that omits it fails loudly", async () => {
+    // The default used to be 'index' — the value that marks a document as a mirror of a file in
+    // the source directory, and the one indexCollection's sweep deletes when the file is gone. A
+    // writer that forgot the column was therefore classified as the indexer and pruned on the next
+    // boot. Both writers set it now, so the default is what remains to be removed.
+    p = await provision("apply");
+    const db = testPool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, docCfg);
+
+    const def = await db.query<{ column_default: string | null }>(
+      `select column_default from information_schema.columns
+        where table_schema = 'data_synth' and table_name = 'policies__files'
+          and column_name = 'origin'`,
+    );
+    expect(def.rowCount).toBe(1);
+    expect(def.rows[0]?.column_default).toBeNull();
+
+    await expect(
+      db.query(`insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at)
+        values (gen_random_uuid(),'t','no-origin.md',null,'c',now())`),
+    ).rejects.toThrow(/origin/);
+
     await db.end();
   });
 });

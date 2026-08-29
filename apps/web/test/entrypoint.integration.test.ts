@@ -72,9 +72,11 @@ collections:
     description: Test files
     source: ./seed/docs-dev
     source_live: ./seed/docs-live
+    writable: true
     fields:
-      title: { posture: allow }
-      content: { posture: allow }
+      title: { posture: { read: allow, write: allow } }
+      content: { posture: { read: allow, write: allow } }
+      path: { posture: deny }
 `;
     await writeFile(join(fixture, "warehousd.yml"), yaml);
 
@@ -321,9 +323,11 @@ collections:
     description: Test files
     source: ./seed/docs-dev
     source_live: ./seed/docs-live
+    writable: true
     fields:
-      title: { posture: allow }
-      content: { posture: allow }
+      title: { posture: { read: allow, write: allow } }
+      content: { posture: { read: allow, write: allow } }
+      path: { posture: deny }
   newcollection:
     description: New test collection
     fields:
@@ -415,5 +419,85 @@ collections:
     const dev = await db.query(`select count(*) as cnt from data_synth."documents__files"`);
     expect(Number(dev.rows[0].cnt)).toBe(2);
     await db.end();
+  });
+
+  // The sibling of the truncate guard above. The entrypoint indexes every file collection on every
+  // boot, and indexing is a mirror: it deletes every document it put there whose file has left the
+  // source directory. A document written over /v1 was never in that directory, so if it is
+  // classified as one that was, every restart deletes every document a client ever wrote.
+  //
+  // Last in the file deliberately: it leaves a third document in `documents__files`, and the tests
+  // above assert that count is 2.
+  it("preserves a document written to a writable file collection across a restart", async () => {
+    const { bootstrap } = await import("../scripts/entrypoint");
+
+    const devUrl = process.env.DEV_DATABASE_URL;
+    const devWriteUrl = process.env.DEV_WRITE_DATABASE_URL;
+    const liveUrl = process.env.LIVE_DATABASE_URL;
+    const liveWriteUrl = process.env.LIVE_WRITE_DATABASE_URL;
+    if (!devUrl || !devWriteUrl || !liveUrl || !liveWriteUrl) {
+      throw new Error("expected bootstrap() to have set the data-role URLs already");
+    }
+
+    const cfg = loadConfig(fixture);
+    const pools = createPools({
+      app: setup.appUrl,
+      dev: devUrl,
+      live: liveUrl,
+      devWrite: devWriteUrl,
+      liveWrite: liveWriteUrl,
+    });
+    const broker = makeBroker(pools, cfg);
+    const app = new Pool({ connectionString: setup.appUrl });
+
+    try {
+      const grantId = await requestGrant(app, {
+        userId: "documents_writer",
+        collection: "documents",
+        env: "dev",
+        workspaceId: "default",
+        purposeLabel: "test",
+        allowedFields: ["title", "content"],
+      });
+      await approveGrant(app, cfg, grantId, "admin", {
+        verbs: ["read", "create"],
+        mode: "direct",
+      });
+
+      const written = await broker.mutate(makeCtx({ userId: "documents_writer" }), {
+        collection: "documents",
+        op: "create",
+        values: {
+          path: "written-over-the-api.md",
+          title: "Written over the API",
+          content: "A client submission that is not in seed/docs-dev.",
+        },
+      });
+      assertApplied(written);
+
+      await bootstrap();
+
+      const after = await app.query(
+        `select id from data_synth."documents__files" where path = 'written-over-the-api.md'`,
+      );
+      expect(after.rowCount).toBe(1);
+      expect(after.rows[0].id).toBe(written.documentId);
+
+      // Its chunks go with it on a cascade, so their survival is the other half of the claim.
+      const chunks = await app.query(
+        `select count(*) as cnt from data_synth."documents__documents" where file_id = $1`,
+        [written.documentId],
+      );
+      expect(Number(chunks.rows[0].cnt)).toBeGreaterThan(0);
+
+      // And the seeded documents are still mirrored, so nothing was fixed by disabling the index.
+      const seeded = await app.query(
+        `select count(*) as cnt from data_synth."documents__files" where origin = 'index'`,
+      );
+      expect(Number(seeded.rows[0].cnt)).toBe(2);
+    } finally {
+      await app.end();
+      await pools.end();
+    }
   });
 });

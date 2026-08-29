@@ -8,6 +8,11 @@ import type { WarehousdConfig } from "../src/config/schema";
 import { ConfigSchema } from "../src/config/schema";
 import { makeCtx } from "./helpers/ctx";
 import { assertApplied } from "./helpers/results";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { indexCollection } from "../src/indexing";
+import { DEFAULT_WORKSPACE_ID } from "../src/db/migrate-app";
 
 let p: Provisioned, app: Pool, pools: any;
 
@@ -186,8 +191,8 @@ describe("broker.mutate file operations", () => {
     // Create a file first
     const fileId = (
       await app.query(
-        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at)
-       values (gen_random_uuid(), 'default', 'seeded-for-update.md', 'Test', 'admin', 'abc', now()) returning id`,
+        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at, origin)
+       values (gen_random_uuid(), 'default', 'seeded-for-update.md', 'Test', 'admin', 'abc', now(), 'index') returning id`,
       )
     ).rows[0].id;
 
@@ -218,8 +223,8 @@ describe("broker.mutate file operations", () => {
     // Create a file first
     const fileId = (
       await app.query(
-        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at)
-       values (gen_random_uuid(), 'default', 'seeded-for-delete.md', 'Test', 'admin', 'abc', now()) returning id`,
+        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at, origin)
+       values (gen_random_uuid(), 'default', 'seeded-for-delete.md', 'Test', 'admin', 'abc', now(), 'index') returning id`,
       )
     ).rows[0].id;
 
@@ -261,5 +266,57 @@ describe("broker.mutate file operations", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("invalid_value");
+  });
+});
+
+describe("a document written over /v1 and directory indexing coexist", () => {
+  // The sweep at the end of indexCollection deletes every document the indexer put there whose
+  // file has left the source directory. A document created over /v1 was never in that directory,
+  // so it must not be classified as one that was — the entrypoint indexes every file collection
+  // on every boot, and a misclassified document is deleted by the next restart.
+  it("survives the next index of the collection", async () => {
+    const grantId = await requestGrant(app, {
+      userId: "api_origin_user",
+      collection: "docs",
+      env: "dev",
+      workspaceId: "default",
+      purposeLabel: "test",
+      allowedFields: ["title", "content", "owner", "updated_at"],
+    });
+    await approveGrant(app, cfg, grantId, "admin", { verbs: ["read", "create"] });
+
+    const result = await broker.mutate(makeCtx({ userId: "api_origin_user" }), {
+      collection: "docs",
+      op: "create",
+      values: {
+        path: "written-over-the-api.md",
+        title: "Written over the API",
+        content: "A client submission that was never on disk.",
+        owner: "api_origin_user",
+        updated_at: new Date().toISOString(),
+      },
+    });
+    assertApplied(result);
+
+    const stored = await app.query<{ origin: string }>(
+      `select origin from data_synth."docs__files" where path = 'written-over-the-api.md'`,
+    );
+    expect(stored.rows[0]?.origin).toBe("api");
+
+    // An empty directory: everything the mirror sweep collects is a candidate for deletion.
+    const dir = mkdtempSync(join(tmpdir(), "wh-api-origin-"));
+    try {
+      const r = await indexCollection(app, "dev", "docs", dir, DEFAULT_WORKSPACE_ID);
+      // The sweep really ran: the documents the tests above seeded as the indexer's are gone, which
+      // is exactly what would have happened to this one had it been classified as one of them.
+      expect(r.deleted).toBeGreaterThan(0);
+      const after = await app.query<{ origin: string }>(
+        `select origin from data_synth."docs__files" where path = 'written-over-the-api.md'`,
+      );
+      expect(after.rowCount).toBe(1);
+      expect(after.rows[0]?.origin).toBe("api");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

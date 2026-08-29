@@ -429,7 +429,7 @@ Re-index a file collection. `start` does this automatically for the dev environm
 
 `--env live` requires `source_live` in the config or an explicit `--source`. The CLI will not index one directory into both environments.
 
-Indexing **mirrors** the directory: a file that is no longer there is removed from the collection. Documents uploaded through **Admin → Documents** were never in that directory and are left alone — see [docs/configuration.md](configuration.md), "Uploading documents from the console".
+Indexing **mirrors** the directory: a file that is no longer there is removed from the collection, and the run names every document it removed. Documents that were never in that directory are left alone — one uploaded through **Admin → Documents**, and one a client created over `/v1` on a `writable` file collection. See [docs/configuration.md](configuration.md), "Uploading documents from the console".
 
 ### `embed [collection]`
 

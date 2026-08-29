@@ -87,8 +87,8 @@ beforeAll(async () => {
   // view's own predicate, so what this proves is that these functions go through it.
   const fileId = "11111111-1111-1111-1111-111111111111";
   await admin.query(
-    `insert into data_synth."policies__files" (id, workspace_id, title, path, owner, checksum, updated_at, department, tags)
-     values ($1, $2, 'Tenant B handbook', 'tenant-b/handbook.md', 'b@example.com', 'cafef00d', now(), 'finance', array['compliance','tax'])`,
+    `insert into data_synth."policies__files" (id, workspace_id, title, path, owner, checksum, updated_at, department, tags, origin)
+     values ($1, $2, 'Tenant B handbook', 'tenant-b/handbook.md', 'b@example.com', 'cafef00d', now(), 'finance', array['compliance','tax'], 'index')`,
     [fileId, OTHER_ORG],
   );
   for (let seq = 0; seq < TENANT_B_DOCUMENTS; seq++) {

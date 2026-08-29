@@ -136,11 +136,25 @@ export async function indexCollection(
   // The cost is a row per restricted document that may outlive its file. That is one row, it is
   // invisible to every read path (the join finds no file to attach it to), and it is removed with
   // the rest when the collection is dropped — see resolveDestructiveChanges.
+  const pruned: string[] = [];
   for (const [path, id] of existing)
     if (!seen.has(path)) {
       await db.query(`delete from ${filesT} where id=$1`, [id]);
       deleted++;
+      pruned.push(path);
       opts.onProgress?.({ done: deleted, phase: "prune" });
     }
+  // Said out loud, because this is a destructive sweep that runs on every boot and the delete is
+  // plain — there is no revision to go back to. Without a line here a document that disappeared
+  // cannot be attributed to the run that removed it. These are the collection's own relative paths
+  // from the operator's source directory, not client input, and this is a server-side log rather
+  // than anything a caller sees. Capped, because a collection can shed thousands at once.
+  if (pruned.length) {
+    const shown = pruned.slice(0, 20).join(", ");
+    const rest = pruned.length > 20 ? `, and ${pruned.length - 20} more` : "";
+    console.warn(
+      `[broker] index of "${collection}" (${env}) deleted ${pruned.length} document(s) no longer in ${sourceDir}: ${shown}${rest}`,
+    );
+  }
   return { indexed, skipped, deleted };
 }
