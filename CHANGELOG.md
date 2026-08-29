@@ -6,6 +6,8 @@ One version number covers both published artifacts — the `warehousd` CLI on np
 
 ## [Unreleased]
 
+## [0.1.0-rc.3] - 2026-08-29
+
 ### Fixed
 
 - **Every server start deleted every document a client had written to a `writable: true` file collection.** `POST /v1/collections/{c}/documents` stored the document without saying how it arrived, so it took the column default — the value that marks a document as a mirror of a file in the collection's `source` directory. Indexing a file collection is a mirror and deletes every such document whose file is not on disk, the server indexes every file collection on every start, and a document written over `/v1` is never on disk: `warehousd start`, `warehousd restart`, a container restart and a host reboot all discarded them, along with their chunks, with nothing in the log and no revision to go back to. A client write is now recorded as its own origin (`api`, beside `index` and `upload`) and is left alone by the sweep, the column has lost its default so a future writer that omits it fails on the insert instead of being classified as the indexer's, and the sweep now names the documents it deletes.
@@ -158,6 +160,7 @@ Publishing goes to npm's `next` dist-tag and, until a stable release exists, to 
 - A hosted Postgres that installs its extensions outside `public` now works. Supabase ships pgcrypto in a schema called `extensions`, making `create extension if not exists pgcrypto` a silent no-op and leaving every unqualified reference unresolvable for the data roles — apply and boot both succeeded, and the first masked read or semantic search failed at request time as an `internal_error`. `applyConfig` reads back where `vector`, `pgcrypto` and `postgres_fdw` landed and puts that schema on the roles' `search_path`, scoped to the one database.
 - The boot wait for Postgres no longer leaks a connection pool per failed attempt. It ended one only on success, so a 60s wait at 500ms intervals left up to 120 dangling.
 
-[Unreleased]: https://github.com/tregismoreira/warehousd/compare/v0.1.0-rc.2...HEAD
+[Unreleased]: https://github.com/tregismoreira/warehousd/compare/v0.1.0-rc.3...HEAD
+[0.1.0-rc.3]: https://github.com/tregismoreira/warehousd/compare/v0.1.0-rc.2...v0.1.0-rc.3
 [0.1.0-rc.2]: https://github.com/tregismoreira/warehousd/compare/v0.1.0-rc.1...v0.1.0-rc.2
 [0.1.0-rc.1]: https://github.com/tregismoreira/warehousd/releases/tag/v0.1.0-rc.1
