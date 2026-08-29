@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
 import type { Pool } from "pg";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -154,6 +154,52 @@ describe("indexCollection (DB-backed)", () => {
     expect(live.rows[0].n).toBe(0);
 
     rmSync(join(tmpdir(), "wh-idx-*"), { force: true });
+  });
+
+  it("names the documents the mirror sweep deletes", async () => {
+    // A destructive sweep that says nothing is one nobody can attribute afterwards. It runs on
+    // every boot, so an unexplained disappearance has to be traceable to the run that caused it.
+    p = await provision("indexing3");
+    db = testPool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, docCfg);
+
+    const dir = mkdtempSync(join(tmpdir(), "wh-idx-warn-"));
+    writeFileSync(join(dir, "gone.md"), "# Gone\n\nbody");
+    await indexCollection(db, "dev", "policies", dir, DEFAULT_WORKSPACE_ID);
+    rmSync(join(dir, "gone.md"));
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const r = await indexCollection(db, "dev", "policies", dir, DEFAULT_WORKSPACE_ID);
+      expect(r.deleted).toBe(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const line = warn.mock.calls[0]!.join(" ");
+      expect(line).toContain("policies");
+      expect(line).toContain("gone.md");
+    } finally {
+      warn.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("says nothing when the sweep deletes nothing", async () => {
+    p = await provision("indexing4");
+    db = testPool({ connectionString: p.urls.admin });
+    await createAppSchema(db);
+    await applyConfig(db, docCfg);
+
+    const dir = mkdtempSync(join(tmpdir(), "wh-idx-quiet-"));
+    writeFileSync(join(dir, "stays.md"), "# Stays\n\nbody");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await indexCollection(db, "dev", "policies", dir, DEFAULT_WORKSPACE_ID);
+      await indexCollection(db, "dev", "policies", dir, DEFAULT_WORKSPACE_ID);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
