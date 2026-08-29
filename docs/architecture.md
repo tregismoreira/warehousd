@@ -345,7 +345,7 @@ create unique index on data_live.pages (workspace_id, id) where _current;
 - **Delete is a tombstone revision.** No `DELETE` privilege is granted anywhere, and the view's `_rev_op <> 'delete'` predicate makes the document disappear from reads while the history stays.
 - **`_rev*` and `workspace_id` can never be granted.** They are not in `warehousd.yml`, so no grant can name them and `describe_collection` never shows them. Bookkeeping is invisible to the query surface for free, with no filtering code.
 
-**File collections keep their existing shape.** No revision columns, no migration: a `create` appends a file row plus its derived chunks, `path` stays unique within the workspace so a repeat is a `conflict`, and chunks are never re-derived — which is why the "search still returns pre-edit text" bug class cannot occur here.
+**File collections keep their existing shape.** No revision columns, no migration: a `create` appends a file row plus its derived chunks, `path` stays unique within the workspace so a repeat is a `conflict`, and chunks are never re-derived — which is why the "search still returns pre-edit text" bug class cannot occur here. The appended document records that a client wrote it (`origin = api`, beside the indexer's `index` and the console's `upload`), which is what keeps the delete sweep below off it: a writable file collection still has a `source` directory, and the server re-indexes every file collection on every start.
 
 Turning `writable: true` on over a collection that already has a plain table **fails the apply** with an operator-facing error. Migrating existing rows into revisions is deferred, and silently emitting a table that cannot hold a revision would be worse than refusing.
 
