@@ -40,6 +40,16 @@ updates:
       # Pinned in package.json's `pnpm.overrides` to work around a specific upstream break; a bump
       # here would be silently overridden anyway.
       - dependency-name: better-call
+      # Pinned to an exact 1.6.26 in apps/web/package.json — not a caret — because 1.7 is a
+      # migration rather than a bump, and dependabot rewriting that pin is exactly what this entry
+      # prevents. 1.7 moved the `mcp` and `oidc-provider` plugins out of `better-auth/plugins` into
+      # a separate `@better-auth/mcp` package, whose endpoints live at `/oauth2/*` rather than
+      # `/mcp/*`. The three §6.1 hooks in apps/web/lib/oauth.ts match on those paths, so taking the
+      # upgrade would stop env-scope enforcement silently, with nothing raised and nothing red. That
+      # is a trust-boundary change and needs its own pull request carrying a test that fails without
+      # it. Lift this entry when that lands.
+      - dependency-name: better-auth
+      - dependency-name: "@better-auth/sso"
 
   - package-ecosystem: docker
     directory: /apps/web
