@@ -223,8 +223,8 @@ describe("broker.getDocument", () => {
     // Insert file data
     const fileId = (
       await app.query(
-        `insert into data_live."sources__files" (id, workspace_id, path, owner, checksum, updated_at)
-       values (gen_random_uuid(), 'default', 'test.md', null, 'abc', now()) returning id`,
+        `insert into data_live."sources__files" (id, workspace_id, path, owner, checksum, updated_at, origin)
+       values (gen_random_uuid(), 'default', 'test.md', null, 'abc', now(), 'index') returning id`,
       )
     ).rows[0].id;
     await app.query(
@@ -277,8 +277,8 @@ describe("broker.getDocument", () => {
     const tail = "the overlapping tail";
     const fileId = (
       await app.query(
-        `insert into data_live."sources__files" (id, workspace_id, title, path, owner, checksum, updated_at)
-       values (gen_random_uuid(), 'default', 'Multi', 'multi.md', null, 'c', now()) returning id`,
+        `insert into data_live."sources__files" (id, workspace_id, title, path, owner, checksum, updated_at, origin)
+       values (gen_random_uuid(), 'default', 'Multi', 'multi.md', null, 'c', now(), 'index') returning id`,
       )
     ).rows[0].id;
     await app.query(

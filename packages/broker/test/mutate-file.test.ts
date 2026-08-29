@@ -191,8 +191,8 @@ describe("broker.mutate file operations", () => {
     // Create a file first
     const fileId = (
       await app.query(
-        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at)
-       values (gen_random_uuid(), 'default', 'seeded-for-update.md', 'Test', 'admin', 'abc', now()) returning id`,
+        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at, origin)
+       values (gen_random_uuid(), 'default', 'seeded-for-update.md', 'Test', 'admin', 'abc', now(), 'index') returning id`,
       )
     ).rows[0].id;
 
@@ -223,8 +223,8 @@ describe("broker.mutate file operations", () => {
     // Create a file first
     const fileId = (
       await app.query(
-        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at)
-       values (gen_random_uuid(), 'default', 'seeded-for-delete.md', 'Test', 'admin', 'abc', now()) returning id`,
+        `insert into data_synth."docs__files" (id, workspace_id, path, title, owner, checksum, updated_at, origin)
+       values (gen_random_uuid(), 'default', 'seeded-for-delete.md', 'Test', 'admin', 'abc', now(), 'index') returning id`,
       )
     ).rows[0].id;
 

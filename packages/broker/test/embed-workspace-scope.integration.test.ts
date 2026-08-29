@@ -42,8 +42,8 @@ let p: Provisioned, admin: Pool;
 async function seedChunk(workspaceId: string, word: string) {
   const fileId = randomUUID();
   await admin.query(
-    `insert into data_synth."notes__files" (id, workspace_id, title, path, checksum, updated_at)
-     values ($1,$2,$3,$3,$3, now())`,
+    `insert into data_synth."notes__files" (id, workspace_id, title, path, checksum, updated_at, origin)
+     values ($1,$2,$3,$3,$3, now(), 'index')`,
     [fileId, workspaceId, `${word}.md`],
   );
   await admin.query(

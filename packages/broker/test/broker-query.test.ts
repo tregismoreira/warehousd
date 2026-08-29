@@ -124,9 +124,9 @@ describe("document_filter on file collections", () => {
 
     // Seed documents
     const docRes = await dbDoc.query(
-      `insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at)
-       values (gen_random_uuid(),'PTO Policy','hr/pto.md',null,'c1',now()),
-              (gen_random_uuid(),'Benefits Policy','hr/benefits.md',null,'c2',now())
+      `insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at,origin)
+       values (gen_random_uuid(),'PTO Policy','hr/pto.md',null,'c1',now(),'index'),
+              (gen_random_uuid(),'Benefits Policy','hr/benefits.md',null,'c2',now(),'index')
        returning id`,
     );
     const docIds = docRes.rows.map((r: any) => r.id);
@@ -189,9 +189,9 @@ describe("document_filter on file collections", () => {
 
     // Seed documents
     const docRes = await dbDoc.query(
-      `insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at)
-       values (gen_random_uuid(),'PTO Policy','hr/pto.md',null,'c1',now()),
-              (gen_random_uuid(),'Benefits Policy','hr/benefits.md',null,'c2',now())
+      `insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at,origin)
+       values (gen_random_uuid(),'PTO Policy','hr/pto.md',null,'c1',now(),'index'),
+              (gen_random_uuid(),'Benefits Policy','hr/benefits.md',null,'c2',now(),'index')
        returning id`,
     );
     const docIds = docRes.rows.map((r: any) => r.id);

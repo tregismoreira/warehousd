@@ -85,8 +85,8 @@ async function seed(docs: typeof DOCS) {
   for (const d of docs) {
     const fileId = randomUUID();
     await admin.query(
-      `insert into data_synth."notes__files" (id, workspace_id, title, path, checksum, updated_at)
-       values ($1,'default',$2,$3,$4, now())`,
+      `insert into data_synth."notes__files" (id, workspace_id, title, path, checksum, updated_at, origin)
+       values ($1,'default',$2,$3,$4, now(), 'index')`,
       [fileId, d.title, d.path, d.path],
     );
     await admin.query(

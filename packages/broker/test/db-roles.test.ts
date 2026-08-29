@@ -240,8 +240,8 @@ describe("env role grants (design §8 test 7)", () => {
     await applyConfig(db, docCfg);
 
     // Insert one file + one document as admin
-    await db.query(`insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at)
-      values (gen_random_uuid(),'test policy','test.md',null,'c',now())`);
+    await db.query(`insert into data_synth."policies__files" (id,title,path,owner,checksum,updated_at,origin)
+      values (gen_random_uuid(),'test policy','test.md',null,'c',now(),'index')`);
     const d = await db.query(`select id from data_synth."policies__files" limit 1`);
     await db.query(
       `insert into data_synth."policies__documents" (id,file_id,document_seq,content)

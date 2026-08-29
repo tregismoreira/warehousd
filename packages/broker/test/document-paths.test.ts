@@ -55,8 +55,8 @@ beforeAll(async () => {
   // whatever indexCollection itself does or does not enforce.
   const fileId = "11111111-1111-1111-1111-111111111111";
   await admin.query(
-    `insert into data_synth."policies__files" (id, workspace_id, title, path, owner, checksum, updated_at, department, tags)
-     values ($1, $2, 'Tenant B handbook', 'tenant-b/handbook.md', 'b@example.com', 'deadbeef', now(), 'hr', array['compliance'])`,
+    `insert into data_synth."policies__files" (id, workspace_id, title, path, owner, checksum, updated_at, department, tags, origin)
+     values ($1, $2, 'Tenant B handbook', 'tenant-b/handbook.md', 'b@example.com', 'deadbeef', now(), 'hr', array['compliance'], 'index')`,
     [fileId, OTHER_ORG],
   );
   await admin.query(
