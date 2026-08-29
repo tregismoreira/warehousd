@@ -21,7 +21,7 @@ export function contentTypeFor(path: string): string | null {
   return null;
 }
 
-export const FILE_ORIGINS = ["index", "upload"] as const;
+export const FILE_ORIGINS = ["index", "upload", "api"] as const;
 export type FileOrigin = (typeof FILE_ORIGINS)[number];
 
 /**
@@ -56,9 +56,11 @@ export type IngestInput = {
   sidecar?: Record<string, unknown>;
   updatedAt: Date;
   /**
-   * How the file arrived. `index` rows are a mirror of a source directory and are swept when
-   * they leave it; `upload` rows exist only here, so nothing sweeps them. Without the
-   * distinction the first `warehousd index` after an upload would silently delete it.
+   * How the file arrived. `index` documents are a mirror of a source directory and are swept when
+   * they leave it. `upload` (the console) and `api` (a client write over `/v1`) were never in one,
+   * so nothing sweeps them. Without the distinction the first `warehousd index` after an upload or
+   * a client write would silently delete it — and the server indexes every file collection on
+   * every boot, so "the first index" is the next restart.
    */
   origin: FileOrigin;
 };
