@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@warehousd/broker": "workspace:*",
-    "mammoth": "^1.12.1",
+    "mammoth": "^1.12.3",
     "unpdf": "^1.8.1"
   },
   "peerDependencies": {
