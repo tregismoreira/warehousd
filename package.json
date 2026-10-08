@@ -39,7 +39,7 @@
     "@vitest/coverage-v8": "^4.1.11",
     "@warehousd/broker": "workspace:*",
     "eslint": "^10.9.1",
-    "pg": "^8.23.0",
+    "pg": "^8.23.1",
     "prettier": "^3.9.6",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",

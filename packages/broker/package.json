@@ -13,9 +13,9 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "pg": "^8.23.0",
-    "yaml": "^2.6.0",
-    "zod": "^4.4.3"
+    "pg": "^8.23.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1"
