@@ -39,9 +39,9 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "pg": "^8.23.0",
+    "pg": "^8.23.1",
     "unpdf": "^1.8.1",
-    "mammoth": "^1.12.1"
+    "mammoth": "^1.13.0"
   },
   "devDependencies": {
     "@clack/prompts": "^1.7.0",
